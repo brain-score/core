@@ -3,6 +3,6 @@
 Metrics
 -------
 
-.. automodule:: brainscore.metrics
+.. automodule:: brainscore_core.metrics
     :members:
     :undoc-members:

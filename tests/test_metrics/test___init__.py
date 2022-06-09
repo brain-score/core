@@ -1,7 +1,7 @@
 import numpy as np
 from brainio.assemblies import DataAssembly
 
-from brainscore.metrics import Score
+from brainscore_core.metrics import Score
 
 
 class TestScoreRaw:

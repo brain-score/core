@@ -31,13 +31,12 @@ requirements = [
     "jupyter",
     "pybtex",
     "peewee",
-    "pillow<9.0.0",
     "psycopg2-binary"
 ]
 
 setup(
-    name='brain-score',
-    version='0.2',
+    name='brain-score core',
+    version='0.1',
     description="A framework for the quantitative comparison of mindlike systems.",
     long_description=readme,
     author="Brain-Score Team",
@@ -50,16 +49,11 @@ setup(
     zip_safe=False,
     keywords='brain-score',
     classifiers=[
-        'Development Status :: 2 - Pre-Alpha',
+        'Development Status :: 1 - Pre-Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
         'Programming Language :: Python :: 3.7',
     ],
     test_suite='tests',
-    entry_points={
-        'brainio_lookups': [
-            'brainio_brainscore = brainscore.entrypoint:brainio_brainscore',
-        ],
-    },
 )

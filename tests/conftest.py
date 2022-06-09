@@ -1,8 +1,6 @@
 import brainio
 import pytest
 
-from brainscore.benchmarks import screen
-
 
 @pytest.fixture
 def brainio_home(tmp_path, monkeypatch):
@@ -18,9 +16,4 @@ def resultcaching_home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def brainscore_home(tmp_path, monkeypatch):
-    monkeypatch.setattr(screen, "root_path", tmp_path)
     yield tmp_path
-
-
-
-

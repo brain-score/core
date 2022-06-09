@@ -3,9 +3,9 @@ from datetime import datetime
 
 import pytest
 
-from brainscore.submission.database import connect_db
-from brainscore.submission.evaluation import run_evaluation
-from brainscore.submission.models import User, Score, Model, BenchmarkInstance, BenchmarkType, Submission, Reference
+from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.evaluation import run_evaluation
+from brainscore_core.submission.models import User, Score, Model, BenchmarkInstance, BenchmarkType, Submission, Reference
 
 
 def init_user():

@@ -3,6 +3,6 @@
 Benchmarks
 ----------
 
-.. automodule:: brainscore.benchmarks
+.. automodule:: brainscore_core.benchmarks
     :members:
     :undoc-members:

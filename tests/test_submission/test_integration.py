@@ -6,9 +6,9 @@ from datetime import datetime
 import pytest
 from pytest import approx
 
-from brainscore.submission.database import connect_db
-from brainscore.submission.evaluation import run_evaluation
-from brainscore.submission.models import Score, Model, Submission
+from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.evaluation import run_evaluation
+from brainscore_core.submission.models import Score, Model, Submission
 from tests.test_submission.test_db import clear_schema, init_user, init_benchmark_parents
 
 logger = logging.getLogger(__name__)

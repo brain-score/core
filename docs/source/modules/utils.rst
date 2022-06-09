@@ -1,6 +1,6 @@
 Utils
 -----
 
-.. automodule:: brainscore.utils
+.. automodule:: brainscore_core.utils
     :members:
     :undoc-members:

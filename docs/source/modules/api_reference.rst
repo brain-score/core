@@ -7,4 +7,4 @@ API Reference
    :toctree: _autosummary
    :recursive:
 
-   brainscore
+   brainscore_core

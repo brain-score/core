@@ -16,12 +16,12 @@ sys.path.insert(0, os.path.abspath('../..'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'Brain-Score'
-copyright = '2021, Brain-Score Team'
+project = 'Brain-Score core'
+copyright = '2022, Brain-Score Team'
 author = 'Brain-Score Team'
 
 # The full version, including alpha/beta/rc tags
-release = '0.2'
+release = '0.1'
 
 
 # -- General configuration ---------------------------------------------------

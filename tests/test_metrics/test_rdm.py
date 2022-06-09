@@ -5,8 +5,7 @@ import pytest
 from brainio.assemblies import NeuroidAssembly, DataAssembly
 from pytest import approx
 
-from brainscore.metrics.rdm import RSA, RDMSimilarity, RDMMetric, RDMCrossValidated
-from tests.test_metrics import load_hvm
+from brainscore_core.metrics.rdm import RSA, RDMSimilarity, RDMMetric, RDMCrossValidated
 
 
 class TestRDMCrossValidated:
@@ -23,25 +22,6 @@ class TestRDMCrossValidated:
 
 
 class TestRSA:
-    @pytest.mark.private_access
-    def test_equal_hvm(self):
-        hvm = load_hvm().sel(region='IT')
-        metric = RDMMetric()
-        score = metric(hvm, hvm)
-        assert score == approx(1.)
-
-    @pytest.mark.skip(reason="loaded ordering likely incorrect")
-    def test_hvm(self):
-        hvm_it_v6_obj = self._load_neural_data()
-        assert hvm_it_v6_obj.shape == (64, 168)
-        self._test_hvm(hvm_it_v6_obj)
-
-    @pytest.mark.skip(reason="loaded ordering likely incorrect")
-    def test_hvm_T(self):
-        hvm_it_v6_obj = self._load_neural_data().T
-        assert hvm_it_v6_obj.shape == (168, 64)
-        self._test_hvm(hvm_it_v6_obj)
-
     def _test_hvm(self, hvm_it_v6_obj):
         loaded = np.load(os.path.join(os.path.dirname(__file__), "it_rdm.p"), encoding="latin1")
         rsa_characterization = RSA()
@@ -49,11 +29,6 @@ class TestRSA:
         np.testing.assert_array_equal(rsa.shape, [64, 64])
         np.testing.assert_array_equal(rsa.dims, ['presentation', 'presentation'])
         assert rsa.values == approx(loaded, abs=1e-6)
-
-    def _load_neural_data(self):
-        data = load_hvm(group=lambda hvm: hvm.multi_groupby(["category_name", "object_name"]))
-        data = data.sel(region='IT')
-        return data
 
     def test_alignment(self):
         assembly = NeuroidAssembly([[1, 2], [1, 2], [4, 3], [4, 3]],
