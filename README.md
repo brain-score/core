@@ -1,86 +1,22 @@
-[![Build Status](https://travis-ci.com/brain-score/brain-score.svg?token=vqt7d2yhhpLGwHsiTZvT&branch=master)](https://travis-ci.com/brain-score/brain-score)
-[![Documentation Status](https://readthedocs.org/projects/brain-score/badge/?version=latest)](https://brain-score.readthedocs.io/en/latest/?badge=latest)
+[![Build Status](https://travis-ci.com/brain-score/brain-score_core.svg?token=??&branch=main)](https://travis-ci.com/brain-score/brain-score_core)
+[![Documentation Status](https://readthedocs.org/projects/brain-score_core/badge/?version=latest)](https://brain-score_core.readthedocs.io/en/latest/?badge=latest)
 
 Brain-Score is a platform to evaluate computational models of brain function 
 on their match to brain measurements in primate vision. 
 The intent of Brain-Score is to adopt many (ideally all) the experimental benchmarks in the field
 for the purpose of model testing, falsification, and comparison.
 To that end, Brain-Score operationalizes experimental data into quantitative benchmarks 
-that any model candidate following the [`BrainModel`](brainscore_core/model_interface.py) interface can be scored on.
+that any model candidate following the `BrainModel` interface can be scored on.
 
-See the [Documentation](https://brain-score.readthedocs.io) for more details 
-and the [Tutorial](https://brain-score.readthedocs.io/en/latest/modules/tutorial.html) 
-and [Examples](https://github.com/brain-score/candidate_models/blob/master/examples/score-model.ipynb)
-for submitting a model to Brain-Score.
+See the [Documentation](https://brain-score_core.readthedocs.io) for more details.
 
 Brain-Score is made by and for the community. 
-To contribute, please [send in a pull request](https://github.com/brain-score/brain-score/pulls).
-
-
-## Local installation
-
-You will need Python >= 3.7 and pip >= 18.1.
-Note that you can only access public benchmarks when running locally.
-To score a model on all benchmarks, submit it via the [brain-score.org website](http://www.brain-score.org).
-
-`pip install git+https://github.com/brain-score/brain-score`
-
-Score a model on a public benchmark:
-
-```python
-from brainscore_core.benchmarks import public_benchmark_pool
-
-benchmark = public_benchmark_pool['dicarlo.MajajHong2015public.IT-pls']
-model = my_model()
-score = benchmark(model)
-# >  <xarray.Score (aggregation: 2)>
-# >  array([0.32641998, 0.0207475])
-# >  Coordinates:
-# >    * aggregation  (aggregation) <U6 'center' 'error'
-# >  Attributes:
-# >      raw:                   <xarray.Score (aggregation: 2)>\narray([0.4278365 ...
-# >      ceiling:               <xarray.Score (aggregation: 2)>\narray([0.7488407 ...
-# >      model_identifier:      my-model
-# >      benchmark_identifier:  dicarlo.MajajHong2015public.IT-pls
-```
-
-Some steps may take minutes because data has to be downloaded during first-time use.
-
-For more details, see the [Documentation](https://brain-score.readthedocs.io) and 
-the Examples [[1]](https://github.com/brain-score/brain-score/blob/master/examples) 
-[[2]](https://github.com/brain-score/candidate_models/blob/master/examples).
-
-
-## Environment Variables
-
-| Variable               | Description                                                                                                                           |
-|------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| RESULTCACHING_HOME     | directory to cache results (benchmark ceilings) in, `~/.result_caching` by default (see https://github.com/brain-score/result_caching) |
+To contribute, please [send in a pull request](https://github.com/brain-score/brain-score_core/pulls).
 
 
 ## License
 
 MIT license
-
-
-## Troubleshooting
-
-<details>
-<summary>`ValueError: did not find HDF5 headers` during netcdf4 installation</summary>
-pip seems to fail properly setting up the HDF5_DIR required by netcdf4.
-Use conda: `conda install netcdf4`
-</details>
-
-<details>
-<summary>repeated runs of a benchmark / model do not change the outcome even though code was changed</summary>
-results (scores, activations) are cached on disk using https://github.com/mschrimpf/result_caching.
-Delete the corresponding file or directory to clear the cache.
-</details>
-
-
-## CI environment
-
-Add CI related build commands to `test_setup.sh`. The script is executed in CI environment for unittests.
 
 
 ## References
@@ -96,7 +32,7 @@ as well as the respective benchmark sources.
   author={Martin Schrimpf and Jonas Kubilius and Ha Hong and Najib J. Majaj and Rishi Rajalingham and Elias B. Issa and Kohitij Kar and Pouya Bashivan and Jonathan Prescott-Roy and Franziska Geiger and Kailyn Schmidt and Daniel L. K. Yamins and James J. DiCarlo},
   journal={bioRxiv preprint},
   year={2018},
-  url={https://www.biorxiv.org/content/10.1101/407007v2}
+  url={https://www.biorxiv.org/content/10.1101/407007}
 }
 
 @article{Schrimpf2020integrative,
