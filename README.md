@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.com/brain-score/core.svg?token=vqt7d2yhhpLGwHsiTZvT&branch=main)](https://travis-ci.com/brain-score/core)
+[![Build Status](https://app.travis-ci.com/brain-score/core.svg?token=vqt7d2yhhpLGwHsiTZvT&branch=main)](https://app.travis-ci.com/brain-score/core)
 [![Documentation Status](https://readthedocs.org/projects/brain-score_core/badge/?version=latest)](https://brain-score_core.readthedocs.io/en/latest/?badge=latest)
 
 Brain-Score is a platform to evaluate computational models of mind and brain function on their match to behavioral and
