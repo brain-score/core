@@ -10,13 +10,14 @@ authors = []
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = "3.8.*"
+python = "^3.7.1"
 tqdm = "*"
 numpy = "^1.17"
 brainio = { git = "https://github.com/brain-score/brainio.git", branch="main" }
 result_caching = { git = "https://github.com/brain-score/result_caching.git" }
 scikit-learn = "<0.24"
 scipy = "*"
+pandas = ">=1.0,<1.4"
 h5py = "*"
 gitpython = "*"
 tensorflow = "^1"
@@ -27,7 +28,7 @@ psycopg2-binary = "*"
 
 [tool.poetry.dev-dependencies]
 pdoc3 = "^0.10.0"
-ipython = "^8"
+ipython = "*"
 mypy = "^0.931"
 lxml = "^4.7.1"
 pytest = "*"
