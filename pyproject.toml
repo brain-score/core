@@ -3,7 +3,7 @@
 ################################################################
 
 [tool.poetry]
-name = "brainscore_language"
+name = "brainscore_core"
 version = "0.1.0"
 description = ""
 authors = []
