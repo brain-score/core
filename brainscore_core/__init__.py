@@ -4,8 +4,11 @@ import logging
 # noinspection PyUnresolvedReferences
 from brainio import list_stimulus_sets, list_assemblies
 # noinspection PyUnresolvedReferences
+from brainio.assemblies import BehavioralAssembly, NeuroidAssembly, PropertyAssembly, DataAssembly
+# noinspection PyUnresolvedReferences
+from brainio.stimuli import StimulusSet
+# noinspection PyUnresolvedReferences
 from brainio.fetch import get_assembly as brainio_get_assembly, get_stimulus_set
-from brainscore_core.benchmarks import benchmark_pool
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
