@@ -6,19 +6,12 @@ from brainio import list_stimulus_sets, list_assemblies
 # noinspection PyUnresolvedReferences
 from brainio.assemblies import BehavioralAssembly, NeuroidAssembly, PropertyAssembly, DataAssembly
 # noinspection PyUnresolvedReferences
-from brainio.stimuli import StimulusSet
+from brainio.fetch import get_assembly, get_stimulus_set
 # noinspection PyUnresolvedReferences
-from brainio.fetch import get_assembly as brainio_get_assembly, get_stimulus_set
+from brainio.stimuli import StimulusSet
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
-
-
-def get_assembly(name):
-    assembly = brainio_get_assembly(name)
-    assert hasattr(assembly.stimulus_set, 'identifier')
-    assert assembly.stimulus_set.identifier == assembly.stimulus_set_identifier
-    return assembly
 
 
 @store(identifier_ignore=['model', 'benchmark'])
