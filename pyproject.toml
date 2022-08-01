@@ -10,7 +10,7 @@ authors = []
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = "^3.7.1"
+python = "3.8.*"
 tqdm = "*"
 numpy = "^1.17"
 brainio = { git = "https://github.com/brain-score/brainio.git", branch="main" }
