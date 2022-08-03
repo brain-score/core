@@ -5,31 +5,10 @@ Typically these two sets are model and primate measurements, but metrics are agn
 and can also be used to compare two primate measurements (e.g. for ceiling estimates).
 """
 
+import logging
 import warnings
 
-import logging
-
 from brainio.assemblies import DataAssembly, merge_data_arrays
-
-
-class Metric:
-    """
-    Metric interface.
-    A metric compares two sets of data and outputs a score of how well they match (1 = identical, 0 = no match).
-    """
-
-    def __call__(self, assembly1, assembly2):
-        """
-        Compare two assemblies on their similarity.
-        These assemblies are typically neural or behavioral measurements, e.g. model and primate recordings.
-
-        :param assembly1: the first assembly to compare against the second
-        :param assembly2: the second assembly to compare against the first
-        :return: a :class:`~brainscore.metrics.Score` denoting the match between the two assemblies
-                (1 = identical, 0 = no match).
-        """
-        raise NotImplementedError()
-
 
 _logger = logging.getLogger(__name__)  # cannot set directly on Score object
 
@@ -110,3 +89,22 @@ class Score(DataAssembly):
             else:
                 raise e
         return result
+
+
+class Metric:
+    """
+    Metric interface.
+    A metric compares two sets of data and outputs a score of how well they match (1 = identical, 0 = no match).
+    """
+
+    def __call__(self, assembly1: DataAssembly, assembly2: DataAssembly) -> Score:
+        """
+        Compare two assemblies on their similarity.
+        These assemblies are typically neural or behavioral measurements, e.g. model and primate recordings.
+
+        :param assembly1: the first assembly to compare against the second
+        :param assembly2: the second assembly to compare against the first
+        :return: a :class:`~brainscore_core.metrics.Score` denoting the match between the two assemblies
+                (1 = identical, 0 = no match).
+        """
+        raise NotImplementedError()
