@@ -5,9 +5,8 @@ Typically these two sets are model and primate measurements, but metrics are agn
 and can also be used to compare two primate measurements (e.g. for ceiling estimates).
 """
 
-import warnings
-
 import logging
+import warnings
 
 from brainio.assemblies import DataAssembly, merge_data_arrays
 
@@ -70,43 +69,47 @@ class Score(DataAssembly):
 
     def _preserve_raw(self, operation, *args, _apply_raw=False, _ignore_errors=True, **kwargs):
         result = getattr(super(Score, self), operation)(*args, **kwargs)
-        if self.RAW_VALUES_KEY in self.attrs:
-            raw = self.attrs[self.RAW_VALUES_KEY]
-            if _apply_raw:
-                try:
-                    raw = getattr(raw, operation)(*args, **kwargs)
-                except Exception as e:
-                    if _ignore_errors:
-                        # ignore errors with warning. most users will likely only want to access the main score
-                        _logger.debug(f"{operation} on raw values failed: {repr(e)}")
-                    else:
-                        raise e
-            result.attrs[self.RAW_VALUES_KEY] = raw
+        for attr_key, attr_value in self.attrs.items():
+            if self.RAW_VALUES_KEY in attr_key:
+                if _apply_raw:
+                    try:
+                        attr_value = getattr(attr_value, operation)(*args, **kwargs)
+                    except Exception as e:
+                        if _ignore_errors:
+                            # ignore errors with warning. most users will likely only want to access the main score
+                            _logger.debug(f"{operation} on raw values failed: {repr(e)}")
+                        else:
+                            raise e
+                result.attrs[attr_key] = attr_value
         return result
 
     def __setitem__(self, key, value, _apply_raw=True):
         super(Score, self).__setitem__(key, value)
-        if _apply_raw and self.RAW_VALUES_KEY in self.attrs:
-            try:
-                self.attrs[self.RAW_VALUES_KEY].__setitem__(key, value)
-            except Exception as e:
-                _logger.debug(f"failed to set {key}={value} on raw values: " + (repr(e)))
+        if _apply_raw:
+            for attr_key in self.attrs:
+                if self.RAW_VALUES_KEY in attr_key:
+                    try:
+                        self.attrs[attr_key].__setitem__(key, value)
+                    except Exception as e:
+                        _logger.debug(f"failed to set {key}={value} on raw values: " + (repr(e)))
 
     @classmethod
     def merge(cls, *scores, ignore_exceptions=False):
         """
         Merges the raw values in addition to the score assemblies.
+        Raw values are indexed on the first score.
         """
-        try:
-            result = merge_data_arrays(scores)
-            raws = [score.attrs[cls.RAW_VALUES_KEY] for score in scores if cls.RAW_VALUES_KEY in score.attrs]
-            if len(raws) > 0:
-                raw = Score.merge(*raws, ignore_exceptions=True)
-                result.attrs[cls.RAW_VALUES_KEY] = raw
-        except Exception as e:
-            if ignore_exceptions:
-                warnings.warn("failed to merge raw values: " + str(e))
-                return None
-            else:
-                raise e
+        result = merge_data_arrays(scores)
+        for attr_key in scores[0].attrs:
+            if cls.RAW_VALUES_KEY in attr_key:
+                attr_values = [score.attrs[attr_key] for score in scores]
+                try:
+                    attr_values = Score.merge(*attr_values, ignore_exceptions=True)
+                    result.attrs[attr_key] = attr_values
+                except Exception as e:
+                    if ignore_exceptions:
+                        warnings.warn("failed to merge raw values: " + str(e))
+                        return None
+                    else:
+                        raise e
         return result
