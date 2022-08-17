@@ -7,8 +7,6 @@ This score is normalized with data ceilings and the benchmark returns this ceile
 
 from abc import ABC
 
-from result_caching import store
-
 from brainscore_core.metrics import Score
 
 
