@@ -4,7 +4,6 @@ python:
 before_install:
 - pip install poetry
 install:
-- poetry install
-- poetry show # list installed package versions
+- python -m pip install -e ".[test]"
 script:
 - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
