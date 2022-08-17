@@ -2,47 +2,28 @@
 #### poetry config ####
 ################################################################
 
-[tool.poetry]
+[project]
 name = "brainscore_core"
 version = "0.1.0"
 description = ""
 authors = []
-license = "MIT"
+license = {'file'='LICENSE'}
+readme = "README.md"
+requires-python = "==3.8.*"
 
-[tool.poetry.dependencies]
-python = "3.8.*"
-tqdm = "*"
-numpy = "^1.17"
-brainio = { git = "https://github.com/brain-score/brainio.git", branch="main" }
-result_caching = { git = "https://github.com/brain-score/result_caching.git" }
-scikit-learn = "<0.24"
-scipy = "*"
-pandas = ">=1.0,<1.4"
-h5py = "*"
-gitpython = "*"
-fire = "*"
-pybtex = "*"
-peewee = "*"
-psycopg2-binary = "*"
+dependencies = [
+    "tqdm",
+    "numpy>=1.21",
+    "brainio@git+https://github.com/brain-score/brainio.git@main"
+]
 
-[tool.poetry.dev-dependencies]
-pytest = "*"
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-
-
-################################################################
-#### mypy type-checking config ####
-################################################################
-
-[tool.mypy]
-ignore_missing_imports = true
-
-
-[tool.pytest.ini_options]
-testpaths = [
-    "tests"
+requires = [
+    "setuptools>=65.*",
+    "wheel"
 ]
