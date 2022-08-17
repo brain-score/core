@@ -81,9 +81,9 @@ class BenchmarkBase(Benchmark):
     Helper class for implementing standard functions of the `Benchmark` interface.
     """
 
-    def __init__(self, identifier, ceiling_func, version, parent=None, bibtex=None):
+    def __init__(self, identifier, ceiling, version, parent=None, bibtex=None):
         self._identifier = identifier
-        self._ceiling_func = ceiling_func
+        self._ceiling = ceiling
         self._version = version
         self.parent = parent
         self._bibtex = bibtex
@@ -102,11 +102,7 @@ class BenchmarkBase(Benchmark):
 
     @property
     def ceiling(self):
-        return self._ceiling(identifier=self.identifier)
-
-    @store()
-    def _ceiling(self, identifier):
-        return self._ceiling_func()
+        return self._ceiling
 
 
 def ceil_score(score, ceiling):
