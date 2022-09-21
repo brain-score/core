@@ -1,9 +1,12 @@
 language: python
 python:
-- "3.8"
+  - "3.7"
+  - "3.8"
+  - "3.9"
+  - "3.10"
 before_install:
-- pip install poetry
+  - pip install poetry
 install:
-- python -m pip install -e ".[test]"
+  - python -m pip install -e ".[test]"
 script:
-- pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
+  - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
