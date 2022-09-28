@@ -47,17 +47,20 @@ class Score(DataAssembly):
     def min(self, *args, _apply_raw=False, **kwargs):
         return self._preserve_raw('min', *args, **kwargs, _apply_raw=_apply_raw)
 
-    def _preserve_raw(self, operation, *args, _apply_raw=False, _ignore_errors=True, **kwargs):
-        result = getattr(super(Score, self), operation)(*args, **kwargs)
+    def reduce(self, *args, _apply_raw=False, **kwargs):
+        return self._preserve_raw('reduce', *args, **kwargs, _apply_raw=_apply_raw)
+
+    def _preserve_raw(self, func, *args, _apply_raw=False, _ignore_errors=True, **kwargs):
+        result = getattr(super(Score, self), func)(*args, **kwargs)
         for attr_key, attr_value in self.attrs.items():
             if self.RAW_VALUES_KEY in attr_key:
                 if _apply_raw:
                     try:
-                        attr_value = getattr(attr_value, operation)(*args, **kwargs)
+                        attr_value = getattr(attr_value, func)(*args, **kwargs)
                     except Exception as e:
                         if _ignore_errors:
                             # ignore errors with warning. most users will likely only want to access the main score
-                            _logger.debug(f"{operation} on raw values failed: {repr(e)}")
+                            _logger.debug(f"{func} on raw values failed: {repr(e)}")
                         else:
                             raise e
                 result.attrs[attr_key] = attr_value
