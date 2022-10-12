@@ -1,18 +1,18 @@
+from pathlib import Path
+
 import logging
 import os
+import pytest
 import tempfile
 from datetime import datetime
 
-import pytest
-from _pytest import tmpdir
-
-from brainscore.submission.configuration import object_decoder, BaseConfig
-from brainscore.submission.database import connect_db
-from brainscore.submission.evaluation import get_reference, get_benchmark_instance, get_ml_pool, \
+from brainscore_core.submission.configuration import object_decoder, BaseConfig
+from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.database_models import Reference, BenchmarkType, Submission, Model, BenchmarkInstance, \
+    Score
+from brainscore_core.submission.evaluation import get_reference, get_benchmark_instance, get_ml_pool, \
     run_submission
-from brainscore.submission.models import Reference, BenchmarkType, Submission, Model, BenchmarkInstance, Score
-from brainscore.submission.repository import prepare_module, extract_zip_file, find_submission_directory
-from model_tools.brain_transformation import ModelCommitment
+from brainscore_core.submission.repository import prepare_module, extract_zip_file, find_submission_directory
 from tests.test_submission import base_model
 from tests.test_submission.test_db import clear_schema, init_user
 
@@ -180,15 +180,11 @@ class TestRepository:
         assert str(path) == f'{TestRepository.working_dir}/candidate_models'
 
     def test_find_correct_dir(self):
-        f1 = open(f'{TestRepository.working_dir}/.temp', "w+")
-        f2 = open(f'{TestRepository.working_dir}/_MACOS', "w+")
-        f3 = open(f'{TestRepository.working_dir}/candidate_models', "w+")
+        Path(f'{TestRepository.working_dir}/.temp').touch()
+        Path(f'{TestRepository.working_dir}/_MACOS').touch()
+        Path(f'{TestRepository.working_dir}/candidate_models').touch()
         dir = find_submission_directory(TestRepository.working_dir)
         assert dir == 'candidate_models'
-        exception = False
-        try:
-            f4 = open(f'{TestRepository.working_dir}/candidate_models2', "w+")
-            dir = find_submission_directory(TestRepository.working_dir)
-        except:
-            exception = True
-        assert exception
+        with pytest.raises(Exception):
+            Path(f'{TestRepository.working_dir}/candidate_models2').touch()
+            find_submission_directory(TestRepository.working_dir)

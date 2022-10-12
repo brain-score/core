@@ -21,9 +21,9 @@ def prepare_module(submission: Submission, config: BaseConfig):
     return install_project(repo, package), os.path.basename(repo)
 
 
-def extract_zip_file(id, config_path, work_dir):
+def extract_zip_file(submission_id, config_path, work_dir):
     logger.info(f'Unpack zip file')
-    zip_file = Path(f'{config_path}/submission_{id}.zip')
+    zip_file = Path(f'{config_path}/submission_{submission_id}.zip')
     with zipfile.ZipFile(zip_file, 'r') as model_repo:
         model_repo.extractall(path=str(work_dir))
     # Use the single directory in the zip file

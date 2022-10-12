@@ -1,14 +1,13 @@
 import csv
 import logging
 import os
-from datetime import datetime
-
 import pytest
+from datetime import datetime
 from pytest import approx
 
-from brainscore.submission.database import connect_db
-from brainscore.submission.evaluation import run_evaluation
-from brainscore.submission.models import Score, Model, Submission
+from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.database_models import Score, Model, Submission
+from brainscore_core.submission.evaluation import run_evaluation
 from tests.test_submission.test_db import clear_schema, init_user, init_benchmark_parents
 
 logger = logging.getLogger(__name__)
@@ -114,7 +113,6 @@ class TestIntegration:
                            benchmarks=['dicarlo.Rajalingham2018-i2n'])
 
     def test_model_failure_evaluation(self, tmpdir):
-        # os.environ['RESULTCACHING_DISABLE'] = 'brainscore.score_model,model_tools'
         working_dir = str(tmpdir.mkdir('sub'))
         config_dir = str(os.path.join(os.path.dirname(__file__), 'configs/'))
         run_evaluation(config_dir, working_dir, 36, TestIntegration.database, models=['alexnet'],
@@ -130,4 +128,3 @@ class TestIntegration:
         model = Model.get()
         score = Score.get(model=model)
         assert score.comment is not None  # When there's a problem, the comment field contains an error message
-        # os.environ['RESULTCACHING_DISABLE'] = '0'
