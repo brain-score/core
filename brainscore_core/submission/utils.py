@@ -1,6 +1,5 @@
-import logging
-
 import boto3
+import logging
 from botocore.exceptions import ClientError
 
 _logger = logging.getLogger(__name__)
@@ -54,4 +53,3 @@ def get_secret(secret_name, region_name='us-east-2'):
         else:
             _logger.info("Inside binary response...")
             return get_secret_value_response['SecretBinary']
-

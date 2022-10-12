@@ -5,7 +5,7 @@ from pathlib import Path
 
 import fire
 
-from brainscore.submission.evaluation import run_evaluation
+from brainscore_core.submission.evaluation import run_evaluation
 
 logger = logging.getLogger(__name__)
 

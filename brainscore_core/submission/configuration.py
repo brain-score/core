@@ -1,7 +1,6 @@
 import datetime
-import distutils
 
-from brainscore.submission.models import Model, Submission
+from brainscore_core.submission.database_models import Model, Submission
 
 
 class BaseConfig:
@@ -27,8 +26,8 @@ class MultiConfig(BaseConfig):
         super(MultiConfig, self).__init__(**kwargs)
         self.models = []
         self.submission_entries = {}
-        for id in model_ids:
-            model = Model.get(id=id)
+        for model_id in model_ids:
+            model = Model.get(id=model_id)
             submission: Submission = model.submission
             self.models.append(model)
             if submission.id not in self.submission_entries:
@@ -63,4 +62,3 @@ def object_decoder(config, work_dir, config_path, db_secret, jenkins_id):
                                 jenkins_id=jenkins_id, db_secret=db_secret,
                                 public=config['public'] == "True",
                                 competition_submission=config['competition'])
-

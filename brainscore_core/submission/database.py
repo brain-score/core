@@ -1,10 +1,8 @@
 import json
-import logging
-
 from peewee import PostgresqlDatabase, SqliteDatabase
 
-from brainscore.submission.models import database
-from brainscore.submission.utils import get_secret
+from brainscore_core.submission.models import database
+from brainscore_core.submission.utils import get_secret
 
 
 def connect_db(db_secret):

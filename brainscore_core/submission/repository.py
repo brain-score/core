@@ -6,8 +6,8 @@ import zipfile
 from importlib import import_module
 from pathlib import Path
 
-from brainscore.submission.configuration import BaseConfig
-from brainscore.submission.models import Submission
+from brainscore_core.submission.configuration import BaseConfig
+from brainscore_core.submission.database_models import Submission
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ def find_submission_directory(work_dir):
     Find the single directory inside a directory that corresponds to the submission file.
     Ignores hidden directories, e.g. those prefixed with `.` and `_`
     """
-    list = os.listdir(work_dir)
+    path_list = os.listdir(work_dir)
     candidates = []
-    for item in list:
+    for item in path_list:
         if not item.startswith('.') and not item.startswith('_'):
             candidates.append(item)
     if len(candidates) is 1:
