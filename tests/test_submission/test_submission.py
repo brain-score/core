@@ -1,18 +1,16 @@
-from pathlib import Path
-
 import logging
 import os
 import pytest
 import tempfile
 from datetime import datetime
+from pathlib import Path
 
-from brainscore_core.submission.configuration import object_decoder, BaseConfig
+from brainscore_core.submission.configuration import object_decoder
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import Reference, BenchmarkType, Submission, Model, BenchmarkInstance, \
     Score
-from brainscore_core.submission.evaluation import get_reference, get_benchmark_instance, get_ml_pool, \
-    run_submission
-from brainscore_core.submission.repository import prepare_module, extract_zip_file, find_submission_directory
+from brainscore_core.submission.evaluation import get_reference, get_benchmark_instance, run_submission
+from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
 from tests.test_submission import base_model
 from tests.test_submission.test_db import clear_schema, init_user
 
@@ -86,12 +84,6 @@ class TestSubmission:
                          submission=submission))
         return model_instances, submission
 
-    def test_get_ml_pool(self):
-        model_instances, submission = self.get_test_models()
-        ml_pool = get_ml_pool(model_instances, base_model, submission)
-        assert len(ml_pool) == 1
-        assert isinstance(ml_pool['alexnet'], ModelCommitment)
-
     def test_run_submission(self):
         model_instances, submission = self.get_test_models()
         run_submission(base_model, model_instances, test_benchmarks=['dicarlo.MajajHong2015.IT-pls'],
@@ -163,17 +155,6 @@ class TestRepository:
 
     def tear_down_method(self):
         os.rmdir(TestRepository.working_dir)
-
-    def test_prepare_module(self):
-        config = BaseConfig(TestRepository.working_dir, 33, '', TestRepository.config_dir)
-        submission = Submission.create(id=33, submitter=1, timestamp=datetime.now(),
-                                       model_type='BaseModel', status='running')
-        module, repo = prepare_module(submission, config)
-        assert hasattr(module, 'get_model_list')
-        assert hasattr(module, 'get_model')
-        assert hasattr(module, 'get_bibtex')
-        assert repo == 'candidate_models'
-        assert module.get_model('alexnet') is not None
 
     def test_extract_zip_file(self):
         path = extract_zip_file(33, TestRepository.config_dir, TestRepository.working_dir)

@@ -10,7 +10,6 @@ from peewee import DoesNotExist
 from brainscore_core.submission.configuration import object_decoder, MultiConfig
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import Model, Score, BenchmarkInstance, BenchmarkType, Reference
-from brainscore_core.submission.repository import prepare_module, deinstall_project
 
 logger = logging.getLogger(__name__)
 
