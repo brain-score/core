@@ -4,7 +4,7 @@ Process plugin submissions (data, metrics, benchmarks, models) and score models 
 import logging
 from brainscore_language import load_model, load_benchmark, score
 from datetime import datetime
-from typing import List
+from typing import List, Union
 
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db, modelentry_from_model, submissionentry_from_meta, \
@@ -31,7 +31,10 @@ def process_github_submission():
 
 
 def run_scoring(models: List[str], benchmarks: List[str],
-                submission_meta: dict,
+                # TODO @Katherine: the following parameters likely need to be passed differently,
+                #  e.g. in a config file/environment variables
+                jenkins_id: int, user_id: int, model_type: str,
+                public: bool, competition: str,
                 db_secret: str):
     """
     Run the `models` on the `benchmarks`, and write resulting scores to the database.
@@ -40,7 +43,7 @@ def run_scoring(models: List[str], benchmarks: List[str],
     connect_db(db_secret)
 
     # setup entry for this entire submission
-    submission_entry = submissionentry_from_meta(**submission_meta)
+    submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
     entire_submission_successful = True
 
     # iterate over all model-benchmark pairs
@@ -54,7 +57,7 @@ def run_scoring(models: List[str], benchmarks: List[str],
             try:
                 _score_model_on_benchmark(model_identifier=model_identifier,
                                           benchmark_identifier=benchmark_identifier,
-                                          submission_entry=submission_entry)
+                                          submission_entry=submission_entry, public=public, competition=competition)
             except Exception as e:
                 entire_submission_successful = False
                 logging.error(
@@ -69,13 +72,14 @@ def run_scoring(models: List[str], benchmarks: List[str],
 
 
 def _score_model_on_benchmark(model_identifier: str, benchmark_identifier: str,
-                              submission_entry: database_models.Submission):
+                              submission_entry: database_models.Submission,
+                              public: bool, competition: Union[None, str]):
     # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
     #  in the `score` method.
     logger.info(f'Model database entry')
     model = load_model(model_identifier)
     model_entry = modelentry_from_model(model=model, model_identifier=model_identifier,
-                                        submission=submission_entry)
+                                        submission=submission_entry, public=public, competition=competition)
     logger.info(f'Benchmark database entry')
     benchmark = load_benchmark(benchmark_identifier)
     benchmark_entry = benchmarkinstance_from_benchmark(benchmark)
@@ -91,7 +95,8 @@ def _score_model_on_benchmark(model_identifier: str, benchmark_identifier: str,
     if not created:  # previous score entry exists, but no score was stored
         score_entry.start_timestamp = datetime.now()
         score_entry.comment = None
-        logger.warning('An entry already exists but was not evaluated successful, we rerun!')
+        score_entry.save()
+        logger.warning('A score entry exists but does not have a score value, so we run it again')
 
     # run actual scoring mechanism
     score_result = score(model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
