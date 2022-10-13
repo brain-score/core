@@ -9,8 +9,8 @@ from brainscore_core.benchmarks import BenchmarkBase
 from brainscore_core.metrics import Score
 from brainscore_core.submission import database_models
 from brainscore_core.submission.configuration import object_decoder
-from brainscore_core.submission.database import connect_db
-from brainscore_core.submission.evaluation import get_reference, database_instance_for_benchmark
+from brainscore_core.submission.database import connect_db, benchmarkinstance_from_benchmark
+from brainscore_core.submission.evaluation import reference_from_bibtex
 from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
 from tests.test_submission.test_db import clear_schema, init_user
 
@@ -56,12 +56,12 @@ class TestSubmission:
                                 url={https://doi.org/10.1038/nn.3402}
                                 }
                             """
-        ref = get_reference(bibtex)
+        ref = reference_from_bibtex(bibtex)
         assert isinstance(ref, database_models.Reference)
         assert ref.url == 'https://doi.org/10.1038/nn.3402'
         assert ref.year == '2013'
         assert ref.author is not None
-        ref2 = get_reference(bibtex)
+        ref2 = reference_from_bibtex(bibtex)
         assert ref2.id == ref.id
 
     class MockBenchmark(BenchmarkBase):
@@ -73,7 +73,7 @@ class TestSubmission:
 
     def test_get_benchmark_instance_no_parent(self):
         benchmark = TestSubmission.MockBenchmark()
-        instance = database_instance_for_benchmark(benchmark)
+        instance = benchmarkinstance_from_benchmark(benchmark)
         type = database_models.BenchmarkType.get(identifier=instance.benchmark)
         assert instance.ceiling == 0.6
         assert instance.ceiling_error == 0.1
@@ -83,7 +83,7 @@ class TestSubmission:
         # initially create the parent to see if the benchmark properly links to it
         database_models.BenchmarkType.create(identifier='neural', order=3)
         benchmark = TestSubmission.MockBenchmark()
-        instance = database_instance_for_benchmark(benchmark)
+        instance = benchmarkinstance_from_benchmark(benchmark)
         assert instance.benchmark.parent.identifier == 'neural'
 
     def get_test_models(self):

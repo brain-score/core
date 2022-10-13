@@ -1,12 +1,12 @@
-from peewee import Model as PeeweeModel, Proxy, CharField, ForeignKeyField, IntegerField, BooleanField, DateTimeField, \
+from peewee import Model as PeeweeModel, CharField, ForeignKeyField, IntegerField, BooleanField, DateTimeField, \
     FloatField, TextField, PrimaryKeyField
 
-database = Proxy()
+from brainscore_core.submission.database import database_proxy
 
 
 class PeeweeBase(PeeweeModel):
     class Meta:
-        database = database
+        database = database_proxy
 
 
 class Reference(PeeweeBase):
