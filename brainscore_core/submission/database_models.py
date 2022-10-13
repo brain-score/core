@@ -1,7 +1,7 @@
-from peewee import Model as PeeweeModel, CharField, ForeignKeyField, IntegerField, BooleanField, DateTimeField, \
+from peewee import Proxy, Model as PeeweeModel, CharField, ForeignKeyField, IntegerField, BooleanField, DateTimeField, \
     FloatField, TextField, PrimaryKeyField
 
-from brainscore_core.submission.database import database_proxy
+database_proxy = Proxy()
 
 
 class PeeweeBase(PeeweeModel):

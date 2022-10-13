@@ -8,7 +8,7 @@ from typing import List
 
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db, modelentry_from_model, submissionentry_from_meta, \
-    benchmarkinstance_from_benchmark, score_to_database
+    benchmarkinstance_from_benchmark, update_score
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def process_github_submission():
 
 def run_scoring(models: List[str], benchmarks: List[str],
                 submission_meta: dict,
-                db_secret: str = 'brainscore-1-ohio-cred'):
+                db_secret: str):
     """
     Run the `models` on the `benchmarks`, and write resulting scores to the database.
     """
@@ -99,4 +99,4 @@ def _score_model_on_benchmark(model_identifier: str, benchmark_identifier: str,
 
     # store in database
     logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
-    score_to_database(score_result, score_entry)
+    update_score(score_result, score_entry)

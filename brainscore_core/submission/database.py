@@ -2,17 +2,15 @@ import json
 import logging
 from datetime import datetime
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
-from peewee import Proxy
 from pybtex.database.input import bibtex
 from typing import Union
 
-from brainscore_core.metrics import Score as ScoreObject
 from brainscore_core.benchmarks import Benchmark
-from brainscore_core.submission.database_models import Submission, Model, BenchmarkType, BenchmarkInstance, Reference, \
-    Score
+from brainscore_core.metrics import Score as ScoreObject
+from brainscore_core.submission.database_models import database_proxy, \
+    Submission, Model, BenchmarkType, BenchmarkInstance, Reference, Score
 from brainscore_core.submission.utils import get_secret
 
-database_proxy = Proxy()
 logger = logging.getLogger(__name__)
 
 
@@ -29,17 +27,19 @@ def connect_db(db_secret):
         database_proxy.initialize(sqlite)
 
 
-def submissionentry_from_meta(jenkins_id: str, user_id: str) -> Submission:
+def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) -> Submission:
     now = datetime.now()
-    submission = Submission.create(id=jenkins_id, submitter=user_id, timestamp=now, status='running')
+    submission = Submission.create(id=jenkins_id, submitter=user_id, model_type=model_type,
+                                   timestamp=now, status='running')
     return submission
 
 
-def modelentry_from_model(model, model_identifier: str, submission: Submission) -> Model:
+def modelentry_from_model(model, model_identifier: str, public: bool, competition: Union[None, str],
+                          submission: Submission) -> Model:
     model_entry, created = Model.get_or_create(name=model_identifier, owner=submission.submitter,
-                                               defaults={'public': submission.public,
+                                               defaults={'public': public,
                                                          'submission': submission,
-                                                         'competition': submission.competition_submission})
+                                                         'competition': competition})
     if hasattr(model, 'bibtex') and created:  # model entry was just created and we can add bibtex
         bibtex_string = model.bibtex
         reference = reference_from_bibtex(bibtex_string)
@@ -110,13 +110,13 @@ def reference_from_bibtex(bibtex_string: str) -> Union[Reference, None]:
         return None
 
 
-def score_to_database(score: ScoreObject, entry: Score):
+def update_score(score: ScoreObject, entry: Score):
     if not hasattr(score, 'ceiling'):  # many engineering benchmarks do not have a primate ceiling
         # only store raw (unceiled) value
-        entry.score_raw = score.sel(aggregation='center').item(0)
+        entry.score_raw = score.sel(aggregation='center').item()
     else:  # score has a ceiling. Store ceiled as well as raw value
         assert score.raw.sel(aggregation='center') is not None
-        entry.score_raw = score.raw.sel(aggregation='center').item(0)
-        entry.score_ceiled = score.sel(aggregation='center').item(0)
-        entry.error = score.sel(aggregation='error').item(0)
+        entry.score_raw = score.raw.sel(aggregation='center').item()
+        entry.score_ceiled = score.sel(aggregation='center').item()
+        entry.error = score.sel(aggregation='error').item()
     entry.save()
