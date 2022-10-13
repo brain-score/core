@@ -9,7 +9,7 @@ from brainscore_core.benchmarks import BenchmarkBase
 from brainscore_core.submission.database import connect_db, reference_from_bibtex, benchmarkinstance_from_benchmark, \
     submissionentry_from_meta, modelentry_from_model, update_score
 from brainscore_core.submission.database_models import Score, BenchmarkType, Reference
-from tests.test_submission import clear_schema, init_user
+from tests.test_submission import clear_schema, init_users
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class TestEntries:
 
     def setup_method(self):
         logger.info('Initialize database entries')
-        init_user()
+        init_users()
 
     def teardown_method(self):
         logger.info('Clean database')
@@ -54,18 +54,16 @@ class TestEntries:
         assert entry.status == 'running'
 
     def test_model_no_bibtex(self):
-        model_dummy = namedtuple('Model', field_names=[])()
         submission_entry = submissionentry_from_meta(jenkins_id=123, user_id=1, model_type='base_model')
-        entry = modelentry_from_model(model_dummy, model_identifier='dummy', public=False, competition='cosyne2022',
+        entry = modelentry_from_model(model_identifier='dummy', public=False, competition='cosyne2022',
                                       submission=submission_entry)
         with pytest.raises(Exception):
             entry.reference
 
     def test_model_with_bibtex(self):
-        model_dummy = namedtuple('Model', field_names=['bibtex'])(bibtex=SAMPLE_BIBTEX)
         submission_entry = submissionentry_from_meta(jenkins_id=123, user_id=1, model_type='base_model')
-        entry = modelentry_from_model(model_dummy, model_identifier='dummy', public=True, competition=None,
-                                      submission=submission_entry)
+        entry = modelentry_from_model(model_identifier='dummy', public=True, competition=None,
+                                      submission=submission_entry, bibtex=SAMPLE_BIBTEX)
         assert entry.reference.year == '2013'
 
     class MockBenchmark(BenchmarkBase):

@@ -3,7 +3,7 @@ import os
 import pytest
 import tempfile
 from pathlib import Path
-from tests.test_submission import clear_schema, init_user
+from tests.test_submission import clear_schema, init_users
 
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
@@ -22,7 +22,7 @@ class TestRepository:
     def setup_class(cls):
         connect_db(database)
         clear_schema()
-        init_user()
+        init_users()
 
     @classmethod
     def tear_down_class(cls):

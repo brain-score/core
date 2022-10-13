@@ -34,15 +34,15 @@ def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) ->
     return submission
 
 
-def modelentry_from_model(model, model_identifier: str, public: bool, competition: Union[None, str],
-                          submission: Submission) -> Model:
+def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],
+                          submission: Submission,
+                          bibtex: Union[None, str] = None) -> Model:
     model_entry, created = Model.get_or_create(name=model_identifier, owner=submission.submitter,
                                                defaults={'public': public,
                                                          'submission': submission,
                                                          'competition': competition})
-    if hasattr(model, 'bibtex') and created:  # model entry was just created and we can add bibtex
-        bibtex_string = model.bibtex
-        reference = reference_from_bibtex(bibtex_string)
+    if bibtex and created:  # model entry was just created and we can add bibtex
+        reference = reference_from_bibtex(bibtex)
         model_entry.reference = reference
         model_entry.save()
     return model_entry
