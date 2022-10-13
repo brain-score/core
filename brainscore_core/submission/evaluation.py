@@ -7,18 +7,13 @@ from pybtex.database.input import bibtex
 import pandas as pd
 from peewee import DoesNotExist
 
-from brainscore import score_model
-from brainscore.benchmarks import evaluation_benchmark_pool, benchmark_pool
-from brainscore.submission.configuration import object_decoder, MultiConfig
-from brainscore.submission.database import connect_db
-from brainscore.submission.ml_pool import MLBrainPool, ModelLayers
-from brainscore.submission.models import Model, Score, BenchmarkInstance, BenchmarkType, Reference
-from brainscore.submission.repository import prepare_module, deinstall_project
-from brainscore.utils import LazyLoad
+from brainscore_core.submission.configuration import object_decoder, MultiConfig
+from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.ml_pool import MLBrainPool, ModelLayers
+from brainscore_core.submission.database_models import Model, Score, BenchmarkInstance, BenchmarkType, Reference
+from brainscore_core.submission.repository import prepare_module, deinstall_project
 
 logger = logging.getLogger(__name__)
-
-all_benchmarks_list = [benchmark for benchmark in evaluation_benchmark_pool.keys()]
 
 SCORE_COMMENT_MAX_LENGTH = 1000
 
