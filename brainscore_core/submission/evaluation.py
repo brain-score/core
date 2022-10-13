@@ -1,12 +1,12 @@
 import datetime
 import json
 import logging
-from pathlib import Path
-
-from pybtex.database.input import bibtex
 import pandas as pd
+from pathlib import Path
 from peewee import DoesNotExist
+from pybtex.database.input import bibtex
 
+from brainscore_core.benchmarks import Benchmark
 from brainscore_core.submission.configuration import object_decoder, MultiConfig
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import Model, Score, BenchmarkInstance, BenchmarkType, Reference
@@ -98,7 +98,7 @@ def run_submission(module, test_models, test_benchmarks, submission_entry):
                 score_entry = None
                 try:
                     start = datetime.datetime.now()
-                    benchmark_entry = get_benchmark_instance(benchmark_name)
+                    benchmark_entry = database_instance_for_benchmark(benchmark_name)
                     # Check if the model is already scored on the benchmark
                     score_entry, created = Score.get_or_create(benchmark=benchmark_entry, model=model_entry,
                                                                defaults={'start_timestamp': start, })
@@ -201,29 +201,43 @@ def get_ml_pool(test_models, module, submission):
     return ml_brain_pool
 
 
-def get_benchmark_instance(benchmark_name):
-    benchmark = benchmark_pool[benchmark_name]
-    benchmark_type, created = BenchmarkType.get_or_create(identifier=benchmark_name, defaults=dict(order=999))
+def database_instance_for_benchmark(benchmark: Benchmark):
+    benchmark_identifier = benchmark.identifier
+    benchmark_type, created = BenchmarkType.get_or_create(identifier=benchmark_identifier, defaults=dict(order=999))
     if created:
+        # store parent
         try:
             parent = BenchmarkType.get(identifier=benchmark.parent)
             benchmark_type.parent = parent
             benchmark_type.save()
         except DoesNotExist:
-            logger.warning(f'Could not connect benchmark {benchmark_name} to parent {benchmark.parent} '
+            logger.warning(f'Could not connect benchmark {benchmark_identifier} to parent {benchmark.parent} '
                            f'since parent does not exist')
+        # store reference
         if hasattr(benchmark, 'bibtex') and benchmark.bibtex is not None:
             bibtex_string = benchmark.bibtex
             ref = get_reference(bibtex_string)
             if ref:
                 benchmark_type.reference = ref
                 benchmark_type.save()
+
+    # process instance
     bench_inst, created = BenchmarkInstance.get_or_create(benchmark=benchmark_type, version=benchmark.version)
     if created:
         # the version has changed and the benchmark instance was not yet in the database
         ceiling = benchmark.ceiling
-        bench_inst.ceiling = ceiling.sel(aggregation='center')
-        bench_inst.ceiling_error = ceiling.sel(aggregation='error')
+        bench_inst.ceiling = ceiling.item()
+        # probe the ceiling for an estimate of the error
+        ceiling_error = None
+        error_retrievors = [lambda ceiling: ceiling.sel(aggregation='error').item(),
+                            lambda ceiling: ceiling.attrs['error']]
+        for retrievor in error_retrievors:
+            try:
+                ceiling_error = retrievor(ceiling)
+                break
+            except Exception:  # if we can't find an error estimate, ignore
+                pass
+        bench_inst.ceiling_error = ceiling_error
         bench_inst.save()
     return bench_inst
 
@@ -239,10 +253,10 @@ def get_reference(bibtex_string):
 
     try:
         entry = parse_bib(bibtex_string)
-        ref, create = Reference.get_or_create(url=entry.fields['url'],
-                                              defaults={'bibtex': bibtex_string,
-                                                        'author': entry.persons["author"][0].last()[0],
-                                                        'year': entry.fields['year']})
+        ref, created = Reference.get_or_create(url=entry.fields['url'],
+                                               defaults={'bibtex': bibtex_string,
+                                                         'author': entry.persons["author"][0].last()[0],
+                                                         'year': entry.fields['year']})
         return ref
     except Exception:
         logger.exception('Could not load reference from bibtex string')

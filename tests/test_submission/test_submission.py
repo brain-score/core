@@ -2,16 +2,17 @@ import logging
 import os
 import pytest
 import tempfile
+from brainscore_core.metrics import Score
+
+from brainscore_core.benchmarks import BenchmarkBase
 from datetime import datetime
 from pathlib import Path
 
 from brainscore_core.submission.configuration import object_decoder
 from brainscore_core.submission.database import connect_db
-from brainscore_core.submission.database_models import Reference, BenchmarkType, Submission, Model, BenchmarkInstance, \
-    Score
-from brainscore_core.submission.evaluation import get_reference, get_benchmark_instance, run_submission
+from brainscore_core.submission import database_models
+from brainscore_core.submission.evaluation import get_reference, database_instance_for_benchmark, run_submission
 from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
-from tests.test_submission import base_model
 from tests.test_submission.test_db import clear_schema, init_user
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,6 @@ database = 'brainscore-ohio-test'  # test database
 @pytest.mark.memory_intense
 @pytest.mark.private_access
 class TestSubmission:
-
     @classmethod
     def setup_class(cls):
         logger.info('Connect to database')
@@ -58,37 +58,50 @@ class TestSubmission:
                                 }
                             """
         ref = get_reference(bibtex)
-        assert isinstance(ref, Reference)
+        assert isinstance(ref, database_models.Reference)
         assert ref.url == 'https://doi.org/10.1038/nn.3402'
         assert ref.year == '2013'
         assert ref.author is not None
         ref2 = get_reference(bibtex)
         assert ref2.id == ref.id
 
-    def test_get_benchmark_instance(self):
-        instance = get_benchmark_instance('dicarlo.MajajHong2015.V4-pls')
-        type = BenchmarkType.get(identifier=instance.benchmark)
-        assert instance.ceiling is not None
-        assert instance.ceiling_error is not None
+    class MockBenchmark(BenchmarkBase):
+        def __init__(self):
+            dummy_ceiling = Score(0.6)
+            dummy_ceiling.attrs['error'] = 0.1
+            super(TestSubmission.MockBenchmark, self).__init__(
+                identifier='dummy', ceiling=dummy_ceiling, version=0, parent='neural')
+
+    def test_get_benchmark_instance_no_parent(self):
+        benchmark = TestSubmission.MockBenchmark()
+        instance = database_instance_for_benchmark(benchmark)
+        type = database_models.BenchmarkType.get(identifier=instance.benchmark)
+        assert instance.ceiling == 0.6
+        assert instance.ceiling_error == 0.1
         assert not type.parent
-        BenchmarkType.create(identifier='IT', order=3)
-        instance2 = get_benchmark_instance('dicarlo.MajajHong2015.IT-pls')
-        assert instance2.benchmark.parent.identifier == 'IT'
+
+    def test_get_benchmark_instance_existing_parent(self):
+        # initially create the parent to see if the benchmark properly links to it
+        database_models.BenchmarkType.create(identifier='neural', order=3)
+        benchmark = TestSubmission.MockBenchmark()
+        instance = database_instance_for_benchmark(benchmark)
+        assert instance.benchmark.parent.identifier == 'neural'
 
     def get_test_models(self):
-        submission = Submission.create(id=33, submitter=1, timestamp=datetime.now(),
-                                       model_type='BaseModel', status='running')
+        submission = database_models.Submission.create(id=33, submitter=1, timestamp=datetime.now(),
+                                                       model_type='BaseModel', status='running')
         model_instances = []
         model_instances.append(
-            Model.create(name='alexnet', owner=submission.submitter, public=False,
-                         submission=submission))
+            database_models.Model.create(name='alexnet', owner=submission.submitter, public=False,
+                                         submission=submission))
         return model_instances, submission
 
     def test_run_submission(self):
+        from tests.test_submission import sample_base_model
         model_instances, submission = self.get_test_models()
-        run_submission(base_model, model_instances, test_benchmarks=['dicarlo.MajajHong2015.IT-pls'],
+        run_submission(sample_base_model, model_instances, test_benchmarks=['dicarlo.MajajHong2015.IT-pls'],
                        submission_entry=submission)
-        bench_inst = BenchmarkInstance.get(benchmark_type_id='dicarlo.MajajHong2015.IT-pls')
+        bench_inst = database_models.BenchmarkInstance.get(benchmark_type_id='dicarlo.MajajHong2015.IT-pls')
         assert not isinstance(bench_inst, list)
         assert Score.get(benchmark=bench_inst)
 
@@ -121,7 +134,7 @@ class TestConfig:
         assert not submission_config.public
 
     def test_resubmit_config(self):
-        model = Model.create(id=19, name='alexnet', public=True, submission=33, owner=1)
+        model = database_models.Model.create(id=19, name='alexnet', public=True, submission=33, owner=1)
         config = {
             "model_ids": [model.id],
             "user_id": 1,
