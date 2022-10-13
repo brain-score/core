@@ -1,7 +1,7 @@
 import json
 from peewee import PostgresqlDatabase, SqliteDatabase
 
-from brainscore_core.submission.models import database
+from brainscore_core.submission.database_models import database
 from brainscore_core.submission.utils import get_secret
 
 
