@@ -2,16 +2,15 @@ import logging
 import os
 import pytest
 import tempfile
-from brainscore_core.metrics import Score
-
-from brainscore_core.benchmarks import BenchmarkBase
 from datetime import datetime
 from pathlib import Path
 
+from brainscore_core.benchmarks import BenchmarkBase
+from brainscore_core.metrics import Score
+from brainscore_core.submission import database_models
 from brainscore_core.submission.configuration import object_decoder
 from brainscore_core.submission.database import connect_db
-from brainscore_core.submission import database_models
-from brainscore_core.submission.evaluation import get_reference, database_instance_for_benchmark, run_submission
+from brainscore_core.submission.evaluation import get_reference, database_instance_for_benchmark
 from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
 from tests.test_submission.test_db import clear_schema, init_user
 
@@ -95,15 +94,6 @@ class TestSubmission:
             database_models.Model.create(name='alexnet', owner=submission.submitter, public=False,
                                          submission=submission))
         return model_instances, submission
-
-    def test_run_submission(self):
-        from tests.test_submission import sample_base_model
-        model_instances, submission = self.get_test_models()
-        run_submission(sample_base_model, model_instances, test_benchmarks=['dicarlo.MajajHong2015.IT-pls'],
-                       submission_entry=submission)
-        bench_inst = database_models.BenchmarkInstance.get(benchmark_type_id='dicarlo.MajajHong2015.IT-pls')
-        assert not isinstance(bench_inst, list)
-        assert Score.get(benchmark=bench_inst)
 
 
 @pytest.mark.memory_intense
