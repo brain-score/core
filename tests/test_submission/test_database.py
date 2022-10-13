@@ -1,20 +1,15 @@
 import logging
+
 import os
 import pytest
-import tempfile
 from datetime import datetime
-from pathlib import Path
 
-from brainscore_core.benchmarks import BenchmarkBase
-from brainscore_core.metrics import Score
-from brainscore_core.submission import database_models
-from brainscore_core.submission.configuration import object_decoder
-from brainscore_core.submission.database import connect_db, benchmarkinstance_from_benchmark
-from brainscore_core.submission.evaluation import reference_from_bibtex
-from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
-from tests.test_submission.test_db import clear_schema, init_user
+from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.database_models import Score, BenchmarkType
+from tests.test_submission import clear_schema, init_user
 
 logger = logging.getLogger(__name__)
+
 database = 'brainscore-ohio-test'  # test database
 
 
@@ -96,79 +91,29 @@ class TestSubmission:
         return model_instances, submission
 
 
-@pytest.mark.memory_intense
-@pytest.mark.private_access
-class TestConfig:
-    @classmethod
-    def setup_class(cls):
-        logger.info('Connect to database')
-        connect_db(database)
-        clear_schema()
-        init_user()
+def init_benchmark_parents():
+    BenchmarkType.create(identifier='neural', order=0)
+    BenchmarkType.create(identifier='V1', parent='neural', order=0)
+    BenchmarkType.create(identifier='V2', parent='neural', order=1)
+    BenchmarkType.create(identifier='V4', parent='neural', order=2)
+    BenchmarkType.create(identifier='IT', parent='neural', order=3)
 
-    @classmethod
-    def teardown_class(cls):
-        logger.info('Connect to database')
-        clear_schema()
-
-    def test_base_config(self):
-        config = {"model_type": "BaseModel",
-                  "user_id": 1,
-                  "public": "False",
-                  "competition": "cosyne2022"}
-        submission_config = object_decoder(config, 'work_dir', 'config_path', 'db_secret', 33)
-        assert submission_config.db_secret == 'db_secret'
-        assert submission_config.work_dir == 'work_dir'
-        assert submission_config.jenkins_id == 33
-        assert submission_config.submission is not None
-        assert not submission_config.public
-
-    def test_resubmit_config(self):
-        model = database_models.Model.create(id=19, name='alexnet', public=True, submission=33, owner=1)
-        config = {
-            "model_ids": [model.id],
-            "user_id": 1,
-            "competition": "cosyne2022"
-        }
-        submission_config = object_decoder(config, 'work_dir', 'config_path', 'db_secret', 33)
-        assert len(submission_config.submission_entries) == 1
-        assert len(submission_config.models) == 1
-        assert submission_config.models[0].name == 'alexnet'
+    BenchmarkType.create(identifier='behavior', order=1)
 
 
 @pytest.mark.memory_intense
 @pytest.mark.private_access
-class TestRepository:
-    working_dir = None
+# @pytest.mark.skip(reason="This test case only works locally due to some weird openmind error")
+@pytest.mark.parametrize('database', ['brainscore-ohio-test'])  # test database
+def test_evaluation(database, tmpdir):
+    connect_db(database)
+    clear_schema()
+    init_user()
+    working_dir = str(tmpdir.mkdir("sub"))
     config_dir = str(os.path.join(os.path.dirname(__file__), 'configs/'))
-
-    @classmethod
-    def setup_class(cls):
-        connect_db(database)
-        clear_schema()
-        init_user()
-
-    @classmethod
-    def tear_down_class(cls):
-        clear_schema()
-
-    def setup_method(self):
-        tmpdir = tempfile.mkdtemp()
-        TestRepository.working_dir = tmpdir
-
-    def tear_down_method(self):
-        os.rmdir(TestRepository.working_dir)
-
-    def test_extract_zip_file(self):
-        path = extract_zip_file(33, TestRepository.config_dir, TestRepository.working_dir)
-        assert str(path) == f'{TestRepository.working_dir}/candidate_models'
-
-    def test_find_correct_dir(self):
-        Path(f'{TestRepository.working_dir}/.temp').touch()
-        Path(f'{TestRepository.working_dir}/_MACOS').touch()
-        Path(f'{TestRepository.working_dir}/candidate_models').touch()
-        dir = find_submission_directory(TestRepository.working_dir)
-        assert dir == 'candidate_models'
-        with pytest.raises(Exception):
-            Path(f'{TestRepository.working_dir}/candidate_models2').touch()
-            find_submission_directory(TestRepository.working_dir)
+    run_evaluation(config_dir, working_dir, 33, database, models=['alexnet'],
+                   benchmarks=['dicarlo.MajajHong2015.IT-pls'])
+    scores = Score.select().dicts()
+    assert len(scores) == 1
+    # If comment is none the score was successfully stored, otherwise there would be an error message there
+    assert scores[0]['comment'] is None
