@@ -1,6 +1,7 @@
 """
 Process plugin submissions (data, metrics, benchmarks, models) and score models on benchmarks.
 """
+import traceback
 import logging
 from abc import ABC
 from datetime import datetime
@@ -118,10 +119,17 @@ class RunScoringEndpoint:
             logger.warning('A score entry exists but does not have a score value, so we run it again')
 
         # run actual scoring mechanism
-        score_result = self.domain_plugins.score(
-            model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
-        score_entry.end_timestamp = datetime.now()
-
-        # store in database
-        logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
-        update_score(score_result, score_entry)
+        try:
+            score_result = self.domain_plugins.score(
+                model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
+            score_entry.end_timestamp = datetime.now()
+            # store in database
+            logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
+            update_score(score_result, score_entry)
+        except Exception as e:
+            stacktrace = traceback.format_exc()
+            error_message = f'Model {model_identifier} could not run on benchmark {benchmark_identifier}: ' \
+                            f'{repr(e)}. \n{stacktrace}'
+            score_entry.comment = error_message[:database_models.Score.comment.max_length]
+            score_entry.save()
+            raise e
