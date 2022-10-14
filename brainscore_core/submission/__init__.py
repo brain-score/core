@@ -1,1 +1,1 @@
-from endpoints import RunScoringEndpoint, DomainPlugins
+from .endpoints import RunScoringEndpoint, DomainPlugins

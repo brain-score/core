@@ -1,4 +1,5 @@
 import json
+import json
 import logging
 from datetime import datetime
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
@@ -74,17 +75,7 @@ def benchmarkinstance_from_benchmark(benchmark: Benchmark) -> BenchmarkInstance:
         # the version has changed and the benchmark instance was not yet in the database
         ceiling = benchmark.ceiling
         bench_inst.ceiling = ceiling.item()
-        # probe the ceiling for an estimate of the error
-        ceiling_error = None
-        error_retrievors = [lambda ceiling: ceiling.sel(aggregation='error').item(),
-                            lambda ceiling: ceiling.attrs['error']]
-        for retrievor in error_retrievors:
-            try:
-                ceiling_error = retrievor(ceiling)
-                break
-            except Exception:  # if we can't find an error estimate, ignore
-                pass
-        bench_inst.ceiling_error = ceiling_error
+        bench_inst.ceiling_error = _retrieve_score_error(ceiling)
         bench_inst.save()
     return bench_inst
 
@@ -111,12 +102,35 @@ def reference_from_bibtex(bibtex_string: str) -> Union[Reference, None]:
 
 
 def update_score(score: ScoreObject, entry: Score):
-    if not hasattr(score, 'ceiling'):  # many engineering benchmarks do not have a primate ceiling
+    if 'ceiling' not in score.attrs:  # many engineering benchmarks do not have a primate ceiling
         # only store raw (unceiled) value
-        entry.score_raw = score.sel(aggregation='center').item()
+        entry.score_raw = _retrieve_score_center(score)
     else:  # score has a ceiling. Store ceiled as well as raw value
-        assert score.raw.sel(aggregation='center') is not None
-        entry.score_raw = score.raw.sel(aggregation='center').item()
-        entry.score_ceiled = score.sel(aggregation='center').item()
-        entry.error = score.sel(aggregation='error').item()
+        score_raw = _retrieve_score_center(score.raw)
+        entry.score_raw = score_raw
+        entry.score_ceiled = _retrieve_score_center(score)
+    entry.error = _retrieve_score_error(score)
     entry.save()
+
+
+def _retrieve_score_center(score: ScoreObject) -> float:
+    """
+    Deal with multiple formats of storing the score,
+    i.e. a single scalar in the score object versus an aggregation dimension.
+    """
+    if hasattr(score, 'aggregation'):
+        return score.sel(aggregation='center').item()
+    return score.item()
+
+
+def _retrieve_score_error(score: ScoreObject) -> Union[float, None]:
+    """
+    Deal with multiple formats of storing the score,
+    i.e. an error attribute in the score object versus an aggregation dimension.
+    Returns None if no error was found
+    """
+    if hasattr(score, 'aggregation'):
+        return score.sel(aggregation='error').item()
+    if 'error' in score.attrs:
+        return score.attrs['error']
+    return None

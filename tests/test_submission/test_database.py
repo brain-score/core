@@ -98,9 +98,8 @@ class TestEntries:
         assert ref2.id == ref.id
 
     def _create_score_entry(self):
-        model_dummy = namedtuple('Model', field_names=[])()
         submission_entry = submissionentry_from_meta(jenkins_id=123, user_id=1, model_type='brain_model')
-        model_entry = modelentry_from_model(model_dummy, model_identifier='dummy', public=True, competition=None,
+        model_entry = modelentry_from_model(model_identifier='dummy', public=True, competition=None,
                                             submission=submission_entry)
         benchmark_entry = benchmarkinstance_from_benchmark(TestEntries.MockBenchmark())
         entry, created = Score.get_or_create(benchmark=benchmark_entry, model=model_entry)
@@ -111,7 +110,7 @@ class TestEntries:
         entry = self._create_score_entry()
         update_score(score, entry)
         assert entry.score_ceiled is None
-        assert entry.error is None
+        assert np.isnan(entry.error)
         assert entry.score_raw == .123
 
     def test_score_with_ceiling(self):
@@ -123,3 +122,17 @@ class TestEntries:
         assert entry.score_ceiled == .42
         assert entry.error == .1
         assert entry.score_raw == .336
+
+    def test_score_no_aggregation(self):
+        score = ScoreObject(.42)
+        entry = self._create_score_entry()
+        update_score(score, entry)
+        assert entry.score_raw == .42
+        assert entry.error is None
+
+    def test_score_error_attr(self):
+        score = ScoreObject(.42)
+        score.attrs['error'] = .1
+        entry = self._create_score_entry()
+        update_score(score, entry)
+        assert entry.error == .1
