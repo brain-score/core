@@ -103,9 +103,7 @@ class Score(PeeweeBase):
     score_ceiled = FloatField(null=True)
     score_raw = FloatField(null=True)
     start_timestamp = DateTimeField(null=True)
-    comment = CharField(null=True)
-
-    # jenkins_id = IntegerField(null=True)
+    comment = CharField(null=True, max_length=1_000)
 
     class Meta:
         table_name = 'brainscore_score'
