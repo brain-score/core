@@ -3,7 +3,8 @@ import os
 import pytest
 import tempfile
 from pathlib import Path
-from tests.test_submission import clear_schema, init_users
+from tests.test_submission import init_users
+from brainscore_core.submission.database_models import clear_schema
 
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.repository import extract_zip_file, find_submission_directory

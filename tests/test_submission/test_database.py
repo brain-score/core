@@ -8,8 +8,8 @@ from brainscore_core import Score as ScoreObject
 from brainscore_core.benchmarks import BenchmarkBase
 from brainscore_core.submission.database import connect_db, reference_from_bibtex, benchmarkinstance_from_benchmark, \
     submissionentry_from_meta, modelentry_from_model, update_score
-from brainscore_core.submission.database_models import Score, BenchmarkType, Reference
-from tests.test_submission import clear_schema, init_users
+from brainscore_core.submission.database_models import Score, BenchmarkType, Reference, clear_schema
+from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
 

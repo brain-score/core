@@ -5,7 +5,8 @@ import logging
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins
-from tests.test_submission import clear_schema, init_users
+from tests.test_submission import init_users
+from brainscore_core.submission.database_models import clear_schema
 from brainscore_core.submission import database_models
 
 test_database = 'brainscore-ohio-test'

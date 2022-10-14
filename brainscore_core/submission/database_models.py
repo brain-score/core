@@ -110,3 +110,17 @@ class Score(PeeweeBase):
     class Meta:
         table_name = 'brainscore_score'
         schema = 'public'
+
+
+def clear_schema():
+    """
+    Delete the contents of all tables.
+    This function is meant for testing only, use with caution.
+    """
+    Score.delete().execute()
+    Model.delete().execute()
+    Submission.delete().execute()
+    BenchmarkInstance.delete().execute()
+    BenchmarkType.delete().execute()
+    Reference.delete().execute()
+    User.delete().execute()
