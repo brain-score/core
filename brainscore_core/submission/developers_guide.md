@@ -2,7 +2,7 @@
 
 ### Components
 To provide an automatical scoring mechanism for artificial models of the ventral stream, Brain-Score has implemented a whole system, which is explained in the follows. The system consists of following components:
-![](brainscore_submission.png)
+![](submission_system.png)
 
 - **Brain-Score Website:**
 
