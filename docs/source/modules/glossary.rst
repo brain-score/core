@@ -17,7 +17,7 @@ Glossary
         (e.g., fitting a regression model from model measurements to predict neural activity),
         representational similarity (comparing representational dissimilarity matrices derived from respectively models and neural representations),
         or correlation of e.g., human and model reading times.
-        `Metric specification <https://brain-score-core.readthedocs.io/en/latest/modules/metrics.html>`
+        :doc:`Metrics <./metrics>`
 
     Benchmark
         A benchmark runs an experiment on an ArtificialSubject,
@@ -25,7 +25,7 @@ Glossary
         using a particular metric, resulting in a similarity score.
         Benchmarks typically use a dataset and a metric,
         and additionally specify the experimental paradigm for running subjects.
-        :doc:`Benchmarks <https://brain-score-core.readthedocs.io/en/latest/modules/_autosummary/brainscore_core.benchmarks.html#module-brainscore_core.benchmarks>`
+        :doc:`Benchmarks <./benchmarks>`
 
     ArtificialSubject
         An ArtificialSubject implements a set of interface functions that benchmarks can interact with.
@@ -34,7 +34,6 @@ Glossary
         behavioral tasks (e.g., next-word prediction or reading times),
         neural recordings (e.g. fMRI or ECoG recordings in the biological brain which neural network models could implement as layer-wise unit activations),
         and a method to digest stimuli.
-        :doc:`ArtificialSubject <./artificial_subject>`
 
     Model
         A model usually refers to a computational model,
@@ -47,7 +46,7 @@ Glossary
         dependencies beyond those included in the main Brain-Score codebase.
 
     Xarray
-        `Xarray <https://docs.xarray.dev/en/stable/>` DataArrays are multidimensional pandas dataframes.
+        `Xarray <https://docs.xarray.dev/en/stable/>`_ DataArrays are multidimensional pandas dataframes.
         DataArrays enable us to retain metadata along several dimensions of the data at once (often needed in neuroscience data, e.g., keeping track of stimuli and neural dimensions).
 
     Target
