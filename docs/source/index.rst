@@ -18,3 +18,4 @@ Data assemblies and model predictions are organized in BrainIO_.
    modules/metrics
    modules/benchmarks
    modules/api_reference
+   modules/glossary
