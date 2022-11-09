@@ -5,7 +5,7 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
-from typing import List, Union
+from typing import List, Union, Dict
 
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
