@@ -5,6 +5,8 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
+import os
+import subprocess
 from typing import List, Union, Dict
 
 from brainscore_core import Benchmark, Score
