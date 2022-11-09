@@ -24,13 +24,32 @@ def process_zip_submission(zip_filepath: str):
     pass  # TODO @Katherine
 
 
-def process_github_submission():
+def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     """
-    Triggered when changed are merged to the GitHub repository, if those changes affect benchmarks or models.
+    Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
     Starts parallel runs to score models on benchmarks (`run_scoring`).
     """
-    pass  # TODO @Katherine
+    jenkins_base = "braintree.mit.edu:8080"
+    jenkins_usr = os.environ['JENKINS_USR']
+    jenkins_token = os.environ['JENKINS_TOKEN']
+    jenkins_trigger = os.environ['JENKINS_TRIGGER']
+    jenkins_job = "dev_score_plugins"
 
+    models = plugin_info['models'].split()
+    benchmarks = plugin_info['benchmarks'].split()
+    model_type = plugin_info['model_type']
+    public = plugin_info['public']
+    competition = plugin_info['competition']
+
+    for model in models:
+        for benchmark in benchmarks:
+            url = f'{jenkins_base}/job/{jenkins_job}'\
+            f'/buildWithParameters?model={model}&benchmark={benchmark}'\
+            f'&model_type={model_type}&public={public}&competition={competition}'\
+            f'&token={jenkins_trigger}'
+            response = subprocess.run(
+                f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
+            
 
 class DomainPlugins(ABC):
     """
