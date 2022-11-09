@@ -5,6 +5,8 @@ import pytest
 from datetime import datetime
 from pytest import approx
 
+@pytest.mark.skip(reason="submission.evaluation is deprecated and we're not ready to rewrite integration tests yet", allow_module_level=True)
+
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import Score, Model, Submission
 from brainscore_core.submission.evaluation import run_evaluation
