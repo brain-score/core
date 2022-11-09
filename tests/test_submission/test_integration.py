@@ -7,12 +7,8 @@ from pytest import approx
 
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import Score, Model, Submission
-try:
-	from brainscore_core.submission.evaluation import run_evaluation
-	from tests.test_submission.test_db import clear_schema, init_user, init_benchmark_parents
-except:
-	pass # these are deprecated and we're not ready to rewrite integration tests yet
-
+from brainscore_core.submission.evaluation import run_evaluation
+from tests.test_submission.test_db import clear_schema, init_user, init_benchmark_parents
 
 logger = logging.getLogger(__name__)
 
