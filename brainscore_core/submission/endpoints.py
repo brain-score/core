@@ -49,7 +49,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
             f'&token={jenkins_trigger}'
             response = subprocess.run(
                 f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
-            
+
 
 class DomainPlugins(ABC):
     """
@@ -72,36 +72,27 @@ class RunScoringEndpoint:
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, models: List[str], benchmarks: List[str],
-                 # TODO @Katherine: the following parameters likely need to be passed differently,
-                 #  e.g. in a config file/environment variables
+    def __call__(self, model_identifier: str, benchmark_identifier: str,
                  jenkins_id: int, user_id: int, model_type: str,
                  public: bool, competition: Union[None, str]):
         """
-        Run the `models` on the `benchmarks`, and write resulting scores to the database.
+        Run the `model` on the `benchmark`, and write resulting score to the database.
         """
         # setup entry for this entire submission
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
         entire_submission_successful = True
 
-        # iterate over all model-benchmark pairs
-        for model_identifier in models:
-            for benchmark_identifier in benchmarks:
-                logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
-                # TODO: I am worried about reloading models inside the loop. E.g. a keras model where layer names are
-                #  automatic and will be consecutive from previous layers
-                #  (e.g. on first load layers are [1, 2, 3], on second load layers are [4, 5, 6])
-                #  which can lead to issues with layer assignment
-                try:
-                    self._score_model_on_benchmark(model_identifier=model_identifier,
-                                                   benchmark_identifier=benchmark_identifier,
-                                                   submission_entry=submission_entry, public=public,
-                                                   competition=competition)
-                except Exception as e:
-                    entire_submission_successful = False
-                    logging.error(
-                        f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
-                        exc_info=True)
+        logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
+        try:
+            self._score_model_on_benchmark(model_identifier=model_identifier,
+                                           benchmark_identifier=benchmark_identifier,
+                                           submission_entry=submission_entry, public=public,
+                                           competition=competition)
+        except Exception as e:
+            entire_submission_successful = False
+            logging.error(
+                f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
+                exc_info=True)
 
         # finalize status of submission
         submission_status = 'successful' if entire_submission_successful else 'failure'
