@@ -47,6 +47,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
 
     response = subprocess.run(
         f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
+    print(response)
 
 
 class DomainPlugins(ABC):
