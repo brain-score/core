@@ -42,6 +42,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
     for param in plugin_info.keys():
         url = _url_builder(url, param, plugin_info)
+    url = url.replace(" ", "%20")
 
     response = subprocess.run(
         f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
