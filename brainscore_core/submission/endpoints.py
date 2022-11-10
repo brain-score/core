@@ -43,6 +43,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     auth_basic=HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
     r = requests.get(url, params=payload, auth=auth_basic)
     print(r)
+    
 
 class DomainPlugins(ABC):
     """
