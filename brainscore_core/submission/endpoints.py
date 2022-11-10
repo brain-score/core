@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import subprocess
 from typing import List, Union, Dict
+import urllib.parse
 
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
@@ -40,14 +41,14 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_job = "dev_score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
+    
     for param in plugin_info.keys():
         url = _url_builder(url, param, plugin_info)
-    url = url.replace(" ", "%20")
+    url = urllib.parse.quote(url)
     print(url)
 
     response = subprocess.run(
         f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
-    print(response)
 
 
 class DomainPlugins(ABC):
