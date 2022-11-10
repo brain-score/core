@@ -39,7 +39,6 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_job = "dev_score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
-    
     headers = {jenkins_usr: jenkins_token}
     payload = {k:v for k,v in plugin_info.items() if plugin_info[k]}
     r = requests.get(url, params=payload)
