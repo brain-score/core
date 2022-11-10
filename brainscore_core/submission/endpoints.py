@@ -7,7 +7,7 @@ from abc import ABC
 from datetime import datetime
 import os
 import requests
-import subprocess
+from requests.auth import HTTPBasicAuth
 from typing import List, Union, Dict
 
 from brainscore_core import Benchmark, Score
@@ -39,9 +39,9 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_job = "dev_score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
-    headers = {jenkins_usr: jenkins_token}
     payload = {k:v for k,v in plugin_info.items() if plugin_info[k]}
-    r = requests.get(url, params=payload)
+    auth_basic=HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
+    r = requests.get(url, params=payload, auth=auth_basic)
     print(r)
 
 class DomainPlugins(ABC):
