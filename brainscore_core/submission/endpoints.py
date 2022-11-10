@@ -43,6 +43,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     for param in plugin_info.keys():
         url = _url_builder(url, param, plugin_info)
     url = url.replace(" ", "%20")
+    print(url)
 
     response = subprocess.run(
         f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
@@ -141,8 +142,3 @@ class RunScoringEndpoint:
             score_entry.comment = error_message[:database_models.Score.comment.max_length]
             score_entry.save()
             raise e
-
-if __name__ == '__main__':
-    import sys
-    import ast
-    process_github_submission(ast.literal_eval(sys.argv[1]))
