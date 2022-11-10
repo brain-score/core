@@ -6,9 +6,9 @@ import logging
 from abc import ABC
 from datetime import datetime
 import os
+import requests
 import subprocess
 from typing import List, Union, Dict
-import urllib.parse
 
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
@@ -26,8 +26,6 @@ def process_zip_submission(zip_filepath: str):
     """
     pass  # TODO @Katherine
 
-def _url_builder(url: str, param: str, plugin_info: Dict):
-    return url+f'&{param}={plugin_info[param]}' if plugin_info[param] else url
 
 def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     """
@@ -42,14 +40,10 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
     
-    for param in plugin_info.keys():
-        url = _url_builder(url, param, plugin_info)
-    url = urllib.parse.quote(url)
-    print(url)
-
-    response = subprocess.run(
-        f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
-
+    headers = {jenkins_usr: jenkins_token}
+    payload = {k:v for k,v in plugin_info.items() if k[v]}
+    r = requests.get(url, params=payload)
+    
 
 class DomainPlugins(ABC):
     """
