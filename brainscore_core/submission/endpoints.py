@@ -32,7 +32,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
     Starts parallel runs to score models on benchmarks (`run_scoring`).
     """
-    jenkins_base = "braintree.mit.edu:8080"
+    jenkins_base = "http://braintree.mit.edu:8080"
     jenkins_usr = os.environ['JENKINS_USR']
     jenkins_token = os.environ['JENKINS_TOKEN']
     jenkins_trigger = os.environ['JENKINS_TRIGGER']
