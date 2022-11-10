@@ -43,7 +43,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     headers = {jenkins_usr: jenkins_token}
     payload = {k:v for k,v in plugin_info.items() if k[v]}
     r = requests.get(url, params=payload)
-    
+    print(r)
 
 class DomainPlugins(ABC):
     """
