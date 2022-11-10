@@ -25,6 +25,8 @@ def process_zip_submission(zip_filepath: str):
     """
     pass  # TODO @Katherine
 
+def _url_builder(url: str, param: str, plugin_info: Dict):
+    return url+f'&{param}={plugin_info[param]}' if plugin_info[param] else url
 
 def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     """
@@ -37,19 +39,10 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_trigger = os.environ['JENKINS_TRIGGER']
     jenkins_job = "dev_score_plugins"
 
-    new_models = plugin_info['new_models']
-    new_benchmarks = plugin_info['new_benchmarks']
-    all_models = plugin_info['all_models']
-    all_benchmarks = plugin_info['all_benchmarks']
-    model_type = plugin_info['model_type']
-    public = plugin_info['public']
-    competition = plugin_info['competition']
+    url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
+    for param in plugin_info.keys():
+        url = _url_builder(url, param, plugin_info)
 
-    url = f'{jenkins_base}/job/{jenkins_job}'\
-    f'/buildWithParameters?new_models={new_models}&new_benchmarks={new_benchmarks}'\
-    f'&all_models={new_models}&new_benchmarks={new_benchmarks}'\
-    f'&model_type={model_type}&public={public}&competition={competition}'\
-    f'&token={jenkins_trigger}'
     response = subprocess.run(
         f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
 
@@ -147,3 +140,8 @@ class RunScoringEndpoint:
             score_entry.comment = error_message[:database_models.Score.comment.max_length]
             score_entry.save()
             raise e
+
+if __name__ == '__main__':
+    import sys
+    import ast
+    process_github_submission(ast.literal_eval(sys.argv[1]))
