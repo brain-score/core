@@ -37,20 +37,21 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_trigger = os.environ['JENKINS_TRIGGER']
     jenkins_job = "dev_score_plugins"
 
-    models = plugin_info['models'].split()
-    benchmarks = plugin_info['benchmarks'].split()
+    new_models = plugin_info['new_models']
+    new_benchmarks = plugin_info['new_benchmarks']
+    all_models = plugin_info['all_models']
+    all_benchmarks = plugin_info['all_benchmarks']
     model_type = plugin_info['model_type']
     public = plugin_info['public']
     competition = plugin_info['competition']
 
-    for model in models:
-        for benchmark in benchmarks:
-            url = f'{jenkins_base}/job/{jenkins_job}'\
-            f'/buildWithParameters?model={model}&benchmark={benchmark}'\
-            f'&model_type={model_type}&public={public}&competition={competition}'\
-            f'&token={jenkins_trigger}'
-            response = subprocess.run(
-                f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
+    url = f'{jenkins_base}/job/{jenkins_job}'\
+    f'/buildWithParameters?new_models={new_models}&new_benchmarks={new_benchmarks}'\
+    f'&all_models={new_models}&new_benchmarks={new_benchmarks}'\
+    f'&model_type={model_type}&public={public}&competition={competition}'\
+    f'&token={jenkins_trigger}'
+    response = subprocess.run(
+        f"curl -X POST -u {jenkins_usr}:{jenkins_token} {url}", shell=True)
 
 
 class DomainPlugins(ABC):
@@ -74,9 +75,8 @@ class RunScoringEndpoint:
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, model_identifier: str, benchmark_identifier: str,
-                 jenkins_id: int, user_id: int, model_type: str,
-                 public: bool, competition: Union[None, str]):
+    def __call__(self, jenkins_id: int, models: List[str], benchmarks: List[str],
+                 user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
         Run the `model` on the `benchmark`, and write resulting score to the database.
         """
@@ -84,17 +84,19 @@ class RunScoringEndpoint:
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
         entire_submission_successful = True
 
-        logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
-        try:
-            self._score_model_on_benchmark(model_identifier=model_identifier,
-                                           benchmark_identifier=benchmark_identifier,
-                                           submission_entry=submission_entry, public=public,
-                                           competition=competition)
-        except Exception as e:
-            entire_submission_successful = False
-            logging.error(
-                f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
-                exc_info=True)
+        for model_identifier in models:
+            for benchmark_identifier in benchmarks:
+                logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
+                try:
+                    self._score_model_on_benchmark(model_identifier=model_identifier,
+                                                   benchmark_identifier=benchmark_identifier,
+                                                   submission_entry=submission_entry, public=public,
+                                                   competition=competition)
+                except Exception as e:
+                    entire_submission_successful = False
+                    logging.error(
+                        f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
+                        exc_info=True)
 
         # finalize status of submission
         submission_status = 'successful' if entire_submission_successful else 'failure'
