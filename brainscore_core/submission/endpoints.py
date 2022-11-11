@@ -43,7 +43,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     auth_basic=HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
     r = requests.get(url, params=payload, auth=auth_basic)
     print(r)
-    
+
 
 class DomainPlugins(ABC):
     """
@@ -100,14 +100,22 @@ class RunScoringEndpoint:
                                   public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
-        logger.info(f'Model database entry')
-        model = self.domain_plugins.load_model(model_identifier)
-        model_entry = modelentry_from_model(model_identifier=model_identifier,
-                                            submission=submission_entry, public=public, competition=competition,
-                                            bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
-        logger.info(f'Benchmark database entry')
-        benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
-        benchmark_entry = benchmarkinstance_from_benchmark(benchmark)
+        try:
+            logger.info(f'Model database entry')
+            model = self.domain_plugins.load_model(model_identifier)
+            model_entry = modelentry_from_model(model_identifier=model_identifier,
+                                                submission=submission_entry, public=public, competition=competition,
+                                                bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
+        except Exception as e:
+            logging.error(f'Could not load model {model_identifier} because of {e}')
+            return
+        try:
+            logger.info(f'Benchmark database entry')
+            benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
+            benchmark_entry = benchmarkinstance_from_benchmark(benchmark)
+        except Exception as e:
+            logging.error(f'Could not load benchmark {benchmark_identifier} because of {e}')
+            return
 
         # Check if the model is already scored on the benchmark
         start_timestamp = datetime.now()
