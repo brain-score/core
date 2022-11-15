@@ -20,9 +20,9 @@ class TestPluginTestRunner:
         Path(DUMMY_TESTFILE).touch()
         with open(DUMMY_TESTFILE, 'w') as f:
             f.write(textwrap.dedent('''\
-			def test_dummy():
-				assert True        
-			'''))
+            def test_dummy():
+                assert True        
+            '''))
 
     def teardown_method(self):
         shutil.rmtree(DUMMY_PLUGIN_PATH)
@@ -40,7 +40,7 @@ class TestPluginTestRunner:
     def test_has_requirements(self):
         DUMMY_REQUIREMENTS.unlink()
         plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, DUMMY_RESULTS)
-        assert plugin_test_runner.has_requirements == False
+        assert not plugin_test_runner.has_requirements
 
     def test_run_tests(self):
         plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, DUMMY_RESULTS)

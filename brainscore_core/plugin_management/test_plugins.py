@@ -33,7 +33,8 @@ class PluginTestRunner(EnvironmentManager):
         self.has_requirements = (self.plugin_directory / 'requirements.txt').is_file()
         self.test = test if test else False
         self.results = results
-        self.script_path = f'{Path(__file__).parent}/test_plugin.sh'
+        self.script_path = Path(__file__).parent / 'test_plugin.sh'
+        assert self.script_path.is_file(), f"bash file {self.script_path} does not exist"
 
     def __call__(self):
         self.validate_plugin()
