@@ -3,7 +3,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from brainscore_language.plugin_management.test_plugins import PluginTestRunner
+from brainscore_core.plugin_management.test_plugins import PluginTestRunner
 
 DUMMY_PLUGIN = "dummy_plugin"
 DUMMY_PLUGIN_PATH = Path(__file__).parent / DUMMY_PLUGIN

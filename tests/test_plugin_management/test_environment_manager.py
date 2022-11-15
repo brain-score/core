@@ -1,6 +1,6 @@
 import subprocess
 
-from brainscore_language.plugin_management.environment_manager import EnvironmentManager
+from brainscore_core.plugin_management.environment_manager import EnvironmentManager
 
 
 def test_get_conda_base():
@@ -12,6 +12,6 @@ def test_get_conda_base():
 def test_teardown():
     environment_manager = EnvironmentManager()
     subprocess.run(f"conda create -n {environment_manager.env_name} python=3.8 -y", shell=True)
-    assert environment_manager.env_path.is_dir() == True
+    assert environment_manager.env_path.is_dir()
     environment_manager.teardown()
-    assert environment_manager.env_path.is_dir() == False
+    assert not environment_manager.env_path.is_dir()
