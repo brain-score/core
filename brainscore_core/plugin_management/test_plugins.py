@@ -21,7 +21,6 @@ class PluginTestRunner(EnvironmentManager):
 
     # Run all tests for all plugins:
     python brainscore_language/plugin_management/test_plugins.py 
-
     """
 
     def __init__(self, plugin_directory: Path, results: Dict, test: Union[bool, str] = False):
@@ -55,16 +54,14 @@ class PluginTestRunner(EnvironmentManager):
             {str(self.has_requirements).lower()} {self.test}"
 
         completed_process = self.run_in_env(run_command)
-        check.equal(completed_process.returncode, 0)
+        check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
 
         self.results[self.plugin_name] = completed_process.returncode
 
 
 def run_specified_tests(root_directory: Path, test_file: str, results: Dict, test: str):
     """ Runs either a single test or all tests in a specified test.py """
-    filename = test_file.split('/')[-1]
-    plugin_dirname = test_file.split('/')[-2]
-    plugin_type = test_file.split('/')[-3]
+    plugin_type, plugin_dirname, filename = test_file.split('/')[-3:]
     plugin = root_directory / plugin_type / plugin_dirname
     assert filename == "test.py", "Filepath not recognized as test file, must be 'test.py'."
     assert plugin_type in PLUGIN_TYPES, "Filepath not recognized as plugin test file."
