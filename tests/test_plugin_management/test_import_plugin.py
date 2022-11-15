@@ -1,9 +1,8 @@
-import importlib
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import textwrap
+from pathlib import Path
 
 from brainscore_language import model_registry
 from brainscore_language.plugin_management.import_plugin import import_plugin

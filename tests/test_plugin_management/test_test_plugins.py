@@ -1,9 +1,8 @@
-import pytest
 import shutil
-import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
 from brainscore_language.plugin_management.test_plugins import PluginTestRunner
 
 DUMMY_PLUGIN = "dummy_plugin"

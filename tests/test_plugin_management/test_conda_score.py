@@ -1,15 +1,15 @@
-import numpy as np
-import os
-import pytest
-from numpy.random import RandomState
 from pathlib import Path
-from pytest import approx
 
-from brainio.assemblies import NeuroidAssembly
+import numpy as np
+import pytest
 from brainscore_language import load_metric
 from brainscore_language.benchmarks.futrell2018 import Futrell2018Pearsonr
 from brainscore_language.plugin_management.conda_score import CondaScore, SCORE_PATH
 from brainscore_language.utils.ceiling import ceiling_normalize
+from numpy.random import RandomState
+from pytest import approx
+
+from brainio.assemblies import NeuroidAssembly
 
 
 def _make_assembly():
