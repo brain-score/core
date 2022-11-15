@@ -9,9 +9,12 @@ logger = logging.getLogger(__name__)
 class ImportPlugin:
     """ import plugin and (optionally) install dependencies """
 
-    def __init__(self, plugin_type: str, identifier: str):
+    def __init__(self, library_root: str, plugin_type: str, identifier: str):
         self.plugin_type = plugin_type
-        self.plugins_dir = Path(__file__).parent.with_name(plugin_type)
+        library_module = __import__(library_root)
+        library_directory = Path(library_module.__file__).parent
+        self.plugins_dir = library_directory / plugin_type
+        assert self.plugins_dir.is_dir(), f"Plugins directory {self.plugins_dir} is not a directory"
         self.identifier = identifier
         self.plugin_dirname = self.locate_plugin()
 
@@ -73,7 +76,7 @@ def import_plugin(library_root: str, plugin_type: str, identifier: str):
     :meth:`~brainscore_core.plugin_management.ImportPlugin.install_requirements` installs all requirements
         in that directory's requirements.txt, and the plugin base package is imported
     """
-    importer = ImportPlugin(plugin_type, identifier)
+    importer = ImportPlugin(library_root, plugin_type, identifier)
 
     if installation_preference() != 'no':
         importer.install_requirements()
