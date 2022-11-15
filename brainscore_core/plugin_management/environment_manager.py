@@ -21,12 +21,12 @@ class EnvironmentManager:
             warnings.warn(f"{e}. Please ensure that conda is properly installed "
                           "(https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).")
 
-    def run_in_env(self, run_command=str) -> 'subprocess.CompletedProcess[bytes]':
-        """ 
+    def run_in_env(self, run_command: str) -> 'subprocess.CompletedProcess[bytes]':
+        """
         run specified command in bash shell
         tests a plugin or scores a model in a conda environment
         """
-        completed_process = subprocess.run({run_command}, shell=True)
+        completed_process = subprocess.run(run_command, shell=True)
 
         return completed_process
 
