@@ -1,9 +1,8 @@
-import argparse
-import pytest_check as check
 import warnings
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Union
 
+import pytest_check as check
 from brainscore_language.plugin_management.environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
@@ -25,7 +24,7 @@ class PluginTestRunner(EnvironmentManager):
 
     """
 
-    def __init__(self, plugin_directory: Path, results: Dict, test=False):
+    def __init__(self, plugin_directory: Path, results: Dict, test: Union[bool, str] = False):
         super(PluginTestRunner, self).__init__()
 
         self.plugin_directory = plugin_directory
@@ -46,7 +45,7 @@ class PluginTestRunner(EnvironmentManager):
         """ requires "test.py" file in plugin directory """
         assert (self.plugin_directory / 'test.py').is_file(), "'test.py' not found"
 
-    def run_tests(self) -> int:
+    def run_tests(self):
         """ 
         calls bash script to create conda environment, then
         runs all tests or selected test for specified plugin
@@ -58,27 +57,18 @@ class PluginTestRunner(EnvironmentManager):
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)
 
-        self.results[self.plugin_name] = (completed_process.returncode)
+        self.results[self.plugin_name] = completed_process.returncode
 
 
-def arg_parser() -> List[str]:
-    parser = argparse.ArgumentParser(description='Run single specified test or all tests for each plugin')
-    parser.add_argument('test_file', type=str, nargs='?', help='Optional: path of target test file')
-    parser.add_argument('--test', type=str, help='Optional: name of test to run', required=False)
-    args = parser.parse_args()
-
-    return args
-
-
-def run_specified_tests(args: List[str], results: Dict):
+def run_specified_tests(test_file: str, results: Dict, test: str):
     """ Runs either a single test or all tests in a specified test.py """
-    filename = args.test_file.split('/')[-1]
-    plugin_dirname = args.test_file.split('/')[-2]
-    plugin_type = args.test_file.split('/')[-3]
-    plugin = Path(Path(__file__).parents[1], plugin_type) / plugin_dirname
+    filename = test_file.split('/')[-1]
+    plugin_dirname = test_file.split('/')[-2]
+    plugin_type = test_file.split('/')[-3]
+    plugin = Path(__file__).parents[1] / plugin_type / plugin_dirname
     assert filename == "test.py", "Filepath not recognized as test file, must be 'test.py'."
     assert plugin_type in PLUGIN_TYPES, "Filepath not recognized as plugin test file."
-    plugin_test_runner = PluginTestRunner(plugin, results, test=args.test)
+    plugin_test_runner = PluginTestRunner(plugin, results, test=test)
     plugin_test_runner()
 
 
@@ -92,14 +82,18 @@ def run_all_tests(results: Dict):
                 plugin_test_runner()
 
 
-if __name__ == '__main__':
-    results = {}
+def run_args(test_file: Union[None, str] = None, test: Union[None, str] = None):
+    """
+    Run single specified test or all tests for each plugin.
 
-    args = arg_parser()
-    if not args.test_file:
+    :param test_file: path of target test file (optional)
+    :param test: name of test to run (optional)
+    """
+    results = {}
+    if not test_file:
         run_all_tests(results)
-    elif args.test_file and Path(args.test_file).exists():
-        run_specified_tests(args, results)
+    elif test_file and Path(test_file).exists():
+        run_specified_tests(test_file=test_file, results=results, test=test)
     else:
         warnings.warn("Test file not found.")
 
