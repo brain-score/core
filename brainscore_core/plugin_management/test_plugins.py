@@ -60,40 +60,41 @@ class PluginTestRunner(EnvironmentManager):
         self.results[self.plugin_name] = completed_process.returncode
 
 
-def run_specified_tests(test_file: str, results: Dict, test: str):
+def run_specified_tests(root_directory: Path, test_file: str, results: Dict, test: str):
     """ Runs either a single test or all tests in a specified test.py """
     filename = test_file.split('/')[-1]
     plugin_dirname = test_file.split('/')[-2]
     plugin_type = test_file.split('/')[-3]
-    plugin = Path(__file__).parents[1] / plugin_type / plugin_dirname
+    plugin = root_directory / plugin_type / plugin_dirname
     assert filename == "test.py", "Filepath not recognized as test file, must be 'test.py'."
     assert plugin_type in PLUGIN_TYPES, "Filepath not recognized as plugin test file."
     plugin_test_runner = PluginTestRunner(plugin, results, test=test)
     plugin_test_runner()
 
 
-def run_all_tests(results: Dict):
+def run_all_tests(root_directory: Path, results: Dict):
     """ Runs tests for all plugins """
     for plugin_type in PLUGIN_TYPES:
-        plugins_dir = Path(Path(__file__).parents[1], plugin_type)
+        plugins_dir = root_directory / plugin_type
         for plugin in plugins_dir.glob('[!._]*'):
             if plugin.is_dir():
                 plugin_test_runner = PluginTestRunner(plugin, results)
                 plugin_test_runner()
 
 
-def run_args(test_file: Union[None, str] = None, test: Union[None, str] = None):
+def run_args(root_directory: Union[Path, str], test_file: Union[None, str] = None, test: Union[None, str] = None):
     """
     Run single specified test or all tests for each plugin.
 
+    :param root_directory: the directory containing all plugin types, e.g. `/local/brain-score_language/`
     :param test_file: path of target test file (optional)
     :param test: name of test to run (optional)
     """
     results = {}
     if not test_file:
-        run_all_tests(results)
+        run_all_tests(root_directory=Path(root_directory), results=results)
     elif test_file and Path(test_file).exists():
-        run_specified_tests(test_file=test_file, results=results, test=test)
+        run_specified_tests(root_directory=Path(root_directory), test_file=test_file, results=results, test=test)
     else:
         warnings.warn("Test file not found.")
 
