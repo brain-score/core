@@ -10,7 +10,6 @@ class ImportPlugin:
     """ import plugin and (optionally) install dependencies """
 
     def __init__(self, plugin_type: str, identifier: str):
-
         self.plugin_type = plugin_type
         self.plugins_dir = Path(__file__).parent.with_name(plugin_type)
         self.identifier = identifier
@@ -64,18 +63,19 @@ def installation_preference():
     return pref
 
 
-def import_plugin(plugin_type: str, identifier: str):
+def import_plugin(library_root: str, plugin_type: str, identifier: str):
     """ 
     Installs the dependencies of the given plugin and imports its base package: 
-    Given the identifier `Futrell2018-pearsonr`,
-    :meth:`~brainscore_language.plugin_management.ImportPlugin.locate_plugin` sets
-    :attribute plugin_dirname: directory of plugin denoted by :param identifier:, then
-    :meth:`~brainscore_language.plugin_management.ImportPlugin.install_requirements` installs all requirements
+    Given the identifier `Futrell2018-pearsonr` from library_root `brainscore_language`,
+    :meth:`~brainscore_core.plugin_management.ImportPlugin.locate_plugin` sets
+    :attr:`~brainscore_core.plugin_management.ImportPlugin.plugin_dirname: directory of plugin
+    denoted by the `identifier`, then
+    :meth:`~brainscore_core.plugin_management.ImportPlugin.install_requirements` installs all requirements
         in that directory's requirements.txt, and the plugin base package is imported
     """
-    import_plugin = ImportPlugin(plugin_type, identifier)
+    importer = ImportPlugin(plugin_type, identifier)
 
-    if not installation_preference() == 'no':
-        import_plugin.install_requirements()
+    if installation_preference() != 'no':
+        importer.install_requirements()
 
-    __import__(f'brainscore_language.{plugin_type}.{import_plugin.plugin_dirname}')
+    __import__(f'{library_root}.{plugin_type}.{importer.plugin_dirname}')

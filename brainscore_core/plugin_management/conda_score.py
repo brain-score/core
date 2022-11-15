@@ -1,20 +1,28 @@
 import os
 import pickle
+import subprocess
 import tempfile
 from pathlib import Path
 
 from brainscore_core.metrics import Score
-from brainscore_language.plugin_management.environment_manager import EnvironmentManager
+from .environment_manager import EnvironmentManager
 
-SCORE_PATH = tempfile.NamedTemporaryFile(delete=False).name  # file for sub-process to write the score to, and for us to read back in
+SCORE_PATH = tempfile.NamedTemporaryFile(delete=False).name
+""" file for sub-process to write the score to, and for us to read back in """
 
 
 class CondaScore(EnvironmentManager):
     """ run scoring in conda environment """
 
-    def __init__(self, model_identifier: str, benchmark_identifier: str):
+    def __init__(self, library_root: str, model_identifier: str, benchmark_identifier: str):
+        """
+        :param library_root: the domain-specific library, e.g. `brainscore_language`.
+            Must have a `score` method accepting parameters `model_identifier` and `benchmark_identifier`
+            and call :meth:`~brainscore_core.plugin_management.CondaScore.save_score`
+        """
         super(CondaScore, self).__init__()
 
+        self.library_root = library_root
         self.model = model_identifier
         self.benchmark = benchmark_identifier
         self.env_name = f'{self.model}_{self.benchmark}'
@@ -30,7 +38,7 @@ class CondaScore(EnvironmentManager):
         hands execution back to score()
         """
         run_command = f"bash {self.script_path} \
-                {self.model} {self.benchmark} {self.env_name}"
+                {self.library_root} {self.model} {self.benchmark} {self.env_name}"
 
         completed_process = self.run_in_env(run_command)
         completed_process.check_returncode()

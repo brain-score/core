@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict, Union
 
 import pytest_check as check
-from brainscore_language.plugin_management.environment_manager import EnvironmentManager
+from .environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
 
@@ -11,7 +11,7 @@ PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
 class PluginTestRunner(EnvironmentManager):
     """Runs plugin tests (requires "test.py" for each plugin)
     
-    Usage examples:
+    Usage examples (run `test_plugins.py` file in domain-specific brain-score library, e.g. `brainscore_language`):
 
     # Run all tests for futrell2018 benchmark:
     python brainscore_language/plugin_management/test_plugins.py brainscore_language/benchmarks/futrell2018/test.py

@@ -1,4 +1,5 @@
 import random
+import shutil
 import subprocess
 import warnings
 from pathlib import Path
@@ -9,7 +10,7 @@ class EnvironmentManager:
 
     def __init__(self):
         self.envs_dir = Path(self.get_conda_base()) / 'envs'
-        self.env_name = f'brainscore-language_{str(random.randint(100, 999))}'
+        self.env_name = f'brainscore_{str(random.randint(100, 999))}'
         self.env_path = self.envs_dir / self.env_name
 
     def get_conda_base(self) -> str:
@@ -40,7 +41,7 @@ class EnvironmentManager:
             try:
                 shutil.rmtree(self.env_path)
                 completed_process.returncode = 0
-            except Exception as e:
+            except Exception:
                 warnings.warn(f"conda env {self.env_name} removal failed and must be manually deleted.")
 
         return completed_process
