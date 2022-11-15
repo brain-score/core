@@ -20,6 +20,7 @@ class EnvironmentManager:
         except Exception as e:
             warnings.warn(f"{e}. Please ensure that conda is properly installed "
                           "(https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).")
+            raise e
 
     def run_in_env(self, run_command: str) -> 'subprocess.CompletedProcess[bytes]':
         """
