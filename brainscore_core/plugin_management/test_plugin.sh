@@ -7,7 +7,7 @@ PLUGIN_REQUIREMENTS_PATH=$PLUGIN_PATH/requirements.txt
 PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$4
 
-echo "${PLUGIN_NAME/_//}"
+echo "${PLUGIN_NAME/__//}"
 
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $PLUGIN_NAME python=3.8 -y 2>&1) || echo $output
