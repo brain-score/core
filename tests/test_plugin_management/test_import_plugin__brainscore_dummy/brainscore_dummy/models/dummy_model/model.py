@@ -1,0 +1,2 @@
+class DummyModel:
+    pass
