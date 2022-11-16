@@ -6,17 +6,19 @@ HAS_REQUIREMENTS=$3
 PLUGIN_REQUIREMENTS_PATH=$PLUGIN_PATH/requirements.txt
 PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$4
+LIBRARY_PATH=$5
 
-echo "${PLUGIN_NAME/__//}"
+cd $LIBRARY_PATH
+echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $PLUGIN_NAME python=3.8 -y 2>&1) || echo $output
 conda activate $PLUGIN_NAME
-if $HAS_REQUIREMENTS; then
+if $HAS_REQUIREMENTS; then # install plugin requirements
   output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1) || echo $output
 fi
 
-output=$(python -m pip install -e ".[test]" 2>&1) || echo $output
+output=$(python -m pip install -e ".[test]" 2>&1) || echo $output # install library requirements
 
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"

@@ -1,48 +1,41 @@
 import shutil
-import textwrap
+import tempfile
 from pathlib import Path
 
 import pytest
+
 from brainscore_core.plugin_management.test_plugins import PluginTestRunner
 
-DUMMY_PLUGIN = "dummy_plugin"
-DUMMY_PLUGIN_PATH = Path(__file__).parent / DUMMY_PLUGIN
-DUMMY_TYPE = Path(__file__).parent.name
-DUMMY_TESTFILE = DUMMY_PLUGIN_PATH / "test.py"
-DUMMY_REQUIREMENTS = DUMMY_PLUGIN_PATH / "requirements.txt"
-DUMMY_RESULTS = {}
+DUMMY_LIBRARY_PATH = Path(tempfile.mkdtemp("plugin-library"))
+DUMMY_PLUGIN_PATH = DUMMY_LIBRARY_PATH / 'plugintype' / 'pluginname'
 
 
 class TestPluginTestRunner:
     def setup_method(self):
-        DUMMY_PLUGIN_PATH.mkdir(parents=True, exist_ok=True)
-        Path(DUMMY_REQUIREMENTS).touch()
-        Path(DUMMY_TESTFILE).touch()
-        with open(DUMMY_TESTFILE, 'w') as f:
-            f.write(textwrap.dedent('''\
-            def test_dummy():
-                assert True        
-            '''))
+        local_resource = Path(__file__).parent / 'test_test_plugins__brainscore_dummy'
+        shutil.copytree(local_resource, DUMMY_LIBRARY_PATH, dirs_exist_ok=True)
 
     def teardown_method(self):
-        shutil.rmtree(DUMMY_PLUGIN_PATH)
+        shutil.rmtree(DUMMY_LIBRARY_PATH)
 
     def test_plugin_name(self):
-        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, DUMMY_RESULTS)
-        assert plugin_test_runner.plugin_name == DUMMY_TYPE + '_' + DUMMY_PLUGIN
+        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, {})
+        assert plugin_test_runner.plugin_name == 'plugintype__pluginname'
 
     def test_has_testfile(self):
-        DUMMY_TESTFILE.unlink()
-        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, DUMMY_RESULTS)
+        test_file = DUMMY_PLUGIN_PATH / 'test.py'
+        test_file.unlink()
+        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, {})
         with pytest.raises(Exception):
             plugin_test_runner.validate_plugin()
 
     def test_has_requirements(self):
-        DUMMY_REQUIREMENTS.unlink()
-        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, DUMMY_RESULTS)
+        requirements_file = DUMMY_PLUGIN_PATH / 'requirements.txt'
+        requirements_file.unlink()
+        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, {})
         assert not plugin_test_runner.has_requirements
 
     def test_run_tests(self):
-        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, DUMMY_RESULTS)
+        plugin_test_runner = PluginTestRunner(DUMMY_PLUGIN_PATH, {})
         plugin_test_runner.run_tests()
         assert plugin_test_runner.results[plugin_test_runner.plugin_name] == 0

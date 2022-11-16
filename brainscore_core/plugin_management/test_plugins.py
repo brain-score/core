@@ -14,13 +14,13 @@ class PluginTestRunner(EnvironmentManager):
     Usage examples (run `test_plugins.py` file in domain-specific brain-score library, e.g. `brainscore_language`):
 
     # Run all tests for futrell2018 benchmark:
-    python brainscore_language/plugin_management/test_plugins.py brainscore_language/benchmarks/futrell2018/test.py
+    python brainscore_core/plugin_management/test_plugins.py brainscore_language/benchmarks/futrell2018/test.py
 
     # Run only tests with names matching specified pattern (test_exact):
-    python brainscore_language/plugin_management/test_plugins.py brainscore_language/benchmarks/futrell2018/test.py --test=test_exact
+    python brainscore_core/plugin_management/test_plugins.py brainscore_language/benchmarks/futrell2018/test.py --test=test_exact
 
     # Run all tests for all plugins:
-    python brainscore_language/plugin_management/test_plugins.py 
+    python brainscore_core/plugin_management/test_plugins.py
     """
 
     def __init__(self, plugin_directory: Path, results: Dict, test: Union[bool, str] = False):
@@ -28,6 +28,7 @@ class PluginTestRunner(EnvironmentManager):
 
         self.plugin_directory = plugin_directory
         self.plugin_type = Path(self.plugin_directory).parent.name
+        self.library_path = Path(self.plugin_directory).parent.parent
         self.plugin_name = self.plugin_type + '__' + Path(self.plugin_directory).name
         self.env_name = self.plugin_name
         self.has_requirements = (self.plugin_directory / 'requirements.txt').is_file()
@@ -52,7 +53,7 @@ class PluginTestRunner(EnvironmentManager):
         """
         run_command = f"bash {self.script_path} \
             {self.plugin_directory} {self.plugin_name} \
-            {str(self.has_requirements).lower()} {self.test}"
+            {str(self.has_requirements).lower()} {self.test} {self.library_path}"
 
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
