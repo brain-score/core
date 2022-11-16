@@ -17,12 +17,6 @@ class CondaScore(EnvironmentManager):
     """ run scoring in conda environment """
 
     def __init__(self, library_path: Path, model_identifier: str, benchmark_identifier: str):
-        """
-        :param library_path: path to the domain-specific library module, e.g. `/home/user/brainscore_language`.
-            Must have a `score` method accepting parameters `model_identifier` and `benchmark_identifier`
-            and call :meth:`~brainscore_core.plugin_management.conda_score.CondaScore.save_score`,
-            preferably via :meth:`~brainscore_core.plugin_management.conda_score.wrap_score`.
-        """
         super(CondaScore, self).__init__()
 
         self.library_path = library_path
@@ -60,10 +54,16 @@ class CondaScore(EnvironmentManager):
             pickle.dump(score, f, pickle.HIGHEST_PROTOCOL)
 
 
-def wrap_score(library_root: Union[str, Path], model_identifier: str, benchmark_identifier: str,
+def wrap_score(library_path: Union[str, Path], model_identifier: str, benchmark_identifier: str,
                score_function: Callable[[str, str], Score]):
+    """
+    :param library_path: path to the domain-specific library module, e.g. `/home/user/brainscore_language/__init__.py`.
+        Must have a `score` method accepting parameters `model_identifier` and `benchmark_identifier`
+        and call :meth:`~brainscore_core.plugin_management.conda_score.CondaScore.save_score`,
+        preferably via :meth:`~brainscore_core.plugin_management.conda_score.wrap_score`.
+    """
     if installation_preference() == 'newenv':
-        conda_score = CondaScore(Path(library_root), model_identifier, benchmark_identifier)
+        conda_score = CondaScore(Path(library_path), model_identifier, benchmark_identifier)
         result = conda_score()
     else:
         result = score_function(model_identifier, benchmark_identifier)
