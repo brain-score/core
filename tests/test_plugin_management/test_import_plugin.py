@@ -22,7 +22,7 @@ class TestImportPlugin:
         dummy_requirements = dummy_model_dirpath / "test.py"
         dummy_init = dummy_model_dirpath / "__init__.py"
 
-        dummy_model_dirpath.mkdir(parents=True, exist_ok=True)
+        dummy_model_dirpath.mkdir(parents=True)
         sys.path.append(str(dummy_container_dirpath))
 
         Path(dummy_registry).touch()
@@ -62,7 +62,7 @@ class TestImportPlugin:
         if 'dummy-model' in model_registry:
             del model_registry['dummy-model']
         subprocess.run('pip uninstall pyaztro', shell=True)
-        shutil.rmtree(dummy_domain_dirpath)
+        shutil.rmtree(dummy_container_dirpath)
         if current_dependencies_pref:  # value was set
             os.environ['BS_INSTALL_DEPENDENCIES'] = current_dependencies_pref
         sys.path.remove(str(dummy_container_dirpath))

@@ -1,47 +1,59 @@
+import os
+import shutil
+import sys
+import tempfile
+import textwrap
 from pathlib import Path
 
 import numpy as np
 import pytest
-from brainscore_language import load_metric
-from brainscore_language.benchmarks.futrell2018 import Futrell2018Pearsonr
-from brainscore_language.plugin_management.conda_score import CondaScore, SCORE_PATH
-from brainscore_language.utils.ceiling import ceiling_normalize
 from numpy.random import RandomState
 from pytest import approx
 
-from brainio.assemblies import NeuroidAssembly
+from brainio.assemblies import DataAssembly
+from brainscore_core.metrics import Score
+from brainscore_core.plugin_management.conda_score import CondaScore, SCORE_PATH
 
 
-def _make_assembly():
-    values = RandomState(1).standard_normal(30 * 25).reshape((30, 25))
-    assembly = NeuroidAssembly(values,
-                               coords={'stimulus_id': ('presentation', np.arange(30)),
-                                       'stimulus_category': ('presentation', ['a', 'b', 'c'] * 10),
-                                       'neuroid_id': ('neuroid', np.arange(25)),
-                                       'region': ('neuroid', ['some_region'] * 25)},
-                               dims=['presentation', 'neuroid'])
-    return assembly
-
-
-def _create_dummy_score():
-    assembly = _make_assembly()
-    metric = load_metric('linear_pearsonr')
-    raw_score = metric(assembly1=assembly, assembly2=assembly)
-    score = ceiling_normalize(raw_score, Futrell2018Pearsonr().ceiling)
+def _create_dummy_score() -> Score:
+    score = Score(.8)
+    score.attrs['model_identifier'] = 'distilgpt2'
+    score.attrs['benchmark_identifier'] = 'Pereira2018.243sentences-linear'
+    score.attrs['raw'] = DataAssembly(RandomState(1).standard_normal(30 * 25).reshape((30, 25)), coords={
+        'neuroid_id': ('neuroid', np.arange(30)), 'network': ('neuroid', ['language'] * 30),
+        'split': np.arange(25)}, dims=['neuroid', 'split'])
+    ceiling = Score(0.35378928)
+    ceiling.attrs['raw'] = Score(RandomState(1).standard_normal(30), coords={
+        'neuroid_id': ('neuroid', np.arange(30)), 'network': ('neuroid', ['language'] * 30)}, dims=['neuroid'])
+    score.attrs['ceiling'] = ceiling
     return score
 
 
 def test_save_and_read_score():
-    output = _create_dummy_score()
-    CondaScore.save_score(output)
+    score = _create_dummy_score()
+    CondaScore.save_score(score)
     assert Path(SCORE_PATH).is_file()
     result = CondaScore.read_score()
     assert not Path(SCORE_PATH).is_file()
-    assert output == result
+    assert score == result
 
 
-@pytest.mark.memory_intense
-def test_score_in_env():
-    result = CondaScore(model_identifier='distilgpt2', benchmark_identifier='Futrell2018-pearsonr')
-    score = result.score
-    assert score == approx(0.3614471, abs=0.001)
+class TestCondaScoreInEnv:
+    dummy_container_dirpath = Path(tempfile.mkdtemp("-brainscore-dummy"))
+
+    def setup_method(self):
+        sys.path.append(str(self.dummy_container_dirpath))
+        local_resource = Path(__file__).parent / 'test_conda_score_brainscore_dummy'  # contains dummy-library scripts
+        for local_file in local_resource.iterdir():
+            shutil.copy(local_file, self.dummy_container_dirpath)
+
+    def teardown_method(self):
+        shutil.rmtree(self.dummy_container_dirpath)
+        sys.path.remove(str(self.dummy_container_dirpath))
+
+    @pytest.mark.memory_intense
+    def test_score_in_env(self):
+        scorer = CondaScore(library_path=self.dummy_container_dirpath / 'brainscore_dummy.py',
+                            model_identifier='dummy-model', benchmark_identifier='dummy-benchmark')
+        score = scorer()
+        assert score == 0.42
