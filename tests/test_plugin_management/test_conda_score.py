@@ -43,7 +43,7 @@ class TestCondaScoreInEnv:
 
     def setup_method(self):
         sys.path.append(str(self.dummy_container_dirpath))
-        local_resource = Path(__file__).parent / 'test_conda_score_brainscore_dummy'  # contains dummy-library scripts
+        local_resource = Path(__file__).parent / 'test_conda_score__brainscore_dummy'  # contains dummy-library scripts
         for local_file in local_resource.iterdir():
             shutil.copy(local_file, self.dummy_container_dirpath)
 
