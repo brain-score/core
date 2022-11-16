@@ -11,6 +11,7 @@ Unit tests have various markers that denote possible issues in the travis build:
 * **requires_gpu**: tests requiring a GPU to run or to run in a reasonable time (travis does not support GPUs/CUDA)
 * **slow**: tests leading to runtimes that are not possible on the openmind cluster (>1 hour per test) 
 * **travis_slow**: tests running for more than 10 minutes without output (which leads travis to error)
+* **requires_conda**: tests requiring a conda installation (which travis does not provide)
 
 Use the following syntax to mark a test:
 ```
