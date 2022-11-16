@@ -21,7 +21,7 @@ class TestImportPlugin:
         model_registry = self._model_registry()
         if 'dummy-model' in model_registry:
             del model_registry['dummy-model']
-        subprocess.run('pip uninstall pyaztro', shell=True)
+        subprocess.run('pip uninstall pyaztro --yes', shell=True)
         shutil.rmtree(dummy_container_dirpath)
         if current_dependencies_pref:  # value was set
             os.environ['BS_INSTALL_DEPENDENCIES'] = current_dependencies_pref
