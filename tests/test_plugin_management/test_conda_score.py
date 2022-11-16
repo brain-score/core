@@ -1,18 +1,15 @@
-import os
 import shutil
 import sys
 import tempfile
-import textwrap
 from pathlib import Path
 
 import numpy as np
 import pytest
 from numpy.random import RandomState
-from pytest import approx
 
 from brainio.assemblies import DataAssembly
 from brainscore_core.metrics import Score
-from brainscore_core.plugin_management.conda_score import CondaScore, SCORE_PATH
+from brainscore_core.plugin_management.conda_score import CondaScore
 
 
 def _create_dummy_score() -> Score:
@@ -31,10 +28,12 @@ def _create_dummy_score() -> Score:
 
 def test_save_and_read_score():
     score = _create_dummy_score()
-    CondaScore.save_score(score)
-    assert Path(SCORE_PATH).is_file()
-    result = CondaScore.read_score()
-    assert not Path(SCORE_PATH).is_file()
+    library_path = Path(tempfile.mkdtemp()) / '__init__.py'
+    expected_score_path = library_path.parent / 'conda_score.pkl'
+    CondaScore.save_score(score, library_path=library_path)
+    assert expected_score_path.is_file()
+    result = CondaScore.read_score(library_path=library_path)
+    assert not expected_score_path.is_file()
     assert score == result
 
 
