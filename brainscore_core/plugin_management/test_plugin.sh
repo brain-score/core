@@ -8,7 +8,7 @@ PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$4
 LIBRARY_PATH=$5
 
-cd $LIBRARY_PATH
+cd "$LIBRARY_PATH"
 echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"

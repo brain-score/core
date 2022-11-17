@@ -7,7 +7,7 @@ import pytest
 from brainscore_core.plugin_management.test_plugins import PluginTestRunner
 
 DUMMY_LIBRARY_PATH = Path(tempfile.mkdtemp("plugin-library"))
-DUMMY_PLUGIN_PATH = DUMMY_LIBRARY_PATH / 'plugintype' / 'pluginname'
+DUMMY_PLUGIN_PATH = DUMMY_LIBRARY_PATH / 'brainscore_dummy' / 'plugintype' / 'pluginname'
 
 
 @pytest.mark.requires_conda

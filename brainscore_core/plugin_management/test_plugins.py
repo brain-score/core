@@ -28,7 +28,7 @@ class PluginTestRunner(EnvironmentManager):
 
         self.plugin_directory = plugin_directory
         self.plugin_type = Path(self.plugin_directory).parent.name
-        self.library_path = Path(self.plugin_directory).parent.parent
+        self.library_path = Path(self.plugin_directory).parents[2]
         self.plugin_name = self.plugin_type + '__' + Path(self.plugin_directory).name
         self.env_name = self.plugin_name
         self.has_requirements = (self.plugin_directory / 'requirements.txt').is_file()
