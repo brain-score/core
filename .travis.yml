@@ -17,4 +17,4 @@ install:
   - conda info -a
   - pip list
 script:
-  - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow and not requires_conda"
+  - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"

@@ -1,18 +1,14 @@
 import subprocess
 
-import pytest
-
 from brainscore_core.plugin_management.environment_manager import EnvironmentManager
 
 
-@pytest.mark.requires_conda
 def test_get_conda_base():
     environment_manager = EnvironmentManager()
     conda_base = environment_manager.get_conda_base()
     assert 'conda' in conda_base
 
 
-@pytest.mark.requires_conda
 def test_teardown():
     environment_manager = EnvironmentManager()
     subprocess.run(f"conda create -n {environment_manager.env_name} python=3.8 -y", shell=True)

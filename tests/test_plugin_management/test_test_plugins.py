@@ -10,7 +10,6 @@ DUMMY_LIBRARY_PATH = Path(tempfile.mkdtemp("plugin-library"))
 DUMMY_PLUGIN_PATH = DUMMY_LIBRARY_PATH / 'brainscore_dummy' / 'plugintype' / 'pluginname'
 
 
-@pytest.mark.requires_conda
 class TestPluginTestRunner:
     def setup_method(self):
         local_resource = Path(__file__).parent / 'test_test_plugins__brainscore_dummy'
