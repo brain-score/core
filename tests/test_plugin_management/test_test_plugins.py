@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -13,7 +14,8 @@ DUMMY_PLUGIN_PATH = DUMMY_LIBRARY_PATH / 'brainscore_dummy' / 'plugintype' / 'pl
 class TestPluginTestRunner:
     def setup_method(self):
         local_resource = Path(__file__).parent / 'test_test_plugins__brainscore_dummy'
-        shutil.copytree(local_resource, DUMMY_LIBRARY_PATH, dirs_exist_ok=True)
+        # `shutil.copytree(..., dirs_exist_ok=True)` would be preferable here but is not available in python 3.7
+        subprocess.run(f"cp -r {local_resource}/* {DUMMY_LIBRARY_PATH}", shell=True, text=True, check=True)
 
     def teardown_method(self):
         shutil.rmtree(DUMMY_LIBRARY_PATH)
