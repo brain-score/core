@@ -1,0 +1,16 @@
+[project]
+name = "brainscore_dummy"
+version = "0.1.0"
+description = "provide a callable library with a score method for the `test_test_plugins.py` tests"
+authors = []
+requires-python = ">=3.7"
+
+dependencies = [
+    "brainio@git+https://github.com/brain-score/brainio.git@main",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-check",
+]
