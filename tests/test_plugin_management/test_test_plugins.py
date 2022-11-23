@@ -15,7 +15,7 @@ class TestPluginTestRunner:
     def setup_method(self):
         local_resource = Path(__file__).parent / 'test_test_plugins__brainscore_dummy'
         # `shutil.copytree(..., dirs_exist_ok=True)` would be preferable here but is not available in python 3.7
-        subprocess.run(f"cp -r {local_resource}/* {DUMMY_LIBRARY_PATH}", shell=True, text=True, check=True)
+        subprocess.run(f"cp -r {local_resource}/* {DUMMY_LIBRARY_PATH}/", shell=True, text=True, check=True)
 
     def teardown_method(self):
         shutil.rmtree(DUMMY_LIBRARY_PATH)
