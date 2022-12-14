@@ -6,7 +6,7 @@ MODEL_ID=$3
 BENCHMARK_ID=$4
 ENV_NAME=$5
 
-cd "$LIBRARY_PATH" || exit 2
+cd "../${LIBRARY_PATH}" || exit 2
 echo "In directory: $PWD"
 echo "Setting up conda environment: ${ENV_NAME}"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
