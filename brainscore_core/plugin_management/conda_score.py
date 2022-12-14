@@ -15,7 +15,7 @@ class CondaScore(EnvironmentManager):
     def __init__(self, library_path: Path, model_identifier: str, benchmark_identifier: str):
         super(CondaScore, self).__init__()
 
-        self.library_path = library_path
+        self.library_path = library_path.parent
         self.model = model_identifier
         self.benchmark = benchmark_identifier
         self.env_name = f'{self.model}_{self.benchmark}'
