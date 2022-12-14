@@ -18,15 +18,6 @@ from brainscore_core.submission.database import connect_db, modelentry_from_mode
 logger = logging.getLogger(__name__)
 
 
-def process_zip_submission(zip_filepath: str):
-    """
-    Triggered when a zip file is submitted via the website.
-    Opens a pull request on GitHub with the plugin contents of the zip file.
-    The merge of this PR will potentially trigger `process_github_submission`.
-    """
-    pass  # TODO @Katherine
-
-
 def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     """
     Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
