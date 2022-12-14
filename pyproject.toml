@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest",
+    "pytest-check",
 ]
 
 [build-system]
@@ -32,3 +33,12 @@ requires = [
     "setuptools>=65.*",
     "wheel"
 ]
+
+
+################################################################
+#### setuptools packaging config ####
+################################################################
+
+[tool.setuptools.package-data]
+# include bash files (e.g. 'test_plugin.sh') in package install
+"brainscore_core.plugin_management" = ["**"]

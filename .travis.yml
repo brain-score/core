@@ -7,6 +7,14 @@ before_install:
   - pip install poetry
 install:
   - python -m pip install -e ".[test]"
+  # install conda for plugin management
+  - wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - source "$HOME/miniconda/etc/profile.d/conda.sh"
+  - hash -r
+  - conda config --set always_yes yes --set changeps1 no
+  - conda update -q conda
+  - conda info -a
   - pip list
 script:
   - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow" --ignore=tests/test_submission
