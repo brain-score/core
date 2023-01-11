@@ -10,7 +10,7 @@ from typing import List, Union
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db, modelentry_from_model, submissionentry_from_meta, \
-    benchmarkinstance_from_benchmark, update_score
+    benchmarkinstance_from_benchmark, update_score, public_model_identifiers, public_benchmark_identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -48,22 +48,35 @@ class DomainPlugins(ABC):
 
 
 class RunScoringEndpoint:
+    ALL_PUBLIC = "all_public"  """ key to reference models or benchmarks to all public entries """
+
     def __init__(self, domain_plugins: DomainPlugins, db_secret: str):
         self.domain_plugins = domain_plugins
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, models: List[str], benchmarks: List[str],
+    def __call__(self, models: Union[List[str], str], benchmarks: Union[List[str], str],
                  # TODO @Katherine: the following parameters likely need to be passed differently,
                  #  e.g. in a config file/environment variables
                  jenkins_id: int, user_id: int, model_type: str,
-                 public: bool, competition: Union[None, str]):
+                 model_public: bool, competition: Union[None, str]):
         """
         Run the `models` on the `benchmarks`, and write resulting scores to the database.
+
+        :param models: either a list of model identifiers or the string
+            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
+        :param benchmarks: either a list of benchmark identifiers or the string
+            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
         """
         # setup entry for this entire submission
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
         entire_submission_successful = True
+
+        # resolve settings
+        if models == self.ALL_PUBLIC:
+            models = public_model_identifiers()
+        if benchmarks == self.ALL_PUBLIC:
+            benchmarks = public_benchmark_identifiers()
 
         # iterate over all model-benchmark pairs
         for model_identifier in models:
@@ -76,7 +89,7 @@ class RunScoringEndpoint:
                 try:
                     self._score_model_on_benchmark(model_identifier=model_identifier,
                                                    benchmark_identifier=benchmark_identifier,
-                                                   submission_entry=submission_entry, public=public,
+                                                   submission_entry=submission_entry, model_public=model_public,
                                                    competition=competition)
                 except Exception as e:
                     entire_submission_successful = False
@@ -92,13 +105,13 @@ class RunScoringEndpoint:
 
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission,
-                                  public: bool, competition: Union[None, str]):
+                                  model_public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
         logger.info(f'Model database entry')
         model = self.domain_plugins.load_model(model_identifier)
         model_entry = modelentry_from_model(model_identifier=model_identifier,
-                                            submission=submission_entry, public=public, competition=competition,
+                                            submission=submission_entry, public=model_public, competition=competition,
                                             bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
         logger.info(f'Benchmark database entry')
         benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
