@@ -92,7 +92,6 @@ class Score(DataAssembly):
                 except Exception as e:
                     if ignore_exceptions:
                         warnings.warn("failed to merge raw values: " + str(e))
-                        return None
                     else:
                         raise e
         return result
