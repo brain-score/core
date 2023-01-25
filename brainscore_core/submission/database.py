@@ -1,10 +1,10 @@
 import json
-import json
 import logging
 from datetime import datetime
+from typing import List, Union
+
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
 from pybtex.database.input import bibtex
-from typing import Union
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
@@ -33,6 +33,18 @@ def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) ->
     submission = Submission.create(id=jenkins_id, submitter=user_id, model_type=model_type,
                                    timestamp=now, status='running')
     return submission
+
+
+def public_model_identifiers() -> List[str]:
+    entries = Model.select().where(Model.public == True)
+    identifiers = [entry.name for entry in entries]
+    return identifiers
+
+
+def public_benchmark_identifiers() -> List[str]:
+    entries = BenchmarkType.select().where(BenchmarkType.visible == True)
+    identifiers = [entry.identifier for entry in entries]
+    return identifiers
 
 
 def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],

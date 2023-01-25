@@ -97,6 +97,6 @@ def run_args(root_directory: Union[Path, str], test_file: Union[None, str] = Non
     else:
         warnings.warn("Test file not found.")
 
-    plugins_with_errors = {k: v for k, v in results.items() if v == 1}
+    plugins_with_errors = {k: v for k, v in results.items() if (v != 0) and (v != 5)}
     num_plugins_failed = len(plugins_with_errors)
     assert num_plugins_failed == 0, f"\n{num_plugins_failed} plugin tests failed\n{plugins_with_errors}"

@@ -71,7 +71,7 @@ def import_plugin(library_root: str, plugin_type: str, identifier: str):
     Installs the dependencies of the given plugin and imports its base package: 
     Given the identifier `Futrell2018-pearsonr` from library_root `brainscore_language`,
     :meth:`~brainscore_core.plugin_management.ImportPlugin.locate_plugin` sets
-    :attr:`~brainscore_core.plugin_management.ImportPlugin.plugin_dirname: directory of plugin
+    :attr:`~brainscore_core.plugin_management.ImportPlugin.plugin_dirname` directory of plugin
     denoted by the `identifier`, then
     :meth:`~brainscore_core.plugin_management.ImportPlugin.install_requirements` installs all requirements
         in that directory's requirements.txt, and the plugin base package is imported
