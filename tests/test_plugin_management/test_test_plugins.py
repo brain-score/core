@@ -23,12 +23,24 @@ class TestPluginTestRunner:
         plugin_test_runner = PluginTestRunner(self.dummy_plugin_path, {})
         assert plugin_test_runner.plugin_name == 'plugintype__pluginname'
 
-    def test_has_testfile(self):
+    def test_has_no_testfile(self):
         test_file = self.dummy_plugin_path / 'test.py'
         test_file.unlink()
         plugin_test_runner = PluginTestRunner(self.dummy_plugin_path, {})
         with pytest.raises(Exception):
             plugin_test_runner.validate_plugin()
+
+    def test_has_testfile_underscore_prefix(self):
+        test_file = self.dummy_plugin_path / 'test.py'
+        test_file.rename(self.dummy_plugin_path / 'test_plugin.py')
+        plugin_test_runner = PluginTestRunner(self.dummy_plugin_path, {})
+        plugin_test_runner.validate_plugin()
+
+    def test_has_testfile_no_underscore_prefix(self):
+        test_file = self.dummy_plugin_path / 'test.py'
+        test_file.rename(self.dummy_plugin_path / 'testplugin.py')
+        plugin_test_runner = PluginTestRunner(self.dummy_plugin_path, {})
+        plugin_test_runner.validate_plugin()
 
     def test_has_requirements(self):
         requirements_file = self.dummy_plugin_path / 'requirements.txt'
