@@ -45,7 +45,7 @@ class PluginTestRunner(EnvironmentManager):
         self.teardown()
 
     def validate_plugin(self):
-        """ requires at least one file matching "test.*.py" in plugin directory, e.g. test.py, test_data.py. """
+        """ requires at least one file matching "test.*\.py" in plugin directory, e.g. test.py, test_data.py. """
         test_files = [test_file for test_file in self.plugin_directory.iterdir()
                       if re.match(RECOGNIZED_TEST_FILES, test_file.name)]
         assert len(test_files) > 0, "No test files matching 'test.*.py' found"
