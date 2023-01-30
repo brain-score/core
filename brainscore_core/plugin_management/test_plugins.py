@@ -11,7 +11,7 @@ RECOGNIZED_TEST_FILES = 'test.*\.py'
 
 
 class PluginTestRunner(EnvironmentManager):
-    """Runs plugin tests (requires "test.*.py" for each plugin)
+    """Runs plugin tests (requires "test.*\.py" for each plugin)
     
     Usage examples (run `test_plugins.py` file in domain-specific brain-score library, e.g. `brainscore_language`):
 
