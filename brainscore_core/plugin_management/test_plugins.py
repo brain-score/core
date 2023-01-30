@@ -7,7 +7,7 @@ from typing import Dict, Union
 from .environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
-RECOGNIZED_TEST_FILES = 'test.*.py'
+RECOGNIZED_TEST_FILES = 'test.*\.py'
 
 
 class PluginTestRunner(EnvironmentManager):
