@@ -41,6 +41,13 @@ class TestPluginTestRunner:
         test_file.rename(self.dummy_plugin_path / 'testplugin.py')
         plugin_test_runner = PluginTestRunner(self.dummy_plugin_path, {})
         plugin_test_runner.validate_plugin()
+        
+    def test_has_testfile_valid_python(self):
+        test_file = self.dummy_plugin_path / 'test.py'
+        test_file.rename(self.dummy_plugin_path / 'testpluginpy')
+        plugin_test_runner = PluginTestRunner(self.dummy_plugin_path, {})
+        with pytest.raises(Exception):
+            plugin_test_runner.validate_plugin()
 
     def test_has_requirements(self):
         requirements_file = self.dummy_plugin_path / 'requirements.txt'
