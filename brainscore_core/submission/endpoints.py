@@ -79,6 +79,9 @@ class RunScoringEndpoint:
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers()
 
+        print(f"Models: {models}")
+        print(f"Benchmarks: {benchmarks}")
+
         for model_identifier in models:
             for benchmark_identifier in benchmarks:
                 logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
