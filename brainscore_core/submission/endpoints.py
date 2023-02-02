@@ -75,6 +75,7 @@ class RunScoringEndpoint:
 
         # resolve settings
         if models == self.ALL_PUBLIC:
+            print(f"models == self.ALL_PUBLIC: {models}")
             models = public_model_identifiers()
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers()

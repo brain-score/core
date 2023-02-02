@@ -36,7 +36,10 @@ def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) ->
 
 
 def public_model_identifiers() -> List[str]:
+    print(Model)
+    print(Model.public)
     entries = Model.select().where(Model.public == True)
+    print(entries)
     identifiers = [entry.name for entry in entries]
     return identifiers
 
