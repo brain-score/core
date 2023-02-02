@@ -52,7 +52,7 @@ class DomainPlugins(ABC):
 
 
 class RunScoringEndpoint:
-    ALL_PUBLIC = "all_public"  # key to reference models or benchmarks to all public entries
+    ALL_PUBLIC = "all_public"  """ key to reference models or benchmarks to all public entries """
 
     def __init__(self, domain_plugins: DomainPlugins, db_secret: str):
         self.domain_plugins = domain_plugins
@@ -75,7 +75,6 @@ class RunScoringEndpoint:
 
         # resolve settings
         if models == self.ALL_PUBLIC:
-            print(f"models == self.ALL_PUBLIC: {models}")
             models = public_model_identifiers()
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers()
