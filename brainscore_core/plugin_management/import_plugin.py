@@ -9,20 +9,33 @@ logger = logging.getLogger(__name__)
 class ImportPlugin:
     """ import plugin and (optionally) install dependencies """
 
-    def __init__(self, library_root: str, plugin_type: str, identifier: str):
+    def __init__(self, library_root: str, plugin_type: str, identifier: str, registry_prefix: str = None):
+        """
+        :param library_root: the root package of the library we're loading plugins from, e.g. `brainscore_vision`
+        :param plugin_type: the directory containing the plugin directories, e.g. `benchmarks`.
+            If `registry_prefix` is not explicitly passed, it will be inferred from this parameter.
+        :param identifier: the unique identifier for this plugin, e.g. `MajajHong2015` or `alexnet`.
+            Note that this is (potentially) different from the plugin directory itself.
+        :param library_root: the prefix or the registry in case it is different form the `plugin_type` directory,
+            e.g. `stimulus_set`
+        """
         self.plugin_type = plugin_type
         library_module = __import__(library_root)
         library_directory = Path(library_module.__file__).parent
         self.plugins_dir = library_directory / plugin_type
         assert self.plugins_dir.is_dir(), f"Plugins directory {self.plugins_dir} is not a directory"
         self.identifier = identifier
+        # if registry_prefix not explicitly set, infer from plugin_type:
+        # remove plural and determine variable name, e.g. "models" -> "model_registry"
+        registry_prefix = registry_prefix or self.plugin_type.strip('s')
+        self.registry_name = registry_prefix + '_registry'
         self.plugin_dirname = self.locate_plugin()
 
     def locate_plugin(self) -> str:
         """ 
         Searches all `plugin_type` __init.py__ files for the plugin denoted with `identifier`.
         If a match is found of format {plugin_type}_registry[{identifier}],
-        returns name of directory where __init.py__ is located 
+        returns name of directory where __init.py__ is located
         """
         plugins = [d.name for d in self.plugins_dir.iterdir() if d.is_dir()]
 
@@ -34,9 +47,7 @@ class ImportPlugin:
             plugin_dirpath = self.plugins_dir / plugin_dirname
             init_file = plugin_dirpath / "__init__.py"
             with open(init_file) as f:
-                registry_name = self.plugin_type.strip(
-                    's') + '_registry'  # remove plural and determine variable name, e.g. "models" -> "model_registry"
-                plugin_registrations = [line for line in f if f"{registry_name}['{self.identifier}']"
+                plugin_registrations = [line for line in f if f"{self.registry_name}['{self.identifier}']"
                                         in line.replace('\"', '\'')]
                 if len(plugin_registrations) > 0:
                     specified_plugin_dirname = plugin_dirname
