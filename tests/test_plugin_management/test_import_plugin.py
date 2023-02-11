@@ -59,14 +59,15 @@ class TestRegistryPrefix:
     def setup_method(self):
         sys.path.append(str(TestRegistryPrefix.dummy_container_dirpath))
         local_resource = Path(__file__).parent / 'test_import_plugin__brainscore_dummy_registryprefix'
-        shutil.copytree(local_resource / 'brainscore_dummy',
-                        TestRegistryPrefix.dummy_container_dirpath / 'brainscore_dummy')
+        shutil.copytree(local_resource / 'brainscore_dummy_registryprefix',
+                        TestRegistryPrefix.dummy_container_dirpath / 'brainscore_dummy_registryprefix')
 
     def teardown_method(self):
         shutil.rmtree(TestRegistryPrefix.dummy_container_dirpath)
         sys.path.remove(str(TestRegistryPrefix.dummy_container_dirpath))
 
     def test_stimulus_set(self):
-        importer = ImportPlugin(library_root='brainscore_dummy', plugin_type='data', identifier='dummy-stimulus_set',
+        importer = ImportPlugin(library_root='brainscore_dummy_registryprefix',
+                                plugin_type='data', identifier='dummy-stimulus_set',
                                 registry_prefix='stimulus_set')
         assert importer.plugin_dirname == 'dummy_stimulus_set'
