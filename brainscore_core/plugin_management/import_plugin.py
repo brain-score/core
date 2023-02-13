@@ -16,7 +16,7 @@ class ImportPlugin:
             If `registry_prefix` is not explicitly passed, it will be inferred from this parameter.
         :param identifier: the unique identifier for this plugin, e.g. `MajajHong2015` or `alexnet`.
             Note that this is (potentially) different from the plugin directory itself.
-        :param library_root: the prefix or the registry in case it is different form the `plugin_type` directory,
+        :param registry_prefix: the prefix or the registry in case it is different form the `plugin_type` directory,
             e.g. `stimulus_set`
         """
         self.plugin_type = plugin_type
