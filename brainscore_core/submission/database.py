@@ -31,6 +31,7 @@ def connect_db(db_secret):
 
 def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) -> Submission:
     now = datetime.now()
+    jenkins_id = jenkins_id + 1000000 # TODO: DEV ONLY, REMOVE BEFORE PROD!!!
     submission = Submission.create(id=jenkins_id, submitter=user_id, model_type=model_type,
                                    timestamp=now, status='running')
     return submission
