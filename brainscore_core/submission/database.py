@@ -17,18 +17,14 @@ logger = logging.getLogger(__name__)
 
 def connect_db(db_secret):
     if 'sqlite3' not in db_secret:
-        print('sqlite not in db_secret')
         secret = get_secret(db_secret)
         db_configs = json.loads(secret)
-        print(f'db: {db_configs['dbInstanceIdentifier']}, host: {db_configs['host']}, user: db_configs['username']')
         postgres = PostgresqlDatabase(db_configs['dbInstanceIdentifier'],
                                       **{'host': db_configs['host'], 'port': 5432,
                                          'user': db_configs['username'], 'password': db_configs['password']})
         database_proxy.initialize(postgres)
         database_proxy.connect()
-        print(f"db_proxy: {database_proxy}")
     else:
-        print('sqlite is in db_secret')
         sqlite = SqliteDatabase(db_secret)
         database_proxy.initialize(sqlite)
 
@@ -41,11 +37,8 @@ def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) ->
 
 
 def public_model_identifiers() -> List[str]:
-    print("in public_model_identifiers")
     entries = Model.select().where(Model.public == True)
-    print(f"entries: {entries}")
     identifiers = [entry.name for entry in entries]
-    print(f"identifiers: {identifiers}")
     return identifiers
 
 
