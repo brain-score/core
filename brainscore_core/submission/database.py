@@ -20,10 +20,12 @@ def connect_db(db_secret):
         print('sqlite not in db_secret')
         secret = get_secret(db_secret)
         db_configs = json.loads(secret)
+        print(f'db: {db_configs['dbInstanceIdentifier']}, host: {db_configs['host']}, user: db_configs['username']')
         postgres = PostgresqlDatabase(db_configs['dbInstanceIdentifier'],
                                       **{'host': db_configs['host'], 'port': 5432,
                                          'user': db_configs['username'], 'password': db_configs['password']})
         database_proxy.initialize(postgres)
+        database_proxy.connect()
         print(f"db_proxy: {database_proxy}")
     else:
         print('sqlite is in db_secret')
