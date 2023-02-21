@@ -76,10 +76,10 @@ class RunScoringEndpoint:
         # resolve settings
         if models == self.ALL_PUBLIC:
             models = public_model_identifiers()
-            print(f"Models: {models}")
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers()
 
+        print(f"Models: {models}")
         print(f"Benchmarks: {benchmarks}")
 
         for model_identifier in models:
