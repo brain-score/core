@@ -59,11 +59,12 @@ class RunScoringEndpoint:
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, jenkins_id: int, models: List[str], benchmarks: List[str],
-                 user_id: int, model_type: str, public: bool, competition: Union[None, str]):
+    def __call__(self, jenkins_id: int, domain: str, models: List[str], benchmarks: List[str],
+                 user_id: int, model_type: str, model_public: bool, competition: Union[None, str]):
         """
         Run the `models` on the `benchmarks`, and write resulting score to the database.
 
+        :param domain: "language" or "vision"
         :param models: either a list of model identifiers or the string
             :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
         :param benchmarks: either a list of benchmark identifiers or the string
