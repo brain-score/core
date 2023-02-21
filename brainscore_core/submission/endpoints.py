@@ -60,7 +60,7 @@ class RunScoringEndpoint:
         connect_db(db_secret=db_secret)
 
     def __call__(self, jenkins_id: int, domain: str, models: List[str], benchmarks: List[str],
-                 user_id: int, model_type: str, model_public: bool, competition: Union[None, str]):
+                 user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
         Run the `models` on the `benchmarks`, and write resulting score to the database.
 
@@ -93,7 +93,7 @@ class RunScoringEndpoint:
                 try:
                     self._score_model_on_benchmark(model_identifier=model_identifier,
                                                    benchmark_identifier=benchmark_identifier,
-                                                   submission_entry=submission_entry, model_public=model_public,
+                                                   submission_entry=submission_entry, public=public,
                                                    competition=competition)
                 except Exception as e:
                     entire_submission_successful = False
@@ -109,7 +109,7 @@ class RunScoringEndpoint:
 
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission,
-                                  model_public: bool, competition: Union[None, str]):
+                                  public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
         try:
