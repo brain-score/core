@@ -30,7 +30,8 @@ class CondaScore(EnvironmentManager):
         calls bash script to create conda environment, then hands execution back to score()
         """
         run_command = f"bash {self.script_path} \
-                {self.library_path.parent} {self.library_path.name} {self.model} {self.benchmark} {self.env_name}"
+                {self.library_path.parent} {self.library_path.name} \
+                {self.model} {self.benchmark} {self.env_name} {self.envs_dir}"
 
         completed_process = self.run_in_env(run_command)
         completed_process.check_returncode()
