@@ -19,6 +19,6 @@ conda activate $ENV_NAME
 output=$(python -m pip install "." 2>&1) || echo $output
 
 echo "Scoring ${MODEL_ID} on ${BENCHMARK_ID}"
-python $LIBRARY_NAME score --model_identifier=$MODEL_ID --benchmark_identifier=$BENCHMARK_ID
+python $LIBRARY_NAME score --model_identifier=$MODEL_ID --benchmark_identifier=$BENCHMARK_ID --conda_active=True
 
 exit $?
