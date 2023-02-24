@@ -82,6 +82,8 @@ def wrap_score(library_path: Union[str, Path], model_identifier: str, benchmark_
         and call :meth:`~brainscore_core.plugin_management.conda_score.CondaScore.save_score`,
         preferably via :meth:`~brainscore_core.plugin_management.conda_score.wrap_score`.
     """
+    print("HEY!")
+    print(conda_active)
     if installation_preference() == 'newenv' and not conda_active:
         conda_score = CondaScore(Path(library_path), model_identifier, benchmark_identifier)
         result = conda_score()
