@@ -9,10 +9,10 @@ ENVS_DIR=$6
 
 cd "$LIBRARY_PATH" || exit 2
 echo "In directory: $PWD"
-echo "Setting up conda environment: ${ENV_NAME}"
 if [ -d $ENVS_DIR/$ENV_NAME ]; then
 	conda env remove -n $ENV_NAME
 fi
+echo "Setting up conda environment: ${ENV_NAME}"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $ENV_NAME python=3.8 -y 2>&1) || echo $output
 conda activate $ENV_NAME
