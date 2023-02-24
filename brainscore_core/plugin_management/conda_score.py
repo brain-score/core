@@ -66,7 +66,7 @@ class CondaScore(EnvironmentManager):
 
 
 def wrap_score(library_path: Union[str, Path], model_identifier: str, benchmark_identifier: str,
-               score_function: Callable[[str, str], Score], conda_active: bool=False):
+               score_function: Callable[[str, str], Score], conda_active: bool):
     """
     If :meth:`~brainscore_core.plugin_management.import_plugin.installation_preference` is not `newenv`,
     simply run the `score_function` and return its result directly.
