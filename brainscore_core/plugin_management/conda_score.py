@@ -50,7 +50,7 @@ class CondaScore(EnvironmentManager):
 
     @staticmethod
     def save_score(score: Score, library_path: Path):
-        score_path = CondaScore._score_path(library_path)
+        score_path = CondaScore._score_path(library_path.parent)
         print(f"saving score to {score_path}")
         with open(score_path, 'wb') as f:
             pickle.dump(score, f, pickle.HIGHEST_PROTOCOL)
