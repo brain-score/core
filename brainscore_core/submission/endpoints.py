@@ -150,6 +150,7 @@ class RunScoringEndpoint:
             score_entry.end_timestamp = datetime.now()
             # store in database
             logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
+            print(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)
         except Exception as e:
             stacktrace = traceback.format_exc()

@@ -42,7 +42,7 @@ class CondaScore(EnvironmentManager):
     @staticmethod
     def read_score(library_path: Path):
         score_path = CondaScore._score_path(library_path)
-        print(os.listdir(library_path.parent))
+        print(f"reading score from {score_path}")
         with open(score_path, 'rb') as f:
             score = pickle.load(f)
             os.remove(score_path)
