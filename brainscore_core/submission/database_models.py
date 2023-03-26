@@ -56,6 +56,7 @@ class BenchmarkInstance(PeeweeBase):
 
 
 class User(PeeweeBase):
+    id = PrimaryKeyField()
     email = CharField(index=True, null=True)
     is_active = BooleanField()
     is_staff = BooleanField()

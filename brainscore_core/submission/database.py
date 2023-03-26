@@ -29,6 +29,12 @@ def connect_db(db_secret):
         database_proxy.initialize(sqlite)
 
 
+def uid_from_email(author_email: str) -> int:
+    entries = User.select().where(User.email == author_email)
+    user_id = [entry.id for entry in entries][0]
+    return user_id
+
+
 def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) -> Submission:
     now = datetime.now()
     jenkins_id = jenkins_id + 1000000 # TODO: DEV ONLY, REMOVE BEFORE PROD!!!

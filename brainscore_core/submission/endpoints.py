@@ -13,7 +13,7 @@ from typing import List, Union, Dict
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db, modelentry_from_model, submissionentry_from_meta, \
-    benchmarkinstance_from_benchmark, update_score, public_model_identifiers, public_benchmark_identifiers
+    benchmarkinstance_from_benchmark, update_score, public_model_identifiers, public_benchmark_identifiers, uid_from_email
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,26 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     auth_basic=HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
     r = requests.get(url, params=payload, auth=auth_basic)
     print(r)
+
+
+class UserManager:
+    """
+    Returns the Brain-Score user ID associated with a given email address.
+    If no user ID exists, creates a new account.
+    """
+
+    def __init__(self, author_email: str, db_secret: str):
+        self.author_email = author_email
+        logger.info(f"Connecting to db using secret '{db_secret}")
+        connect_db(db_secret=db_secret)
+
+    def __call__(self)
+        uid = uid_from_email(self.author_email)
+        if uid_from_email(self.author_email):
+            return uid
+        # else: # TO DO
+        #     uid = create_new_user(self.author_email)
+        #     return uid
 
 
 class DomainPlugins(ABC):
