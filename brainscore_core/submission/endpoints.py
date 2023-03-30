@@ -55,7 +55,7 @@ class UserManager:
         logger.info(f"Connecting to db using secret '{db_secret}")
         connect_db(db_secret=db_secret)
 
-    def __call__(self)
+    def __call__(self):
         uid = uid_from_email(self.author_email)
         if not uid:
             _create_new_user(self.author_email)
