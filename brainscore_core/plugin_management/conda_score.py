@@ -15,7 +15,7 @@ class CondaScore(EnvironmentManager):
     def __init__(self, library_path: Path, model_identifier: str, benchmark_identifier: str):
         super(CondaScore, self).__init__()
 
-        self.library_path = library_path
+        self.library_path = library_path.parent
         self.model = model_identifier
         self.benchmark = benchmark_identifier
         self.env_name = f'{self.model}_{self.benchmark}'
@@ -30,7 +30,8 @@ class CondaScore(EnvironmentManager):
         calls bash script to create conda environment, then hands execution back to score()
         """
         run_command = f"bash {self.script_path} \
-                {self.library_path.parent} {self.library_path.name} {self.model} {self.benchmark} {self.env_name}"
+                {self.library_path.parent} {self.library_path.name} \
+                {self.model} {self.benchmark} {self.env_name} {self.envs_dir}"
 
         completed_process = self.run_in_env(run_command)
         completed_process.check_returncode()
@@ -47,7 +48,7 @@ class CondaScore(EnvironmentManager):
 
     @staticmethod
     def save_score(score: Score, library_path: Path):
-        score_path = CondaScore._score_path(library_path)
+        score_path = CondaScore._score_path(library_path.parent)
         with open(score_path, 'wb') as f:
             pickle.dump(score, f, pickle.HIGHEST_PROTOCOL)
 
