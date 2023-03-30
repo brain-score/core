@@ -78,7 +78,7 @@ class UserManager:
             data = f'email={self.author_email}&a=1&csrfmiddlewaretoken={csrf_token} \
                 &password1={temp_pass}&password2={temp_pass}&is_from_pr'
             response = requests.post(signup_url, 
-                headers='Content-Type': 'application/x-www-form-urlencoded', 
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}, 
                 cookies=cookies,data=data)
             os.remove('cookies.txt')
             assert(response.status_code=200)
