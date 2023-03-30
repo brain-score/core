@@ -5,15 +5,19 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
+import http
 import os
+import random
 import requests
 from requests.auth import HTTPBasicAuth
+import string
 from typing import List, Union, Dict
 
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
-from brainscore_core.submission.database import connect_db, modelentry_from_model, submissionentry_from_meta, \
-    benchmarkinstance_from_benchmark, update_score, public_model_identifiers, public_benchmark_identifiers, uid_from_email
+from brainscore_core.submission.database import connect_db, modelentry_from_model, \
+    submissionentry_from_meta, benchmarkinstance_from_benchmark, update_score, \
+    public_model_identifiers, public_benchmark_identifiers, uid_from_email, email_from_uid
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +40,14 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     print(r)
 
 
+def get_email_from_uid(uid: int) -> str:
+    return email_from_uid(uid)
+
+
 class UserManager:
     """
     Returns the Brain-Score user ID associated with a given email address.
-    If no user ID exists, creates a new account.
+    If no user ID exists, creates a new account, then returns user ID.
     """
 
     def __init__(self, author_email: str, db_secret: str):
@@ -49,12 +57,33 @@ class UserManager:
 
     def __call__(self)
         uid = uid_from_email(self.author_email)
-        if uid_from_email(self.author_email):
-            return uid
-        # else: # TO DO
-        #     uid = create_new_user(self.author_email)
-        #     return uid
+        if not uid:
+            _create_new_user(self.author_email)
+            uid = uid_from_email(self.author_email)
+        return uid
 
+    def _generate_temp_pass(length):
+        chars = string.ascii_letters + string.digits + string.punctuation
+        temp_pass = ''.join(random.choice(chars) for i in range(length))
+        return temp_pass
+
+    def _create_new_user(self):
+        signup_url = 'http://www.brain-score.org/signup/'
+        temp_pass = _generate_temp_pass()
+        try:
+            cookies = http.cookiejar.MozillaCookieJar('cookies.txt')
+            cookies.load()
+            response = requests.get(signup_url, cookies=cookies)
+            csrf_token = [x.value for x in response.cookies][0]
+            data = f'email={self.author_email}&a=1&csrfmiddlewaretoken={csrf_token} \
+                &password1={temp_pass}&password2={temp_pass}&is_from_pr'
+            response = requests.post(signup_url, 
+                headers='Content-Type': 'application/x-www-form-urlencoded', 
+                cookies=cookies,data=data)
+            os.remove('cookies.txt')
+            assert(response.status_code=200)
+        except Exception as e:
+            logging.error(f'Could not create Brain-Score account for {self.author_email} because of {e}')
 
 class DomainPlugins(ABC):
     """

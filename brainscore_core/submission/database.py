@@ -35,6 +35,12 @@ def uid_from_email(author_email: str) -> int:
     return user_id
 
 
+def email_from_uid(user_id: int) -> str:
+    entries = User.select().where(User.id == user_id)
+    user_id = [entry.email for entry in entries][0]
+    return user_id
+
+
 def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) -> Submission:
     now = datetime.now()
     jenkins_id = jenkins_id + 1000000 # TODO: DEV ONLY, REMOVE BEFORE PROD!!!
