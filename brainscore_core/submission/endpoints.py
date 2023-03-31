@@ -69,7 +69,7 @@ class UserManager:
 
     def _create_new_user(self):
         signup_url = 'http://www.brain-score.org/signup/'
-        temp_pass = _generate_temp_pass()
+        temp_pass = self._generate_temp_pass(length=10)
         try:
             cookies = http.cookiejar.MozillaCookieJar('cookies.txt')
             cookies.load()
