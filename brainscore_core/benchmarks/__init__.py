@@ -18,7 +18,7 @@ class Benchmark(ABC):
     def __call__(self, candidate):
         """
         Evaluate a candidate `BrainModel` and return a :class:`~brainscore_core.metrics.Score` denoting the
-        alignment the model to natural intelligence under this benchmark.
+        alignment of the model to natural intelligence measurements under this benchmark.
         Typically this involves reproducing the experiment on the model and then comparing model measurements
         (e.g. neural/behavioral) against recordings from biological subjects (e.g. primates)
         using a :class:`~brainscore_core.metrics.Metric`.
