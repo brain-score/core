@@ -1,7 +1,6 @@
 import os
 import pickle
 import subprocess
-import sys
 from pathlib import Path
 from typing import Callable, Union
 
@@ -42,7 +41,6 @@ class CondaScore(EnvironmentManager):
     @staticmethod
     def read_score(library_path: Path):
         score_path = CondaScore._score_path(library_path)
-        print(f"reading score from {score_path}")
         with open(score_path, 'rb') as f:
             score = pickle.load(f)
             os.remove(score_path)
@@ -51,10 +49,8 @@ class CondaScore(EnvironmentManager):
     @staticmethod
     def save_score(score: Score, library_path: Path):
         score_path = CondaScore._score_path(library_path.parent)
-        print(f"saving score to {score_path}")
         with open(score_path, 'wb') as f:
             pickle.dump(score, f, pickle.HIGHEST_PROTOCOL)
-        print(os.listdir(library_path.parent))
 
     @staticmethod
     def _score_path(library_path: Path) -> Path:
