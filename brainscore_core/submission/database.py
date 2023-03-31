@@ -38,6 +38,7 @@ def uid_from_email(author_email: str) -> int:
 
 def email_from_uid(user_id: int) -> str:
     entries = User.select().where(User.id == user_id)
+    assert len(entries) == 1, "Expected exactly one user with id {user_id}, but found {len(entries)}"
     user_id = [entry.email for entry in entries][0]
     return user_id
 
