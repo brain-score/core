@@ -31,6 +31,7 @@ def connect_db(db_secret):
 
 def uid_from_email(author_email: str) -> int:
     entries = User.select().where(User.email == author_email)
+    assert len(entries) == 1, "Expected exactly one user with email {author_email}, but found {len(entries)}"
     user_id = [entry.id for entry in entries][0]
     return user_id
 
