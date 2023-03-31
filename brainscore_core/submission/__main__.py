@@ -22,6 +22,7 @@ parser.add_argument('--models', type=str, nargs='*', default=None,
 parser.add_argument('--benchmarks', type=str, nargs='*', default=None,
                     help='An optional list of the benchmarks to run, if it does not exist all benchmarks are run')
 args, remaining_args = parser.parse_known_args()
+
 logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level),
                     format='%(asctime)-15s %(levelname)s:%(name)s:%(message)s')
 for disable_logger in ['s3transfer', 'botocore', 'boto3', 'urllib3', 'peewee', 'PIL']:
