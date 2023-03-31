@@ -20,7 +20,7 @@ class Benchmark(ABC):
         Evaluate a candidate `BrainModel` and return a :class:`~brainscore_core.metrics.Score` denoting the
         alignment of the model to natural intelligence measurements under this benchmark.
         Typically this involves reproducing the experiment on the model and then comparing model measurements
-        (e.g. neural/behavioral) against recordings from biological subjects (e.g. primates)
+        (e.g. neural/behavioral) against experimental recordings from biological subjects (e.g. primates)
         using a :class:`~brainscore_core.metrics.Metric`.
         The output of this method is a normalized score between 0 and 1 where 0 means the model does not match the
         measurements at all and 1 means the model matches the measurements at ceiling level
