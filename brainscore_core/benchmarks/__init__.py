@@ -29,7 +29,7 @@ class Benchmark(ABC):
 
         :param candidate: a candidate model implementing the `BrainModel` interface. Benchmarks are agnostic of the
                 exact implementation and only interact with models through the methods defined in the interface.
-        :return: a :class:`~brainscore_core.metrics.Score` of how brain-like the candidate model is under this
+        :return: a :class:`~brainscore_core.metrics.Score` of how aligned to natural intelligence the candidate model is under this
                 benchmark. The score is normalized by this benchmark's ceiling such that 1 means the model matches the
                 data to ceiling level.
         """
