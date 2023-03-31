@@ -29,10 +29,10 @@ def _create_dummy_score() -> Score:
 def test_save_and_read_score():
     score = _create_dummy_score()
     library_path = Path(tempfile.mkdtemp()) / '__init__.py'
-    expected_score_path = library_path.parent / 'conda_score.pkl'
+    expected_score_path = library_path.parent.parent / 'conda_score.pkl'
     CondaScore.save_score(score, library_path=library_path)
     assert expected_score_path.is_file()
-    result = CondaScore.read_score(library_path=library_path)
+    result = CondaScore.read_score(library_path=library_path.parent)
     assert not expected_score_path.is_file()
     assert score == result
 
