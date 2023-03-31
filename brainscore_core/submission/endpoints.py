@@ -84,6 +84,7 @@ class UserManager:
             assert(response.status_code==200)
         except Exception as e:
             logging.error(f'Could not create Brain-Score account for {self.author_email} because of {e}')
+            raise e
 
 class DomainPlugins(ABC):
     """
