@@ -41,6 +41,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
 
 
 def get_email_from_uid(uid: int) -> str:
+    """ Convenience method for GitHub Actions to get a user's email if their web-submitted PR fails. """
     return email_from_uid(uid)
 
 
