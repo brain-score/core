@@ -5,7 +5,6 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
-import http.cookiejar
 import os
 import random
 import requests
@@ -74,17 +73,13 @@ class UserManager:
         signup_url = f'http://www.brain-score.org/signup/{domain}'
         temp_pass = self._generate_temp_pass(length=10)
         try:
-            cookies = http.cookiejar.MozillaCookieJar('cookies.txt')
             response = requests.get(signup_url, cookies=cookies)
-            cookies.save()
-            cookies.load()
-            csrf_token = [x.value for x in response.cookies][0]
-            data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token} \
-                &password1={temp_pass}&password2={temp_pass}&is_from_pr'
+            cookies = response.cookies
+            csrf_token = [x.value for x in cookies][0]
+            data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token}&password1={temp_pass}&password2={temp_pass}&is_from_pr'
             response = requests.post(signup_url,
                                      headers={'Content-Type': 'application/x-www-form-urlencoded'},
                                      cookies=cookies, data=data)
-            os.remove('cookies.txt')
             assert response.status_code == 200, f"Response error: {response.status_code}"
         except Exception as e:
             logging.error(f'Could not create Brain-Score account for {user_email} because of {e}')
