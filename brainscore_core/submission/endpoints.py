@@ -143,8 +143,8 @@ class RunScoringEndpoint:
                 try:
                     self._score_model_on_benchmark(model_identifier=model_identifier,
                                                    benchmark_identifier=benchmark_identifier,
-                                                   submission_entry=submission_entry, public=public,
-                                                   competition=competition)
+                                                   submission_entry=submission_entry, domain=domain,
+                                                   public=public, competition=competition)
                 except Exception as e:
                     entire_submission_successful = False
                     logging.error(
@@ -166,7 +166,7 @@ class RunScoringEndpoint:
             logger.info(f'Model database entry')
             model = self.domain_plugins.load_model(model_identifier)
             model_entry = modelentry_from_model(model_identifier=model_identifier,
-                                                submission=submission_entry, public=public, competition=competition,
+                                                submission=submission_entry, domain=domain, public=public, competition=competition,
                                                 bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
         except Exception as e:
             logging.error(f'Could not load model {model_identifier} because of {e}')
