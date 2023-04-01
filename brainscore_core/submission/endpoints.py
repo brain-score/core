@@ -113,11 +113,12 @@ class RunScoringEndpoint:
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, jenkins_id: int, domain: str, models: List[str], benchmarks: List[str],
+    def __call__(self, domain: str, jenkins_id: int, models: List[str], benchmarks: List[str],
                  user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
         Run the `models` on the `benchmarks`, and write resulting score to the database.
 
+        Explanation of subset of parameters:
         :param domain: "language" or "vision"
         :param models: either a list of model identifiers or the string
             :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
@@ -166,22 +167,15 @@ class RunScoringEndpoint:
                                   public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
-        try:
-            logger.info(f'Model database entry')
-            model = self.domain_plugins.load_model(model_identifier)
-            model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
-                                                submission=submission_entry, public=public, competition=competition,
-                                                bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
-        except Exception as e:
-            logging.error(f'Could not load model {model_identifier} because of {e}')
-            return
-        try:
-            logger.info(f'Benchmark database entry')
-            benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
-            benchmark_entry = benchmarkinstance_from_benchmark(benchmark)
-        except Exception as e:
-            logging.error(f'Could not load benchmark {benchmark_identifier} because of {e}')
-            return
+        logger.info(f'Model database entry')
+        model = self.domain_plugins.load_model(model_identifier)
+        model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
+                                            submission=submission_entry, public=public, competition=competition,
+                                            bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
+
+        logger.info(f'Benchmark database entry')
+        benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
+        benchmark_entry = benchmarkinstance_from_benchmark(benchmark, domain=domain)
 
         # Check if the model is already scored on the benchmark
         start_timestamp = datetime.now()
@@ -209,6 +203,17 @@ class RunScoringEndpoint:
             stacktrace = traceback.format_exc()
             error_message = f'Model {model_identifier} could not run on benchmark {benchmark_identifier}: ' \
                             f'{repr(e)}. \n{stacktrace}'
-            score_entry.comment = error_message[:database_models.Score.comment.max_length]
+            error_message = shorten_text(error_message, max_length=database_models.Score.comment.max_length)
+            score_entry.comment = error_message
             score_entry.save()
             raise e
+
+
+def shorten_text(text: str, max_length: int) -> str:
+    if len(text) <= max_length:
+        return text
+    spacer = '[...]'
+    early_stop = (max_length // 2)
+    part1 = text[:early_stop - len(spacer)]
+    part2 = text[-(max_length - early_stop):]
+    return part1 + spacer + part2

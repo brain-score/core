@@ -81,7 +81,7 @@ class _MockBenchmark(BenchmarkBase):
 class TestBenchmark(SchemaTest):
     def test_benchmark_instance_no_parent(self):
         benchmark = _MockBenchmark()
-        instance = benchmarkinstance_from_benchmark(benchmark)
+        instance = benchmarkinstance_from_benchmark(benchmark, domain='test')
         type = BenchmarkType.get(identifier=instance.benchmark)
         assert instance.ceiling == 0.6
         assert instance.ceiling_error == 0.1
@@ -91,7 +91,7 @@ class TestBenchmark(SchemaTest):
         # initially create the parent to see if the benchmark properly links to it
         BenchmarkType.create(identifier='neural', order=3)
         benchmark = _MockBenchmark()
-        instance = benchmarkinstance_from_benchmark(benchmark)
+        instance = benchmarkinstance_from_benchmark(benchmark, domain='test')
         assert instance.benchmark.parent.identifier == 'neural'
 
     def test_reference(self):
@@ -108,7 +108,7 @@ def _create_score_entry():
     submission_entry = submissionentry_from_meta(jenkins_id=123, user_id=1, model_type='brain_model')
     model_entry = modelentry_from_model(model_identifier='dummy', domain='test',
                                         submission=submission_entry, public=True, competition=None)
-    benchmark_entry = benchmarkinstance_from_benchmark(_MockBenchmark())
+    benchmark_entry = benchmarkinstance_from_benchmark(_MockBenchmark(), domain='test')
     entry, created = Score.get_or_create(benchmark=benchmark_entry, model=model_entry)
     return entry
 
@@ -183,25 +183,25 @@ class TestPublic(SchemaTest):
 
     def test_one_public_benchmark(self):
         # create benchmarktype
-        BenchmarkType.create(identifier='dummy', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy', domain='test', visible=True, order=1)
         # test
-        public_benchmarks = public_benchmark_identifiers()
+        public_benchmarks = public_benchmark_identifiers(domain='test')
         assert public_benchmarks == ["dummy"]
 
     def test_one_public_one_private_benchmark(self):
         # create benchmarktypes
-        BenchmarkType.create(identifier='dummy_public', visible=True, order=1)
-        BenchmarkType.create(identifier='dummy_private', visible=False, order=1)
+        BenchmarkType.create(identifier='dummy_public', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_private', domain='test', visible=False, order=1)
         # test
-        public_benchmarks = public_benchmark_identifiers()
+        public_benchmarks = public_benchmark_identifiers(domain='test')
         assert public_benchmarks == ["dummy_public"]
 
     def test_two_public_two_private_benchmarks(self):
         # create benchmarktypes
-        BenchmarkType.create(identifier='dummy_public1', visible=True, order=1)
-        BenchmarkType.create(identifier='dummy_public2', visible=True, order=1)
-        BenchmarkType.create(identifier='dummy_private1', visible=False, order=1)
-        BenchmarkType.create(identifier='dummy_private2', visible=False, order=1)
+        BenchmarkType.create(identifier='dummy_public1', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_public2', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_private1', domain='test', visible=False, order=1)
+        BenchmarkType.create(identifier='dummy_private2', domain='test', visible=False, order=1)
         # test
-        public_benchmarks = public_benchmark_identifiers()
+        public_benchmarks = public_benchmark_identifiers(domain='test')
         assert set(public_benchmarks) == {"dummy_public1", "dummy_public2"}
