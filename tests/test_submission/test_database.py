@@ -1,5 +1,4 @@
 import logging
-
 import numpy as np
 import pytest
 
@@ -59,15 +58,15 @@ class TestModel(SchemaTest):
 
     def test_model_no_bibtex(self):
         submission_entry = _mock_submission_entry()
-        entry = modelentry_from_model(model_identifier='dummy', public=False, competition='cosyne2022',
-                                      submission=submission_entry)
+        entry = modelentry_from_model(model_identifier='dummy', domain='test',
+                                      submission=submission_entry, public=False, competition='cosyne2022')
         with pytest.raises(Exception):
-            entry.reference
+            print(entry.reference)
 
     def test_model_with_bibtex(self):
         submission_entry = _mock_submission_entry()
-        entry = modelentry_from_model(model_identifier='dummy', public=True, competition=None,
-                                      submission=submission_entry, bibtex=SAMPLE_BIBTEX)
+        entry = modelentry_from_model(model_identifier='dummy', domain='test',
+                                      submission=submission_entry, public=True, competition=None, bibtex=SAMPLE_BIBTEX)
         assert entry.reference.year == '2013'
 
 
@@ -107,8 +106,8 @@ class TestBenchmark(SchemaTest):
 
 def _create_score_entry():
     submission_entry = submissionentry_from_meta(jenkins_id=123, user_id=1, model_type='brain_model')
-    model_entry = modelentry_from_model(model_identifier='dummy', public=True, competition=None,
-                                        submission=submission_entry)
+    model_entry = modelentry_from_model(model_identifier='dummy', domain='test',
+                                        submission=submission_entry, public=True, competition=None)
     benchmark_entry = benchmarkinstance_from_benchmark(_MockBenchmark())
     entry, created = Score.get_or_create(benchmark=benchmark_entry, model=model_entry)
     return entry
@@ -152,28 +151,34 @@ class TestPublic(SchemaTest):
     def test_one_public_model(self):
         # create model
         submission_entry = _mock_submission_entry()
-        modelentry_from_model(model_identifier='dummy', public=True, competition=None, submission=submission_entry)
+        modelentry_from_model(model_identifier='dummy', domain='test',
+                              public=True, competition=None, submission=submission_entry)
         # test
-        public_models = public_model_identifiers()
+        public_models = public_model_identifiers(domain='test')
         assert public_models == ["dummy"]
 
     def test_one_public_one_private_model(self):
         # create models
         submission = _mock_submission_entry()
-        modelentry_from_model(model_identifier='dummy_public', public=True, competition=None, submission=submission)
-        modelentry_from_model(model_identifier='dummy_private', public=False, competition=None, submission=submission)
+        modelentry_from_model(model_identifier='dummy_public', domain='test',
+                              public=True, competition=None, submission=submission)
+        modelentry_from_model(model_identifier='dummy_private', domain='test',
+                              public=False, competition=None, submission=submission)
         # test
-        public_models = public_model_identifiers()
+        public_models = public_model_identifiers(domain='test')
         assert public_models == ["dummy_public"]
 
     def test_two_public_one_private_model(self):
         # create models
         submission = _mock_submission_entry()
-        modelentry_from_model(model_identifier='dummy_public1', public=True, competition=None, submission=submission)
-        modelentry_from_model(model_identifier='dummy_public2', public=True, competition=None, submission=submission)
-        modelentry_from_model(model_identifier='dummy_private', public=False, competition=None, submission=submission)
+        modelentry_from_model(model_identifier='dummy_public1', domain='test',
+                              public=True, competition=None, submission=submission)
+        modelentry_from_model(model_identifier='dummy_public2', domain='test',
+                              public=True, competition=None, submission=submission)
+        modelentry_from_model(model_identifier='dummy_private', domain='test',
+                              public=False, competition=None, submission=submission)
         # test
-        public_models = public_model_identifiers()
+        public_models = public_model_identifiers(domain='test')
         assert set(public_models) == {"dummy_public1", "dummy_public2"}
 
     def test_one_public_benchmark(self):
