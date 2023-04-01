@@ -70,7 +70,7 @@ class UserManager:
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self, user_email, domain):
+    def _create_new_user(self, domain, user_email):
         signup_url = f'http://www.brain-score.org/signup/{domain}'
         temp_pass = self._generate_temp_pass(length=10)
         try:
