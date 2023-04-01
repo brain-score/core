@@ -69,13 +69,13 @@ class UserManager:
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self, user_email):
-        signup_url = 'http://www.brain-score.org/signup/'
+    def _create_new_user(self, user_email, domain):
+        signup_url = f'http://www.brain-score.org/signup/{domain}'
         temp_pass = self._generate_temp_pass(length=10)
         try:
             cookies = http.cookiejar.MozillaCookieJar('cookies.txt')
-            cookies.load()
             response = requests.get(signup_url, cookies=cookies)
+            cookies.load()
             csrf_token = [x.value for x in response.cookies][0]
             data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token} \
                 &password1={temp_pass}&password2={temp_pass}&is_from_pr'
