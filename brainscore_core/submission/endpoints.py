@@ -28,7 +28,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     Starts parallel runs to score models on benchmarks (`run_scoring`).
     """
     jenkins_base = "http://braintree.mit.edu:8080"
-    jenkins_usr = os.environ['JENKINS_USR']
+    jenkins_user = os.environ['JENKINS_USER']
     jenkins_token = os.environ['JENKINS_TOKEN']
     jenkins_trigger = os.environ['JENKINS_TRIGGER']
     jenkins_job = "dev_score_plugins"
