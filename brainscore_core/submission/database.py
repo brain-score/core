@@ -1,10 +1,9 @@
 import json
 import logging
 from datetime import datetime
-from typing import List, Union
-
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
 from pybtex.database.input import bibtex
+from typing import List, Union
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
@@ -29,36 +28,47 @@ def connect_db(db_secret):
         database_proxy.initialize(sqlite)
 
 
-def uid_from_email(author_email: str) -> int:
+def uid_from_email(author_email: str) -> Union[None, int]:
+    """
+    Retrieve the user id belonging to an email.
+    If no user is found, returns None.
+    """
     entries = User.select().where(User.email == author_email)
-    assert len(entries) == 1, "Expected exactly one user with email {author_email}, but found {len(entries)}"
+    if not entries:
+        return None
+    assert len(entries) == 1, f"Expected exactly one user with email {author_email}, but found {len(entries)}"
     user_id = [entry.id for entry in entries][0]
     return user_id
 
 
-def email_from_uid(user_id: int) -> str:
+def email_from_uid(user_id: int) -> Union[None, str]:
+    """
+    Retrieve the email belonging to a user id.
+    If no user is found, returns None.
+    """
     entries = User.select().where(User.id == user_id)
-    assert len(entries) == 1, "Expected exactly one user with id {user_id}, but found {len(entries)}"
+    if not entries:
+        return None
+    assert len(entries) == 1, f"Expected exactly one user with id {user_id}, but found {len(entries)}"
     user_id = [entry.email for entry in entries][0]
     return user_id
 
 
 def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) -> Submission:
     now = datetime.now()
-    jenkins_id = jenkins_id
     submission = Submission.create(jenkins_id=jenkins_id, submitter=user_id, model_type=model_type,
                                    timestamp=now, status='running')
     return submission
 
 
 def public_model_identifiers(domain: str) -> List[str]:
-    entries = Model.select().where(Model.public == True and Model.domain == domain)
+    entries = Model.select().where(Model.public & (Model.domain == domain))
     identifiers = [entry.name for entry in entries]
     return identifiers
 
 
 def public_benchmark_identifiers(domain: str) -> List[str]:
-    entries = BenchmarkType.select().where(BenchmarkType.visible == True and Benchmark.domain == domain)
+    entries = BenchmarkType.select().where(BenchmarkType.visible & (BenchmarkType.domain == domain))
     identifiers = [entry.identifier for entry in entries]
     return identifiers
 
@@ -139,8 +149,8 @@ def update_score(score: ScoreObject, entry: Score):
         entry.score_raw = score_raw
         entry.score_ceiled = _retrieve_score_center(score)
     entry.error = _retrieve_score_error(score)
-    print(f"updating raw score: {entry.score_raw}, ceiled score: {entry.score_ceiled}, error: {entry.error}")
-    print(entry.save())
+    logger.debug(f"updating raw score: {entry.score_raw}, ceiled score: {entry.score_ceiled}, error: {entry.error}")
+    entry.save()
 
 
 def _retrieve_score_center(score: ScoreObject) -> float:

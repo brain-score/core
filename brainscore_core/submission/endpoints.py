@@ -5,7 +5,7 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
-import http
+import http.cookiejar
 import os
 import random
 import requests
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     """
     Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
-    Starts parallel runs to score models on benchmarks (`run_scoring`).
+    Starts run to score models on benchmarks (`run_scoring`).
     """
     jenkins_base = "http://braintree.mit.edu:8080"
     jenkins_user = os.environ['JENKINS_USER']
@@ -34,13 +34,14 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_job = "dev_score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
-    payload = {k:v for k,v in plugin_info.items() if plugin_info[k]}
-    auth_basic=HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
+    payload = {k: v for k, v in plugin_info.items() if plugin_info[k]}
+    auth_basic = HTTPBasicAuth(username=jenkins_user, password=jenkins_token)
     r = requests.get(url, params=payload, auth=auth_basic)
     logger.debug(r)
 
 
 def get_email_from_uid(uid: int) -> str:
+    """ Convenience method for GitHub Actions to get a user's email if their web-submitted PR fails. """
     return email_from_uid(uid)
 
 
@@ -56,18 +57,19 @@ class UserManager:
         connect_db(db_secret=db_secret)
 
     def __call__(self):
-        uid = uid_from_email(self.author_email)
+        uid = uid_from_email(author_email=self.author_email)
         if not uid:
-            _create_new_user(self.author_email)
-            uid = uid_from_email(self.author_email)
+            self._create_new_user(user_email=self.author_email)
+            uid = uid_from_email(author_email=self.author_email)
+            assert uid
         return uid
 
-    def _generate_temp_pass(length):
+    def _generate_temp_pass(self, length):
         chars = string.ascii_letters + string.digits + string.punctuation
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self):
+    def _create_new_user(self, user_email):
         signup_url = 'http://www.brain-score.org/signup/'
         temp_pass = self._generate_temp_pass(length=10)
         try:
@@ -75,16 +77,17 @@ class UserManager:
             cookies.load()
             response = requests.get(signup_url, cookies=cookies)
             csrf_token = [x.value for x in response.cookies][0]
-            data = f'email={self.author_email}&a=1&csrfmiddlewaretoken={csrf_token} \
+            data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token} \
                 &password1={temp_pass}&password2={temp_pass}&is_from_pr'
-            response = requests.post(signup_url, 
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}, 
-                cookies=cookies,data=data)
+            response = requests.post(signup_url,
+                                     headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                                     cookies=cookies, data=data)
             os.remove('cookies.txt')
-            assert(response.status_code==200)
+            assert response.status_code == 200
         except Exception as e:
-            logging.error(f'Could not create Brain-Score account for {self.author_email} because of {e}')
+            logging.error(f'Could not create Brain-Score account for {user_email} because of {e}')
             raise e
+
 
 class DomainPlugins(ABC):
     """
@@ -130,12 +133,12 @@ class RunScoringEndpoint:
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers(domain)
 
-        print(f"Models: {models}")
-        print(f"Benchmarks: {benchmarks}")
+        logger.info(f"Models: {models}")
+        logger.info(f"Benchmarks: {benchmarks}")
 
         for model_identifier in models:
             for benchmark_identifier in benchmarks:
-                logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
+                logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
                 # TODO: I am worried about reloading models inside the loop. E.g. a keras model where layer names are
                 #  automatic and will be consecutive from previous layers
                 #  (e.g. on first load layers are [1, 2, 3], on second load layers are [4, 5, 6])
@@ -165,8 +168,8 @@ class RunScoringEndpoint:
         try:
             logger.info(f'Model database entry')
             model = self.domain_plugins.load_model(model_identifier)
-            model_entry = modelentry_from_model(model_identifier=model_identifier,
-                                                submission=submission_entry, domain=domain, public=public, competition=competition,
+            model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
+                                                submission=submission_entry, public=public, competition=competition,
                                                 bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
         except Exception as e:
             logging.error(f'Could not load model {model_identifier} because of {e}')
@@ -200,7 +203,6 @@ class RunScoringEndpoint:
             score_entry.end_timestamp = datetime.now()
             # store in database
             logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
-            print(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)
         except Exception as e:
             stacktrace = traceback.format_exc()
