@@ -12,8 +12,6 @@ from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
 
-database = 'brainscore-ohio-test'  # test database
-
 SAMPLE_BIBTEX = """@Article{Freeman2013,
                                 author={Freeman, Jeremy and Ziemba, Corey M. and Heeger, David J. 
                                         and Simoncelli, Eero P. and Movshon, J. Anthony},
@@ -35,7 +33,7 @@ class SchemaTest:
     @classmethod
     def setup_class(cls):
         logger.info('Connect to database')
-        connect_db(database)
+        connect_db(db_secret='sqlite3.db')
         clear_schema()
 
     def setup_method(self):

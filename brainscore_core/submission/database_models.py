@@ -7,6 +7,7 @@ database_proxy = Proxy()
 class PeeweeBase(PeeweeModel):
     class Meta:
         database = database_proxy
+        schema = 'public'
 
 
 class Reference(PeeweeBase):
@@ -17,7 +18,6 @@ class Reference(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_reference'
-        schema = 'public'
 
 
 class BenchmarkType(PeeweeBase):
@@ -30,7 +30,6 @@ class BenchmarkType(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarktype'
-        schema = 'public'
 
 
 class BenchmarkMeta(PeeweeBase):
@@ -41,7 +40,6 @@ class BenchmarkMeta(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarkmeta'
-        schema = 'public'
 
 
 class BenchmarkInstance(PeeweeBase):
@@ -53,7 +51,6 @@ class BenchmarkInstance(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarkinstance'
-        schema = 'public'
 
 
 class User(PeeweeBase):
@@ -67,7 +64,6 @@ class User(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_user'
-        schema = 'public'
 
 
 class Submission(PeeweeBase):
@@ -79,7 +75,6 @@ class Submission(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_submission'
-        schema = 'public'
 
 
 class Model(PeeweeBase):
@@ -94,7 +89,6 @@ class Model(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_model'
-        schema = 'public'
 
 
 class Score(PeeweeBase):
@@ -109,7 +103,6 @@ class Score(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_score'
-        schema = 'public'
 
 
 def clear_schema():
