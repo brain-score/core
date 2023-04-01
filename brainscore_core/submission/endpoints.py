@@ -51,7 +51,8 @@ class UserManager:
     If no user ID exists, creates a new account, then returns user ID.
     """
 
-    def __init__(self, author_email: str, db_secret: str):
+    def __init__(self, domain: str, author_email: str, db_secret: str):
+        self.domain = domain
         self.author_email = author_email
         logger.info(f"Connecting to db using secret '{db_secret}")
         connect_db(db_secret=db_secret)
