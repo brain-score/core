@@ -76,6 +76,7 @@ class UserManager:
         try:
             cookies = http.cookiejar.MozillaCookieJar('cookies.txt')
             response = requests.get(signup_url, cookies=cookies)
+            cookies.save()
             cookies.load()
             csrf_token = [x.value for x in response.cookies][0]
             data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token} \
