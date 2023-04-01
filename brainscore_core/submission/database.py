@@ -1,15 +1,14 @@
 import json
 import logging
 from datetime import datetime
-from typing import List, Union
-
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
 from pybtex.database.input import bibtex
+from typing import List, Union
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
 from brainscore_core.submission.database_models import database_proxy, \
-    Submission, Model, BenchmarkType, BenchmarkInstance, Reference, Score
+    Submission, Model, BenchmarkType, BenchmarkInstance, Reference, Score, User
 from brainscore_core.submission.utils import get_secret
 
 logger = logging.getLogger(__name__)
@@ -29,16 +28,28 @@ def connect_db(db_secret):
         database_proxy.initialize(sqlite)
 
 
-def uid_from_email(author_email: str) -> int:
+def uid_from_email(author_email: str) -> Union[None, int]:
+    """
+    Retrieve the user id belonging to an email.
+    If no user is found, returns None.
+    """
     entries = User.select().where(User.email == author_email)
-    assert len(entries) == 1, "Expected exactly one user with email {author_email}, but found {len(entries)}"
+    if not entries:
+        return None
+    assert len(entries) == 1, f"Expected exactly one user with email {author_email}, but found {len(entries)}"
     user_id = [entry.id for entry in entries][0]
     return user_id
 
 
-def email_from_uid(user_id: int) -> str:
+def email_from_uid(user_id: int) -> Union[None, str]:
+    """
+    Retrieve the email belonging to a user id.
+    If no user is found, returns None.
+    """
     entries = User.select().where(User.id == user_id)
-    assert len(entries) == 1, "Expected exactly one user with id {user_id}, but found {len(entries)}"
+    if not entries:
+        return None
+    assert len(entries) == 1, f"Expected exactly one user with id {user_id}, but found {len(entries)}"
     user_id = [entry.email for entry in entries][0]
     return user_id
 

@@ -5,7 +5,7 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
-import http
+import http.cookiejar
 import os
 import random
 import requests
@@ -57,18 +57,19 @@ class UserManager:
         connect_db(db_secret=db_secret)
 
     def __call__(self):
-        uid = uid_from_email(self.author_email)
+        uid = uid_from_email(author_email=self.author_email)
         if not uid:
-            _create_new_user(self.author_email)
-            uid = uid_from_email(self.author_email)
+            self._create_new_user(user_email=self.author_email)
+            uid = uid_from_email(author_email=self.author_email)
+            assert uid
         return uid
 
-    def _generate_temp_pass(length):
+    def _generate_temp_pass(self, length):
         chars = string.ascii_letters + string.digits + string.punctuation
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self):
+    def _create_new_user(self, user_email):
         signup_url = 'http://www.brain-score.org/signup/'
         temp_pass = self._generate_temp_pass(length=10)
         try:
@@ -76,7 +77,7 @@ class UserManager:
             cookies.load()
             response = requests.get(signup_url, cookies=cookies)
             csrf_token = [x.value for x in response.cookies][0]
-            data = f'email={self.author_email}&a=1&csrfmiddlewaretoken={csrf_token} \
+            data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token} \
                 &password1={temp_pass}&password2={temp_pass}&is_from_pr'
             response = requests.post(signup_url,
                                      headers={'Content-Type': 'application/x-www-form-urlencoded'},
@@ -84,7 +85,7 @@ class UserManager:
             os.remove('cookies.txt')
             assert response.status_code == 200
         except Exception as e:
-            logging.error(f'Could not create Brain-Score account for {self.author_email} because of {e}')
+            logging.error(f'Could not create Brain-Score account for {user_email} because of {e}')
             raise e
 
 
@@ -132,12 +133,12 @@ class RunScoringEndpoint:
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers(domain)
 
-        print(f"Models: {models}")
-        print(f"Benchmarks: {benchmarks}")
+        logger.info(f"Models: {models}")
+        logger.info(f"Benchmarks: {benchmarks}")
 
         for model_identifier in models:
             for benchmark_identifier in benchmarks:
-                logger.info(f"Scoring {model_identifier} on {benchmark_identifier}")
+                logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
                 # TODO: I am worried about reloading models inside the loop. E.g. a keras model where layer names are
                 #  automatic and will be consecutive from previous layers
                 #  (e.g. on first load layers are [1, 2, 3], on second load layers are [4, 5, 6])
@@ -202,7 +203,6 @@ class RunScoringEndpoint:
             score_entry.end_timestamp = datetime.now()
             # store in database
             logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
-            print(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)
         except Exception as e:
             stacktrace = traceback.format_exc()
