@@ -158,7 +158,7 @@ class RunScoringEndpoint:
         submission_entry.save()
 
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
-                                  submission_entry: database_models.Submission, domain=domain,
+                                  submission_entry: database_models.Submission, domain:domain,
                                   public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
