@@ -64,7 +64,7 @@ def public_benchmark_identifiers(domain: str) -> List[str]:
 
 
 def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],
-                          submission: Submission, domain: domain,
+                          submission: Submission, domain: str,
                           bibtex: Union[None, str] = None) -> Model:
     model_entry, created = Model.get_or_create(name=model_identifier, owner=submission.submitter,
                                                defaults={'domain': domain,
