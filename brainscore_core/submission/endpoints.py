@@ -34,8 +34,8 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_job = "dev_score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
-    payload = {k:v for k,v in plugin_info.items() if plugin_info[k]}
-    auth_basic=HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
+    payload = {k: v for k, v in plugin_info.items() if plugin_info[k]}
+    auth_basic = HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
     r = requests.get(url, params=payload, auth=auth_basic)
     logger.debug(r)
 
@@ -78,14 +78,15 @@ class UserManager:
             csrf_token = [x.value for x in response.cookies][0]
             data = f'email={self.author_email}&a=1&csrfmiddlewaretoken={csrf_token} \
                 &password1={temp_pass}&password2={temp_pass}&is_from_pr'
-            response = requests.post(signup_url, 
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}, 
-                cookies=cookies,data=data)
+            response = requests.post(signup_url,
+                                     headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                                     cookies=cookies, data=data)
             os.remove('cookies.txt')
-            assert(response.status_code==200)
+            assert response.status_code == 200
         except Exception as e:
             logging.error(f'Could not create Brain-Score account for {self.author_email} because of {e}')
             raise e
+
 
 class DomainPlugins(ABC):
     """
@@ -166,8 +167,8 @@ class RunScoringEndpoint:
         try:
             logger.info(f'Model database entry')
             model = self.domain_plugins.load_model(model_identifier)
-            model_entry = modelentry_from_model(model_identifier=model_identifier,
-                                                submission=submission_entry, domain=domain, public=public, competition=competition,
+            model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
+                                                submission=submission_entry, public=public, competition=competition,
                                                 bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
         except Exception as e:
             logging.error(f'Could not load model {model_identifier} because of {e}')
