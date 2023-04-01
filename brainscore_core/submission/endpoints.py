@@ -60,7 +60,7 @@ class UserManager:
     def __call__(self):
         uid = uid_from_email(author_email=self.author_email)
         if not uid:
-            self._create_new_user(user_email=self.author_email)
+            self._create_new_user(domain=self.domain, user_email=self.author_email)
             uid = uid_from_email(author_email=self.author_email)
             assert uid
         return uid
