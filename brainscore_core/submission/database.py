@@ -58,7 +58,7 @@ def public_model_identifiers() -> List[str]:
 
 
 def public_benchmark_identifiers() -> List[str]:
-    entries = BenchmarkType.select().where(BenchmarkType.visible == True)
+    entries = BenchmarkType.select().where(BenchmarkType.visible == True and Benchmark.domain == "language")
     identifiers = [entry.identifier for entry in entries]
     return identifiers
 
