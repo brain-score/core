@@ -35,7 +35,7 @@ def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
     payload = {k: v for k, v in plugin_info.items() if plugin_info[k]}
-    auth_basic = HTTPBasicAuth(username=jenkins_usr, password=jenkins_token)
+    auth_basic = HTTPBasicAuth(username=jenkins_user, password=jenkins_token)
     r = requests.get(url, params=payload, auth=auth_basic)
     logger.debug(r)
 
