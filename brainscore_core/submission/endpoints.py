@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
     """
     Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
-    Starts parallel runs to score models on benchmarks (`run_scoring`).
+    Starts run to score models on benchmarks (`run_scoring`).
     """
     jenkins_base = "http://braintree.mit.edu:8080"
     jenkins_user = os.environ['JENKINS_USER']
