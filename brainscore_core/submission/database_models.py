@@ -33,7 +33,7 @@ class BenchmarkType(PeeweeBase):
 
 
 class BenchmarkMeta(PeeweeBase):
-    number_of_images = IntegerField(null=True)
+    number_of_stimuli = IntegerField(null=True)
     number_of_recording_sites = IntegerField(null=True)
     recording_sites = CharField(max_length=100, null=True)
     behavioral_task = CharField(max_length=100, null=True)
