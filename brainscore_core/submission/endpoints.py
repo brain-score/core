@@ -73,9 +73,7 @@ class UserManager:
         signup_url = 'http://www.brain-score.org/signup/'
         temp_pass = self._generate_temp_pass(length=10)
         try:
-            cookie_file = 'cookies.txt'
-            open(cookie_file, 'w').close()
-            cookies = http.cookiejar.MozillaCookieJar(cookie_file)
+            cookies = http.cookiejar.MozillaCookieJar('cookies.txt')
             cookies.load()
             response = requests.get(signup_url, cookies=cookies)
             csrf_token = [x.value for x in response.cookies][0]
