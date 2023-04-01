@@ -70,7 +70,7 @@ class User(PeeweeBase):
 
 
 class Submission(PeeweeBase):
-    id = PrimaryKeyField()  # We use jenkins id as id for the submission.
+    jenkins_id = IntegerField() 
     # IDs will not be incremental when resubmitting models
     submitter = ForeignKeyField(column_name='submitter_id', field='id', model=User)
     timestamp = DateTimeField(null=True)
