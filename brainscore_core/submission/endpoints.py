@@ -85,7 +85,7 @@ class UserManager:
                                      headers={'Content-Type': 'application/x-www-form-urlencoded'},
                                      cookies=cookies, data=data)
             os.remove('cookies.txt')
-            assert response.status_code == 200
+            assert response.status_code == 200, f"Response error: {response.status_code}"
         except Exception as e:
             logging.error(f'Could not create Brain-Score account for {user_email} because of {e}')
             raise e
