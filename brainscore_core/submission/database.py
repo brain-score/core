@@ -51,14 +51,14 @@ def submissionentry_from_meta(jenkins_id: int, user_id: int, model_type: str) ->
     return submission
 
 
-def public_model_identifiers() -> List[str]:
-    entries = Model.select().where(Model.public == True and Model.domain == "language")
+def public_model_identifiers(domain: str) -> List[str]:
+    entries = Model.select().where(Model.public == True and Model.domain == domain)
     identifiers = [entry.name for entry in entries]
     return identifiers
 
 
-def public_benchmark_identifiers() -> List[str]:
-    entries = BenchmarkType.select().where(BenchmarkType.visible == True and Benchmark.domain == "language")
+def public_benchmark_identifiers(domain: str) -> List[str]:
+    entries = BenchmarkType.select().where(BenchmarkType.visible == True and Benchmark.domain == domain)
     identifiers = [entry.identifier for entry in entries]
     return identifiers
 
