@@ -9,7 +9,7 @@ from pybtex.database.input import bibtex
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
 from brainscore_core.submission.database_models import database_proxy, \
-    Submission, Model, BenchmarkType, BenchmarkInstance, Reference, Score
+    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score
 from brainscore_core.submission.utils import get_secret
 
 logger = logging.getLogger(__name__)
