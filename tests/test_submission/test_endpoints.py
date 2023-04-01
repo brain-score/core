@@ -1,7 +1,6 @@
 from collections import namedtuple
 
 import logging
-import sys
 
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
@@ -47,7 +46,7 @@ class TestRunScoring:
                 return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
 
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=test_database)
-        endpoint(models=['dummymodel'], benchmarks=['dummybenchmark'],
+        endpoint(domain='test', models=['dummymodel'], benchmarks=['dummybenchmark'],
                  jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
         score_entries = database_models.Score.select()
         score_entries = list(score_entries)
