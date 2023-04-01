@@ -26,6 +26,7 @@ class BenchmarkType(PeeweeBase):
     order = IntegerField()
     parent = ForeignKeyField(column_name='parent_id', field='identifier', model='self', null=True)
     visible = BooleanField(default=False, null=False)
+    domain = CharField(max_length=200, default=None)
 
     class Meta:
         table_name = 'brainscore_benchmarktype'
@@ -86,7 +87,7 @@ class Model(PeeweeBase):
     owner = ForeignKeyField(column_name='owner_id', field='id', model=User)
     reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference)
     submission = ForeignKeyField(column_name='submission_id', field='id', model=Submission)
-    domain = CharField(max_length=200, default=None, null=True)
+    domain = CharField(max_length=200, default=None)
     visual_degrees = IntegerField(null=True)  # null during creation of new model without having model object loaded
     public = BooleanField()
     competition = CharField(max_length=200, default=None, null=True)
