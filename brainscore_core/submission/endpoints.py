@@ -21,29 +21,6 @@ from brainscore_core.submission.database import connect_db, modelentry_from_mode
 logger = logging.getLogger(__name__)
 
 
-def process_github_submission(plugin_info: Dict[str, Union[List[str], str]]):
-    """
-    Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
-    Starts run to score models on benchmarks (`run_scoring`).
-    """
-    jenkins_base = "http://braintree.mit.edu:8080"
-    jenkins_user = os.environ['JENKINS_USER']
-    jenkins_token = os.environ['JENKINS_TOKEN']
-    jenkins_trigger = os.environ['JENKINS_TRIGGER']
-    jenkins_job = "dev_score_plugins"
-
-    url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
-    payload = {k: v for k, v in plugin_info.items() if plugin_info[k]}
-    auth_basic = HTTPBasicAuth(username=jenkins_user, password=jenkins_token)
-    r = requests.get(url, params=payload, auth=auth_basic)
-    logger.debug(r)
-
-
-def get_email_from_uid(uid: int) -> str:
-    """ Convenience method for GitHub Actions to get a user's email if their web-submitted PR fails. """
-    return email_from_uid(uid)
-
-
 class UserManager:
     """
     Returns the Brain-Score user ID associated with a given email address.
@@ -64,12 +41,12 @@ class UserManager:
             assert uid
         return uid
 
-    def _generate_temp_pass(self, length):
+    def _generate_temp_pass(self, length:int) -> str:
         chars = string.ascii_letters + string.digits + string.punctuation
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self, domain, user_email):
+    def _create_new_user(self, domain:str, user_email:str):
         signup_url = f'http://www.brain-score.org/signup/{domain}'
         temp_pass = self._generate_temp_pass(length=10)
         try:
@@ -203,6 +180,11 @@ class RunScoringEndpoint:
             score_entry.comment = error_message
             score_entry.save()
             raise e
+
+
+def get_email_from_uid(uid: int) -> str:
+    """ Convenience method for GitHub Actions to get a user's email if their web-submitted PR fails. """
+    return email_from_uid(uid)
 
 
 def shorten_text(text: str, max_length: int) -> str:
