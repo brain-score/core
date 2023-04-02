@@ -3,25 +3,23 @@ import os
 import pytest
 import tempfile
 from pathlib import Path
-from tests.test_submission import init_users
-from brainscore_core.submission.database_models import clear_schema
 
 from brainscore_core.submission.database import connect_db
+from brainscore_core.submission.database_models import clear_schema
 from brainscore_core.submission.repository import extract_zip_file, find_submission_directory
+from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
-database = 'brainscore-ohio-test'  # test database
 
 
 @pytest.mark.memory_intense
-@pytest.mark.private_access
 class TestRepository:
     working_dir = None
     config_dir = str(os.path.join(os.path.dirname(__file__), 'configs/'))
 
     @classmethod
     def setup_class(cls):
-        connect_db(database)
+        connect_db(db_secret='sqlite3.db')
         clear_schema()
         init_users()
 

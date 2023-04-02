@@ -12,8 +12,6 @@ from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
 
-database = 'brainscore-ohio-test'  # test database
-
 SAMPLE_BIBTEX = """@Article{Freeman2013,
                                 author={Freeman, Jeremy and Ziemba, Corey M. and Heeger, David J. 
                                         and Simoncelli, Eero P. and Movshon, J. Anthony},
@@ -35,7 +33,7 @@ class SchemaTest:
     @classmethod
     def setup_class(cls):
         logger.info('Connect to database')
-        connect_db(database)
+        connect_db(db_secret='sqlite3.db')
         clear_schema()
 
     def setup_method(self):
@@ -60,8 +58,7 @@ class TestModel(SchemaTest):
         submission_entry = _mock_submission_entry()
         entry = modelentry_from_model(model_identifier='dummy', domain='test',
                                       submission=submission_entry, public=False, competition='cosyne2022')
-        with pytest.raises(Exception):
-            print(entry.reference)
+        assert entry.reference is None
 
     def test_model_with_bibtex(self):
         submission_entry = _mock_submission_entry()
@@ -89,7 +86,7 @@ class TestBenchmark(SchemaTest):
 
     def test_benchmark_instance_existing_parent(self):
         # initially create the parent to see if the benchmark properly links to it
-        BenchmarkType.create(identifier='neural', order=3)
+        BenchmarkType.create(identifier='neural', order=3, domain='test')
         benchmark = _MockBenchmark()
         instance = benchmarkinstance_from_benchmark(benchmark, domain='test')
         assert instance.benchmark.parent.identifier == 'neural'

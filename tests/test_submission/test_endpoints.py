@@ -1,5 +1,6 @@
 from collections import namedtuple
 
+import botocore.exceptions
 import logging
 
 from brainscore_core import Score, Benchmark
@@ -9,16 +10,23 @@ from brainscore_core.submission.database_models import clear_schema
 from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, shorten_text
 from tests.test_submission import init_users
 
-test_database = 'brainscore-ohio-test'
-
 logger = logging.getLogger(__name__)
+
+POSTGRESQL_TEST_DATABASE = 'brainscore-ohio-test'
 
 
 class TestRunScoring:
+    test_database = None
+
     @classmethod
     def setup_class(cls):
         logger.info('Connect to database')
-        connect_db(test_database)
+        try:
+            connect_db(db_secret=POSTGRESQL_TEST_DATABASE)
+            cls.test_database = POSTGRESQL_TEST_DATABASE
+        except botocore.exceptions.NoCredentialsError:  # we're in an environment where we cannot retrieve AWS secrets
+            connect_db(db_secret='sqlite3.db')
+            cls.test_database = 'sqlite3.db'  # -> use local sqlite database
         clear_schema()
 
     def setup_method(self):
@@ -45,7 +53,7 @@ class TestRunScoring:
             def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
                 return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
 
-        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=test_database)
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
         endpoint(domain='test', models=['dummymodel'], benchmarks=['dummybenchmark'],
                  jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
         score_entries = database_models.Score.select()

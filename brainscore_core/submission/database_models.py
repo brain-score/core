@@ -7,6 +7,7 @@ database_proxy = Proxy()
 class PeeweeBase(PeeweeModel):
     class Meta:
         database = database_proxy
+        schema = 'public'
 
 
 class Reference(PeeweeBase):
@@ -17,12 +18,11 @@ class Reference(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_reference'
-        schema = 'public'
 
 
 class BenchmarkType(PeeweeBase):
     identifier = CharField(primary_key=True)
-    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference)
+    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference, null=True)
     order = IntegerField()
     parent = ForeignKeyField(column_name='parent_id', field='identifier', model='self', null=True)
     visible = BooleanField(default=False, null=False)
@@ -30,7 +30,6 @@ class BenchmarkType(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarktype'
-        schema = 'public'
 
 
 class BenchmarkMeta(PeeweeBase):
@@ -41,7 +40,6 @@ class BenchmarkMeta(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarkmeta'
-        schema = 'public'
 
 
 class BenchmarkInstance(PeeweeBase):
@@ -49,11 +47,10 @@ class BenchmarkInstance(PeeweeBase):
     ceiling = FloatField(null=True)
     ceiling_error = FloatField(null=True)
     version = IntegerField(null=True)
-    meta = ForeignKeyField(model=BenchmarkMeta)
+    meta = ForeignKeyField(model=BenchmarkMeta, null=True)
 
     class Meta:
         table_name = 'brainscore_benchmarkinstance'
-        schema = 'public'
 
 
 class User(PeeweeBase):
@@ -67,7 +64,6 @@ class User(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_user'
-        schema = 'public'
 
 
 class Submission(PeeweeBase):
@@ -79,13 +75,12 @@ class Submission(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_submission'
-        schema = 'public'
 
 
 class Model(PeeweeBase):
     name = CharField()
     owner = ForeignKeyField(column_name='owner_id', field='id', model=User)
-    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference)
+    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference, null=True)
     submission = ForeignKeyField(column_name='submission_id', field='id', model=Submission)
     domain = CharField(max_length=200, default=None)
     visual_degrees = IntegerField(null=True)  # null during creation of new model without having model object loaded
@@ -94,7 +89,6 @@ class Model(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_model'
-        schema = 'public'
 
 
 class Score(PeeweeBase):
@@ -109,7 +103,6 @@ class Score(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_score'
-        schema = 'public'
 
 
 def clear_schema():
