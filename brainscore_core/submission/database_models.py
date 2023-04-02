@@ -22,7 +22,7 @@ class Reference(PeeweeBase):
 
 class BenchmarkType(PeeweeBase):
     identifier = CharField(primary_key=True)
-    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference)
+    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference, null=True)
     order = IntegerField()
     parent = ForeignKeyField(column_name='parent_id', field='identifier', model='self', null=True)
     visible = BooleanField(default=False, null=False)
@@ -47,7 +47,7 @@ class BenchmarkInstance(PeeweeBase):
     ceiling = FloatField(null=True)
     ceiling_error = FloatField(null=True)
     version = IntegerField(null=True)
-    meta = ForeignKeyField(model=BenchmarkMeta)
+    meta = ForeignKeyField(model=BenchmarkMeta, null=True)
 
     class Meta:
         table_name = 'brainscore_benchmarkinstance'
@@ -80,7 +80,7 @@ class Submission(PeeweeBase):
 class Model(PeeweeBase):
     name = CharField()
     owner = ForeignKeyField(column_name='owner_id', field='id', model=User)
-    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference)
+    reference = ForeignKeyField(column_name='reference_id', field='id', model=Reference, null=True)
     submission = ForeignKeyField(column_name='submission_id', field='id', model=Submission)
     domain = CharField(max_length=200, default=None)
     visual_degrees = IntegerField(null=True)  # null during creation of new model without having model object loaded
