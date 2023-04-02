@@ -6,7 +6,8 @@ from brainscore_core import Score as ScoreObject
 from brainscore_core.benchmarks import BenchmarkBase
 from brainscore_core.submission.database import (connect_db, reference_from_bibtex, benchmarkinstance_from_benchmark,
                                                  submissionentry_from_meta, modelentry_from_model, update_score,
-                                                 public_model_identifiers, public_benchmark_identifiers)
+                                                 public_model_identifiers, public_benchmark_identifiers,
+                                                 email_from_uid, uid_from_email)
 from brainscore_core.submission.database_models import Score, BenchmarkType, Reference, clear_schema
 from tests.test_submission import init_users
 
@@ -43,6 +44,20 @@ class SchemaTest:
     def teardown_method(self):
         logger.info('Clean database')
         clear_schema()
+
+
+class TestUser(SchemaTest):
+    def test_email_from_uid(self):
+        email = email_from_uid(1)
+        assert email == 'test@brainscore.com'
+
+    def test_uid_from_email(self):
+        uid = uid_from_email('admin@brainscore.com')
+        assert uid == 2
+
+    def test_uid_from_email_does_not_exist(self):
+        uid = uid_from_email('doesnotexist@brainscore.com')
+        assert uid == None
 
 
 def _mock_submission_entry():
