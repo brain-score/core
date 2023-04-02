@@ -58,8 +58,7 @@ class TestModel(SchemaTest):
         submission_entry = _mock_submission_entry()
         entry = modelentry_from_model(model_identifier='dummy', domain='test',
                                       submission=submission_entry, public=False, competition='cosyne2022')
-        with pytest.raises(Exception):
-            print(entry.reference)
+        assert entry.reference is None
 
     def test_model_with_bibtex(self):
         submission_entry = _mock_submission_entry()
@@ -87,7 +86,7 @@ class TestBenchmark(SchemaTest):
 
     def test_benchmark_instance_existing_parent(self):
         # initially create the parent to see if the benchmark properly links to it
-        BenchmarkType.create(identifier='neural', order=3)
+        BenchmarkType.create(identifier='neural', order=3, domain='test')
         benchmark = _MockBenchmark()
         instance = benchmarkinstance_from_benchmark(benchmark, domain='test')
         assert instance.benchmark.parent.identifier == 'neural'
