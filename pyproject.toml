@@ -17,6 +17,7 @@ dependencies = [
     "brainio@git+https://github.com/brain-score/brainio.git@main",
     "psycopg2-binary", # postgres driver
     # submission
+    "fire",
     "peewee",
     "pybtex",
     "requests",

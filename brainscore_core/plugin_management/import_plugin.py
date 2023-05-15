@@ -1,4 +1,3 @@
-import fire
 import logging
 import os
 import subprocess
@@ -102,4 +101,5 @@ def print_plugin_dir(library_root: str, plugin_type: str, identifier: str):
 
 
 if __name__ == '__main__':
+    import fire
     fire.Fire()
