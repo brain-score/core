@@ -1,13 +1,14 @@
 import pytest_check as check
 import re
 import warnings
+import yaml
 from pathlib import Path
 from typing import Dict, Union
 
 from .environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
-RECOGNIZED_TEST_FILES = 'test.*\.py'
+RECOGNIZED_TEST_FILES = r'test.*\.py'
 
 
 class PluginTestRunner(EnvironmentManager):
@@ -33,7 +34,6 @@ class PluginTestRunner(EnvironmentManager):
         self.library_path = Path(self.plugin_directory).parents[2]
         self.plugin_name = self.plugin_type + '__' + Path(self.plugin_directory).name
         self.env_name = self.plugin_name
-        self.has_requirements = (self.plugin_directory / 'requirements.txt').is_file()
         self.test = test if test else False
         self.results = results
         self.script_path = Path(__file__).parent / 'test_plugin.sh'
@@ -45,10 +45,33 @@ class PluginTestRunner(EnvironmentManager):
         self.teardown()
 
     def validate_plugin(self):
-        """ requires at least one file matching "test.*\.py" in plugin directory, e.g. test.py, test_data.py. """
+        """
+        requires at least one file matching the RECOGNIZED_TEST_FILES pattern in plugin directory,
+        e.g. test.py, test_data.py.
+        """
         test_files = [test_file for test_file in self.plugin_directory.iterdir()
                       if re.match(RECOGNIZED_TEST_FILES, test_file.name)]
-        assert len(test_files) > 0, "No test files matching 'test.*\.py' found"
+        assert len(test_files) > 0, f"No test files matching '{RECOGNIZED_TEST_FILES}' found"
+
+        self._validate_environment_yml()
+
+    def _validate_environment_yml(self):
+        # if environment.yml is present, ensure no dependency conflicts
+        # checks that environment.yml does not include env name or unsupported python versions
+        conda_yml_path = self.plugin_directory / 'environment.yml'
+        if conda_yml_path.is_file():
+            with open(conda_yml_path, "r") as f:
+                env = yaml.dump(yaml.safe_load(f))
+                # ensure that name is not set so as to not override our assigned env name
+                assert 'name' not in env, f"\nenvironment.yml must not specify 'name'"
+                python_specs = [line for line in env.split("\n") if 'python=' in line]
+                if len(python_specs) == 1:
+                    python_spec = python_specs[0]
+                    python_version = python_spec.split('python=')[1]
+                    assert python_version.startswith(('3.7', '3.8', '3.9'))  # should get these into a central place
+                elif len(python_specs) > 1:
+                    raise yaml.YAMLError('multiple versions of python found in environment.yml')
+                # (else) no python specifications, ignore
 
     def run_tests(self):
         """ 
@@ -56,8 +79,7 @@ class PluginTestRunner(EnvironmentManager):
         runs all tests or selected test for specified plugin
         """
         run_command = f"bash {self.script_path} \
-            {self.plugin_directory} {self.plugin_name} \
-            {str(self.has_requirements).lower()} {self.test} {self.library_path}"
+            {self.plugin_directory} {self.plugin_name} {self.test} {self.library_path}"
 
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
