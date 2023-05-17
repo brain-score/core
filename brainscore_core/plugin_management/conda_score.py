@@ -39,7 +39,7 @@ class CondaScore(EnvironmentManager):
         return completed_process
 
     @staticmethod
-    def read_score(library_path: Path, env_name: str) --> Score:
+    def read_score(library_path: Path, env_name: str) -> Score:
         score_path = CondaScore._score_path(library_path, env_name)
         with open(score_path, 'rb') as f:
             score = pickle.load(f)
