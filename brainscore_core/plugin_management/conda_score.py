@@ -61,7 +61,7 @@ class CondaScore(EnvironmentManager):
         There is still a remaining race condition when two scoring runs are started within the same library,
         which is currently not handled.
         """
-        return library_path.parent / f'conda_score_{env_name}.pkl'
+        return library_path.parent / f'conda_score--{env_name}.pkl'
 
 
 def wrap_score(library_path: Union[str, Path], model_identifier: str, benchmark_identifier: str,
