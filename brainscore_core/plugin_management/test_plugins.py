@@ -55,6 +55,7 @@ class PluginTestRunner(EnvironmentManager):
         if not conda_yml_path.is_file():
             with open(conda_yml_path, "r") as f:
                 env = yaml.dump(yaml.safe_load(f))
+                # ensure that name is not set so as to not override our assigned env name
                 assert 'name' not in env, f"\nenvironment.yml must not specify 'name'"
                 python_specs = [line for line in env.split("\n") if 'python=' in line]
                 if len(python_specs) == 1:
