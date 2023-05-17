@@ -1,15 +1,17 @@
+import pytest_check as check
+import re
 import warnings
 from pathlib import Path
 from typing import Dict, Union
 
-import pytest_check as check
 from .environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
+RECOGNIZED_TEST_FILES = 'test.*\.py'
 
 
 class PluginTestRunner(EnvironmentManager):
-    """Runs plugin tests (requires "test.py" for each plugin)
+    """Runs plugin tests (requires "test.*\.py" for each plugin)
     
     Usage examples (run `test_plugins.py` file in domain-specific brain-score library, e.g. `brainscore_language`):
 
@@ -43,8 +45,10 @@ class PluginTestRunner(EnvironmentManager):
         self.teardown()
 
     def validate_plugin(self):
-        """ requires "test.py" file in plugin directory """
-        assert (self.plugin_directory / 'test.py').is_file(), "'test.py' not found"
+        """ requires at least one file matching "test.*\.py" in plugin directory, e.g. test.py, test_data.py. """
+        test_files = [test_file for test_file in self.plugin_directory.iterdir()
+                      if re.match(RECOGNIZED_TEST_FILES, test_file.name)]
+        assert len(test_files) > 0, "No test files matching 'test.*\.py' found"
 
     def run_tests(self):
         """ 
@@ -62,10 +66,11 @@ class PluginTestRunner(EnvironmentManager):
 
 
 def run_specified_tests(root_directory: Path, test_file: str, results: Dict, test: str):
-    """ Runs either a single test or all tests in a specified test.py """
+    """ Runs either a single test or all tests in the specified test file """
     plugin_type, plugin_dirname, filename = test_file.split('/')[-3:]
     plugin = root_directory / plugin_type / plugin_dirname
-    assert filename == "test.py", "Filepath not recognized as test file, must be 'test.py'."
+    assert re.match(RECOGNIZED_TEST_FILES, filename), \
+        f"Test file {filename} not recognized as test file, must match '{RECOGNIZED_TEST_FILES}'."
     assert plugin_type in PLUGIN_TYPES, "Filepath not recognized as plugin test file."
     plugin_test_runner = PluginTestRunner(plugin, results, test=test)
     plugin_test_runner()
