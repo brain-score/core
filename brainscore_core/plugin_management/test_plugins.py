@@ -8,7 +8,7 @@ from typing import Dict, Union
 from .environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
-RECOGNIZED_TEST_FILES = 'test.*\.py'
+RECOGNIZED_TEST_FILES = r'test.*\.py'
 
 
 class PluginTestRunner(EnvironmentManager):
@@ -45,10 +45,13 @@ class PluginTestRunner(EnvironmentManager):
         self.teardown()
 
     def validate_plugin(self):
-        """ requires at least one file matching "test.*\.py" in plugin directory, e.g. test.py, test_data.py. """
+        """
+        requires at least one file matching the RECOGNIZED_TEST_FILES pattern in plugin directory,
+        e.g. test.py, test_data.py.
+        """
         test_files = [test_file for test_file in self.plugin_directory.iterdir()
                       if re.match(RECOGNIZED_TEST_FILES, test_file.name)]
-        assert len(test_files) > 0, "No test files matching 'test.*\.py' found"
+        assert len(test_files) > 0, f"No test files matching '{RECOGNIZED_TEST_FILES}' found"
 
         self._validate_environment_yml()
 
