@@ -30,7 +30,7 @@ def test_save_and_read_score():
     score = _create_dummy_score()
     library_path = Path(tempfile.mkdtemp()) / '__init__.py'
     env_name = 'dummy-model_dummy-benchmark'
-    expected_score_path = library_path.parent.parent / f'conda_score_{env_name}.pkl'
+    expected_score_path = library_path.parent.parent / f'conda_score--{env_name}.pkl'
     CondaScore.save_score(score, library_path=library_path, env_name=env_name)
     assert expected_score_path.is_file()
     result = CondaScore.read_score(library_path=library_path.parent, env_name=env_name)
