@@ -56,7 +56,7 @@ class PluginTestRunner(EnvironmentManager):
         # if environment.yml is present, ensure no dependency conflicts
         # checks that environment.yml does not include env name or unsupported python versions
         conda_yml_path = self.plugin_directory / 'environment.yml'
-        if not conda_yml_path.is_file():
+        if conda_yml_path.is_file():
             with open(conda_yml_path, "r") as f:
                 env = yaml.dump(yaml.safe_load(f))
                 # ensure that name is not set so as to not override our assigned env name
