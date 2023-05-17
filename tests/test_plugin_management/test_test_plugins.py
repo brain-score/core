@@ -1,9 +1,8 @@
+import pytest
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-
-import pytest
 
 from brainscore_core.plugin_management.test_plugins import PluginTestRunner
 
@@ -23,10 +22,32 @@ class TestPluginTestRunner:
         plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
         assert plugin_test_runner.plugin_name == 'plugintype__dummy_plugin'
 
-    def test_has_testfile(self):
+    def test_has_no_testfile(self):
         dummy_plugin_path = self.dummy_library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
         test_file = dummy_plugin_path / 'test.py'
         test_file.unlink()
+        plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
+        with pytest.raises(Exception):
+            plugin_test_runner.validate_plugin()
+
+    def test_has_testfile_underscore_prefix(self):
+        dummy_plugin_path = self.dummy_library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
+        test_file = dummy_plugin_path / 'test.py'
+        test_file.rename(dummy_plugin_path / 'test_plugin.py')
+        plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
+        plugin_test_runner.validate_plugin()
+
+    def test_has_testfile_no_underscore_prefix(self):
+        dummy_plugin_path = self.dummy_library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
+        test_file = dummy_plugin_path / 'test.py'
+        test_file.rename(dummy_plugin_path / 'testplugin.py')
+        plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
+        plugin_test_runner.validate_plugin()
+
+    def test_has_testfile_valid_python(self):
+        dummy_plugin_path = self.dummy_library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
+        test_file = dummy_plugin_path / 'test.py'
+        test_file.rename(dummy_plugin_path / 'testpluginpy')
         plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
         with pytest.raises(Exception):
             plugin_test_runner.validate_plugin()
