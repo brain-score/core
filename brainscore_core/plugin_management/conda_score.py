@@ -23,7 +23,7 @@ class CondaScore(EnvironmentManager):
 
     def __call__(self):
         self.result = self.score_in_env()
-        return self.read_score(self.library_path, self.env_name)
+        return self.consume_score(self.library_path, self.env_name)
 
     def score_in_env(self) -> 'subprocess.CompletedProcess[bytes]':
         """
@@ -39,7 +39,7 @@ class CondaScore(EnvironmentManager):
         return completed_process
 
     @staticmethod
-    def read_score(library_path: Path, env_name: str) -> Score:
+    def consume_score(library_path: Path, env_name: str) -> Score:
         score_path = CondaScore._score_path(library_path, env_name)
         with open(score_path, 'rb') as f:
             score = pickle.load(f)
