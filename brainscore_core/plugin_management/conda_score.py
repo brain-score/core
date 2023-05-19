@@ -23,7 +23,7 @@ class CondaScore(EnvironmentManager):
 
     def __call__(self):
         self.result = self.score_in_env()
-        return self.read_score(self.library_path)
+        return self.consume_score(self.library_path, self.env_name)
 
     def score_in_env(self) -> 'subprocess.CompletedProcess[bytes]':
         """
@@ -39,21 +39,21 @@ class CondaScore(EnvironmentManager):
         return completed_process
 
     @staticmethod
-    def read_score(library_path: Path):
-        score_path = CondaScore._score_path(library_path)
+    def consume_score(library_path: Path, env_name: str) -> Score:
+        score_path = CondaScore._score_path(library_path, env_name)
         with open(score_path, 'rb') as f:
             score = pickle.load(f)
             os.remove(score_path)
             return score
 
     @staticmethod
-    def save_score(score: Score, library_path: Path):
-        score_path = CondaScore._score_path(library_path.parent)
+    def save_score(score: Score, library_path: Path, env_name: str):
+        score_path = CondaScore._score_path(library_path.parent, env_name)
         with open(score_path, 'wb') as f:
             pickle.dump(score, f, pickle.HIGHEST_PROTOCOL)
 
     @staticmethod
-    def _score_path(library_path: Path) -> Path:
+    def _score_path(library_path: Path, env_name: str) -> Path:
         """
         File path inside the given library for sub-process to write the score to, and for us to read back in.
         Since separate scoring runs typically occur in separately installed libraries,
@@ -61,7 +61,7 @@ class CondaScore(EnvironmentManager):
         There is still a remaining race condition when two scoring runs are started within the same library,
         which is currently not handled.
         """
-        return library_path.parent / 'conda_score.pkl'
+        return library_path.parent / f'conda_score--{env_name}.pkl'
 
 
 def wrap_score(library_path: Union[str, Path], model_identifier: str, benchmark_identifier: str,
@@ -86,6 +86,6 @@ def wrap_score(library_path: Union[str, Path], model_identifier: str, benchmark_
         result = conda_score()
     else:
         result = score_function(model_identifier, benchmark_identifier)
-        CondaScore.save_score(result, Path(library_path))
+        CondaScore.save_score(result, Path(library_path), f'{model_identifier}_{benchmark_identifier}')
 
     return result
