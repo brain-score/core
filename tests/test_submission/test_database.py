@@ -60,8 +60,8 @@ class TestUser(SchemaTest):
         assert uid == None
 
 
-def _mock_submission_entry():
-    return submissionentry_from_meta(jenkins_id=123, user_id=1, model_type='base_model')
+def _mock_submission_entry(jenkins_id=123, user_id=1, model_type='base_model'):
+    return submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
 
 
 class TestModel(SchemaTest):
@@ -80,6 +80,16 @@ class TestModel(SchemaTest):
         entry = modelentry_from_model(model_identifier='dummy', domain='test',
                                       submission=submission_entry, public=True, competition=None, bibtex=SAMPLE_BIBTEX)
         assert entry.reference.year == '2013'
+
+    def test_resubmission(self):  # make model entry from user 1, then retrieve model entry from user 2 ("resubmit")
+        submission_entry = _mock_submission_entry()
+        params = dict(model_identifier='dummy', domain='test', public=True, competition=None, bibtex=SAMPLE_BIBTEX)
+        original_entry = modelentry_from_model(**params, submission=submission_entry)
+        # resubmit
+        resubmission = _mock_submission_entry(user_id=2)
+        resubmit_entry = modelentry_from_model(**params, submission=resubmission)
+        # even though resubmission had different submitter, model owner should still be original user
+        assert original_entry.owner == resubmit_entry.owner
 
 
 class _MockBenchmark(BenchmarkBase):
