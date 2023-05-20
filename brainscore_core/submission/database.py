@@ -80,11 +80,13 @@ def public_benchmark_identifiers(domain: str) -> List[str]:
 def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],
                           submission: Submission, domain: str,
                           bibtex: Union[None, str] = None) -> Model:
-    model_entry, created = Model.get_or_create(name=model_identifier, owner=submission.submitter,
-                                               defaults={'domain': domain,
-                                                         'public': public,
-                                                         'submission': submission,
-                                                         'competition': competition})
+    model_entry, created = Model.get_or_create(name=model_identifier,
+                                               defaults={
+                                                   'owner': submission.submitter,
+                                                   'domain': domain,
+                                                   'public': public,
+                                                   'submission': submission,
+                                                   'competition': competition})
     if bibtex and created:  # model entry was just created and we can add bibtex
         reference = reference_from_bibtex(bibtex)
         model_entry.reference = reference
