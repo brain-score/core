@@ -93,3 +93,13 @@ def import_plugin(library_root: str, plugin_type: str, identifier: str):
         importer.install_requirements()
 
     __import__(f'{library_root}.{plugin_type}.{importer.plugin_dirname}')
+
+
+def print_plugin_dir(library_root: str, plugin_type: str, identifier: str):
+    importer = ImportPlugin(library_root=library_root, plugin_type=plugin_type, identifier=identifier)
+    print(importer.locate_plugin())
+
+
+if __name__ == '__main__':
+    import fire
+    fire.Fire()
