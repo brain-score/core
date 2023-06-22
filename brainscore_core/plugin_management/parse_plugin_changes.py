@@ -97,8 +97,9 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	get_changed_plugin_paths(plugin_info_dict, changed_plugin_files, domain_root)
 
 	return plugin_info_dict
+	
 
-def get_scoring_info(commit_SHA: str, domain_root: str):
+def get_plugin_info(commit_SHA: str, domain_root: str):
 	"""
 	If any model or benchmark files changed, get plugin ids and set run_score to "True"
 	Otherwise set else "False"
@@ -115,6 +116,8 @@ def get_scoring_info(commit_SHA: str, domain_root: str):
 			plugin_info_dict[f'new_{plugin_type}'] = ' '.join(scoring_plugin_ids)
 	else:
 		plugin_info_dict["run_score"] = "False"
+
+	print(plugin_info_dict)
 
 
 def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
