@@ -93,17 +93,18 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	plugin_info_dict = {}
 	changed_files = get_all_changed_files(commit_SHA)
 	changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(changed_files)
+	is_automergeable(plugin_info_dict, len(changed_non_plugin_files))
 	get_changed_plugin_paths(plugin_info_dict, changed_plugin_files, domain_root)
 
 	return plugin_info_dict
 
 def get_scoring_info(commit_SHA: str, domain_root: str):
 	"""
-	if any model or benchmark files changed, get plugin ids and set run_score to "True", else "False"
+	Get 
+	If any model or benchmark files changed, get plugin ids and set run_score to "True"
+	Otherwise set else "False"
 	"""
 	plugin_info_dict = parse_plugin_changes(commit_SHA, domain_root)
-
-	is_automergeable(plugin_info_dict, len(changed_non_plugin_files))
 
 	scoring_plugin_types = ("models", "benchmarks")
 	plugins_to_score = [plugin_info_dict["changed_plugins"][plugin_type] for plugin_type in scoring_plugin_types]
@@ -119,17 +120,16 @@ def get_scoring_info(commit_SHA: str, domain_root: str):
 
 def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 	"""
-	Initiates a run of all tests in each changed plugin directory
+	Initiates run of all tests in each changed plugin directory
 	"""
 	plugin_info_dict = parse_plugin_changes(commit_SHA, domain_root)
 
 	tests_to_run = []
-
 	for plugin_type in plugin_info_dict["changed_plugins"]:
-		for plugin_dirname in plugin_type:
-			root = pathlib.Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-			for filepath in root.rglob(r'test.*\.py'):
-				tests_to_run.append(filepath)
+		changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
+		for plugin_dirname in changed_plugins:
+			root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
+			for filepath in root.rglob(r'test*.py'):
+				tests_to_run.append(str(filepath))
 
 	run_args('brainscore_language', tests_to_run)
-

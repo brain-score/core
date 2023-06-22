@@ -3,7 +3,7 @@ import re
 import warnings
 import yaml
 from pathlib import Path
-from typing import Dict, Union
+from typing import Dict, Union, List
 
 from .environment_manager import EnvironmentManager
 
