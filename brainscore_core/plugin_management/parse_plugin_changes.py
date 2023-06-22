@@ -100,7 +100,6 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 
 def get_scoring_info(commit_SHA: str, domain_root: str):
 	"""
-	Get 
 	If any model or benchmark files changed, get plugin ids and set run_score to "True"
 	Otherwise set else "False"
 	"""
@@ -132,4 +131,5 @@ def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 			for filepath in root.rglob(r'test*.py'):
 				tests_to_run.append(str(filepath))
 
+	print("Running tests for new or modified plugins...")
 	run_args('brainscore_language', tests_to_run)
