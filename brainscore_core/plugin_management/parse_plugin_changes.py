@@ -128,7 +128,7 @@ def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 	for plugin_type in plugin_info_dict["changed_plugins"]:
 		for plugin_dirname in plugin_type:
 			root = pathlib.Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-			for filepath in root.rglob('test*.py'):
+			for filepath in root.rglob(r'test.*\.py'):
 				tests_to_run.append(filepath)
 
 	run_args('brainscore_language', tests_to_run)
