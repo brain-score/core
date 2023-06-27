@@ -108,8 +108,9 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 
 def get_plugin_info(commit_SHA: str, domain_root: str):
 	"""
-	If any model or benchmark files changed, get plugin ids and set run_score to "True"
-	Otherwise set else "False"
+	If any model or benchmark files changed, get plugin ids and set run_score to "True".
+	Otherwise set to "False".
+	Print all collected information about plugins.
 	"""
 	plugin_info_dict = parse_plugin_changes(commit_SHA, domain_root)
 
