@@ -40,14 +40,6 @@ def get_changed_plugin_files(changed_files: str) -> Tuple[List[str], List[str]]:
 	return changed_plugin_files, changed_non_plugin_files
 
 
-def is_automergeable(plugin_info_dict: dict, num_changed_non_plugin_files: int):
-	""" 
-	Stores `plugin_info_dict['is_plugin_only']` `"True"` or `"False"` 
-	depending on whether there are any changed non-plugin files.
-	"""
-	plugin_info_dict["is_plugin_only"] = "False" if num_changed_non_plugin_files > 0 else "True"
-
-
 def _plugin_name_from_path(path_relative_to_library: str) -> str:
     """
     Returns the name of the plugin from the given path. 
@@ -100,11 +92,13 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	plugin_info_dict = {}
 	changed_files = get_all_changed_files(commit_SHA)
 	changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(changed_files)
-	is_automergeable(plugin_info_dict, len(changed_non_plugin_files))
+	
+	plugin_info_dict["is_automergeable"] = str(num_changed_non_plugin_files > 0)
+	
 	get_changed_plugin_paths(plugin_info_dict, changed_plugin_files, domain_root)
 
 	return plugin_info_dict
-	
+
 
 def get_plugin_info(commit_SHA: str, domain_root: str):
 	"""
