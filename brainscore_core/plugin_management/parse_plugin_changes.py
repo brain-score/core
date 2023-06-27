@@ -10,6 +10,9 @@ PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
 
 def get_all_changed_files(commit_SHA: str) -> List[str]:
+	"""
+	:return: a list of file paths, relative to the library root directory, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`
+	"""
 	cmd = f'git diff --name-only main {commit_SHA}'
 	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
 	files_changed = [f.decode() for f in files_changed_bytes]
