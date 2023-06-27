@@ -48,16 +48,17 @@ def _plugin_name_from_path(path_relative_to_library: str) -> str:
     return path_relative_to_library.split('/')[2]
 
 
-def get_changed_plugin_paths(plugin_info_dict: dict, changed_plugin_files: List[str], domain_root: str):
+def get_changed_plugin_paths(changed_plugin_files: List[str], domain_root: str) -> Dict[str, List[str]]:
 	"""
-	Adds full path (rel. to library) of all changed plugin directories for each plugin_type to plugin_info_dict
+	Returns a dictionary `plugin_type -> plugin names` with the full path (rel. to library) of all changed plugin directories for each plugin_type
 	"""
-	plugin_info_dict["changed_plugins"] = {}
+	changed_plugins = {}
 	for plugin_type in PLUGIN_DIRS:
 		plugin_type_path = f'{domain_root}/{plugin_type}/'
 		changed_plugin_paths = [fpath for fpath in changed_plugin_files if fpath.startswith(plugin_type_path)]
-		plugin_info_dict["changed_plugins"][plugin_type] = list(set([_plugin_name_from_path(fname) 
+		changed_plugins[plugin_type] = list(set([_plugin_name_from_path(fname) 
 			for fname in changed_plugin_paths if f'/{plugin_type}/' in fname]))
+	return changed_plugins
 
 
 def _get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: str) -> List[str]:
@@ -91,19 +92,20 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	"""
 	plugin_info_dict = {}
 	changed_files = get_all_changed_files(commit_SHA)
-	changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(changed_files)
-	
-	plugin_info_dict["is_automergeable"] = str(num_changed_non_plugin_files > 0)
-	
+	changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(changed_files)	
 	get_changed_plugin_paths(plugin_info_dict, changed_plugin_files, domain_root)
+
+	plugin_info_dict["changed_plugins"] = get_changed_plugin_paths(changed_plugin_files, domain_root)
+	plugin_info_dict["is_automergeable"] = str(num_changed_non_plugin_files > 0)
 
 	return plugin_info_dict
 
 
 def get_plugin_info(commit_SHA: str, domain_root: str):
 	"""
-	If any model or benchmark files changed, get plugin ids and set run_score to "True"
-	Otherwise set else "False"
+	If any model or benchmark files changed, get plugin ids and set run_score to "True".
+	Otherwise set to "False".
+	Print all collected information about plugins.
 	"""
 	plugin_info_dict = parse_plugin_changes(commit_SHA, domain_root)
 

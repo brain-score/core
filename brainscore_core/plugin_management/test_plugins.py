@@ -113,7 +113,7 @@ def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]
     Run single specified test or all tests for each plugin.
 
     :param root_directory: the directory containing all plugin types, e.g. `/local/brain-score_language/`
-    :param test_files: List of paths of target test files (optional)
+    :param test_files: List of paths of target test files. If this is `None`, run all tests
     :param test: name of test to run (optional)
     """
     results = {}
