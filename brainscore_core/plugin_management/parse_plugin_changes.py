@@ -101,7 +101,7 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	changed_files = get_all_changed_files(commit_SHA)
 	changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(changed_files)
 	is_automergeable(plugin_info_dict, len(changed_non_plugin_files))
-	get_changed_plugin_paths(plugin_info_dict, changed_plugin_files, domain_root)
+	plugin_info_dict["changed_plugins"] = get_changed_plugin_paths(changed_plugin_files, domain_root)
 
 	return plugin_info_dict
 	
