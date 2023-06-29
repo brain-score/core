@@ -17,7 +17,8 @@ def test_get_all_changed_files():
 
     commit_sha = '097d7cdda25b399317a885a6263b43e133ead16e'
     comparison_branch = '90ca868673104413ecd3d8b9c86f9997d427dbfa'
-    files_changed = get_all_changed_files(commit_sha, comparison_branch)
+    files_changed, core_dir = get_all_changed_files(commit_sha, comparison_branch)
+    assert core_dir == 'core'
     assert files_changed[0] == 'brainscore_core/submission/endpoints.py'
 
 
