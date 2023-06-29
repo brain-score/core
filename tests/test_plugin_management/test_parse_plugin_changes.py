@@ -15,11 +15,10 @@ DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
 
 def test_get_all_changed_files():
 
-    commit_sha = '097d7cdda25b399317a885a6263b43e133ead16e'
-    comparison_branch = '90ca868673104413ecd3d8b9c86f9997d427dbfa'
+    commit_sha = '1ee0923234bd40126cff0d995d56c608a4a803a1'
+    comparison_branch = 'b55f3f3c5b4f30c0d1963e59f4a65432dfc90c31'
     files_changed, core_dir = get_all_changed_files(commit_sha, comparison_branch)
-    assert core_dir == 'core'
-    assert files_changed[0] == 'brainscore_core/submission/endpoints.py'
+    assert set(['.travis.yml', 'README.md', 'pyproject.toml', 'setup.py']) == set(files_changed)
 
 
 def test_get_changed_plugin_files():

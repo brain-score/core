@@ -18,7 +18,7 @@ def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str
 	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
 	files_changed = [f.decode() for f in files_changed_bytes]
 
-	return files_changed, str(core_dir)
+	return files_changed
 
 
 def get_changed_plugin_files(changed_files: str) -> Tuple[List[str], List[str]]:
