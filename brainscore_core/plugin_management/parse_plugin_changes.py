@@ -2,19 +2,19 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 from .test_plugins import run_args
 
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
 
-def get_all_changed_files(commit_SHA: str) -> List[str]:
+def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str]:
 	"""
 	:return: a list of file paths, relative to the library root directory, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`
 	"""
-	parent_dir = Path(__file__).parent
-	cmd = f'git diff -C {parent_dir} --name-only main {commit_SHA}'
+	core_dir = Path(__file__).parents[2]
+	cmd = f'git diff --name-only {comparison_branch} {commit_SHA} -C {core_dir}'
 	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
 	files_changed = [f.decode() for f in files_changed_bytes]
 
@@ -51,7 +51,7 @@ def _plugin_name_from_path(path_relative_to_library: str) -> str:
 
 def get_changed_plugin_paths(changed_plugin_files: List[str], domain_root: str) -> Dict[str, List[str]]:
 	"""
-	Returns a dictionary `plugin_type -> plugin names` with the full path (rel. to library) of all changed plugin directories for each plugin_type
+	Returns a dictionary `plugin_type -> plugin names` with the full names of all changed plugin directories for each plugin_type
 	"""
 	changed_plugins = {}
 	for plugin_type in PLUGIN_DIRS:
@@ -62,7 +62,7 @@ def get_changed_plugin_paths(changed_plugin_files: List[str], domain_root: str) 
 	return changed_plugins
 
 
-def _get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: str) -> List[str]:
+def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: str) -> List[str]:
 	"""
 	Searches all __init.py__ files in `new_plugin_dirs` of `plugin_type` for registered plugins.
 	Returns list of identifiers for each registered plugin.
@@ -94,7 +94,6 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	plugin_info_dict = {}
 	changed_files = get_all_changed_files(commit_SHA)
 	changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(changed_files)	
-	get_changed_plugin_paths(plugin_info_dict, changed_plugin_files, domain_root)
 
 	plugin_info_dict["changed_plugins"] = get_changed_plugin_paths(changed_plugin_files, domain_root)
 	plugin_info_dict["is_automergeable"] = str(num_changed_non_plugin_files > 0)
@@ -116,7 +115,7 @@ def get_plugin_info(commit_SHA: str, domain_root: str):
 	if len(plugins_to_score) > 0:
 		plugin_info_dict["run_score"] = "True"
 		for plugin_type in scoring_plugin_types:
-			scoring_plugin_ids = _get_plugin_ids(plugin_type, plugin_info_dict["changed_plugins"][plugin_type], domain_root)
+			scoring_plugin_ids = get_plugin_ids(plugin_type, plugin_info_dict["changed_plugins"][plugin_type], domain_root)
 			plugin_info_dict[f'new_{plugin_type}'] = ' '.join(scoring_plugin_ids)
 	else:
 		plugin_info_dict["run_score"] = "False"
