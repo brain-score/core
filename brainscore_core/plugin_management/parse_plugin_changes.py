@@ -1,3 +1,4 @@
+import logging
 import re
 import subprocess
 import sys
@@ -5,6 +6,8 @@ from pathlib import Path
 from typing import List, Tuple, Dict
 
 from .test_plugins import run_args
+
+_logger = logging.getLogger(__name__)
 
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
