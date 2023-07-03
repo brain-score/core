@@ -50,17 +50,17 @@ def _plugin_name_from_path(path_relative_to_library: str) -> str:
     return path_relative_to_library.split('/')[2]
 
 
-def get_changed_plugin_paths(changed_plugin_files: List[str], domain_root: str) -> Dict[str, List[str]]:
+def get_plugin_paths(plugin_files: List[str], domain_root: str) -> Dict[str, List[str]]:
 	"""
-	Returns a dictionary `plugin_type -> plugin names` with the full names of all changed plugin directories for each plugin_type
+	Returns a dictionary `plugin_type -> plugin names` with the full names of all plugin directories for each plugin_type
 	"""
-	changed_plugins = {}
+	plugins = {}
 	for plugin_type in PLUGIN_DIRS:
 		plugin_type_path = f'{domain_root}/{plugin_type}/'
-		changed_plugin_paths = [fpath for fpath in changed_plugin_files if fpath.startswith(plugin_type_path)]
-		changed_plugins[plugin_type] = list(set([_plugin_name_from_path(fname) 
-			for fname in changed_plugin_paths if f'/{plugin_type}/' in fname]))
-	return changed_plugins
+		plugin_paths = [fpath for fpath in plugin_files if fpath.startswith(plugin_type_path)]
+		plugins[plugin_type] = list(set([_plugin_name_from_path(fname) 
+			for fname in plugin_paths if f'/{plugin_type}/' in fname]))
+	return plugins
 
 
 def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: str) -> List[str]:
