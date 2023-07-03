@@ -138,5 +138,5 @@ def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 			for filepath in root.rglob(r'test*.py'):
 				tests_to_run.append(str(filepath))
 
-	print("Running tests for new or modified plugins...")
+	_logger.info("Running tests for new or modified plugins...")
 	run_args('brainscore_language', tests_to_run)
