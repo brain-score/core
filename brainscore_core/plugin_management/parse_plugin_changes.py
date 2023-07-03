@@ -21,7 +21,7 @@ def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str
 	return files_changed
 
 
-def get_changed_plugin_files(changed_files: str) -> Tuple[List[str], List[str]]:
+def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 	"""
 	:return: one list of files that have been changed inside a plugin, and one list of files that have been changed outside of all plugins, 
 		e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py'], ['model_helpers/make_model_brainlike.py']`
