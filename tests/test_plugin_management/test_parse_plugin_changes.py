@@ -21,9 +21,8 @@ def test_get_all_changed_files():
     assert set(['.travis.yml', 'README.md', 'pyproject.toml', 'setup.py']) == set(files_changed)
 
 
-def test_get_changed_plugin_files():
-
-    changed_plugin_files, changed_non_plugin_files = get_changed_plugin_files(DUMMY_FILES_CHANGED)
+def test_separate_plugin_files():
+    plugin_files, non_plugin_files = separate_plugin_files(DUMMY_FILES_CHANGED)
     assert set(['brainscore_core/models/dummy_model/model.py', 
         'brainscore_core/models/dummy_model/test.py', 
         'brainscore_core/models/dummy_model/__init__.py', 
