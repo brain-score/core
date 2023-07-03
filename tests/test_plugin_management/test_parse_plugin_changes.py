@@ -3,7 +3,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from brainscore_core.plugin_management.parse_plugin_changes import *
+from brainscore_core.plugin_management.parse_plugin_changes import get_all_changed_files, separate_plugin_files, get_plugin_paths, get_plugin_ids
 
 DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py', 
                 'brainscore_core/models/dummy_model/test.py', 
