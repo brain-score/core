@@ -31,9 +31,8 @@ def test_separate_plugin_files():
         'brainscore_core/README.md']) == set(changed_non_plugin_files)
 
 
-def test_get_changed_plugin_paths():
-
-    changed_plugins = get_changed_plugin_paths(DUMMY_FILES_CHANGED, 'brainscore_core')
+def test_get_plugin_paths():
+    changed_plugins = get_plugin_paths(DUMMY_FILES_CHANGED, 'brainscore_core')
     assert changed_plugins['models'][0] == 'dummy_model'
     assert changed_plugins['benchmarks'][0] == 'dummy_benchmark'
     assert len(changed_plugins['data']) + len(changed_plugins['metrics']) == 0
