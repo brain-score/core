@@ -121,10 +121,8 @@ def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]
         run_all_tests(root_directory=Path(root_directory), results=results)
     else:
         for test_file in test_files:
-            if Path(test_file).exists():
-                run_specified_tests(root_directory=Path(root_directory), test_file=test_file, results=results, test=test)
-            else:
-                warnings.warn(f"Test file {test_file} not found.")
+            assert Path(test_file).exists()
+            run_specified_tests(root_directory=Path(root_directory), test_file=test_file, results=results, test=test)
 
     plugins_with_errors = {k: v for k, v in results.items() if (v != 0) and (v != 5)}
     num_plugins_failed = len(plugins_with_errors)
