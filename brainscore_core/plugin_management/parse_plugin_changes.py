@@ -26,7 +26,7 @@ def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str
 
 def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 	"""
-	:return: one list of files that have been changed inside a plugin, and one list of files that have been changed outside of all plugins, 
+	:return: one list of files that are located inside a plugin, and one list of files that are located outside of all plugins, 
 		e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py'], ['model_helpers/make_model_brainlike.py']`
 	"""
 	changed_files_list = changed_files.split() if type(changed_files) == str else changed_files
