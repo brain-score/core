@@ -29,19 +29,17 @@ def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 	:return: one list of files that are located inside a plugin, and one list of files that are located outside of all plugins, 
 		e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py'], ['model_helpers/make_model_brainlike.py']`
 	"""
-	changed_files_list = changed_files.split() if type(changed_files) == str else changed_files
+	plugin_files = []
+	non_plugin_files = []
 
-	changed_plugin_files = []
-	changed_non_plugin_files = []
-
-	for f in changed_files_list:
+	for f in files:
 		subdir = f.split('/')[1] if len(f.split('/')) > 1 else None
 		if not any(plugin_dir == subdir for plugin_dir in PLUGIN_DIRS):
-			changed_non_plugin_files.append(f)
+			non_plugin_files.append(f)
 		else:
-			changed_plugin_files.append(f)
+			plugin_files.append(f)
 
-	return changed_plugin_files, changed_non_plugin_files
+	return plugin_files, non_plugin_files
 
 
 def _plugin_name_from_path(path_relative_to_library: str) -> str:
