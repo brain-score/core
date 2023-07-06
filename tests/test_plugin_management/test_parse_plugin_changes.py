@@ -26,9 +26,9 @@ def test_separate_plugin_files():
     assert set(['brainscore_core/models/dummy_model/model.py', 
         'brainscore_core/models/dummy_model/test.py', 
         'brainscore_core/models/dummy_model/__init__.py', 
-        'brainscore_core/benchmarks/dummy_benchmark/__init__.py']) == set(changed_plugin_files)
+        'brainscore_core/benchmarks/dummy_benchmark/__init__.py']) == set(plugin_files)
     assert set(['brainscore_core/__init__.py', 
-        'brainscore_core/README.md']) == set(changed_non_plugin_files)
+        'brainscore_core/README.md']) == set(non_plugin_files)
 
 
 def test_get_plugin_paths():
