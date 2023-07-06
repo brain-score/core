@@ -121,7 +121,7 @@ def get_plugin_info(commit_SHA: str, domain_root: str):
 	else:
 		plugin_info_dict["run_score"] = "False"
 
-	print(plugin_info_dict)
+	print(plugin_info_dict) # output is accessed via print!
 
 
 def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
