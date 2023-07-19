@@ -1,3 +1,4 @@
+import pytest
 import shutil
 import sys
 import tempfile
@@ -13,7 +14,8 @@ DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
                 'brainscore_core/README.md']
 
 
-def test_branch_git_access():
+@pytest.mark.pr_only
+def test_git_access():
     import subprocess
     cmd = f'git diff --name-only 1ee0923234bd40126cff0d995d56c608a4a803a1 b55f3f3c5b4f30c0d1963e59f4a65432dfc90c31'
     files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
