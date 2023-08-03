@@ -77,7 +77,7 @@ def installation_preference():
     return pref
 
 
-def import_plugin(library_root: str, plugin_type: str, identifier: str):
+def import_plugin(library_root: str, plugin_type: str, identifier: str, registry_prefix: str = None):
     """ 
     Installs the dependencies of the given plugin and imports its base package: 
     Given the identifier `Futrell2018-pearsonr` from library_root `brainscore_language`,
@@ -87,7 +87,8 @@ def import_plugin(library_root: str, plugin_type: str, identifier: str):
     :meth:`~brainscore_core.plugin_management.ImportPlugin.install_requirements` installs all requirements
         in that directory's requirements.txt, and the plugin base package is imported
     """
-    importer = ImportPlugin(library_root, plugin_type, identifier)
+    importer = ImportPlugin(library_root=library_root, plugin_type=plugin_type, identifier=identifier,
+                            registry_prefix=registry_prefix)
 
     if installation_preference() != 'no':
         importer.install_requirements()
@@ -102,4 +103,5 @@ def print_plugin_dir(library_root: str, plugin_type: str, identifier: str):
 
 if __name__ == '__main__':
     import fire
+
     fire.Fire()
