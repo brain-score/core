@@ -18,9 +18,10 @@ install:
   - pip list
 jobs:
   include:
-    
-    if: type = pull_request
-    - script: pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
+    - stage: pr
+      if: type = pull_request
+      script: pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
   
-    if: type = push
-    - script: pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"
+    - stage: branch
+      if: type = push
+      script: pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"
