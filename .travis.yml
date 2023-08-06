@@ -16,6 +16,11 @@ install:
   - conda update -q conda
   - conda info -a
   - pip list
-script:
-  - if [ type = pull_request ]; then pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"; fi
-  - if [ type = push ]; then pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"; fi
+jobs:
+  include:
+    
+    if: type = pull_request
+    script: pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"; fi
+  
+    if: type = push
+    script: pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"; fi
