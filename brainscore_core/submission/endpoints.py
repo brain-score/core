@@ -11,16 +11,17 @@ from abc import ABC
 from argparse import ArgumentParser
 from datetime import datetime
 from email.mime.text import MIMEText
-from typing import List, Union, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import requests
 from requests.auth import HTTPBasicAuth
-
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
-from brainscore_core.submission.database import connect_db, modelentry_from_model, \
-    submissionentry_from_meta, benchmarkinstance_from_benchmark, update_score, \
-    public_model_identifiers, public_benchmark_identifiers, uid_from_email, email_from_uid
+from brainscore_core.submission.database import (
+    benchmarkinstance_from_benchmark, connect_db, email_from_uid,
+    modelentry_from_model, public_benchmark_identifiers,
+    public_model_identifiers, submissionentry_from_meta, uid_from_email,
+    update_score)
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ class RunScoringEndpoint:
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, domain: str, jenkins_id: int, models: List[str], benchmarks: List[str],
+    def __call__(self, domain: str, jenkins_id: int, model_identifier: str, benchmark_identifier: str,
                  user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
         Run the `models` on the `benchmarks`, and write resulting score to the database.
@@ -128,38 +129,44 @@ class RunScoringEndpoint:
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
         entire_submission_successful = True
 
-        # resolve settings
-        if models == self.ALL_PUBLIC:
-            models = public_model_identifiers(domain)
-        if benchmarks == self.ALL_PUBLIC:
-            benchmarks = public_benchmark_identifiers(domain)
 
-        logger.info(f"Models: {models}")
-        logger.info(f"Benchmarks: {benchmarks}")
+        logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
 
-        for model_identifier in models:
-            for benchmark_identifier in benchmarks:
-                logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
-                # TODO: I am worried about reloading models inside the loop. E.g. a keras model where layer names are
-                #  automatic and will be consecutive from previous layers
-                #  (e.g. on first load layers are [1, 2, 3], on second load layers are [4, 5, 6])
-                #  which can lead to issues with layer assignment
-                try:
-                    self._score_model_on_benchmark(model_identifier=model_identifier,
-                                                   benchmark_identifier=benchmark_identifier,
-                                                   submission_entry=submission_entry, domain=domain,
-                                                   public=public, competition=competition)
-                except Exception as e:
-                    entire_submission_successful = False
-                    logging.error(
-                        f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
-                        exc_info=True)
+        try:
+            self._score_model_on_benchmark(model_identifier=model_identifier,
+                                            benchmark_identifier=benchmark_identifier,
+                                            submission_entry=submission_entry, domain=domain,
+                                            public=public, competition=competition)
+        except Exception as e:
+            entire_submission_successful = False
+            logging.error(
+                f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
+                exc_info=True)
 
         # finalize status of submission
         submission_status = 'successful' if entire_submission_successful else 'failure'
         submission_entry.status = submission_status
         logger.info(f'Submission is stored as {submission_status}')
         submission_entry.save()
+
+    def get_models_and_benchmarks_to_score(self, domain: str, models: List[str], benchmarks: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        Identify the set of new models and new benchmarks for scoring. Replaces `models` with the list of
+        public models if `models` is `ALL_PUBLIC`, and similarly for `benchmarks`.
+
+        :param domain: "language" or "vision"
+        :param models: either a list of model identifiers or the string
+            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
+        :param benchmarks: either a list of benchmark identifiers or the string
+            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
+        """
+        
+        if models == self.ALL_PUBLIC:
+            models = public_model_identifiers(domain)
+        if benchmarks == self.ALL_PUBLIC:
+            benchmarks = public_benchmark_identifiers(domain)
+        
+        return models, benchmarks
 
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission, domain: str,
