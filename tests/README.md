@@ -6,7 +6,8 @@ They are automatically downloaded by executing `bash download_test_files.sh`.
 ## Markers
 Unit tests have various markers that denote possible issues in the travis build:
 
-* **private_access**: tests that require access to a private ressource, such as assemblies on S3 (travis pull request builds can not have private access)
+* **pr_only**: tests that should only be run on pull requests
+* **private_access**: tests that require access to a private resource, such as assemblies on S3 (travis pull request builds can not have private access)
 * **memory_intense**: tests requiring more memory than is available in the travis sandbox (currently 3 GB, https://docs.travis-ci.com/user/common-build-problems/#my-build-script-is-killed-without-any-error)
 * **requires_gpu**: tests requiring a GPU to run or to run in a reasonable time (travis does not support GPUs/CUDA)
 * **slow**: tests leading to runtimes that are not possible on the openmind cluster (>1 hour per test) 

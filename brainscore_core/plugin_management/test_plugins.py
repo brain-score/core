@@ -3,7 +3,7 @@ import re
 import warnings
 import yaml
 from pathlib import Path
-from typing import Dict, Union
+from typing import Dict, Union, List
 
 from .environment_manager import EnvironmentManager
 
@@ -108,21 +108,21 @@ def run_all_tests(root_directory: Path, results: Dict):
                 plugin_test_runner()
 
 
-def run_args(root_directory: Union[Path, str], test_file: Union[None, str] = None, test: Union[None, str] = None):
+def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]] = None, test: Union[None, str] = None):
     """
     Run single specified test or all tests for each plugin.
 
     :param root_directory: the directory containing all plugin types, e.g. `/local/brain-score_language/`
-    :param test_file: path of target test file (optional)
+    :param test_files: List of paths of target test files. If this is `None`, run all tests
     :param test: name of test to run (optional)
     """
     results = {}
-    if not test_file:
+    if not test_files:
         run_all_tests(root_directory=Path(root_directory), results=results)
-    elif test_file and Path(test_file).exists():
-        run_specified_tests(root_directory=Path(root_directory), test_file=test_file, results=results, test=test)
     else:
-        warnings.warn("Test file not found.")
+        for test_file in test_files:
+            assert Path(test_file).exists()
+            run_specified_tests(root_directory=Path(root_directory), test_file=test_file, results=results, test=test)
 
     plugins_with_errors = {k: v for k, v in results.items() if (v != 0) and (v != 5)}
     num_plugins_failed = len(plugins_with_errors)
