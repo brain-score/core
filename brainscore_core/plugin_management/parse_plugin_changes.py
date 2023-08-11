@@ -1,4 +1,3 @@
-import logging
 import re
 import subprocess
 import sys
@@ -6,8 +5,6 @@ from pathlib import Path
 from typing import List, Tuple, Dict
 
 from .test_plugins import run_args
-
-_logger = logging.getLogger(__name__)
 
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
@@ -139,5 +136,6 @@ def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 			for filepath in root.rglob(r'test*.py'):
 				tests_to_run.append(str(filepath))
 
-	_logger.info("Running tests for new or modified plugins...")
-	run_args('brainscore_language', tests_to_run)
+	print("Running tests for new or modified plugins...")
+	print(tests_to_run)
+	print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
