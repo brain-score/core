@@ -1,4 +1,3 @@
-import logging
 import re
 import subprocess
 import sys
@@ -6,8 +5,6 @@ from pathlib import Path
 from typing import List, Tuple, Dict
 
 from .test_plugins import run_args
-
-_logger = logging.getLogger(__name__)
 
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
@@ -18,8 +15,9 @@ def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str
 	"""
 	core_dir = Path(__file__).parents[2]
 	cmd = f'git diff --name-only {comparison_branch} {commit_SHA} -C {core_dir}'
-	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
+	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.splitlines()
 	files_changed = [f.decode() for f in files_changed_bytes]
+	assert not files_changed[0].startswith('fatal')
 
 	return files_changed
 
@@ -97,7 +95,7 @@ def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
 	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files)	
 
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
-	plugin_info_dict["is_automergeable"] = str(num_changed_non_plugin_files > 0)
+	plugin_info_dict["is_automergeable"] = str(len(changed_non_plugin_files) > 0)
 
 	return plugin_info_dict
 
@@ -138,5 +136,6 @@ def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 			for filepath in root.rglob(r'test*.py'):
 				tests_to_run.append(str(filepath))
 
-	_logger.info("Running tests for new or modified plugins...")
-	run_args('brainscore_language', tests_to_run)
+	print("Running tests for new or modified plugins...")
+	print(tests_to_run)
+	print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
