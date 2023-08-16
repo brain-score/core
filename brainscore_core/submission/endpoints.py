@@ -116,16 +116,14 @@ class RunScoringEndpoint:
     def __call__(self, domain: str, jenkins_id: int, model_identifier: str, benchmark_identifier: str,
                  user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
-        Run the `models` on the `benchmarks`, and write resulting score to the database.
+        Run the `model_identifier` on the `benchmark_identifier`, and write resulting score to the database.
 
         Explanation of subset of parameters:
         :param domain: "language" or "vision"
-        :param models: either a list of model identifiers or the string
-            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
-        :param benchmarks: either a list of benchmark identifiers or the string
-            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
+        :param model_identifier: a string of a model identifier
+        :param benchmark_identifier: a string of a model identifier
         """
-        # setup entry for this entire submission
+        # setup entry for this submission
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
         entire_submission_successful = True
 
