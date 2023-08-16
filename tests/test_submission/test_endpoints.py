@@ -8,8 +8,8 @@ import requests
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db
-from brainscore_core.submission.database_models import clear_schema
 from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text
+from brainscore_core.submission.database_models import Model, BenchmarkType, clear_schema
 from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,31 @@ class TestUserManager:
         smtp_mock.assert_called_once_with('smtp.gmail.com', 465) 
 
 
+class DummyDomainPlugins(DomainPlugins):    
+    def load_model(self, model_identifier: str):
+        model_class1 = namedtuple('DummyModel1', field_names=['identifier'])
+        model_class2 = namedtuple('DummyModel2', field_names=['identifier'])
+        model_class = {
+            "dummymodel1": model_class1,
+            "dummymodel2": model_class2,
+        }[model_identifier]
+        return model_class(identifier=model_identifier)
+
+    def load_benchmark(self, benchmark_identifier: str) -> Benchmark:
+        benchmark_class1 = namedtuple('DummyBenchmark1',
+                                        field_names=['identifier', 'parent', 'version', 'bibtex', 'ceiling'])
+        benchmark_class2 = namedtuple('DummyBenchmark2',
+                                        field_names=['identifier', 'parent', 'version', 'bibtex', 'ceiling'])
+        benchmark_class = {
+            "dummybenchmark1": benchmark_class1,
+            "dummybenchmark2": benchmark_class2,
+        }[benchmark_identifier]
+        return benchmark_class(identifier=benchmark_identifier, parent='neural', version=0, bibtex=None,
+                                ceiling=Score(1))
+
+    def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
+        return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+            
 class TestRunScoring:
     test_database = None
 
@@ -80,35 +105,74 @@ class TestRunScoring:
     def setup_method(self):
         logger.info('Initialize database entries')
         init_users()
+        
+        for model_id in ["dummymodel1", "dummymodel2"]:
+            Model.get_or_create(name=model_id, domain="test", public=True, owner=2)
+        for benchmark_id in ["dummybenchmark1", "dummybenchmark2"]:
+            BenchmarkType.get_or_create(identifier=benchmark_id, domain="test", visible=True, order=999)
 
     def teardown_method(self):
         logger.info('Clean database')
         clear_schema()
 
-    def test_1model_1benchmark(self):
-        class DummyDomainPlugins(DomainPlugins):
-            def load_model(self, model_identifier: str):
-                model_class = namedtuple('DummyModel',
-                                         field_names=[])
-                return model_class()
-
-            def load_benchmark(self, benchmark_identifier: str) -> Benchmark:
-                benchmark_class = namedtuple('DummyBenchmark',
-                                             field_names=['identifier', 'parent', 'version', 'bibtex', 'ceiling'])
-                return benchmark_class(identifier='dummybenchmark', parent='neural', version=0, bibtex=None,
-                                       ceiling=Score(1))
-
-            def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
-                return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
-
+    def test_get_models_list_benchmarks_list(self):
+        domain, models, benchmarks = 'test', ['dummymodel1'], ['dummybenchmark1']
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
-        endpoint(domain='test', models=['dummymodel'], benchmarks=['dummybenchmark'],
+        
+        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        assert endpoint_models == models
+        assert endpoint_benchmarks == benchmarks
+
+    def test_get_models_all_benchmarks_list(self):
+        domain, models, benchmarks = 'test', RunScoringEndpoint.ALL_PUBLIC, ['dummybenchmark1']
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        
+        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        assert endpoint_models == ["dummymodel1", "dummymodel2"]
+        assert endpoint_benchmarks == benchmarks
+
+    def test_get_models_list_benchmarks_all(self):
+        domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        
+        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        assert endpoint_models == models
+        assert endpoint_benchmarks == ['dummybenchmark1', 'dummybenchmark2']
+
+    def test_get_models_all_benchmarks_all(self):
+        domain, models, benchmarks = 'test', RunScoringEndpoint.ALL_PUBLIC, RunScoringEndpoint.ALL_PUBLIC
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        
+        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        assert endpoint_models == ["dummymodel1", "dummymodel2"]
+        assert endpoint_benchmarks == ['dummybenchmark1', 'dummybenchmark2']
+    
+    def test_score_model_benchmark(self):
+        domain, model_id, benchmark_id = 'test', 'dummymodel1', 'dummybenchmark1'
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        
+        endpoint(domain=domain, model_identifier=model_id, benchmark_identifier=benchmark_id,
                  jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
         score_entries = database_models.Score.select()
         score_entries = list(score_entries)
         assert len(score_entries) == 1
         score_entry = score_entries[0]
         assert score_entry.score_raw == 0.8
+    
+    def test_full_scoring(self):
+        domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        
+        models, benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+
+        for model_id in models:
+            for benchmark_id in benchmarks:
+                endpoint(domain=domain, model_identifier=model_id, benchmark_identifier=benchmark_id, jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        score_entries = database_models.Score.select()
+        score_entries = list(score_entries)
+        assert len(score_entries) == 2
+        for score_entry in score_entries:
+            assert score_entry.score_raw == 0.8
 
 
 class TestShortenText:
