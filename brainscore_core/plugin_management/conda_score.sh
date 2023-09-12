@@ -10,7 +10,7 @@ ENVS_DIR=$6
 ### DEPENDENCIES
 
 get_plugin_dir() {
-  python brainscore_core/plugin_management/import_plugin print_plugin_dir "$LIBRARY_NAME" "$1" "$2"
+  python -m brainscore_core.plugin_management.import_plugin print_plugin_dir "$LIBRARY_NAME" "$1" "$2"
 }
 
 MODEL_DIR=$LIBRARY_NAME/models/$(get_plugin_dir "models" "$MODEL_ID")
@@ -36,7 +36,7 @@ if [ -f "$BENCHMARK_ENV_YML" ]; then
   output=$(conda env update --file $BENCHMARK_ENV_YML 2>&1) || echo $output
 fi
 # install library dependencies
-output=$(python -m pip install "." 2>&1) || echo $output
+output=$(python -m pip install -e "." 2>&1) || echo $output
 
 ### SCORING
 echo "Scoring ${MODEL_ID} on ${BENCHMARK_ID}"
