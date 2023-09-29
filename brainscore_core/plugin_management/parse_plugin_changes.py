@@ -122,6 +122,15 @@ def get_plugin_info(commit_SHA: str, domain_root: str):
 	print(plugin_info_dict) # output is accessed via print!
 
 
+def is_automergeable(commit_SHA: str, domain_root: str):
+	"""
+	Print "true" if PR ONLY changes plugin files, else print "false"
+	"""
+	plugin_info_dict = get_plugin_info(commit_SHA, domain_root)
+
+	print(plugin_info_dict["is_automergeable"])
+
+
 def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
 	"""
 	Initiates run of all tests in each changed plugin directory
