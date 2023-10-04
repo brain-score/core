@@ -1,3 +1,4 @@
+import os
 import pytest
 import shutil
 import sys
@@ -13,28 +14,13 @@ DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
                 'brainscore_core/__init__.py',
                 'brainscore_core/README.md']
 
-
-@pytest.mark.pr_only
-def test_git_access():
-    
-    import subprocess
-    cmd = f'git diff --name-only 1ee0923234bd40126cff0d995d56c608a4a803a1 b55f3f3c5b4f30c0d1963e59f4a65432dfc90c31'
-    files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
-    files_changed = [f.decode() for f in files_changed_bytes]
-    assert set(['.travis.yml', 'README.md', 'pyproject.toml', 'setup.py']) == set(files_changed)
-    core_dir = Path(__file__).parents[2]
-    cmd = f'git diff --name-only 1ee0923234bd40126cff0d995d56c608a4a803a1 b55f3f3c5b4f30c0d1963e59f4a65432dfc90c31 -C {core_dir}'
-    files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.splitlines()
-    files_changed = [f.decode() for f in files_changed_bytes]
-    print(core_dir)
-    assert set(['.travis.yml', 'README.md', 'pyproject.toml', 'setup.py']) == set(files_changed)
-
 @pytest.mark.pr_only
 def test_get_all_changed_files():
 
     commit_sha = '1ee0923234bd40126cff0d995d56c608a4a803a1'
     comparison_branch = 'b55f3f3c5b4f30c0d1963e59f4a65432dfc90c31'
-    files_changed = get_all_changed_files(commit_sha, comparison_branch)
+    build_dir = os.environ['TRAVIS_BUILD_DIR']
+    files_changed = get_all_changed_files(commit_sha, build_dir, comparison_branch)
     assert set(['.travis.yml', 'README.md', 'pyproject.toml', 'setup.py']) == set(files_changed)
 
 
