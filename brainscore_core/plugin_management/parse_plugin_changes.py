@@ -9,7 +9,7 @@ from .test_plugins import run_args
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
 
-def get_all_changed_files(commit_SHA: str, build_dir=None: str, comparison_branch='main': str) -> List[str]:
+def get_all_changed_files(commit_SHA: str, build_dir=None, comparison_branch='main') -> List[str]:
 	"""
 	:return: a list of file paths, relative to the library root directory, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`
 	"""
@@ -131,7 +131,7 @@ def is_automergeable(commit_SHA: str, domain_root: str):
 	print(plugin_info_dict["is_automergeable"])
 
 
-def run_changed_plugin_tests(commit_SHA: str, domain_root: str, build_dir=None: str):
+def run_changed_plugin_tests(commit_SHA: str, domain_root: str, build_dir=None):
 	"""
 	Initiates run of all tests in each changed plugin directory
 	"""
