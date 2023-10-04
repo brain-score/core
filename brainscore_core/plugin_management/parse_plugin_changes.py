@@ -17,7 +17,7 @@ def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str
 	cmd = f'git diff --name-only {comparison_branch} {commit_SHA} -C {core_dir}'
 	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.splitlines()
 	files_changed = [f.decode() for f in files_changed_bytes]
-	assert not files_changed[0].startswith('fatal')
+	assert not files_changed[0].startswith('fatal'), files_changed[0]
 
 	return files_changed
 
