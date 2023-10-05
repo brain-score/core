@@ -14,15 +14,6 @@ DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
                 'brainscore_core/__init__.py',
                 'brainscore_core/README.md']
 
-@pytest.mark.pr_only
-def test_get_all_changed_files():
-
-    commit_sha = '1ee0923234bd40126cff0d995d56c608a4a803a1'
-    comparison_branch = 'b55f3f3c5b4f30c0d1963e59f4a65432dfc90c31'
-    build_dir = os.environ['TRAVIS_BUILD_DIR']
-    files_changed = get_all_changed_files(commit_sha, build_dir, comparison_branch)
-    assert set(['.travis.yml', 'README.md', 'pyproject.toml', 'setup.py']) == set(files_changed)
-
 
 def test_separate_plugin_files():
     plugin_files, non_plugin_files = separate_plugin_files(DUMMY_FILES_CHANGED)
