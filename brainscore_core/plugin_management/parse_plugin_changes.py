@@ -77,12 +77,13 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	:param commit_SHA: SHA of the invoking PR
 	:param domain_root: the root package directory of the repo where the PR originates, either 'brainscore' (vision) or 'brainscore_language' (language)
 	"""
-	plugin_info_dict = {}
 	changed_files_list = changed_files.split()
 	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
 
+	plugin_info_dict = {}
+	plugin_info_dict["plugin_tests_needed"] = False if len(changed_plugin_files) == 0 else True
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
-	plugin_info_dict["is_automergeable"] = str(len(changed_non_plugin_files) > 0)
+	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) == 0
 
 	return plugin_info_dict
 
@@ -124,14 +125,18 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 	"""
 	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
-	tests_to_run = []
-	for plugin_type in plugin_info_dict["changed_plugins"]:
-		changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
-		for plugin_dirname in changed_plugins:
-			root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-			for filepath in root.rglob(r'test*.py'):
-				tests_to_run.append(str(filepath))
+	if plugin_info_dict["plugin_tests_needed"]:
+		tests_to_run = []
+		for plugin_type in plugin_info_dict["changed_plugins"]:
+			if len(plugin_info_dict["changed_plugins"][plugin_type]) > 0:
+				changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
+				for plugin_dirname in changed_plugins:
+					root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
+					for filepath in root.rglob(r'test*.py'):
+						tests_to_run.append(str(filepath))
 
-	print("Running tests for new or modified plugins...")
-	print(tests_to_run)
-	print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
+		print(f"Running tests for new or modified plugins: {tests_to_run}")
+		print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
+
+	else:
+		print("No plugins changed or added.")
