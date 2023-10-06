@@ -81,7 +81,7 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
 
 	plugin_info_dict = {}
-	plugin_info_dict["plugin_tests_needed"] = False if len(changed_plugin_files) == 0 else True
+	plugin_info_dict["modifies_plugins"] = False if len(changed_plugin_files) == 0 else True
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
 	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) == 0
 
@@ -107,15 +107,17 @@ def get_plugin_info(changed_files: str, domain_root: str):
 	else:
 		plugin_info_dict["run_score"] = "False"
 
-	print(plugin_info_dict) # output is accessed via print!
+	return plugin_info_dict
 
 
-def is_automergeable(changed_files: str, domain_root: str):
+def testing_needed(changed_files: str, domain_root: str):
 	"""
-	Print "true" if PR ONLY changes plugin files, else print "false"
+	1. Print "true" if PR changes ANY plugin files, else print "false"
+	2. Print "true" if PR ONLY changes plugin files, else print "false"
 	"""
 	plugin_info_dict = get_plugin_info(changed_files, domain_root)
 
+	print(plugin_info_dict["modifies_plugins"]) # output is accessed via print!
 	print(plugin_info_dict["is_automergeable"]) # output is accessed via print!
 
 
