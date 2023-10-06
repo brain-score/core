@@ -127,7 +127,7 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 	"""
 	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
-	if plugin_info_dict["plugin_tests_needed"]:
+	if plugin_info_dict["modifies_plugins"]:
 		tests_to_run = []
 		for plugin_type in plugin_info_dict["changed_plugins"]:
 			if len(plugin_info_dict["changed_plugins"][plugin_type]) > 0:
