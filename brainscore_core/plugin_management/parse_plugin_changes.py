@@ -130,12 +130,11 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 	if plugin_info_dict["modifies_plugins"]:
 		tests_to_run = []
 		for plugin_type in plugin_info_dict["changed_plugins"]:
-			if len(plugin_info_dict["changed_plugins"][plugin_type]) > 0:
-				changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
-				for plugin_dirname in changed_plugins:
-					root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-					for filepath in root.rglob(r'test*.py'):
-						tests_to_run.append(str(filepath))
+			changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
+			for plugin_dirname in changed_plugins:
+				root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
+				for filepath in root.rglob(r'test*.py'):
+					tests_to_run.append(str(filepath))
 
 		print(f"Running tests for new or modified plugins: {tests_to_run}")
 		print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
