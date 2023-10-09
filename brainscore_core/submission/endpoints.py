@@ -184,7 +184,7 @@ class RunScoringEndpoint:
             raise e
 
 
-def send_user_email(uid: int, domain: str, pr_number: str):
+def send_user_email(uid: int, domain: str, pr_number: str, sender: str, password: str):
     """ Send user an email if their web-submitted PR fails. """
     user_email = email_from_uid(uid)
 
@@ -192,11 +192,11 @@ def send_user_email(uid: int, domain: str, pr_number: str):
     msg = MIMEText(body)
     msg['Subject'] = "Brain-Score submission failed"
     msg['From'] = "Brain-Score"
-    msg['To'] = recipient
+    msg['To'] = user_email
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
         smtp_server.login(sender, password)
-        smtp_server.sendmail(sender, recipients, msg.as_string())
+        smtp_server.sendmail(sender, user_email, msg.as_string())
     
     print(f"Email sent to {user_email}")
 
