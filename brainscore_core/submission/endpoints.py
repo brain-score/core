@@ -5,10 +5,12 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
+from email.mime.text import MIMEText
 import os
 import random
 import requests
 from requests.auth import HTTPBasicAuth
+import smtplib
 import string
 from typing import List, Union, Dict
 
@@ -182,9 +184,21 @@ class RunScoringEndpoint:
             raise e
 
 
-def get_email_from_uid(uid: int) -> str:
-    """ Convenience method for GitHub Actions to get a user's email if their web-submitted PR fails. """
-    return email_from_uid(uid)
+def send_user_email(uid: int, domain: str, pr_number: str):
+    """ Send user an email if their web-submitted PR fails. """
+    user_email = email_from_uid(uid)
+
+    body = f"Your Brain-Score submission did not pass checks. Please review the test results and update the PR at https://github.com/brain-score/{domain}/pull/{pr_number} or send in an updated submission via the website."
+    msg = MIMEText(body)
+    msg['Subject'] = "Brain-Score submission failed"
+    msg['From'] = "Brain-Score"
+    msg['To'] = recipient
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
+        smtp_server.login(sender, password)
+        smtp_server.sendmail(sender, recipients, msg.as_string())
+    
+    print(f"Email sent to {user_email}")
 
 
 def shorten_text(text: str, max_length: int) -> str:
