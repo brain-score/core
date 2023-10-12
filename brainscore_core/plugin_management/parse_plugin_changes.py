@@ -110,7 +110,7 @@ def get_scoring_info(changed_files: str, domain_root: str):
 	print(plugin_info_dict) # output is accessed via print!
 
 
-def testing_needed(changed_files: str, domain_root: str):
+def get_testing_info(changed_files: str, domain_root: str):
 	"""
 	1. Print "true" if PR changes ANY plugin files, else print "false"
 	2. Print "true" if PR ONLY changes plugin files, else print "false"
