@@ -88,7 +88,7 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	return plugin_info_dict
 
 
-def get_plugin_info(changed_files: str, domain_root: str):
+def get_scoring_info(changed_files: str, domain_root: str):
 	"""
 	If any model or benchmark files changed, get plugin ids and set run_score to "True".
 	Otherwise set to "False".
@@ -107,7 +107,7 @@ def get_plugin_info(changed_files: str, domain_root: str):
 	else:
 		plugin_info_dict["run_score"] = "False"
 
-	return plugin_info_dict
+	print(plugin_info_dict) # output is accessed via print!
 
 
 def testing_needed(changed_files: str, domain_root: str):
@@ -115,7 +115,7 @@ def testing_needed(changed_files: str, domain_root: str):
 	1. Print "true" if PR changes ANY plugin files, else print "false"
 	2. Print "true" if PR ONLY changes plugin files, else print "false"
 	"""
-	plugin_info_dict = get_plugin_info(changed_files, domain_root)
+	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
 	print(plugin_info_dict["modifies_plugins"]) # output is accessed via print!
 	print(plugin_info_dict["is_automergeable"]) # output is accessed via print!
