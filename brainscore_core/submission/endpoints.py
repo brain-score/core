@@ -75,11 +75,16 @@ class UserManager:
         msg['From'] = "Brain-Score"
         msg['To'] = user_email
 
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
-            smtp_server.login(sender, password)
-            smtp_server.sendmail(sender, user_email, msg.as_string())
-        
-        print(f"Email sent to {user_email}")
+        try:
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
+                smtp_server.login(sender, password)
+                smtp_server.sendmail(sender, user_email, msg.as_string())
+
+            print(f"Email sent to {user_email}")
+            
+        except Exception as e:
+            logging.error(f'Could not send email to {user_email} because of {e}')
+            raise e
 
 
 class DomainPlugins(ABC):
