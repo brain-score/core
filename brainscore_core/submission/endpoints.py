@@ -39,7 +39,7 @@ class UserManager:
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self, user_email:str):
+    def create_new_user(self, user_email:str):
         signup_url = f'http://www.brain-score.org/signup'
         temp_pass = self._generate_temp_pass(length=10)
         try:
@@ -62,7 +62,7 @@ class UserManager:
         """
         uid = uid_from_email(author_email)
         if not uid:
-            self._create_new_user(author_email)
+            self.create_new_user(author_email)
             uid = uid_from_email(author_email)
             assert uid
         return uid 
@@ -81,7 +81,7 @@ class UserManager:
                 smtp_server.sendmail(sender, user_email, msg.as_string())
 
             print(f"Email sent to {user_email}")
-            
+
         except Exception as e:
             logging.error(f'Could not send email to {user_email} because of {e}')
             raise e
