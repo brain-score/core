@@ -6,7 +6,6 @@ import logging
 from abc import ABC
 from datetime import datetime
 from email.mime.text import MIMEText
-import os
 import random
 import requests
 from requests.auth import HTTPBasicAuth
