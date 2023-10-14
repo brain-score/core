@@ -1,11 +1,9 @@
-import os
-import pytest
-import shutil
-import sys
-import tempfile
+import ast
+import contextlib
+import io
 from pathlib import Path
 
-from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids
+from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info
 
 DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py', 
                 'brainscore_core/models/dummy_model/test.py', 
@@ -13,6 +11,12 @@ DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
                 'brainscore_core/benchmarks/dummy_benchmark/__init__.py',
                 'brainscore_core/__init__.py',
                 'brainscore_core/README.md']
+
+DUMMY_FILES_CHANGED_AUTOMERGEABLE = ['brainscore_core/data/dummy_data/__init__.py',
+                                     'brainscore_core/data/dummy_data/data.py']
+
+DUMMY_FILES_CHANGED_NO_PLUGINS = ['brainscore_core/__init__.py',
+                                'brainscore_core/README.md']
 
 
 def test_separate_plugin_files():
@@ -41,4 +45,50 @@ def test_get_plugin_ids():
         assert plugin_id == plugin_id
 
 
+def test_parse_plugin_changes_not_automergeable():
+    changed_files = " ".join(DUMMY_FILES_CHANGED)
+    plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
+    assert plugin_info_dict["modifies_plugins"] == True
+    assert len(plugin_info_dict["changed_plugins"]["models"]) == 1
+    assert plugin_info_dict["changed_plugins"]["models"][0] == "dummy_model"
+    assert len(plugin_info_dict["changed_plugins"]["benchmarks"]) == 1
+    assert plugin_info_dict["changed_plugins"]["benchmarks"][0] == "dummy_benchmark"
+    assert len(plugin_info_dict["changed_plugins"]["data"]) == 0
+    assert len(plugin_info_dict["changed_plugins"]["metrics"]) == 0
+    assert plugin_info_dict["is_automergeable"] == False
 
+
+def test_parse_plugin_changes_automergeable():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_AUTOMERGEABLE)
+    plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
+    assert plugin_info_dict["modifies_plugins"] == True
+    assert len(plugin_info_dict["changed_plugins"]["data"]) == 1
+    assert plugin_info_dict["changed_plugins"]["data"][0] == "dummy_data"
+    assert plugin_info_dict["is_automergeable"] == True
+
+
+def test_parse_plugin_changes_no_change():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
+    plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
+    all_plugins_changed = [len(plugin_list) for plugin_list in plugin_info_dict["changed_plugins"].values()]
+    assert sum(all_plugins_changed) == 0
+    assert plugin_info_dict["modifies_plugins"] == False
+    assert plugin_info_dict["is_automergeable"] == False
+
+
+def test_get_scoring_info_scoring_needed(mocker):
+    changed_files = " ".join(DUMMY_FILES_CHANGED)
+
+    mocked_plugin_ids = ["dummy_plugin1", "dummy_plugin2"]
+    get_plugin_ids_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.get_plugin_ids")
+    get_plugin_ids_mock.return_value = mocked_plugin_ids
+    
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        get_scoring_info(changed_files, 'brainscore_core')
+    plugin_info_dict = ast.literal_eval(f.getvalue())
+    print(plugin_info_dict)
+
+    assert plugin_info_dict["run_score"] == str(True)
+    assert plugin_info_dict["new_models"] == "dummy_plugin1 dummy_plugin2"
+    
