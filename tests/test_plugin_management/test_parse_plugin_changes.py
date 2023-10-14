@@ -3,7 +3,7 @@ import contextlib
 import io
 from pathlib import Path
 
-from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info
+from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, run_changed_plugin_tests
 
 DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py', 
                 'brainscore_core/models/dummy_model/test.py', 
@@ -91,4 +91,58 @@ def test_get_scoring_info_scoring_needed(mocker):
 
     assert plugin_info_dict["run_score"] == str(True)
     assert plugin_info_dict["new_models"] == "dummy_plugin1 dummy_plugin2"
+
+
+def test_get_scoring_info_scoring_not_needed():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
+
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        get_scoring_info(changed_files, 'brainscore_core')
+    plugin_info_dict = ast.literal_eval(f.getvalue())
+    print(plugin_info_dict)
+
+    assert plugin_info_dict["run_score"] == str(False)
+
+
+def test_get_testing_info_testing_needed():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_AUTOMERGEABLE)
+
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        get_testing_info(changed_files, 'brainscore_core')
+    return_values = (f.getvalue())
+
+    # First value: modifies_plugins
+    # Second value: is_automergeable
+    assert return_values == "True True"
+
+
+def test_get_testing_info_testing_not_needed():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
+
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        get_testing_info(changed_files, 'brainscore_core')
+    return_values = (f.getvalue())
+
+    # First value: modifies_plugins
+    # Second value: is_automergeable
+    assert return_values == "False False"
+
+
+def test_run_changed_plugin_tests(mocker):
+    changed_files = " ".join(DUMMY_FILES_CHANGED)
+
+    plugin_info_dict_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
+    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'changed_plugins': {'models': ['dummy_model'], 'benchmarks': ['dummy_benchmark'], 'data': [], 'metrics': []}, 'is_automergeable': False, 'run_score': 'True'}
+
+    run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
+    run_args_mock.return_value = "Mock test run"
     
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        run_changed_plugin_tests(changed_files, 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
+        output = f.getvalue()
+
+    assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/models/dummy_model/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark/test.py']" in output

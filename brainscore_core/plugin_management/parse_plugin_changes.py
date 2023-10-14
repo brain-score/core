@@ -99,7 +99,7 @@ def get_scoring_info(changed_files: str, domain_root: str):
 	scoring_plugin_types = ("models", "benchmarks")
 	plugins_to_score = [plugin_info_dict["changed_plugins"][plugin_type] for plugin_type in scoring_plugin_types]
 
-	if len(plugins_to_score) > 0:
+	if any(plugins_to_score):
 		plugin_info_dict["run_score"] = "True"
 		for plugin_type in scoring_plugin_types:
 			scoring_plugin_ids = get_plugin_ids(plugin_type, plugin_info_dict["changed_plugins"][plugin_type], domain_root)
@@ -117,8 +117,7 @@ def get_testing_info(changed_files: str, domain_root: str):
 	"""
 	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
-	print(plugin_info_dict["modifies_plugins"]) # output is accessed via print!
-	print(plugin_info_dict["is_automergeable"]) # output is accessed via print!
+	print(f'{plugin_info_dict["modifies_plugins"]} {plugin_info_dict["is_automergeable"]}', end="") # output is accessed via print!
 
 
 def run_changed_plugin_tests(changed_files: str, domain_root: str):
