@@ -9,19 +9,6 @@ from .test_plugins import run_args
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
 
-def get_all_changed_files(commit_SHA: str, comparison_branch='main') -> List[str]:
-	"""
-	:return: a list of file paths, relative to the library root directory, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`
-	"""
-	core_dir = Path(__file__).parents[2]
-	cmd = f'git diff --name-only {comparison_branch} {commit_SHA} -C {core_dir}'
-	files_changed_bytes = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.splitlines()
-	files_changed = [f.decode() for f in files_changed_bytes]
-	assert not files_changed[0].startswith('fatal')
-
-	return files_changed
-
-
 def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 	"""
 	:return: one list of files that are located inside a plugin, and one list of files that are located outside of all plugins, 
@@ -83,35 +70,36 @@ def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: st
 	return plugin_ids
 
 
-def parse_plugin_changes(commit_SHA: str, domain_root: str) -> dict:
+def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	"""
 	Return information about which files changed by the invoking PR (compared against main) belong to plugins
 
 	:param commit_SHA: SHA of the invoking PR
 	:param domain_root: the root package directory of the repo where the PR originates, either 'brainscore' (vision) or 'brainscore_language' (language)
 	"""
-	plugin_info_dict = {}
-	changed_files = get_all_changed_files(commit_SHA)
-	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files)	
+	changed_files_list = changed_files.split()
+	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
 
+	plugin_info_dict = {}
+	plugin_info_dict["modifies_plugins"] = False if len(changed_plugin_files) == 0 else True
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
-	plugin_info_dict["is_automergeable"] = str(len(changed_non_plugin_files) > 0)
+	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) == 0
 
 	return plugin_info_dict
 
 
-def get_plugin_info(commit_SHA: str, domain_root: str):
+def get_scoring_info(changed_files: str, domain_root: str):
 	"""
 	If any model or benchmark files changed, get plugin ids and set run_score to "True".
 	Otherwise set to "False".
 	Print all collected information about plugins.
 	"""
-	plugin_info_dict = parse_plugin_changes(commit_SHA, domain_root)
+	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
 	scoring_plugin_types = ("models", "benchmarks")
 	plugins_to_score = [plugin_info_dict["changed_plugins"][plugin_type] for plugin_type in scoring_plugin_types]
 
-	if len(plugins_to_score) > 0:
+	if any(plugins_to_score):
 		plugin_info_dict["run_score"] = "True"
 		for plugin_type in scoring_plugin_types:
 			scoring_plugin_ids = get_plugin_ids(plugin_type, plugin_info_dict["changed_plugins"][plugin_type], domain_root)
@@ -122,20 +110,33 @@ def get_plugin_info(commit_SHA: str, domain_root: str):
 	print(plugin_info_dict) # output is accessed via print!
 
 
-def run_changed_plugin_tests(commit_SHA: str, domain_root: str):
+def get_testing_info(changed_files: str, domain_root: str):
+	"""
+	1. Print "true" if PR changes ANY plugin files, else print "false"
+	2. Print "true" if PR ONLY changes plugin files, else print "false"
+	"""
+	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
+
+	print(f'{plugin_info_dict["modifies_plugins"]} {plugin_info_dict["is_automergeable"]}', end="") # output is accessed via print!
+
+
+def run_changed_plugin_tests(changed_files: str, domain_root: str):
 	"""
 	Initiates run of all tests in each changed plugin directory
 	"""
-	plugin_info_dict = parse_plugin_changes(commit_SHA, domain_root)
+	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
-	tests_to_run = []
-	for plugin_type in plugin_info_dict["changed_plugins"]:
-		changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
-		for plugin_dirname in changed_plugins:
-			root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-			for filepath in root.rglob(r'test*.py'):
-				tests_to_run.append(str(filepath))
+	if plugin_info_dict["modifies_plugins"]:
+		tests_to_run = []
+		for plugin_type in plugin_info_dict["changed_plugins"]:
+			changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
+			for plugin_dirname in changed_plugins:
+				root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
+				for filepath in root.rglob(r'test*.py'):
+					tests_to_run.append(str(filepath))
 
-	print("Running tests for new or modified plugins...")
-	print(tests_to_run)
-	print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
+		print(f"Running tests for new or modified plugins: {tests_to_run}")
+		print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
+
+	else:
+		print("No plugins changed or added.")

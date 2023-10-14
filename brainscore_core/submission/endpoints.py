@@ -5,10 +5,11 @@ import traceback
 import logging
 from abc import ABC
 from datetime import datetime
-import os
+from email.mime.text import MIMEText
 import random
 import requests
 from requests.auth import HTTPBasicAuth
+import smtplib
 import string
 from typing import List, Union, Dict
 
@@ -23,31 +24,22 @@ logger = logging.getLogger(__name__)
 
 class UserManager:
     """
-    Returns the Brain-Score user ID associated with a given email address.
-    If no user ID exists, creates a new account, then returns user ID.
+    Retrieve user information (UID from email / email from UID)
+    Create new user from email address
+    Send email to user
     """
 
-    def __init__(self, domain: str, author_email: str, db_secret: str):
-        self.domain = domain
-        self.author_email = author_email
+    def __init__(db_secret: str):
         logger.info(f"Connecting to db using secret '{db_secret}")
         connect_db(db_secret=db_secret)
-
-    def __call__(self):
-        uid = uid_from_email(author_email=self.author_email)
-        if not uid:
-            self._create_new_user(domain=self.domain, user_email=self.author_email)
-            uid = uid_from_email(author_email=self.author_email)
-            assert uid
-        return uid
 
     def _generate_temp_pass(self, length:int) -> str:
         chars = string.ascii_letters + string.digits + string.punctuation
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def _create_new_user(self, domain:str, user_email:str):
-        signup_url = f'http://www.brain-score.org/signup/{domain}'
+    def create_new_user(self, user_email:str):
+        signup_url = f'http://www.brain-score.org/signup'
         temp_pass = self._generate_temp_pass(length=10)
         try:
             response = requests.get(signup_url, cookies=cookies)
@@ -60,6 +52,37 @@ class UserManager:
             assert response.status_code == 200, f"Response error: {response.status_code}"
         except Exception as e:
             logging.error(f'Could not create Brain-Score account for {user_email} because of {e}')
+            raise e
+
+    def get_uid(self, author_email:str) -> str:
+        """
+        Returns the Brain-Score user ID associated with a given email address.
+        If no user ID exists, creates a new account, then returns user ID.
+        """
+        uid = uid_from_email(author_email)
+        if not uid:
+            self.create_new_user(author_email)
+            uid = uid_from_email(author_email)
+            assert uid
+        return uid 
+
+    def send_user_email(self, uid: int, subject: str, body: str, sender: str, password: str):
+        """ Send user an email. """
+        user_email = email_from_uid(uid)
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = "Brain-Score"
+        msg['To'] = user_email
+
+        try:
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
+                smtp_server.login(sender, password)
+                smtp_server.sendmail(sender, user_email, msg.as_string())
+
+            print(f"Email sent to {user_email}")
+
+        except Exception as e:
+            logging.error(f'Could not send email to {user_email} because of {e}')
             raise e
 
 
@@ -180,11 +203,6 @@ class RunScoringEndpoint:
             score_entry.comment = error_message
             score_entry.save()
             raise e
-
-
-def get_email_from_uid(uid: int) -> str:
-    """ Convenience method for GitHub Actions to get a user's email if their web-submitted PR fails. """
-    return email_from_uid(uid)
 
 
 def shorten_text(text: str, max_length: int) -> str:
