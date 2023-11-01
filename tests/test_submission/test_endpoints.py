@@ -97,6 +97,7 @@ class TestRunScoring:
         try:
             connect_db(db_secret=POSTGRESQL_TEST_DATABASE)
             cls.test_database = POSTGRESQL_TEST_DATABASE
+            raise botocore.exceptions.NoCredentialsError
         except botocore.exceptions.NoCredentialsError:  # we're in an environment where we cannot retrieve AWS secrets
             connect_db(db_secret='sqlite3.db')
             cls.test_database = 'sqlite3.db'  # -> use local sqlite database
@@ -119,7 +120,8 @@ class TestRunScoring:
         domain, models, benchmarks = 'test', ['dummymodel1'], ['dummybenchmark1']
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
         
-        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        endpoint_models = endpoint.resolve_models(domain=domain, models=models)
+        endpoint_benchmarks = endpoint.resolve_benchmarks(domain=domain, benchmarks=benchmarks)
         assert endpoint_models == models
         assert endpoint_benchmarks == benchmarks
 
@@ -127,7 +129,8 @@ class TestRunScoring:
         domain, models, benchmarks = 'test', RunScoringEndpoint.ALL_PUBLIC, ['dummybenchmark1']
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
         
-        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        endpoint_models = endpoint.resolve_models(domain=domain, models=models)
+        endpoint_benchmarks = endpoint.resolve_benchmarks(domain=domain, benchmarks=benchmarks)
         assert endpoint_models == ["dummymodel1", "dummymodel2"]
         assert endpoint_benchmarks == benchmarks
 
@@ -135,7 +138,8 @@ class TestRunScoring:
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
         
-        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        endpoint_models = endpoint.resolve_models(domain=domain, models=models)
+        endpoint_benchmarks = endpoint.resolve_benchmarks(domain=domain, benchmarks=benchmarks)
         assert endpoint_models == models
         assert endpoint_benchmarks == ['dummybenchmark1', 'dummybenchmark2']
 
@@ -143,7 +147,8 @@ class TestRunScoring:
         domain, models, benchmarks = 'test', RunScoringEndpoint.ALL_PUBLIC, RunScoringEndpoint.ALL_PUBLIC
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
         
-        endpoint_models, endpoint_benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        endpoint_models = endpoint.resolve_models(domain=domain, models=models)
+        endpoint_benchmarks = endpoint.resolve_benchmarks(domain=domain, benchmarks=benchmarks)
         assert endpoint_models == ["dummymodel1", "dummymodel2"]
         assert endpoint_benchmarks == ['dummybenchmark1', 'dummybenchmark2']
     
@@ -163,7 +168,8 @@ class TestRunScoring:
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC
         endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
         
-        models, benchmarks = endpoint.get_models_and_benchmarks_to_score(domain=domain, models=models, benchmarks=benchmarks)
+        models = endpoint.resolve_models(domain=domain, models=models)
+        benchmarks = endpoint.resolve_benchmarks(domain=domain, benchmarks=benchmarks)
 
         for model_id in models:
             for benchmark_id in benchmarks:

@@ -143,28 +143,34 @@ class RunScoringEndpoint:
 
         # finalize status of submission
         submission_status = 'successful' if entire_submission_successful else 'failure'
-        submission_entry.status = submission_status
+        if getattr(submission_entry, 'status', "successful") is not 'failure':
+            submission_entry.status = submission_status
         logger.info(f'Submission is stored as {submission_status}')
         submission_entry.save()
 
-    def get_models_and_benchmarks_to_score(self, domain: str, models: List[str], benchmarks: List[str]) -> Tuple[List[str], List[str]]:
+    def resolve_models(self, domain: str, models: List[str]) -> List[str]:
         """
-        Identify the set of new models and new benchmarks for scoring. Replaces `models` with the list of
-        public models if `models` is `ALL_PUBLIC`, and similarly for `benchmarks`.
+        Identify the set of models by resolving `models` to the list of public models if `models` is `ALL_PUBLIC`
 
         :param domain: "language" or "vision"
         :param models: either a list of model identifiers or the string
             :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
+        """
+        if models == self.ALL_PUBLIC:
+            models = public_model_identifiers(domain)
+        return models
+    
+    def resolve_benchmarks(self, domain: str, benchmarks: List[str]) -> List[str]:
+        """
+        Identify the set of benchmarks by resolving `benchmarks` to the list of public models if `benchmarks` is `ALL_PUBLIC`
+
+        :param domain: "language" or "vision"
         :param benchmarks: either a list of benchmark identifiers or the string
             :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
         """
-        
-        if models == self.ALL_PUBLIC:
-            models = public_model_identifiers(domain)
         if benchmarks == self.ALL_PUBLIC:
             benchmarks = public_benchmark_identifiers(domain)
-        
-        return models, benchmarks
+        return benchmarks
 
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission, domain: str,
