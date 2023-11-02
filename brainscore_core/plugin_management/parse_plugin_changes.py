@@ -136,7 +136,7 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 					tests_to_run.append(str(filepath))
 
 		print(f"Running tests for new or modified plugins: {tests_to_run}")
-		print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
+		print(run_args(domain_root, tests_to_run)) # print tests to travis log
 
 	else:
 		print("No plugins changed or added.")
