@@ -156,7 +156,10 @@ def update_score(score: ScoreObject, entry: Score):
         entry.score_raw = score_raw
         entry.score_ceiled = _retrieve_score_center(score)
     entry.error = _retrieve_score_error(score)
-    logger.debug(f"updating raw score: {entry.score_raw}, ceiled score: {entry.score_ceiled}, error: {entry.error}")
+    if 'comment' in score.attrs:
+        entry.comment = score.attrs['comment']
+    logger.debug(f"updating raw score: {entry.score_raw}, ceiled score: {entry.score_ceiled}, error: {entry.error}, "
+                 f"comment: {entry.comment}")
     entry.save()
 
 
