@@ -1,17 +1,19 @@
 """
 Process plugin submissions (data, metrics, benchmarks, models) and score models on benchmarks.
 """
-import traceback
 import logging
+import os
+import random
+import smtplib
+import string
+import traceback
 from abc import ABC
 from datetime import datetime
 from email.mime.text import MIMEText
-import random
+from typing import List, Union, Dict
+
 import requests
 from requests.auth import HTTPBasicAuth
-import smtplib
-import string
-from typing import List, Union, Dict
 
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
@@ -33,12 +35,12 @@ class UserManager:
         logger.info(f"Connecting to db using secret '{db_secret}")
         connect_db(db_secret=db_secret)
 
-    def _generate_temp_pass(self, length:int) -> str:
+    def _generate_temp_pass(self, length: int) -> str:
         chars = string.ascii_letters + string.digits + string.punctuation
         temp_pass = ''.join(random.choice(chars) for i in range(length))
         return temp_pass
 
-    def create_new_user(self, user_email:str):
+    def create_new_user(self, user_email: str):
         signup_url = f'http://www.brain-score.org/signup'
         temp_pass = self._generate_temp_pass(length=10)
         try:
@@ -54,7 +56,7 @@ class UserManager:
             logging.error(f'Could not create Brain-Score account for {user_email} because of {e}')
             raise e
 
-    def get_uid(self, author_email:str) -> str:
+    def get_uid(self, author_email: str) -> str:
         """
         Returns the Brain-Score user ID associated with a given email address.
         If no user ID exists, creates a new account, then returns user ID.
@@ -64,7 +66,7 @@ class UserManager:
             self.create_new_user(author_email)
             uid = uid_from_email(author_email)
             assert uid
-        return uid 
+        return uid
 
     def send_user_email(self, uid: int, subject: str, body: str, sender: str, password: str):
         """ Send user an email. """
@@ -213,3 +215,24 @@ def shorten_text(text: str, max_length: int) -> str:
     part1 = text[:early_stop - len(spacer)]
     part2 = text[-(max_length - early_stop):]
     return part1 + spacer + part2
+
+
+# used by domain libraries in `score_new_plugins.yml`
+def call_jenkins(plugin_info: Dict[str, Union[List[str], str]]):
+    """
+    Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
+    Starts run to score models on benchmarks (`run_scoring`).
+    """
+    jenkins_base = "http://braintree.mit.edu:8080"
+    jenkins_user = os.environ['JENKINS_USER']
+    jenkins_token = os.environ['JENKINS_TOKEN']
+    jenkins_trigger = os.environ['JENKINS_TRIGGER']
+    jenkins_job = "score_plugins"
+
+    url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
+    payload = {k: v for k, v in plugin_info.items() if plugin_info[k]}
+    try:
+        auth_basic = HTTPBasicAuth(username=jenkins_user, password=jenkins_token)
+        requests.get(url, params=payload, auth=auth_basic)
+    except Exception as e:
+        print(f'Could not initiate Jenkins job because of {e}')
