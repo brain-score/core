@@ -7,7 +7,7 @@ PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$3
 CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
-PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not private_access and not requires_gpu and not memory_intense and not slow"}
+PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow"}
 
 cd "$LIBRARY_PATH" || exit 2
 echo "$PLUGIN_NAME ($PLUGIN_PATH)"
@@ -31,7 +31,12 @@ if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
   pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
 else
-  pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH
+  if [ "$PRIVATE_ACCESS" = 1 ]; then 
+    pytest -m "private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+  fi
+  if [ "$PRIVATE_ACCESS" != 1 ]; then 
+    pytest -m "not private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+  fi
 fi
 
 exit $?
