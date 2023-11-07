@@ -31,7 +31,12 @@ if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
   pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
 else
-  pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH
+  if [ "$PRIVATE_ACCESS" = 1 ]; then 
+    pytest -m "private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+  fi
+  if [ "$PRIVATE_ACCESS" != 1 ]; then 
+    pytest -m "not private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+  fi
 fi
 
 exit $?
