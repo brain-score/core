@@ -55,11 +55,12 @@ class TestUserManager:
         uid = user_manager.get_uid('admin@brainscore.com')
         assert uid == 2
 
-    # def test_send_user_email(self, mocker):
-    #     with mocker.patch('smtplib.SMTP_SSL') as mock:
-    #         user_manager = UserManager(self.test_database)
-    #         user_manager.send_user_email(2, 'Subject', 'Test email body', 'sender@gmail.com', 'testpassword')
-    #         assert mocker.patch('smtplib.SMTP_SSL').assert_called_once()
+    def test_send_user_email(self, mocker):
+        smtp_mock = mocker.MagicMock(name='smtp_mock')
+        mocker.patch('brainscore_core.submission.endpoints.smtplib.SMTP_SSL', new=smtp_mock)
+        user_manager = UserManager(self.test_database)
+        user_manager.send_user_email(2, 'Subject', 'Test email body', 'sender@gmail.com', 'testpassword')
+        smtp_mock.assert_called_once_with('smtp.gmail.com', 465) 
 
 
 class TestRunScoring:
