@@ -28,6 +28,7 @@ test = [
     "pytest",
     "pytest-check",
     "pytest-mock",
+    "requests-mock",
 ]
 
 [build-system]
