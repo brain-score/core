@@ -42,10 +42,10 @@ class UserManager:
         return temp_pass
 
     def create_new_user(self, user_email: str):
-        signup_url = f'http://www.brain-score.org/signup'
+        signup_url = 'http://www.brain-score.org/signup'
         temp_pass = self._generate_temp_pass(length=10)
         try:
-            response = requests.get(signup_url, cookies=cookies)
+            response = requests.get(signup_url)
             cookies = response.cookies
             csrf_token = [x.value for x in cookies][0]
             data = f'email={user_email}&a=1&csrfmiddlewaretoken={csrf_token}&password1={temp_pass}&password2={temp_pass}&is_from_pr'

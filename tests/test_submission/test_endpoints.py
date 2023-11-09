@@ -2,17 +2,65 @@ from collections import namedtuple
 
 import botocore.exceptions
 import logging
+import pytest
+import requests
 
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import clear_schema
-from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, shorten_text
+from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text
 from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
 
 POSTGRESQL_TEST_DATABASE = 'brainscore-ohio-test'
+
+
+class TestUserManager:
+    test_database = None
+
+    @classmethod
+    def setup_class(cls):
+        logger.info('Connect to database')
+        try:
+            connect_db(db_secret=POSTGRESQL_TEST_DATABASE)
+            cls.test_database = POSTGRESQL_TEST_DATABASE
+        except botocore.exceptions.NoCredentialsError:  # we're in an environment where we cannot retrieve AWS secrets
+            connect_db(db_secret='sqlite3.db')
+            cls.test_database = 'sqlite3.db'  # -> use local sqlite database
+        clear_schema()
+
+    def setup_method(self):
+        logger.info('Initialize database entries')
+        init_users()
+
+    def teardown_method(self):
+        logger.info('Clean database')
+        clear_schema()
+
+    def test_create_new_user(self, requests_mock):
+        # mock GET & POST responses
+        get_adapter = requests_mock.get('http://www.brain-score.org/signup', cookies={'cookie_name': 'cookie_value'})
+        post_adapter = requests_mock.post('http://www.brain-score.org/signup', status_code=200)
+    
+        user_manager = UserManager(self.test_database)
+        user_manager.create_new_user('test@example.com')
+
+        assert get_adapter.call_count == 1
+        assert post_adapter.call_count == 1
+
+    def test_get_uid_for_existing_user(self):
+        user_manager = UserManager(self.test_database)
+        uid = user_manager.get_uid('admin@brainscore.com')
+        assert uid == 2
+
+    def test_send_user_email(self, mocker):
+        smtp_mock = mocker.MagicMock(name='smtp_mock')
+        mocker.patch('brainscore_core.submission.endpoints.smtplib.SMTP_SSL', new=smtp_mock)
+        user_manager = UserManager(self.test_database)
+        user_manager.send_user_email(2, 'Subject', 'Test email body', 'sender@gmail.com', 'testpassword')
+        smtp_mock.assert_called_once_with('smtp.gmail.com', 465) 
 
 
 class TestRunScoring:
