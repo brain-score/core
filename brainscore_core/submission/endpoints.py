@@ -125,9 +125,8 @@ class RunScoringEndpoint:
         """
         # setup entry for this submission
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
-        entire_submission_successful = True
-
-
+        is_run_successful = True
+        
         logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
 
         try:
@@ -136,13 +135,13 @@ class RunScoringEndpoint:
                                             submission_entry=submission_entry, domain=domain,
                                             public=public, competition=competition)
         except Exception as e:
-            entire_submission_successful = False
+            is_run_successful = False
             logging.error(
                 f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
                 exc_info=True)
 
         # finalize status of submission
-        submission_status = 'successful' if entire_submission_successful else 'failure'
+        submission_status = 'successful' if is_run_successful else 'failure'
         if getattr(submission_entry, 'status', "successful") is not 'failure':
             submission_entry.status = submission_status
         logger.info(f'Submission is stored as {submission_status}')
