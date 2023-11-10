@@ -148,30 +148,6 @@ class RunScoringEndpoint:
         logger.info(f'Submission is stored as {submission_status}')
         submission_entry.save()
 
-    def resolve_models(self, domain: str, models: List[str]) -> List[str]:
-        """
-        Identify the set of models by resolving `models` to the list of public models if `models` is `ALL_PUBLIC`
-
-        :param domain: "language" or "vision"
-        :param models: either a list of model identifiers or the string
-            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
-        """
-        if models == self.ALL_PUBLIC:
-            models = public_model_identifiers(domain)
-        return models
-    
-    def resolve_benchmarks(self, domain: str, benchmarks: List[str]) -> List[str]:
-        """
-        Identify the set of benchmarks by resolving `benchmarks` to the list of public models if `benchmarks` is `ALL_PUBLIC`
-
-        :param domain: "language" or "vision"
-        :param benchmarks: either a list of benchmark identifiers or the string
-            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
-        """
-        if benchmarks == self.ALL_PUBLIC:
-            benchmarks = public_benchmark_identifiers(domain)
-        return benchmarks
-
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission, domain: str,
                                   public: bool, competition: Union[None, str]):
