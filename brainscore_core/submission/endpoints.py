@@ -193,6 +193,27 @@ class RunScoringEndpoint:
             score_entry.save()
             raise e
 
+def resolve_models(domain: str, models: Union[List[str], str]) -> List[str]:
+    """
+    Identify the set of models by resolving `models` to the list of public models if `models` is `ALL_PUBLIC`
+    :param domain: "language" or "vision"
+    :param models: either a list of model identifiers or the string
+        :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
+    """
+    if models == RunScoringEndpoint.ALL_PUBLIC:
+        models = public_model_identifiers(domain)
+    return models
+
+def resolve_benchmarks(domain: str, benchmarks: Union[List[str], str]) -> List[str]:
+    """
+    Identify the set of benchmarks by resolving `benchmarks` to the list of public models if `benchmarks` is `ALL_PUBLIC`
+    :param domain: "language" or "vision"
+    :param benchmarks: either a list of benchmark identifiers or the string
+        :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
+    """
+    if benchmarks == RunScoringEndpoint.ALL_PUBLIC:
+        benchmarks = public_benchmark_identifiers(domain)
+    return benchmarks
 
 def shorten_text(text: str, max_length: int) -> str:
     if len(text) <= max_length:
