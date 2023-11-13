@@ -78,6 +78,7 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	:param domain_root: the root package directory of the repo where the PR originates, either 'brainscore' (vision) or 'brainscore_language' (language)
 	"""
 	changed_files_list = changed_files.split()
+	assert changed_files_list, "no changed files detected"
 	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
 
 	plugin_info_dict = {}
@@ -136,7 +137,9 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 					tests_to_run.append(str(filepath))
 
 		print(f"Running tests for new or modified plugins: {tests_to_run}")
-		print(run_args(domain_root, tests_to_run)) # print tests to travis log
-
+		try:
+			print(run_args(domain_root, tests_to_run)) # print tests to travis log
+		except AssertionError as e:
+			assert False, e
 	else:
 		print("No plugins changed or added.")
