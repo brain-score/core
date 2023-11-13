@@ -142,7 +142,7 @@ class RunScoringEndpoint:
 
         # finalize status of submission
         submission_status = 'successful' if is_run_successful else 'failure'
-        if getattr(submission_entry, 'status', "successful") is not 'failure':
+        if getattr(submission_entry, 'status', "successful") != 'failure':
             submission_entry.status = submission_status
         logger.info(f'Submission is stored as {submission_status}')
         submission_entry.save()
