@@ -243,6 +243,9 @@ def make_argparser() -> ArgumentParser:
                         help='The identifiers of newly submitted models to score on all benchmarks')
     parser.add_argument('--new_benchmarks', type=str, nargs='*', default=None,
                         help='The identifiers of newly submitted benchmarks on which to score all models')
+    parser.add_argument('--fn', type=str, nargs='?', default='run_scoring',
+                    choices=['run_scoring', 'resolve_models_benchmarks'],
+                    help='The endpoint method to run. `run_scoring` to score `new_models` on `new_benchmarks`, or `resolve_models_benchmarks` to respond with a list of models and benchmarks to score.')
     return parser
 
 
