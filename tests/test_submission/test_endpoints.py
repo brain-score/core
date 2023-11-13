@@ -8,7 +8,7 @@ import requests
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db
-from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text, resolve_models, resolve_benchmarks
+from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text, resolve_models_benchmarks, resolve_models, resolve_benchmarks
 from brainscore_core.submission.database_models import Model, BenchmarkType, clear_schema
 from tests.test_submission import init_users
 
@@ -147,6 +147,16 @@ class TestRunScoring:
         endpoint_benchmarks = resolve_benchmarks(domain=domain, benchmarks=benchmarks)
         assert endpoint_models == ["dummymodel1", "dummymodel2"]
         assert endpoint_benchmarks == ['dummybenchmark1', 'dummybenchmark2']
+
+    def test_resolve_models_and_benchmarks(self):
+        domain, new_models, new_benchmarks = 'test', ['dummymodel1'], ['dummybenchmark1']
+        args_dict = {'jenkins_id': 62, 'user_id': 1, 'model_type': 'artificialsubject', 
+                    'public': True, 'competition': 'None', 'new_models': new_models, 
+                    'new_benchmarks': new_benchmarks, 'specified_only': True}
+        model_ids, benchmark_ids = resolve_models_benchmarks(domain=domain, args_dict=args_dict)
+        
+        assert model_ids == new_models
+        assert benchmark_ids == new_benchmarks
     
     def test_score_model_benchmark(self):
         domain, model_id, benchmark_id = 'test', 'dummymodel1', 'dummybenchmark1'

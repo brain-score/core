@@ -206,7 +206,7 @@ def resolve_models(domain: str, models: Union[List[str], str]) -> List[str]:
 
 def resolve_benchmarks(domain: str, benchmarks: Union[List[str], str]) -> List[str]:
     """
-    Identify the set of benchmarks by resolving `benchmarks` to the list of public models if `benchmarks` is `ALL_PUBLIC`
+    Identify the set of benchmarks by resolving `benchmarks` to the list of public benchmarks if `benchmarks` is `ALL_PUBLIC`
     :param domain: "language" or "vision"
     :param benchmarks: either a list of benchmark identifiers or the string
         :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
@@ -214,6 +214,23 @@ def resolve_benchmarks(domain: str, benchmarks: Union[List[str], str]) -> List[s
     if benchmarks == RunScoringEndpoint.ALL_PUBLIC:
         benchmarks = public_benchmark_identifiers(domain)
     return benchmarks
+
+def resolve_models_benchmarks(domain: str, args_dict: Dict[str, Union[str, List]]):
+    """
+    Identify the set of model/benchmark pairs to score by resolving `new_models` and `new_benchmarks` in the user input.
+    Prints the names of models and benchmarks to stdout.
+    :param domain: "language" or "vision"
+    :param args_dict: a map containing `new_models`, `new_benchmarks`, and `specified_only`, specifying which the
+        model/benchmark names to be resolved.
+    """
+    benchmarks, models = retrieve_models_and_benchmarks(args_dict)
+    
+    benchmark_ids = resolve_benchmarks(domain=domain, benchmarks=benchmarks)
+    model_ids = resolve_models(domain=domain, models=models)
+
+    print("BS_NEW_MODELS=" + " ".join(model_ids))
+    print("BS_NEW_BENCHMARKS=" + " ".join(benchmark_ids))
+    return model_ids, benchmark_ids
 
 def shorten_text(text: str, max_length: int) -> str:
     if len(text) <= max_length:
