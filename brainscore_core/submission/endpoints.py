@@ -254,7 +254,7 @@ def make_argparser() -> ArgumentParser:
                         help='ID of submitting user in the postgres DB')
     parser.add_argument('--author_email', type=str, nargs='?', default=None,
                         help='email associated with PR author GitHub username')
-    parser.add_argument('--specified_only', type=bool, nargs='?', default=False,
+    parser.add_argument('--specified_only', default=False, action="store_true",
                         help='Only score the plugins specified by new_models and new_benchmarks')
     parser.add_argument('--new_models', type=str, nargs='*', default=None,
                         help='The identifiers of newly submitted models to score on all benchmarks')
