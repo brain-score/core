@@ -1,6 +1,7 @@
 import re
 import subprocess
 import sys
+import json
 from pathlib import Path
 from typing import List, Tuple, Dict
 
@@ -107,7 +108,8 @@ def get_scoring_info(changed_files: str, domain_root: str):
 	else:
 		plugin_info_dict["run_score"] = "False"
 
-	print(plugin_info_dict) # output is accessed via print!
+	plugin_info_json = json.dumps(plugin_info_dict)
+	print(plugin_info_json) # output is accessed via print!
 
 
 def get_testing_info(changed_files: str, domain_root: str):
