@@ -3,6 +3,7 @@ Process plugin submissions (data, metrics, benchmarks, models) and score models 
 """
 import logging
 import os
+import json
 import random
 import smtplib
 import string
@@ -240,7 +241,7 @@ def make_argparser() -> ArgumentParser:
 
 
 # used by domain libraries in `score_new_plugins.yml`
-def call_jenkins(plugin_info: Dict[str, Union[List[str], str]]):
+def call_jenkins(plugin_info: Union[str, Dict[str, Union[List[str], str]]]):
     """
     Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
     Starts run to score models on benchmarks (`run_scoring`).
@@ -252,12 +253,18 @@ def call_jenkins(plugin_info: Dict[str, Union[List[str], str]]):
     jenkins_job = "score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
+
+    if isinstance(plugin_info, str):
+        # Check if plugin_info is a String object, in which case JSON-deserialize it into Dict
+        plugin_info = json.loads(plugin_info)
+
     payload = {k: v for k, v in plugin_info.items() if plugin_info[k]}
     try:
         auth_basic = HTTPBasicAuth(username=jenkins_user, password=jenkins_token)
         requests.get(url, params=payload, auth=auth_basic)
     except Exception as e:
         print(f'Could not initiate Jenkins job because of {e}')
+
 
 
 def retrieve_models_and_benchmarks(args_dict: Dict[str, Any]) -> Tuple[List[str], List[str]]:
