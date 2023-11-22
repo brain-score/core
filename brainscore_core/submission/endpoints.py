@@ -12,16 +12,17 @@ from abc import ABC
 from argparse import ArgumentParser
 from datetime import datetime
 from email.mime.text import MIMEText
-from typing import List, Union, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import requests
 from requests.auth import HTTPBasicAuth
-
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
-from brainscore_core.submission.database import connect_db, modelentry_from_model, \
-    submissionentry_from_meta, benchmarkinstance_from_benchmark, update_score, \
-    public_model_identifiers, public_benchmark_identifiers, uid_from_email, email_from_uid
+from brainscore_core.submission.database import (
+    benchmarkinstance_from_benchmark, connect_db, email_from_uid,
+    modelentry_from_model, public_benchmark_identifiers,
+    public_model_identifiers, submissionentry_from_meta, uid_from_email,
+    update_score)
 
 logger = logging.getLogger(__name__)
 
@@ -113,52 +114,37 @@ class RunScoringEndpoint:
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def __call__(self, domain: str, jenkins_id: int, models: List[str], benchmarks: List[str],
+    def __call__(self, domain: str, jenkins_id: int, model_identifier: str, benchmark_identifier: str,
                  user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
-        Run the `models` on the `benchmarks`, and write resulting score to the database.
+        Run the `model_identifier` on the `benchmark_identifier`, and write resulting score to the database.
 
         Explanation of subset of parameters:
         :param domain: "language" or "vision"
-        :param models: either a list of model identifiers or the string
-            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
-        :param benchmarks: either a list of benchmark identifiers or the string
-            :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
+        :param model_identifier: a string of a model identifier
+        :param benchmark_identifier: a string of a model identifier
         """
-        # setup entry for this entire submission
+        # setup entry for this submission
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
-        entire_submission_successful = True
+        is_run_successful = True
+        
+        logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
 
-        # resolve settings
-        if models == self.ALL_PUBLIC:
-            models = public_model_identifiers(domain)
-        if benchmarks == self.ALL_PUBLIC:
-            benchmarks = public_benchmark_identifiers(domain)
-
-        logger.info(f"Models: {models}")
-        logger.info(f"Benchmarks: {benchmarks}")
-
-        for model_identifier in models:
-            for benchmark_identifier in benchmarks:
-                logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
-                # TODO: I am worried about reloading models inside the loop. E.g. a keras model where layer names are
-                #  automatic and will be consecutive from previous layers
-                #  (e.g. on first load layers are [1, 2, 3], on second load layers are [4, 5, 6])
-                #  which can lead to issues with layer assignment
-                try:
-                    self._score_model_on_benchmark(model_identifier=model_identifier,
-                                                   benchmark_identifier=benchmark_identifier,
-                                                   submission_entry=submission_entry, domain=domain,
-                                                   public=public, competition=competition)
-                except Exception as e:
-                    entire_submission_successful = False
-                    logging.error(
-                        f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
-                        exc_info=True)
+        try:
+            self._score_model_on_benchmark(model_identifier=model_identifier,
+                                            benchmark_identifier=benchmark_identifier,
+                                            submission_entry=submission_entry, domain=domain,
+                                            public=public, competition=competition)
+        except Exception as e:
+            is_run_successful = False
+            logging.error(
+                f'Could not run model {model_identifier} on benchmark {benchmark_identifier} because of {e}',
+                exc_info=True)
 
         # finalize status of submission
-        submission_status = 'successful' if entire_submission_successful else 'failure'
-        submission_entry.status = submission_status
+        submission_status = 'successful' if is_run_successful else 'failure'
+        if getattr(submission_entry, 'status', "successful") != 'failure':
+            submission_entry.status = submission_status
         logger.info(f'Submission is stored as {submission_status}')
         submission_entry.save()
 
@@ -208,6 +194,44 @@ class RunScoringEndpoint:
             score_entry.save()
             raise e
 
+def resolve_models(domain: str, models: Union[List[str], str]) -> List[str]:
+    """
+    Identify the set of models by resolving `models` to the list of public models if `models` is `ALL_PUBLIC`
+    :param domain: "language" or "vision"
+    :param models: either a list of model identifiers or the string
+        :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public models
+    """
+    if models == RunScoringEndpoint.ALL_PUBLIC:
+        models = public_model_identifiers(domain)
+    return models
+
+def resolve_benchmarks(domain: str, benchmarks: Union[List[str], str]) -> List[str]:
+    """
+    Identify the set of benchmarks by resolving `benchmarks` to the list of public benchmarks if `benchmarks` is `ALL_PUBLIC`
+    :param domain: "language" or "vision"
+    :param benchmarks: either a list of benchmark identifiers or the string
+        :attr:`~brainscore_core.submission.endpoints.RunScoringEndpoint.ALL_PUBLIC` to select all public benchmarks
+    """
+    if benchmarks == RunScoringEndpoint.ALL_PUBLIC:
+        benchmarks = public_benchmark_identifiers(domain)
+    return benchmarks
+
+def resolve_models_benchmarks(domain: str, args_dict: Dict[str, Union[str, List]]):
+    """
+    Identify the set of model/benchmark pairs to score by resolving `new_models` and `new_benchmarks` in the user input.
+    Prints the names of models and benchmarks to stdout.
+    :param domain: "language" or "vision"
+    :param args_dict: a map containing `new_models`, `new_benchmarks`, and `specified_only`, specifying which the
+        model/benchmark names to be resolved.
+    """
+    benchmarks, models = retrieve_models_and_benchmarks(args_dict)
+    
+    benchmark_ids = resolve_benchmarks(domain=domain, benchmarks=benchmarks)
+    model_ids = resolve_models(domain=domain, models=models)
+
+    print("BS_NEW_MODELS=" + " ".join(model_ids))
+    print("BS_NEW_BENCHMARKS=" + " ".join(benchmark_ids))
+    return model_ids, benchmark_ids
 
 def shorten_text(text: str, max_length: int) -> str:
     if len(text) <= max_length:
@@ -231,12 +255,15 @@ def make_argparser() -> ArgumentParser:
                         help='ID of submitting user in the postgres DB')
     parser.add_argument('--author_email', type=str, nargs='?', default=None,
                         help='email associated with PR author GitHub username')
-    parser.add_argument('--specified_only', type=bool, nargs='?', default=False,
+    parser.add_argument('--specified_only', default=False, action="store_true",
                         help='Only score the plugins specified by new_models and new_benchmarks')
     parser.add_argument('--new_models', type=str, nargs='*', default=None,
                         help='The identifiers of newly submitted models to score on all benchmarks')
     parser.add_argument('--new_benchmarks', type=str, nargs='*', default=None,
                         help='The identifiers of newly submitted benchmarks on which to score all models')
+    parser.add_argument('--fn', type=str, nargs='?', default='run_scoring',
+                    choices=['run_scoring', 'resolve_models_benchmarks'],
+                    help='The endpoint method to run. `run_scoring` to score `new_models` on `new_benchmarks`, or `resolve_models_benchmarks` to respond with a list of models and benchmarks to score.')
     return parser
 
 
