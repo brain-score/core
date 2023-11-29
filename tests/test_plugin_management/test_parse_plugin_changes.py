@@ -158,17 +158,6 @@ def test_is_plugin_only_true():
     # First value: modifies_plugins
     assert return_values == "True"
 
-def test_is_plugin_only_true():
-    changed_files = " ".join(DUMMY_FILES_CHANGED_AUTOMERGEABLE)
-
-    f = io.StringIO()
-    with contextlib.redirect_stdout(f):
-        is_plugin_only(changed_files, 'brainscore_core')
-    return_values = (f.getvalue())
-
-    # First value: modifies_plugins
-    assert return_values == "True"
-
 def test_is_plugin_only_false():
     changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
 
