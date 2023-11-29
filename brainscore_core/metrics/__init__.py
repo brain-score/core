@@ -10,7 +10,7 @@ import warnings
 
 from brainio.assemblies import DataAssembly, merge_data_arrays
 
-_logger = logging.getLogger(__name__)  # cannot set directly on Score object
+_logger = logging.getLogger(__name__)
 
 
 class Score(DataAssembly):
@@ -77,23 +77,31 @@ class Score(DataAssembly):
                         _logger.debug(f"failed to set {key}={value} on raw values: " + (repr(e)))
 
     @classmethod
-    def merge(cls, *scores, ignore_exceptions=False):
+    def merge(cls, *scores, exception_handling: str = 'ignore'):
         """
         Merges the raw values in addition to the score assemblies.
         Raw values are indexed on the first score.
+
+        :param exception_handling: how to deal with raised exceptions,
+            one of 'ignore' (do not raise or log), 'warn' (log but do not raise), 'raise' (raise exception).
         """
         result = merge_data_arrays(scores)
         for attr_key in scores[0].attrs:
             if cls.RAW_VALUES_KEY in attr_key:
                 attr_values = [score.attrs[attr_key] for score in scores]
                 try:
-                    attr_values = Score.merge(*attr_values, ignore_exceptions=True)
+                    attr_values = Score.merge(*attr_values, exception_handling=exception_handling)
                     result.attrs[attr_key] = attr_values
                 except Exception as e:
-                    if ignore_exceptions:
+                    if exception_handling == 'ignore':
+                        pass
+                    elif exception_handling == 'warn':
                         warnings.warn("failed to merge raw values: " + str(e))
-                    else:
+                        pass
+                    elif exception_handling == 'raise':
                         raise e
+                    else:
+                        raise ValueError(f"Unknown exception_handling argument '{exception_handling}'")
         return result
 
 
