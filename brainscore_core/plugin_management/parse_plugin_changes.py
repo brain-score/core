@@ -109,17 +109,26 @@ def get_scoring_info(changed_files: str, domain_root: str):
 		plugin_info_dict["run_score"] = "False"
 
 	plugin_info_json = json.dumps(plugin_info_dict)
-	print(plugin_info_json) # output is accessed via print!
+	print(plugin_info_json, end="") # output is accessed via print!
 
 
 def get_testing_info(changed_files: str, domain_root: str):
 	"""
-	1. Print "true" if PR changes ANY plugin files, else print "false"
-	2. Print "true" if PR ONLY changes plugin files, else print "false"
+	1. Print "True" if PR changes ANY plugin files, else print "False"
+	2. Print "True" if PR ONLY changes plugin files, else print "False"
 	"""
 	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
 
 	print(f'{plugin_info_dict["modifies_plugins"]} {plugin_info_dict["is_automergeable"]}', end="") # output is accessed via print!
+
+
+def is_plugin_only(changed_files: str, domain_root: str):
+	"""
+	Print "True" if PR ONLY changes plugin files, else print "False"
+	"""
+	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
+
+	print(f'{plugin_info_dict["is_automergeable"]}', end="") # output is accessed via print!
 
 
 def run_changed_plugin_tests(changed_files: str, domain_root: str):
