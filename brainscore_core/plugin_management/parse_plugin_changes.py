@@ -1,6 +1,7 @@
 import re
 import subprocess
 import sys
+import json
 from pathlib import Path
 from typing import List, Tuple, Dict
 
@@ -107,7 +108,8 @@ def get_scoring_info(changed_files: str, domain_root: str):
 	else:
 		plugin_info_dict["run_score"] = "False"
 
-	print(plugin_info_dict) # output is accessed via print!
+	plugin_info_json = json.dumps(plugin_info_dict)
+	print(plugin_info_json) # output is accessed via print!
 
 
 def get_testing_info(changed_files: str, domain_root: str):
@@ -136,7 +138,7 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 					tests_to_run.append(str(filepath))
 
 		print(f"Running tests for new or modified plugins: {tests_to_run}")
-		print(run_args('brainscore_language', tests_to_run)) # print tests to travis log
+		print(run_args(domain_root, tests_to_run)) # print tests to travis log
 
 	else:
 		print("No plugins changed or added.")

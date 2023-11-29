@@ -1,4 +1,4 @@
-import ast
+import json
 import contextlib
 import io
 from pathlib import Path
@@ -86,7 +86,7 @@ def test_get_scoring_info_scoring_needed(mocker):
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
         get_scoring_info(changed_files, 'brainscore_core')
-    plugin_info_dict = ast.literal_eval(f.getvalue())
+    plugin_info_dict = json.loads(f.getvalue())
     print(plugin_info_dict)
 
     assert plugin_info_dict["run_score"] == str(True)
@@ -99,7 +99,7 @@ def test_get_scoring_info_scoring_not_needed():
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
         get_scoring_info(changed_files, 'brainscore_core')
-    plugin_info_dict = ast.literal_eval(f.getvalue())
+    plugin_info_dict = json.loads(f.getvalue())
     print(plugin_info_dict)
 
     assert plugin_info_dict["run_score"] == str(False)
