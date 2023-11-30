@@ -66,7 +66,6 @@ def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: st
 			for line in plugin_registrations:
 				result = re.search(f'{registry_name}\[.*\]', line)
 				identifier = result.group(0)[len(registry_name) + 2:-2] # remove brackets and quotes
-				print(identifier)
 				plugin_ids.append(identifier)
 
 	return plugin_ids
