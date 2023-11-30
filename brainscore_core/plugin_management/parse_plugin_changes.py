@@ -75,9 +75,10 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	"""
 	Return information about which files changed by the invoking PR (compared against main) belong to plugins
 
-	:param commit_SHA: SHA of the invoking PR
+	:param changed_files: changed file path(s), separated by white space.
 	:param domain_root: the root package directory of the repo where the PR originates, either 'brainscore' (vision) or 'brainscore_language' (language)
 	"""
+	assert changed_files, "No files changed"
 	changed_files_list = changed_files.split()
 	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
 

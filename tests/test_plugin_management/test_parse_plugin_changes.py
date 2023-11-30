@@ -2,6 +2,7 @@ import json
 import contextlib
 import io
 from pathlib import Path
+import pytest
 
 from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, run_changed_plugin_tests
 
@@ -42,7 +43,7 @@ def test_get_plugin_ids():
     for plugin_type in plugin_types:
         plugin_id = f'dummy_{plugin_type}'.strip('s')
         plugin_ids = get_plugin_ids(plugin_type, [plugin_id], dummy_root)
-        assert plugin_id == plugin_id
+        assert plugin_ids == [plugin_id.replace("_", "-")]
 
 
 def test_parse_plugin_changes_not_automergeable():
@@ -67,7 +68,13 @@ def test_parse_plugin_changes_automergeable():
     assert plugin_info_dict["is_automergeable"] == True
 
 
-def test_parse_plugin_changes_no_change():
+def test_parse_plugin_changes_no_files_changed():
+    changed_files = ""
+    with pytest.raises(AssertionError):
+        plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
+
+
+def test_parse_plugin_changes_no_plugins_changed():
     changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
     plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
     all_plugins_changed = [len(plugin_list) for plugin_list in plugin_info_dict["changed_plugins"].values()]
