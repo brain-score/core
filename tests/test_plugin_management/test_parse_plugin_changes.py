@@ -3,7 +3,7 @@ import contextlib
 import io
 from pathlib import Path
 
-from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, run_changed_plugin_tests
+from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, run_changed_plugin_tests
 
 DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py', 
                 'brainscore_core/models/dummy_model/test.py', 
@@ -146,3 +146,25 @@ def test_run_changed_plugin_tests(mocker):
         output = f.getvalue()
 
     assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/models/dummy_model/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark/test.py']" in output
+
+def test_is_plugin_only_true():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_AUTOMERGEABLE)
+
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        is_plugin_only(changed_files, 'brainscore_core')
+    return_values = (f.getvalue())
+
+    # First value: modifies_plugins
+    assert return_values == "True"
+
+def test_is_plugin_only_false():
+    changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
+
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        is_plugin_only(changed_files, 'brainscore_core')
+    return_values = (f.getvalue())
+
+    # First value: modifies_plugins
+    assert return_values == "False"
