@@ -66,6 +66,7 @@ def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: st
 			for line in plugin_registrations:
 				result = re.search(f'{registry_name}\[.*\]', line)
 				identifier = result.group(0)[len(registry_name) + 2:-2] # remove brackets and quotes
+				print(identifier)
 				plugin_ids.append(identifier)
 
 	return plugin_ids
@@ -78,6 +79,7 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	:param commit_SHA: SHA of the invoking PR
 	:param domain_root: the root package directory of the repo where the PR originates, either 'brainscore' (vision) or 'brainscore_language' (language)
 	"""
+	assert changed_files, "No files changed"
 	changed_files_list = changed_files.split()
 	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
 
