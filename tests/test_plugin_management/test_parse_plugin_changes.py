@@ -10,6 +10,8 @@ DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
                 'brainscore_core/models/dummy_model/test.py', 
                 'brainscore_core/models/dummy_model/__init__.py',
                 'brainscore_core/benchmarks/dummy_benchmark/__init__.py',
+                'brainscore_core/benchmarks/__init__.py',
+                'brainscore_core/model_helpers/dummy_helper.py',
                 'brainscore_core/__init__.py',
                 'brainscore_core/README.md']
 
@@ -21,17 +23,20 @@ DUMMY_FILES_CHANGED_NO_PLUGINS = ['brainscore_core/__init__.py',
 
 
 def test_separate_plugin_files():
-    plugin_files, non_plugin_files = separate_plugin_files(DUMMY_FILES_CHANGED)
+    plugin_files, non_plugin_files, plugin_related_files = separate_plugin_files(DUMMY_FILES_CHANGED)
     assert set(['brainscore_core/models/dummy_model/model.py', 
         'brainscore_core/models/dummy_model/test.py', 
         'brainscore_core/models/dummy_model/__init__.py', 
         'brainscore_core/benchmarks/dummy_benchmark/__init__.py']) == set(plugin_files)
     assert set(['brainscore_core/__init__.py', 
         'brainscore_core/README.md']) == set(non_plugin_files)
+    assert set(['brainscore_core/benchmarks/__init__.py',
+                'brainscore_core/model_helpers/dummy_helper.py']) == set(plugin_related_files)
 
 
 def test_get_plugin_paths():
-    changed_plugins = get_plugin_paths(DUMMY_FILES_CHANGED, 'brainscore_core')
+    plugin_files, non_plugin_files, plugin_related_files = separate_plugin_files(DUMMY_FILES_CHANGED)
+    changed_plugins = get_plugin_paths(plugin_files, 'brainscore_core')
     assert changed_plugins['models'][0] == 'dummy_model'
     assert changed_plugins['benchmarks'][0] == 'dummy_benchmark'
     assert len(changed_plugins['data']) + len(changed_plugins['metrics']) == 0

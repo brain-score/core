@@ -1,8 +1,7 @@
-import re
-import subprocess
-import sys
 import json
+import os
 from pathlib import Path
+import re
 from typing import List, Tuple, Dict
 
 from .test_plugins import run_args
@@ -12,20 +11,27 @@ PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 
 def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 	"""
-	:return: one list of files that are located inside a plugin, and one list of files that are located outside of all plugins, 
-		e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py'], ['model_helpers/make_model_brainlike.py']`
+	:return: one list of files that are located inside a plugin, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`,
+		one list of files that are not plugin-related, e.g. `['README.md', 'pyproject.toml']`,
+		and one list of files that are not inside a plugin but will trigger scoring of all related plugins, e.g. `['model_helpers/make_model_brainlike.py', 'data/__init__.py']`
 	"""
 	plugin_files = []
 	non_plugin_files = []
+	plugin_related_files = []
 
 	for f in files:
 		subdir = f.split('/')[1] if len(f.split('/')) > 1 else None
-		if not any(plugin_dir == subdir for plugin_dir in PLUGIN_DIRS):
-			non_plugin_files.append(f)
+		if any(plugin_dir == subdir for plugin_dir in PLUGIN_DIRS):
+			if len(f.split('/')) == 3 and os.path.isfile(f):
+				plugin_related_files.append(f)
+			else:
+				plugin_files.append(f)
+		elif any(f'{plugin_dir[:-1]}_helpers' == subdir for plugin_dir in PLUGIN_DIRS):
+				plugin_related_files.append(f)
 		else:
-			plugin_files.append(f)
+			non_plugin_files.append(f)
 
-	return plugin_files, non_plugin_files
+	return plugin_files, non_plugin_files, plugin_related_files
 
 
 def _plugin_name_from_path(path_relative_to_library: str) -> str:
@@ -80,12 +86,12 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	"""
 	assert changed_files, "No files changed"
 	changed_files_list = changed_files.split()
-	changed_plugin_files, changed_non_plugin_files = separate_plugin_files(changed_files_list)	
+	changed_plugin_files, changed_non_plugin_files, changed_plugin_related_files = separate_plugin_files(changed_files_list)	
 
 	plugin_info_dict = {}
-	plugin_info_dict["modifies_plugins"] = False if len(changed_plugin_files) == 0 else True
+	plugin_info_dict["modifies_plugins"] = False if len(changed_plugin_files) + len(changed_plugin_related_files) == 0 else True
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
-	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) == 0
+	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) + len(changed_plugin_related_files) == 0
 
 	return plugin_info_dict
 
