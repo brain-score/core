@@ -27,7 +27,7 @@ def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 			else:
 				plugin_files.append(f)
 		elif any(f'{plugin_dir[:-1]}_helpers' == subdir for plugin_dir in PLUGIN_DIRS):
-				plugin_related_files.append(f)
+			plugin_related_files.append(f)
 		else:
 			non_plugin_files.append(f)
 
