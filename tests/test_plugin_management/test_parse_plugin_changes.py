@@ -4,7 +4,7 @@ import io
 from pathlib import Path
 import pytest
 
-from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, run_changed_plugin_tests
+from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, plugin_types_to_test_all, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, run_changed_plugin_tests
 
 DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py', 
                 'brainscore_core/models/dummy_model/test.py', 
@@ -40,6 +40,17 @@ def test_get_plugin_paths():
     assert changed_plugins['models'][0] == 'dummy_model'
     assert changed_plugins['benchmarks'][0] == 'dummy_benchmark'
     assert len(changed_plugins['data']) + len(changed_plugins['metrics']) == 0
+
+
+def test_plugin_types_to_test_all():
+    plugin_files, non_plugin_files, plugin_related_files = separate_plugin_files(DUMMY_FILES_CHANGED)
+    run_all_plugin_tests = plugin_types_to_test_all(plugin_related_files)
+    assert set(['models', 'benchmarks']) == set(run_all_plugin_tests)
+
+
+def test_plugin_types_to_test_all_special_case():
+    run_all_plugin_tests = plugin_types_to_test_all(['brainscore_vision/model_interface.py'])
+    assert set(['models', 'benchmarks', 'data', 'metrics']) == set(run_all_plugin_tests)
 
 
 def test_get_plugin_ids():
