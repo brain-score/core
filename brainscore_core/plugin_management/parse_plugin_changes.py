@@ -116,7 +116,7 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	plugin_info_dict["modifies_plugins"] = False if (len(changed_plugin_files) + len(changed_plugin_related_files)) == 0 else True
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
 	plugin_info_dict["test_all_plugins"] = plugin_types_to_test_all(changed_plugin_related_files)
-	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) + len(changed_plugin_related_files) == 0
+	plugin_info_dict["is_automergeable"] = (len(changed_non_plugin_files) + len(changed_plugin_related_files)) == 0
 
 	return plugin_info_dict
 
