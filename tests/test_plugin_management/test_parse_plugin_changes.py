@@ -154,9 +154,24 @@ def test_get_testing_info_testing_not_needed():
     assert return_values == "False False"
 
 
-def test_run_changed_plugin_tests(mocker):
+def test_run_changed_plugin_tests_one_benchmark(mocker):
     plugin_info_dict_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
-    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': ['data', 'benchmarks'], 'changed_plugins': {'models': ['dummy_model'], 'benchmarks': [], 'data': [], 'metrics': []}, 'is_automergeable': False, 'run_score': 'True'}
+    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': [], 'changed_plugins': {'models': [], 'benchmarks': ['dummy_benchmark_2'], 'data': [], 'metrics': []}, 'is_automergeable': False, 'run_score': 'True'}
+
+    run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
+    run_args_mock.return_value = "Mock test run"
+    
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        run_changed_plugin_tests('mocked_changed_files', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
+        output = f.getvalue()
+
+    assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py']" in output
+
+
+def test_run_changed_plugin_tests_all_models_benchmarks_data(mocker):
+    plugin_info_dict_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
+    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': ['data', 'benchmarks', 'models'], 'changed_plugins': {'models': [], 'benchmarks': [], 'data': [], 'metrics': []}, 'is_automergeable': False, 'run_score': 'True'}
 
     run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
     run_args_mock.return_value = "Mock test run"
@@ -168,6 +183,8 @@ def test_run_changed_plugin_tests(mocker):
 
     assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/models/dummy_model/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/data/dummy_data/test.py']" in output
 
+
+
 def test_is_plugin_only_true():
     changed_files = " ".join(DUMMY_FILES_CHANGED_AUTOMERGEABLE)
 
@@ -178,6 +195,7 @@ def test_is_plugin_only_true():
 
     # First value: modifies_plugins
     assert return_values == "True"
+
 
 def test_is_plugin_only_false():
     changed_files = " ".join(DUMMY_FILES_CHANGED_NO_PLUGINS)
