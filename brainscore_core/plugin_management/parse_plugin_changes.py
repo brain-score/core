@@ -69,7 +69,7 @@ def plugin_types_to_test_all(plugin_related_files: List[str]) -> List[str]:
 	plugin_types_changed = []
 	for f in plugin_related_files:
 		plugin_type = [plugin_dir for plugin_dir in PLUGIN_DIRS if plugin_dir.strip('s') in f]
-		assert len(plugin_type) == 1, "More than one plugin type associated with this file"
+		assert len(plugin_type) == 1, f"Expected exactly one plugin type to be associated with file {f}"
 		plugin_types_changed.append(plugin_type[0])
 	
 	# if metric- or data-related files are changed, run all benchmark plugin tests
