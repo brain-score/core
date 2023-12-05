@@ -10,7 +10,7 @@ PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 SPECIAL_PLUGIN_FILES = ['brainscore_vision/model_interface.py', 'brainscore_language/artificial_subject.py']
 
 
-def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
+def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str], List[str]]:
 	"""
 	:return: one list of files that are located inside a plugin, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`,
 		one list of files that are not plugin-related, e.g. `['README.md', 'pyproject.toml']`,
