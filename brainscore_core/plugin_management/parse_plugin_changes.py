@@ -63,7 +63,7 @@ def plugin_types_to_test_all(plugin_related_files: List[str]) -> List[str]:
 	Returns a list of plugin types for which all plugins should be tested.
 	If any of SPECIAL_PLUGIN_FILES is changed, all plugin tests will be run. 
 	"""
-	if any(f == spf for spf in SPECIAL_PLUGIN_FILES for f in plugin_related_files):
+	if any(f == special_plugin_file for special_plugin_file in SPECIAL_PLUGIN_FILES for f in plugin_related_files):
 		return PLUGIN_DIRS
 
 	plugin_types_changed = []
