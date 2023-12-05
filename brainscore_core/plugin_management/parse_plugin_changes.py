@@ -163,31 +163,35 @@ def is_plugin_only(changed_files: str, domain_root: str):
 	print(f'{plugin_info_dict["is_automergeable"]}', end="") # output is accessed via print!
 
 
+def get_test_file_paths(dir_to_search: Path) -> List[str]:
+	"""
+	Returns list of paths to all test files in dir_to_search
+	"""	
+	test_filepaths = []
+	for filepath in dir_to_search.rglob(r'test*.py'):
+		test_filepaths.append(str(filepath))
+
+	return test_filepaths
+
+
 def run_changed_plugin_tests(changed_files: str, domain_root: str):
 	"""
 	Initiates run of all tests in each changed plugin directory
 	"""
 	plugin_info_dict = parse_plugin_changes(changed_files, domain_root)
+	assert plugin_info_dict["modifies_plugins"], "Expected at least one plugin changed or added, none found."
 
-	if plugin_info_dict["modifies_plugins"]:
-		tests_to_run = []
-		for plugin_type in PLUGIN_DIRS:
-			if plugin_type in plugin_info_dict["test_all_plugins"]:
-				plugin_type_dir = Path(f'{domain_root}/{plugin_type}')
-				for dir in plugin_type_dir.iterdir():
-					if dir.is_dir():
-						for filepath in dir.rglob(r'test*.py'):
-							tests_to_run.append(str(filepath))
-			elif plugin_type in plugin_info_dict["changed_plugins"]:
-				changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
-				if changed_plugins:
-					for plugin_dirname in changed_plugins:
-						root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-						for filepath in root.rglob(r'test*.py'):
-							tests_to_run.append(str(filepath))
+	tests_to_run = []
+	for plugin_type in PLUGIN_DIRS:
+		if plugin_type in plugin_info_dict["test_all_plugins"]:
+			plugin_type_dir = Path(f'{domain_root}/{plugin_type}')
+			for plugin_dir in plugin_type_dir.iterdir():
+				if plugin_dir.is_dir(): tests_to_run.extend(get_test_file_paths(plugin_dir))
+		else:
+			changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
+			for plugin_dirname in changed_plugins:
+				plugin_dir = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
+				tests_to_run.extend(get_test_file_paths(plugin_dir))
 
-		print(f"Running tests for new or modified plugins: {tests_to_run}")
-		print(run_args(domain_root, tests_to_run)) # print tests to travis log
-
-	else:
-		print("No plugins changed or added.")
+	print(f"Running tests for new or modified plugins: {tests_to_run}")
+	print(run_args(domain_root, tests_to_run)) # print tests to travis log
