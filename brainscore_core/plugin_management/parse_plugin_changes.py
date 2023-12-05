@@ -10,7 +10,7 @@ PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 SPECIAL_PLUGIN_FILES = ['brainscore_vision/model_interface.py', 'brainscore_language/artificial_subject.py']
 
 
-def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
+def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str], List[str]]:
 	"""
 	:return: one list of files that are located inside a plugin, e.g. `['models/mymodel/__init__.py', 'models/mymodel/model.py', 'models/mymodel/test.py']`,
 		one list of files that are not plugin-related, e.g. `['README.md', 'pyproject.toml']`,
@@ -29,7 +29,7 @@ def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 				plugin_files.append(f)
 		elif any(f'{plugin_dir.strip("s")}_helpers' == subdir for plugin_dir in PLUGIN_DIRS):
 			plugin_related_files.append(f)
-		elif any(spf == f for spf in SPECIAL_PLUGIN_FILES):
+		elif any(special_plugin_file == f for special_plugin_file in SPECIAL_PLUGIN_FILES):
 			plugin_related_files.append(f)
 		else:
 			non_plugin_files.append(f)
@@ -69,7 +69,7 @@ def plugin_types_to_test_all(plugin_related_files: List[str]) -> List[str]:
 	plugin_types_changed = []
 	for f in plugin_related_files:
 		plugin_type = [plugin_dir for plugin_dir in PLUGIN_DIRS if plugin_dir.strip('s') in f]
-		assert len(plugin_type) == 1, "More than one plugin type associated with this file"
+		assert len(plugin_type) == 1, f"Expected exactly one plugin type to be associated with file {f}"
 		plugin_types_changed.append(plugin_type[0])
 	
 	# if metric- or data-related files are changed, run all benchmark plugin tests
@@ -113,10 +113,10 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
 	changed_plugin_files, changed_non_plugin_files, changed_plugin_related_files = separate_plugin_files(changed_files_list)	
 
 	plugin_info_dict = {}
-	plugin_info_dict["modifies_plugins"] = False if len(changed_plugin_files) + len(changed_plugin_related_files) == 0 else True
+	plugin_info_dict["modifies_plugins"] = False if (len(changed_plugin_files) + len(changed_plugin_related_files)) == 0 else True
 	plugin_info_dict["changed_plugins"] = get_plugin_paths(changed_plugin_files, domain_root)
 	plugin_info_dict["test_all_plugins"] = plugin_types_to_test_all(changed_plugin_related_files)
-	plugin_info_dict["is_automergeable"] = len(changed_non_plugin_files) + len(changed_plugin_related_files) == 0
+	plugin_info_dict["is_automergeable"] = (len(changed_non_plugin_files) + len(changed_plugin_related_files)) == 0
 
 	return plugin_info_dict
 
