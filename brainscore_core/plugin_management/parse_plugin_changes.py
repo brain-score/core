@@ -29,7 +29,7 @@ def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str], List[
 				plugin_files.append(f)
 		elif any(f'{plugin_dir.strip("s")}_helpers' == subdir for plugin_dir in PLUGIN_DIRS):
 			plugin_related_files.append(f)
-		elif any(spf == f for spf in SPECIAL_PLUGIN_FILES):
+		elif any(special_plugin_file == f for special_plugin_file in SPECIAL_PLUGIN_FILES):
 			plugin_related_files.append(f)
 		else:
 			non_plugin_files.append(f)
