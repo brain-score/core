@@ -23,7 +23,7 @@ def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str]]:
 	for f in files:
 		subdir = f.split('/')[1] if len(f.split('/')) > 1 else None
 		if any(plugin_dir == subdir for plugin_dir in PLUGIN_DIRS):
-			if len(f.split('/')) == 3 and os.path.isfile(f):
+			if len(f.split('/')) == 3 and not os.path.isdir(f):
 				plugin_related_files.append(f)
 			else:
 				plugin_files.append(f)
@@ -171,12 +171,20 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
 
 	if plugin_info_dict["modifies_plugins"]:
 		tests_to_run = []
-		for plugin_type in plugin_info_dict["changed_plugins"]:
-			changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
-			for plugin_dirname in changed_plugins:
-				root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-				for filepath in root.rglob(r'test*.py'):
-					tests_to_run.append(str(filepath))
+		for plugin_type in PLUGIN_DIRS:
+			if plugin_type in plugin_info_dict["test_all_plugins"]:
+				plugin_type_dir = Path(f'{domain_root}/{plugin_type}')
+				for dir in plugin_type_dir.iterdir():
+					if dir.is_dir():
+						for filepath in dir.rglob(r'test*.py'):
+							tests_to_run.append(str(filepath))
+			elif plugin_type in plugin_info_dict["changed_plugins"]:
+				changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
+				if changed_plugins:
+					for plugin_dirname in changed_plugins:
+						root = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
+						for filepath in root.rglob(r'test*.py'):
+							tests_to_run.append(str(filepath))
 
 		print(f"Running tests for new or modified plugins: {tests_to_run}")
 		print(run_args(domain_root, tests_to_run)) # print tests to travis log
