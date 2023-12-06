@@ -167,11 +167,7 @@ def get_test_file_paths(dir_to_search: Path) -> List[str]:
 	"""
 	Returns list of paths to all test files in dir_to_search
 	"""	
-	test_filepaths = []
-	for filepath in dir_to_search.rglob(r'test*.py'):
-		test_filepaths.append(str(filepath))
-
-	return test_filepaths
+	return [str(filepath) for filepath in dir_to_search.rglob(r'test*.py')]
 
 
 def run_changed_plugin_tests(changed_files: str, domain_root: str):
