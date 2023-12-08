@@ -1,6 +1,5 @@
 import pytest_check as check
 import re
-import warnings
 import yaml
 from pathlib import Path
 from typing import Dict, Union, List
@@ -78,6 +77,7 @@ class PluginTestRunner(EnvironmentManager):
         calls bash script to create conda environment, then
         runs all tests or selected test for specified plugin
         """
+        print(f"travis_fold:start:{self.plugin_directory}")
         run_command = f"bash {self.script_path} \
             {self.plugin_directory} {self.plugin_name} {self.test} {self.library_path}"
 
@@ -85,6 +85,7 @@ class PluginTestRunner(EnvironmentManager):
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
 
         self.results[self.plugin_name] = completed_process.returncode
+        if completed_process.returncode == 0: print(f"travis_fold:end:{self.plugin_directory}")
 
 
 def run_specified_tests(root_directory: Path, test_file: str, results: Dict, test: str):
