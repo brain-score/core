@@ -42,9 +42,6 @@ requires = [
 #### setuptools packaging config ####
 ################################################################
 
-[tool.setuptools]
-py-modules = ['brainscore_core']
-
 [tool.setuptools.package-data]
 # include bash files (e.g. 'test_plugin.sh') in package install
 "brainscore_core.plugin_management" = ["**"]
