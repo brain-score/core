@@ -85,7 +85,10 @@ class PluginTestRunner(EnvironmentManager):
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
 
         self.results[self.plugin_name] = completed_process.returncode
-        if completed_process.returncode == 0: print(f"travis_fold:end:{self.plugin_directory}")
+
+        # fold test output if all successful (0) or no tests were collected (5)
+        if (completed_process.returncode == 0) or (completed_process.returncode == 5): 
+            print(f"travis_fold:end:{self.plugin_directory}")
 
 
 def run_specified_tests(root_directory: Path, test_file: str, results: Dict, test: str):
