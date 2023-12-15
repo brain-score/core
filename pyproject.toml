@@ -41,6 +41,7 @@ requires = [
 #### mypy type-checking config ####
 ################################################################
 
+[tool.pytest.ini_options]
 markers = [
     "memory_intense",
     "travis_slow",
