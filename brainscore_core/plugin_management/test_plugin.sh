@@ -7,7 +7,12 @@ PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$3
 CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
-PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow"}
+
+if $TRAVIS; then
+  PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow and not travis_slow"}
+else
+  PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not slow"}
+fi
 
 cd "$LIBRARY_PATH" || exit 2
 echo "$PLUGIN_NAME ($PLUGIN_PATH)"
