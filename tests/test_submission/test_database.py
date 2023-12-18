@@ -1,6 +1,6 @@
 import logging
+
 import numpy as np
-import pytest
 
 from brainscore_core import Score as ScoreObject
 from brainscore_core.benchmarks import BenchmarkBase
