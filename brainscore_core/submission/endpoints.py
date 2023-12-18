@@ -127,14 +127,14 @@ class RunScoringEndpoint:
         # setup entry for this submission
         submission_entry = submissionentry_from_meta(jenkins_id=jenkins_id, user_id=user_id, model_type=model_type)
         is_run_successful = True
-        
+
         logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
 
         try:
             self._score_model_on_benchmark(model_identifier=model_identifier,
-                                            benchmark_identifier=benchmark_identifier,
-                                            submission_entry=submission_entry, domain=domain,
-                                            public=public, competition=competition)
+                                           benchmark_identifier=benchmark_identifier,
+                                           submission_entry=submission_entry, domain=domain,
+                                           public=public, competition=competition)
         except Exception as e:
             is_run_successful = False
             logging.error(
@@ -194,6 +194,7 @@ class RunScoringEndpoint:
             score_entry.save()
             raise e
 
+
 def resolve_models(domain: str, models: Union[List[str], str]) -> List[str]:
     """
     Identify the set of models by resolving `models` to the list of public models if `models` is `ALL_PUBLIC`
@@ -204,6 +205,7 @@ def resolve_models(domain: str, models: Union[List[str], str]) -> List[str]:
     if models == RunScoringEndpoint.ALL_PUBLIC:
         models = public_model_identifiers(domain)
     return models
+
 
 def resolve_benchmarks(domain: str, benchmarks: Union[List[str], str]) -> List[str]:
     """
@@ -216,6 +218,7 @@ def resolve_benchmarks(domain: str, benchmarks: Union[List[str], str]) -> List[s
         benchmarks = public_benchmark_identifiers(domain)
     return benchmarks
 
+
 def resolve_models_benchmarks(domain: str, args_dict: Dict[str, Union[str, List]]):
     """
     Identify the set of model/benchmark pairs to score by resolving `new_models` and `new_benchmarks` in the user input.
@@ -225,13 +228,14 @@ def resolve_models_benchmarks(domain: str, args_dict: Dict[str, Union[str, List]
         model/benchmark names to be resolved.
     """
     benchmarks, models = retrieve_models_and_benchmarks(args_dict)
-    
+
     benchmark_ids = resolve_benchmarks(domain=domain, benchmarks=benchmarks)
     model_ids = resolve_models(domain=domain, models=models)
 
     print("BS_NEW_MODELS=" + " ".join(model_ids))
     print("BS_NEW_BENCHMARKS=" + " ".join(benchmark_ids))
     return model_ids, benchmark_ids
+
 
 def shorten_text(text: str, max_length: int) -> str:
     if len(text) <= max_length:
@@ -243,13 +247,20 @@ def shorten_text(text: str, max_length: int) -> str:
     return part1 + spacer + part2
 
 
+def noneable_string(val: str) -> Union[None, str]:
+    """ For argparse """
+    if val is None or val == 'None':
+        return None
+    return val
+
+
 def make_argparser() -> ArgumentParser:
     parser = ArgumentParser()
     parser.add_argument('jenkins_id', type=int,
                         help='The id of the current jenkins run')
     parser.add_argument('public', type=bool, nargs='?', default=True,
                         help='Public (or private) submission?')
-    parser.add_argument('--competition', type=str, nargs='?', default=None,
+    parser.add_argument('--competition', type=noneable_string, nargs='?', default=None,
                         help='Name of competition for which submission is being scored')
     parser.add_argument('--user_id', type=int, nargs='?', default=None,
                         help='ID of submitting user in the postgres DB')
@@ -262,8 +273,9 @@ def make_argparser() -> ArgumentParser:
     parser.add_argument('--new_benchmarks', type=str, nargs='*', default=None,
                         help='The identifiers of newly submitted benchmarks on which to score all models')
     parser.add_argument('--fn', type=str, nargs='?', default='run_scoring',
-                    choices=['run_scoring', 'resolve_models_benchmarks'],
-                    help='The endpoint method to run. `run_scoring` to score `new_models` on `new_benchmarks`, or `resolve_models_benchmarks` to respond with a list of models and benchmarks to score.')
+                        choices=['run_scoring', 'resolve_models_benchmarks'],
+                        help='The endpoint method to run. `run_scoring` to score `new_models` on `new_benchmarks`, '
+                             'or `resolve_models_benchmarks` to respond with a list of models and benchmarks to score.')
     return parser
 
 
@@ -291,7 +303,6 @@ def call_jenkins(plugin_info: Union[str, Dict[str, Union[List[str], str]]]):
         requests.get(url, params=payload, auth=auth_basic)
     except Exception as e:
         print(f'Could not initiate Jenkins job because of {e}')
-
 
 
 def retrieve_models_and_benchmarks(args_dict: Dict[str, Any]) -> Tuple[List[str], List[str]]:

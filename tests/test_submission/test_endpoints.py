@@ -8,7 +8,7 @@ from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import Model, BenchmarkType, clear_schema
 from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text, \
-    resolve_models_benchmarks, resolve_models, resolve_benchmarks
+    resolve_models_benchmarks, resolve_models, resolve_benchmarks, make_argparser
 from tests.test_submission import init_users
 
 logger = logging.getLogger(__name__)
@@ -219,3 +219,17 @@ class TestShortenText:
         shortened = shorten_text(text, max_length=max_length)
         assert len(shortened) == max_length
         assert shortened == 'lorem i[...]lor sit amet'
+
+
+class TestArgparser:
+    def test_competition_None(self):
+        parser = make_argparser()
+        args = parser.parse_args([0,  # required jenkins_id
+                                  '--competition', 'None'])
+        assert args.competition is None
+
+    def test_competition_cosyne2022(self):
+        parser = make_argparser()
+        args = parser.parse_args([0,  # required jenkins_id
+                                  '--competition', 'cosyne2022'])
+        assert args.competition == 'cosyne2022'
