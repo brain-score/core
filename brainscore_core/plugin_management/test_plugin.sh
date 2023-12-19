@@ -7,7 +7,7 @@ PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$3
 CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
-PYTHON_VERSION=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f 1,2)
+PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 
 PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow"}
 
