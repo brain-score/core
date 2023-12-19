@@ -9,7 +9,7 @@ CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
 PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 
-if $TRAVIS; then
+if [ $USER = "travis" ]; then
   PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow and not travis_slow"}
 else
   PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not slow"}
