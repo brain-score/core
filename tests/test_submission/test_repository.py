@@ -1,8 +1,9 @@
 import logging
 import os
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from brainscore_core.submission.database import connect_db
 from brainscore_core.submission.database_models import clear_schema
@@ -44,6 +45,11 @@ class TestRepository:
         Path(f'{TestRepository.working_dir}/candidate_models').touch()
         dir = find_submission_directory(TestRepository.working_dir)
         assert dir == 'candidate_models'
+
+    def test_too_many_dirs(self):
+        Path(f'{TestRepository.working_dir}/.temp').touch()
+        Path(f'{TestRepository.working_dir}/_MACOS').touch()
+        Path(f'{TestRepository.working_dir}/candidate_models').touch()
+        Path(f'{TestRepository.working_dir}/candidate_models2').touch()
         with pytest.raises(Exception):
-            Path(f'{TestRepository.working_dir}/candidate_models2').touch()
             find_submission_directory(TestRepository.working_dir)
