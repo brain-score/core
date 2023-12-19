@@ -7,7 +7,6 @@ PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$3
 CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
-PYTHON_VERSION=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f 1,2)
 
 if $TRAVIS; then
   PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow and not travis_slow"}
@@ -21,7 +20,7 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 ### DEPENDENCIES
 echo "Setting up conda environment..."
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
-output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1) || echo $output
+output=$(conda create -n $PLUGIN_NAME python=3.8 -y 2>&1) || echo $output
 conda activate $PLUGIN_NAME
 if [ -f "$CONDA_ENV_PATH" ]; then
   output=$(conda env update --file $CONDA_ENV_PATH 2>&1) || echo $output
