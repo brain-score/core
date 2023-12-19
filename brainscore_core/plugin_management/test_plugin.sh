@@ -24,7 +24,7 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
 fi
 
-output=$(python -m pip install -e ".[test]" 2>&1) || echo $output # install library requirements
+output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
