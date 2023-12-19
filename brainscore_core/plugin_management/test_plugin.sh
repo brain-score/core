@@ -21,28 +21,38 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 ### DEPENDENCIES
 echo "Setting up conda environment..."
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
-output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
+conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y
 conda activate $PLUGIN_NAME
 if [ -f "$CONDA_ENV_PATH" ]; then
-  output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
+  conda env update --file $CONDA_ENV_PATH
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
-  output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
+  pip install -r $PLUGIN_REQUIREMENTS_PATH
 fi
 
-output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
+python -m pip install -e ".[test]" # install library requirements
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
   pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
 else
-  if [ "$PRIVATE_ACCESS" = 1 ]; then 
-    pytest -m "private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
-  fi
-  if [ "$PRIVATE_ACCESS" != 1 ]; then 
-    pytest -m "not private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
-  fi
+  if [ $USER = "travis" ]; then
+    if [ "$PRIVATE_ACCESS" = 1 ]; then 
+      pytest -m "private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+    fi
+    if [ "$PRIVATE_ACCESS" != 1 ]; then 
+      pytest -m "not private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+    fi
+  elif [ $USER = "openmind" ]; then
+    PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
+    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuites></testsuites>" > $PLUGIN_XML_FILE
+    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH --junitxml $PLUGIN_XML_FILE --capture=no -o log_cli=true;
+    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
+    rm $PLUGIN_XML_FILE
+  else
+    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
+  fi 
 fi
 
 exit $?
