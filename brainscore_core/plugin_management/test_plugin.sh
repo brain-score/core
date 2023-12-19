@@ -37,14 +37,14 @@ if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
   pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
 else
-  if [ $USER = "travis" ]; then
+  if [[ -v TRAVIS ]]; then
     if [ "$PRIVATE_ACCESS" = 1 ]; then 
       pytest -m "private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
     fi
     if [ "$PRIVATE_ACCESS" != 1 ]; then 
       pytest -m "not private_access and $PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
     fi
-  elif [ $USER = "openmind" ]; then
+  if [[ -v OPENMIND ]]; then
     PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
     echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuites></testsuites>" > $PLUGIN_XML_FILE
     pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH --junitxml $PLUGIN_XML_FILE --capture=no -o log_cli=true;
