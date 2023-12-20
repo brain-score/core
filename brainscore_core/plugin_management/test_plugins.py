@@ -78,7 +78,7 @@ class PluginTestRunner(EnvironmentManager):
         calls bash script to create conda environment, then
         runs all tests or selected test for specified plugin
         """
-        if os.environ["TRAVIS"]:
+        if os.getenv("TRAVIS"):
             print(f"travis_fold:start:{self.plugin_directory}")
         
         run_command = f"bash {self.script_path} \
@@ -90,7 +90,7 @@ class PluginTestRunner(EnvironmentManager):
         self.results[self.plugin_name] = completed_process.returncode
 
         # fold test output if all successful (0) or no tests were collected (5)
-        if os.environ["TRAVIS"] and ((completed_process.returncode == 0) or (completed_process.returncode == 5)): 
+        if os.getenv("TRAVIS") and ((completed_process.returncode == 0) or (completed_process.returncode == 5)): 
             print(f"travis_fold:end:{self.plugin_directory}")
 
 
