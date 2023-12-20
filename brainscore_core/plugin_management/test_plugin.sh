@@ -21,16 +21,16 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 ### DEPENDENCIES
 echo "Setting up conda environment..."
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
-conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y
+output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
 conda activate $PLUGIN_NAME
 if [ -f "$CONDA_ENV_PATH" ]; then
-  conda env update --file $CONDA_ENV_PATH
+  output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
-  pip install -r $PLUGIN_REQUIREMENTS_PATH
+  output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
 fi
 
-python -m pip install -e ".[test]" # install library requirements
+output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
