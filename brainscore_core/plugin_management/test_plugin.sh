@@ -43,7 +43,7 @@ else
       pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
     fi
   fi
-  if [ "${OPENMIND}" ]; then
+  elif [ "${OPENMIND}" ]; then
     PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
     echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuites></testsuites>" > $PLUGIN_XML_FILE
     pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH --junitxml $PLUGIN_XML_FILE --capture=no -o log_cli=true;
