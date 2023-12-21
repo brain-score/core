@@ -53,6 +53,12 @@ def test_plugin_types_to_test_all_special_case():
     assert set(['models', 'benchmarks', 'data', 'metrics']) == set(run_all_plugin_tests)
 
 
+def test_plugin_types_to_test_all_none():
+    plugin_files, non_plugin_files, plugin_related_files = separate_plugin_files([])
+    run_all_plugin_tests = plugin_types_to_test_all(plugin_related_files)
+    assert set([]) == set(run_all_plugin_tests)
+
+
 def test_get_plugin_ids():
     dummy_root = str(Path(__file__).parent / 'test_parse_plugin_changes__brainscore_dummy')
     plugin_types = ['models', 'benchmarks']
@@ -182,7 +188,6 @@ def test_run_changed_plugin_tests_all_models_benchmarks_data(mocker):
         output = f.getvalue()
 
     assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/models/dummy_model/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/data/dummy_data/test.py']" in output
-
 
 
 def test_is_plugin_only_true():

@@ -37,6 +37,18 @@ requires = [
     "wheel"
 ]
 
+################################################################
+#### mypy type-checking config ####
+################################################################
+
+[tool.pytest.ini_options]
+markers = [
+    "memory_intense: tests requiring more memory than is available in the Travis sandbox (currently 3 GB)", # see https://docs.travis-ci.com/user/common-build-problems/#my-build-script-is-killed-without-any-error
+    "travis_slow: tests running for more than 10 minutes without output (which leads Travis to error)",
+    "slow: tests leading to runtimes that are not possible on the OpenMind cluster (>1 hour per test)",
+    "private_access: tests that require access to a private resource, such as assemblies on S3 (note that Travis builds originating from forks can not have private access)",
+]
+
 
 ################################################################
 #### setuptools packaging config ####
