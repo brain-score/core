@@ -29,7 +29,6 @@ test = [
     "pytest-check",
     "pytest-mock",
     "requests-mock",
-    "junitparser",
 ]
 
 [build-system]
