@@ -73,7 +73,7 @@ def plugin_types_to_test_all(plugin_related_files: List[str]) -> List[str]:
 		plugin_types_changed.append(plugin_type[0])
 	
 	# if metric- or data-related files are changed, run all benchmark plugin tests
-	if ('metrics' or 'data' in plugin_types_changed) and not ('benchmarks' in plugin_types_changed):
+	if any(plugin_type in plugin_types_changed for plugin_type in ['metrics','data']) and ('benchmarks' not in plugin_types_changed):
 		plugin_types_changed.append('benchmarks')
 
 	return list(set(plugin_types_changed))
