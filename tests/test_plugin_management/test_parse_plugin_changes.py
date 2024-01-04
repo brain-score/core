@@ -211,7 +211,7 @@ class TestRunChangedPlugins:
         plugin_name = 'models__dummy_model'
         single_test = 'False'
         library_path = str(Path(self.domain_root).parent)
-        generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'test_plugin.py')
+        generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'generic_plugin_tests.py')
         assert command_parts == ['bash', script_path,
                                  plugin_directory, plugin_name, single_test, library_path, generic_plugin_test]
 
@@ -242,7 +242,7 @@ class TestRunChangedPlugins:
         """ Test the pytest call to generic model plugin testing,
         but without running the full `test_plugin.sh` file which includes environment installation and other tests """
         plugin_directory = str(Path(self.domain_root) / 'models' / 'dummy_model')
-        generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'test_plugin.py')
+        generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'generic_plugin_tests.py')
         pytest_settings = "not slow"
         command = [
             # this is the command that is built for the generic plugin test inside `test_plugin.sh`
