@@ -44,7 +44,6 @@ else
   elif [ "${OPENMIND}" ]; then
     pip install junitparser
     PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
-    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuites></testsuites>" > $XML_FILE
     pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH --junitxml $PLUGIN_XML_FILE --capture=no -o log_cli=true;
     junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
     rm $PLUGIN_XML_FILE
