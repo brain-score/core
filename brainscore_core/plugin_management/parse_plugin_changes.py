@@ -172,6 +172,7 @@ def get_test_file_paths(dir_to_search: Path) -> List[str]:
     """
     Returns list of paths to all test files in dir_to_search
     """
+    assert dir_to_search.is_dir(), f"Plugin directory {dir_to_search} does not exist"
     return [str(filepath) for filepath in dir_to_search.rglob(r'test*.py')]
 
 
