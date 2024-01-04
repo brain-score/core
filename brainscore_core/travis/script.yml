@@ -13,7 +13,7 @@ script:
       python -c "from brainscore_core.plugin_management.parse_plugin_changes import run_changed_plugin_tests; run_changed_plugin_tests(\"${CHANGED_FILES}\", \"brainscore_${DOMAIN}\")"; 
     fi
   - |
-    if [ "$PRIVATE_ACCESS" = 1 ] && [ -n "${GITHUB_TOKEN}" ] && [ "$PLUGIN_ONLY" = "False" ]; then 
+    if [ "$PRIVATE_ACCESS" = 1 ] && [ "${TRAVIS_SECURE_ENV_VARS}" = true ] && [ "$PLUGIN_ONLY" = "False" ]; then 
       pytest -m "private_access and $PYTEST_SETTINGS"; 
     fi
   - |
