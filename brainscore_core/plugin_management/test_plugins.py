@@ -12,6 +12,7 @@ PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
 RECOGNIZED_TEST_FILES = r'test.*\.py'
 GENERIC_PLUGIN_TEST_FILENAME = "generic_plugin_tests.py"
 
+
 class PluginTestRunner(EnvironmentManager):
     """Runs plugin tests (requires "test.*\.py" for each plugin)
     

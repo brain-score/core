@@ -1,7 +1,8 @@
 """
 Imports for domain-instances' generic tests.
 By importing this file's `pytest_addoption` and `pytest_generate_tests`,
-the respective `test_plugin.py` can specify tests with an `identifier` argument that are automatically parametrized.
+the respective `generic_plugin_tests.py` can specify tests with an `identifier` argument
+such that the tests are automatically parametrized.
 """
 
 from pathlib import Path
