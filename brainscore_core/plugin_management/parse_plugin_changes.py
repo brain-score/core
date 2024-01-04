@@ -84,6 +84,10 @@ def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: st
     """
     Searches all __init.py__ files in `new_plugin_dirs` of `plugin_type` for registered plugins.
     Returns list of identifiers for each registered plugin.
+
+    :param plugin_type: e.g. `models`
+    :param new_plugin_dirs: e.g. `['alexnet', 'resnets']`
+    :param domain_root: e.g. `/home/me/vision/brainscore_vision`
     """
     plugin_ids = []
 
