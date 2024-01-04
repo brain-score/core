@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+from collections import namedtuple
 from pathlib import Path
 
 import pytest
@@ -156,13 +157,15 @@ class TestGetScoringInfo:
 
 
 class TestRunChangedPlugins:
+    domain_root = str(Path(__file__).parent / 'test_parse_plugin_changes__brainscore_dummy')
+
     def test_run_changed_plugin_tests_one_benchmark(self, mocker):
         plugin_info_dict_mock = mocker.patch(
             "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
-        plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': [],
-                                              'changed_plugins': {'models': [], 'benchmarks': ['dummy_benchmark_2'],
-                                                                  'data': [], 'metrics': []}, 'is_automergeable': False,
-                                              'run_score': 'True'}
+        plugin_info_dict_mock.return_value = {
+            'modifies_plugins': True, 'test_all_plugins': [],
+            'changed_plugins': {'models': [], 'benchmarks': ['dummy_benchmark_2'], 'data': [], 'metrics': []},
+            'is_automergeable': False, 'run_score': 'True'}
 
         run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
         run_args_mock.return_value = "Mock test run"
@@ -170,19 +173,55 @@ class TestRunChangedPlugins:
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
             run_changed_plugin_tests('mocked_changed_files',
-                                     'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
+                                     self.domain_root)
             output = f.getvalue()
 
-        assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py']" in output
+        assert "Running tests for new or modified plugins: [" \
+               f"'{self.domain_root}/benchmarks/dummy_benchmark_2/test.py']" in output
 
     def test_run_changed_plugin_tests_one_model(self, mocker):
         plugin_info_dict_mock = mocker.patch(
             "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
-        plugin_info_dict_mock.return_value = {'modifies_plugins': True,
-                                              'test_all_plugins': ['data', 'benchmarks', 'models'],
-                                              'changed_plugins': {'models': [], 'benchmarks': [], 'data': [],
-                                                                  'metrics': []}, 'is_automergeable': False,
-                                              'run_score': 'True'}
+        plugin_info_dict_mock.return_value = {
+            'modifies_plugins': True, 'test_all_plugins': [],
+            'changed_plugins': {'models': ['dummy_model'], 'benchmarks': [], 'data': [], 'metrics': []},
+            'is_automergeable': False, 'run_score': 'True'}
+
+        run_mock = mocker.patch("brainscore_core.plugin_management.environment_manager.EnvironmentManager.run_in_env")
+        MockReturn = namedtuple("MockRunInEnv", field_names=['returncode'])
+        run_mock.return_value = MockReturn(returncode=0)
+
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            run_changed_plugin_tests('mocked_changed_files',
+                                     self.domain_root)
+            output = f.getvalue()
+
+        assert "Running tests for new or modified plugins: [" \
+               f"'{self.domain_root}/models/dummy_model/test.py']" in output
+        # check generic testing
+        assert len(run_mock.call_args[0]) == 1, "expected exactly one positional argument"
+        assert len(run_mock.call_args[1]) == 0, "expected no keyword arguments"
+        command = run_mock.call_args[0][0]
+        print(command)
+        command_parts = command.split()
+        script_path = str(Path(__file__).parent.parent.parent /
+                          'brainscore_core' / 'plugin_management' / 'test_plugin.sh')
+        plugin_directory = str(Path(self.domain_root) / 'models' / 'dummy_model')
+        plugin_name = 'models__dummy_model'
+        single_test = 'False'
+        library_path = str(Path(self.domain_root).parent)
+        generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'test_plugin.py')
+        assert command_parts == ['bash', script_path,
+                                 plugin_directory, plugin_name, single_test, library_path, generic_plugin_test]
+
+    def test_run_changed_plugin_tests_all_models_benchmarks_data(self, mocker):
+        plugin_info_dict_mock = mocker.patch(
+            "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
+        plugin_info_dict_mock.return_value = {
+            'modifies_plugins': True, 'test_all_plugins': ['data', 'benchmarks', 'models'],
+            'changed_plugins': {'models': [], 'benchmarks': [], 'data': [], 'metrics': []},
+            'is_automergeable': False, 'run_score': 'True'}
 
         run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
         run_args_mock.return_value = "Mock test run"
@@ -190,10 +229,37 @@ class TestRunChangedPlugins:
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
             run_changed_plugin_tests('mocked_changed_files',
-                                     'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
+                                     self.domain_root)
             output = f.getvalue()
 
-        assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/models/dummy_model/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/data/dummy_data/test.py']" in output
+        assert "Running tests for new or modified plugins: [" \
+               f"'{self.domain_root}/models/dummy_model/test.py', " \
+               f"'{self.domain_root}/benchmarks/dummy_benchmark/test.py', " \
+               f"'{self.domain_root}/benchmarks/dummy_benchmark_2/test.py', " \
+               f"'{self.domain_root}/data/dummy_data/test.py']" in output
+
+    def test_model_generic_test_plugin(self):
+        """ Test the pytest call to generic model plugin testing,
+        but without running the full `test_plugin.sh` file which includes environment installation and other tests """
+        plugin_directory = str(Path(self.domain_root) / 'models' / 'dummy_model')
+        generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'test_plugin.py')
+        pytest_settings = "not slow"
+        command = [
+            # this is the command that is built for the generic plugin test inside `test_plugin.sh`
+            # to keep things simple and stay in the same python environment, we invoke pytest directly
+            # rather than using the shell (and subprocess)
+            'pytest', '-m', pytest_settings, "-vv",
+            generic_plugin_test, "--plugin_directory", plugin_directory,
+            "--log-cli-level=INFO"
+        ]
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            returncode = pytest.main(command[1:] + ["-s"])  # print directly to console
+            stdout = f.getvalue()
+        assert returncode == 0
+        # make sure identifier was resolved
+        dummy_model_identifier = 'dummy-model'  # inside self.domain_root/models/dummy_model/__init__.py
+        assert f"Testing model {dummy_model_identifier}" in stdout
 
 
 class TestIsPluginOnly:
