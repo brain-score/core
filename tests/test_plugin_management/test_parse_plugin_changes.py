@@ -102,8 +102,8 @@ def test_parse_plugin_changes_no_plugins_changed():
     plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
     all_plugins_changed = [len(plugin_list) for plugin_list in plugin_info_dict["changed_plugins"].values()]
     assert sum(all_plugins_changed) == 0
-    assert plugin_info_dict["modifies_plugins"] == False
-    assert plugin_info_dict["is_automergeable"] == False
+    assert plugin_info_dict["modifies_plugins"] is False
+    assert plugin_info_dict["is_automergeable"] is False
 
 
 def test_get_scoring_info_scoring_needed(mocker):
