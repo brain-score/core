@@ -4,34 +4,35 @@ import io
 from pathlib import Path
 import pytest
 
-from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, plugin_types_to_test_all, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, run_changed_plugin_tests
+from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, \
+    plugin_types_to_test_all, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, \
+    run_changed_plugin_tests
 
-DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py', 
-                'brainscore_core/models/dummy_model/test.py', 
-                'brainscore_core/models/dummy_model/__init__.py',
-                'brainscore_core/models/__init__.py',
-                'brainscore_core/benchmarks/dummy_benchmark/__init__.py',
-                'brainscore_core/data_helpers/dummy_helper.py',
-                'brainscore_core/__init__.py',
-                'brainscore_core/README.md']
+DUMMY_FILES_CHANGED = ['brainscore_core/models/dummy_model/model.py',
+                       'brainscore_core/models/dummy_model/test.py',
+                       'brainscore_core/models/dummy_model/__init__.py',
+                       'brainscore_core/models/__init__.py',
+                       'brainscore_core/benchmarks/dummy_benchmark/__init__.py',
+                       'brainscore_core/data_helpers/dummy_helper.py',
+                       'brainscore_core/__init__.py',
+                       'brainscore_core/README.md']
 
 DUMMY_FILES_CHANGED_AUTOMERGEABLE = ['brainscore_core/data/dummy_data/__init__.py',
                                      'brainscore_core/data/dummy_data/data.py']
 
 DUMMY_FILES_CHANGED_NO_PLUGINS = ['brainscore_core/__init__.py',
-                                'brainscore_core/README.md']
+                                  'brainscore_core/README.md']
 
 
 def test_separate_plugin_files():
     plugin_files, non_plugin_files, plugin_related_files = separate_plugin_files(DUMMY_FILES_CHANGED)
-    assert set(['brainscore_core/models/dummy_model/model.py', 
-        'brainscore_core/models/dummy_model/test.py', 
-        'brainscore_core/models/dummy_model/__init__.py', 
-        'brainscore_core/benchmarks/dummy_benchmark/__init__.py']) == set(plugin_files)
-    assert set(['brainscore_core/__init__.py', 
-        'brainscore_core/README.md']) == set(non_plugin_files)
-    assert set(['brainscore_core/models/__init__.py',
-                'brainscore_core/data_helpers/dummy_helper.py']) == set(plugin_related_files)
+    assert {'brainscore_core/models/dummy_model/model.py',
+            'brainscore_core/models/dummy_model/test.py',
+            'brainscore_core/models/dummy_model/__init__.py',
+            'brainscore_core/benchmarks/dummy_benchmark/__init__.py'} == set(plugin_files)
+    assert {'brainscore_core/__init__.py', 'brainscore_core/README.md'} == set(non_plugin_files)
+    assert {'brainscore_core/models/__init__.py',
+            'brainscore_core/data_helpers/dummy_helper.py'} == set(plugin_related_files)
 
 
 def test_get_plugin_paths():
@@ -45,12 +46,12 @@ def test_get_plugin_paths():
 def test_plugin_types_to_test_all():
     plugin_files, non_plugin_files, plugin_related_files = separate_plugin_files(DUMMY_FILES_CHANGED)
     run_all_plugin_tests = plugin_types_to_test_all(plugin_related_files)
-    assert set(['data', 'benchmarks', 'models']) == set(run_all_plugin_tests)
+    assert {'data', 'benchmarks', 'models'} == set(run_all_plugin_tests)
 
 
 def test_plugin_types_to_test_all_special_case():
     run_all_plugin_tests = plugin_types_to_test_all(['brainscore_vision/model_interface.py'])
-    assert set(['models', 'benchmarks', 'data', 'metrics']) == set(run_all_plugin_tests)
+    assert {'models', 'benchmarks', 'data', 'metrics'} == set(run_all_plugin_tests)
 
 
 def test_plugin_types_to_test_all_none():
@@ -93,7 +94,7 @@ def test_parse_plugin_changes_automergeable():
 def test_parse_plugin_changes_no_files_changed():
     changed_files = ""
     with pytest.raises(AssertionError):
-        plugin_info_dict = parse_plugin_changes(changed_files, 'brainscore_core')
+        parse_plugin_changes(changed_files, 'brainscore_core')
 
 
 def test_parse_plugin_changes_no_plugins_changed():
@@ -111,7 +112,7 @@ def test_get_scoring_info_scoring_needed(mocker):
     mocked_plugin_ids = ["dummy_plugin1", "dummy_plugin2"]
     get_plugin_ids_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.get_plugin_ids")
     get_plugin_ids_mock.return_value = mocked_plugin_ids
-    
+
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
         get_scoring_info(changed_files, 'brainscore_core')
@@ -162,14 +163,18 @@ def test_get_testing_info_testing_not_needed():
 
 def test_run_changed_plugin_tests_one_benchmark(mocker):
     plugin_info_dict_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
-    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': [], 'changed_plugins': {'models': [], 'benchmarks': ['dummy_benchmark_2'], 'data': [], 'metrics': []}, 'is_automergeable': False, 'run_score': 'True'}
+    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': [],
+                                          'changed_plugins': {'models': [], 'benchmarks': ['dummy_benchmark_2'],
+                                                              'data': [], 'metrics': []}, 'is_automergeable': False,
+                                          'run_score': 'True'}
 
     run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
     run_args_mock.return_value = "Mock test run"
-    
+
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
-        run_changed_plugin_tests('mocked_changed_files', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
+        run_changed_plugin_tests('mocked_changed_files',
+                                 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
         output = f.getvalue()
 
     assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py']" in output
@@ -177,14 +182,19 @@ def test_run_changed_plugin_tests_one_benchmark(mocker):
 
 def test_run_changed_plugin_tests_all_models_benchmarks_data(mocker):
     plugin_info_dict_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
-    plugin_info_dict_mock.return_value = {'modifies_plugins': True, 'test_all_plugins': ['data', 'benchmarks', 'models'], 'changed_plugins': {'models': [], 'benchmarks': [], 'data': [], 'metrics': []}, 'is_automergeable': False, 'run_score': 'True'}
+    plugin_info_dict_mock.return_value = {'modifies_plugins': True,
+                                          'test_all_plugins': ['data', 'benchmarks', 'models'],
+                                          'changed_plugins': {'models': [], 'benchmarks': [], 'data': [],
+                                                              'metrics': []}, 'is_automergeable': False,
+                                          'run_score': 'True'}
 
     run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
     run_args_mock.return_value = "Mock test run"
-    
+
     f = io.StringIO()
     with contextlib.redirect_stdout(f):
-        run_changed_plugin_tests('mocked_changed_files', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
+        run_changed_plugin_tests('mocked_changed_files',
+                                 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy')
         output = f.getvalue()
 
     assert "Running tests for new or modified plugins: ['tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/models/dummy_model/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/benchmarks/dummy_benchmark_2/test.py', 'tests/test_plugin_management/test_parse_plugin_changes__brainscore_dummy/data/dummy_data/test.py']" in output
