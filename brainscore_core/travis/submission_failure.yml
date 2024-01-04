@@ -6,7 +6,7 @@ after_failure:
       WEB_SUBMISSION="True"; 
     fi
   - |
-    if $WEB_SUBMISSION = "True"; then
+    if [[ "$WEB_SUBMISSION" == "True" ]]; then
       BRAINSCORE_UID=$(<<<$PR_TITLE | sed -E 's/.*\(user:([^)]+)\).*/\1/') && 
       python -c "from brainscore_$DOMAIN.submission.endpoints import send_email_to_submitter; send_email_to_submitter(\"${BRAINSCORE_UID}\", \"${$DOMAIN}\", \"${$TRAVIS_PULL_REQUEST}\", \"${$GMAIL_USERNAME}\", \"${GMAIL_PASSWORD}\")"; 
     fi
