@@ -252,11 +252,11 @@ class TestRunChangedPlugins:
             generic_plugin_test, "--plugin_directory", plugin_directory,
             "--log-cli-level=INFO"
         ]
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f):
+        stdout_stream, stderr_stream = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout_stream), contextlib.redirect_stderr(stderr_stream):
             returncode = pytest.main(command[1:] + ["-s"])  # print directly to console
-            stdout = f.getvalue()
-        assert returncode == 0
+            stdout, stderr = stdout_stream.getvalue(), stderr_stream.getvalue()
+        assert returncode == 0, f"stderr: {stderr}"
         # make sure identifier was resolved
         dummy_model_identifier = 'dummy-model'  # inside self.domain_root/models/dummy_model/__init__.py
         assert f"Testing model {dummy_model_identifier}" in stdout
