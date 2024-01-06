@@ -8,6 +8,7 @@ ENV_NAME=$5
 ENVS_DIR=$6
 
 ### DEPENDENCIES
+PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 
 get_plugin_dir() {
   python -m brainscore_core.plugin_management.import_plugin print_plugin_dir "$LIBRARY_NAME" "$1" "$2"
@@ -26,7 +27,7 @@ if [ -d $ENVS_DIR/$ENV_NAME ]; then
 fi
 echo "Setting up conda environment: ${ENV_NAME}"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
-output=$(conda create -n $ENV_NAME python=3.8 -y 2>&1) || echo $output
+output=$(conda create -n $ENV_NAME python=$PYTHON_VERSION -y 2>&1) || echo $output
 conda activate $ENV_NAME
 conda install pip
 # install plugin yml environments if available
