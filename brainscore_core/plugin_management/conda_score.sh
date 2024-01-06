@@ -28,6 +28,7 @@ echo "Setting up conda environment: ${ENV_NAME}"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $ENV_NAME python=3.8 -y 2>&1) || echo $output
 conda activate $ENV_NAME
+conda install pip
 # install plugin yml environments if available
 if [ -f "$MODEL_ENV_YML" ]; then
   output=$(conda env update --file $MODEL_ENV_YML 2>&1) || echo $output
