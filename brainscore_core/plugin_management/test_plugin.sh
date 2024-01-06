@@ -7,6 +7,7 @@ PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$3
 CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
+GENERIC_TEST_PATH=$5
 
 PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 
@@ -29,6 +30,11 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
 fi
 
 output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
+
+### RUN GENERIC TESTING
+if [ "$GENERIC_TEST_PATH" != False ]; then
+  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO"
+fi
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then

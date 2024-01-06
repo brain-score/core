@@ -1,14 +1,16 @@
 import os
-import pytest_check as check
 import re
-import yaml
 from pathlib import Path
 from typing import Dict, Union, List
+
+import pytest_check as check
+import yaml
 
 from .environment_manager import EnvironmentManager
 
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
 RECOGNIZED_TEST_FILES = r'test.*\.py'
+GENERIC_PLUGIN_TEST_FILENAME = "generic_plugin_tests.py"
 
 
 class PluginTestRunner(EnvironmentManager):
@@ -33,6 +35,7 @@ class PluginTestRunner(EnvironmentManager):
         self.plugin_type = Path(self.plugin_directory).parent.name
         self.library_path = Path(self.plugin_directory).parents[2]
         self.plugin_name = self.plugin_type + '__' + Path(self.plugin_directory).name
+        self.generic_plugin_test = self._resolve_generic_plugin_test()
         self.env_name = self.plugin_name
         self.test = test if test else False
         self.results = results
@@ -45,6 +48,10 @@ class PluginTestRunner(EnvironmentManager):
         self.teardown()
 
     def validate_plugin(self):
+        self._validate_test_files()
+        self._validate_environment_yml()
+
+    def _validate_test_files(self):
         """
         requires at least one file matching the RECOGNIZED_TEST_FILES pattern in plugin directory,
         e.g. test.py, test_data.py.
@@ -52,8 +59,6 @@ class PluginTestRunner(EnvironmentManager):
         test_files = [test_file for test_file in self.plugin_directory.iterdir()
                       if re.match(RECOGNIZED_TEST_FILES, test_file.name)]
         assert len(test_files) > 0, f"No test files matching '{RECOGNIZED_TEST_FILES}' found"
-
-        self._validate_environment_yml()
 
     def _validate_environment_yml(self):
         # if environment.yml is present, ensure no dependency conflicts
@@ -75,22 +80,33 @@ class PluginTestRunner(EnvironmentManager):
 
     def run_tests(self):
         """ 
-        calls bash script to create conda environment, then
-        runs all tests or selected test for specified plugin
+        Calls bash script to create conda environment, then
+        runs all tests or selected test for specified plugin.
+        If generic tests for the plugin type are defined by the domain library, those are run first.
         """
         if "TRAVIS" in os.environ:
             print(f"travis_fold:start:{self.plugin_directory}")
-        
+
         run_command = f"bash {self.script_path} \
-            {self.plugin_directory} {self.plugin_name} {self.test} {self.library_path}"
+            {self.plugin_directory} {self.plugin_name} {self.test} {self.library_path} {self.generic_plugin_test}"
 
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
 
         self.results[self.plugin_name] = completed_process.returncode
 
-        if "TRAVIS" in os.environ: 
+        if "TRAVIS" in os.environ:
             print(f"travis_fold:end:{self.plugin_directory}")
+
+    def _resolve_generic_plugin_test(self) -> Union[bool, Path]:
+        # remove plural and determine variable name, e.g. "models" -> "model"
+        singular_prefix = self.plugin_type.strip('s')
+        plugin_type_helper = f"{singular_prefix}_helpers"
+        domain_root = Path(self.plugin_directory).parents[1]
+        generic_plugin_test = domain_root / plugin_type_helper / GENERIC_PLUGIN_TEST_FILENAME
+        if not generic_plugin_test.is_file():
+            return False
+        return generic_plugin_test
 
 
 def run_specified_tests(root_directory: Path, test_file: str, results: Dict, test: str):
@@ -114,7 +130,8 @@ def run_all_tests(root_directory: Path, results: Dict):
                 plugin_test_runner()
 
 
-def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]] = None, test: Union[None, str] = None):
+def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]] = None,
+             test: Union[None, str] = None):
     """
     Run single specified test or all tests for each plugin.
 
