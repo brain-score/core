@@ -3,7 +3,7 @@ script:
   - |
     echo 'travis_fold:start:configure'
     if [ ! -z "$TRAVIS_PULL_REQUEST_BRANCH" ]; then 
-      CHANGED_FILES=$( git fetch origin pull/$TRAVIS_PULL_REQUEST/head:pr_branch && git diff --name-only pr_branch $TRAVIS_BRANCH -C $TRAVIS_BUILD_DIR) | tr '\n' ' ' ) &&
+      CHANGED_FILES=$( git fetch origin pull/$TRAVIS_PULL_REQUEST/head:pr_branch && echo $( git diff --name-only pr_branch $TRAVIS_BRANCH -C $TRAVIS_BUILD_DIR) | tr '\n' ' ' ) &&
       TESTING_NEEDED=$( python -c "from brainscore_core.plugin_management.parse_plugin_changes import get_testing_info; get_testing_info(\"${CHANGED_FILES}\", \"brainscore_${DOMAIN}\")" ) && 
       read MODIFIES_PLUGIN PLUGIN_ONLY <<< $TESTING_NEEDED && echo MODIFIES_PLUGIN: $MODIFIES_PLUGIN && echo PLUGIN_ONLY: $PLUGIN_ONLY; 
     fi
