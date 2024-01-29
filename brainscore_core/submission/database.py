@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def connect_db(db_secret):
-    if 'sqlite3' not in db_secret:
+    if 'sqlite3' not in db_secret or ':memory:' not in db_secret:
         secret = get_secret(db_secret)
         db_configs = json.loads(secret)
         postgres = PostgresqlDatabase(db_configs['dbInstanceIdentifier'],
