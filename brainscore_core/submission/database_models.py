@@ -137,3 +137,10 @@ def drop_schema(schema_name):
     Drops a schema that was used for testing purposes.
     """
     database_proxy.execute_sql(f'DROP SCHEMA IF EXISTS {schema_name} CASCADE')
+
+def create_tables():
+    """
+    Creates the necessary tables for a test database schema.
+    """
+    with database_proxy:
+        database_proxy.create_tables(PeeweeBase.__subclasses__(), safe=True)
