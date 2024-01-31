@@ -5,9 +5,13 @@ database_proxy = Proxy()
 
 
 class PeeweeBase(PeeweeModel):
+    @classmethod
+    def set_schema(cls, schema_name):
+        for model in cls.__subclasses__():
+            model._meta.schema = schema_name
+    
     class Meta:
         database = database_proxy
-        schema = 'public'
 
 
 class Reference(PeeweeBase):
@@ -117,3 +121,15 @@ def clear_schema():
     BenchmarkType.delete().execute()
     Reference.delete().execute()
     User.delete().execute()
+
+def create_schema(schema_name):
+    """
+    Creates an isolated schema for testing purposes.
+    """
+    database_proxy.execute_sql(f'CREATE SCHEMA IF NOT EXISTS {schema_name}')
+
+def drop_schema(schema_name):
+    """
+    Drops a schema that was used for testing purposes.
+    """
+    database_proxy.execute_sql(f'DROP SCHEMA IF EXISTS {schema_name} CASCADE')
