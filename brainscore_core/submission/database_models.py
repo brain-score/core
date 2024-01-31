@@ -126,7 +126,11 @@ def create_schema(schema_name):
     """
     Creates an isolated schema for testing purposes.
     """
-    database_proxy.execute_sql(f'CREATE SCHEMA IF NOT EXISTS {schema_name}')
+    try:
+        database_proxy.execute_sql(f'CREATE SCHEMA IF NOT EXISTS {schema_name}')
+        print(f"Schema {schema_name} created successfully.")
+    except Exception as e:
+        print(f"Error creating schema {schema_name}: {e}")
 
 def drop_schema(schema_name):
     """
