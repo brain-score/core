@@ -61,10 +61,22 @@ class ImportPlugin:
     def install_requirements(self):
         """
         Install all the requirements of the given plugin directory.
-        This is done via `pip install` in the current interpreter.
+        - If a `setup.py` file exists, it is run in the current interpreter.
+        - Alternatively, if a `requirements.txt` file exists, this is done via
+          `pip install` in the current interpreter.
         """
+        setup_file = self.plugins_dir / self.plugin_dirname / 'setup.py'
         requirements_file = self.plugins_dir / self.plugin_dirname / 'requirements.txt'
-        if requirements_file.is_file():
+        
+        if setup_file.is_file() and requirements_file.is_file():
+            logger.debug(
+                f"Plugin {self.plugin_dirname} has both a setup script {setup_file} "
+                f"and a requirements file {requirements_file}. The setup script will be run."
+            )
+        
+        if setup_file.is_file():
+            subprocess.run(f"python {setup_file}", shell=True)
+        elif requirements_file.is_file():
             subprocess.run(f"pip install -r {requirements_file}", shell=True)
         else:
             logger.debug(f"Plugin {self.plugin_dirname} has no requirements file {requirements_file}")
