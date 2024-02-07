@@ -68,18 +68,17 @@ class ImportPlugin:
         setup_file = self.plugins_dir / self.plugin_dirname / 'setup.py'
         requirements_file = self.plugins_dir / self.plugin_dirname / 'requirements.txt'
         
-        if setup_file.is_file() and requirements_file.is_file():
+        if not setup_file.is_file() and not requirements_file.is_file():
             logger.debug(
-                f"Plugin {self.plugin_dirname} has both a setup script {setup_file} "
-                f"and a requirements file {requirements_file}. The setup script will be run."
+                f"Plugin {self.plugin_dirname} has no requirements file {requirements_file} "
+                f"or setup file {setup_file}"
             )
         
         if setup_file.is_file():
-            subprocess.run(f"python {setup_file}", shell=True)
-        elif requirements_file.is_file():
+            subprocess.run(f"pip install {self.plugins_dir / self.plugin_dirname}", shell=True)
+
+        if requirements_file.is_file():
             subprocess.run(f"pip install -r {requirements_file}", shell=True)
-        else:
-            logger.debug(f"Plugin {self.plugin_dirname} has no requirements file {requirements_file}")
 
 
 def installation_preference():

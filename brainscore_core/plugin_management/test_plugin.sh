@@ -28,8 +28,9 @@ if [ -f "$CONDA_ENV_PATH" ]; then
   output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
 fi
 if [ -f "$PLUGIN_SETUP_PATH" ]; then
-  output=$(python $PLUGIN_SETUP_PATH 2>&1)
-elif [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
+  output=$(pip install $PLUGIN_PATH 2>&1)
+fi
+if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
 fi
 
