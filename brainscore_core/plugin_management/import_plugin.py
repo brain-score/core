@@ -64,6 +64,7 @@ class ImportPlugin:
         - If a `setup.py` file exists, it is run in the current interpreter.
         - Alternatively, if a `requirements.txt` file exists, this is done via
           `pip install` in the current interpreter.
+        - If both `setup.py` and `requirements.txt` are present, `setup.py` is installed first.
         """
         setup_file = self.plugins_dir / self.plugin_dirname / 'setup.py'
         requirements_file = self.plugins_dir / self.plugin_dirname / 'requirements.txt'
