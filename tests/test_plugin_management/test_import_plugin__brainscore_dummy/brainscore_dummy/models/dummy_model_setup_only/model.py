@@ -1,4 +1,5 @@
-import pyaztro
+import pyfiglet
+
 
 class DummyModel:
     pass
