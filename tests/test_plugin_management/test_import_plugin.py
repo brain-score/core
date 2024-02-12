@@ -20,9 +20,9 @@ class TestImportPlugin:
 
     def teardown_method(self):
         model_registry = self._model_registry()
-        if 'dummy-model' in model_registry:
-            del model_registry['dummy-model']
-        subprocess.run('pip uninstall pyaztro --yes', shell=True)
+        for model_id in list(model_registry.keys()):
+            del model_registry[model_id]
+        subprocess.run(f'pip uninstall pyaztro pyfiglet --yes', shell=True)
         shutil.rmtree(TestImportPlugin.dummy_container_dirpath)
         if TestImportPlugin.current_dependencies_pref:  # value was set
             os.environ['BS_INSTALL_DEPENDENCIES'] = TestImportPlugin.current_dependencies_pref
@@ -51,6 +51,20 @@ class TestImportPlugin:
             import_plugin('brainscore_dummy', 'models', 'dummy-model')
         except Exception as e:
             assert "No module named 'pyaztro'" in str(e)
+
+    def test_dependency_install_from_setup_py(self):
+        os.environ['BS_INSTALL_DEPENDENCIES'] = 'yes'
+        model_registry = self._model_registry()
+        assert 'dummy-model-setup-py' not in model_registry
+        import_plugin('brainscore_dummy', 'models', 'dummy-model-setup-py')
+        assert 'dummy-model-setup-py' in model_registry
+
+    def test_dependency_install_from_setup_py_with_requirements_txt(self):
+        os.environ['BS_INSTALL_DEPENDENCIES'] = 'yes'
+        model_registry = self._model_registry()
+        assert 'dummy-model-requirements-and-setup' not in model_registry
+        import_plugin('brainscore_dummy', 'models', 'dummy-model-requirements-and-setup')
+        assert 'dummy-model-requirements-and-setup' in model_registry
 
 
 class TestRegistryPrefix:
