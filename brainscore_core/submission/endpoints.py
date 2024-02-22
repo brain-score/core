@@ -44,7 +44,7 @@ class UserManager:
         return temp_pass
 
     def create_new_user(self, user_email: str):
-        signup_url = 'http://www.brain-score.org/signup'
+        signup_url = 'https://www.brain-score.org/signup'
         temp_pass = self._generate_temp_pass(length=10)
         try:
             response = requests.get(signup_url)

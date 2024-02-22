@@ -40,8 +40,8 @@ class TestUserManager:
 
     def test_create_new_user(self, requests_mock):
         # mock GET & POST responses
-        get_adapter = requests_mock.get('http://www.brain-score.org/signup', cookies={'cookie_name': 'cookie_value'})
-        post_adapter = requests_mock.post('http://www.brain-score.org/signup', status_code=200)
+        get_adapter = requests_mock.get('https://www.brain-score.org/signup', cookies={'cookie_name': 'cookie_value'})
+        post_adapter = requests_mock.post('https://www.brain-score.org/signup', status_code=200)
 
         user_manager = UserManager(self.test_database)
         user_manager.create_new_user('test@example.com')
