@@ -72,8 +72,10 @@ def public_model_identifiers(domain: str) -> List[str]:
 
 
 def public_benchmark_identifiers(domain: str) -> List[str]:
-    entries = BenchmarkType.select().where(BenchmarkType.visible & (BenchmarkType.domain == domain))
-    identifiers = [entry.identifier for entry in entries]
+    entries = BenchmarkInstance.select(BenchmarkType.identifier).join(BenchmarkType).where(
+        (BenchmarkType.domain == domain) & (BenchmarkType.visible)
+    )
+    identifiers = [entry.benchmark.identifier for entry in entries]
     return identifiers
 
 

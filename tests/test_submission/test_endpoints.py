@@ -6,7 +6,7 @@ import botocore.exceptions
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db
-from brainscore_core.submission.database_models import Model, BenchmarkType, clear_schema
+from brainscore_core.submission.database_models import Model, BenchmarkType, BenchmarkInstance, clear_schema
 from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text, \
     resolve_models_benchmarks, resolve_models, resolve_benchmarks, make_argparser
 from tests.test_submission import init_users
@@ -111,6 +111,7 @@ class TestRunScoring:
             Model.get_or_create(name=model_id, domain="test", public=True, owner=2, submission=0)
         for benchmark_id in ["dummybenchmark1", "dummybenchmark2"]:
             BenchmarkType.get_or_create(identifier=benchmark_id, domain="test", visible=True, order=999)
+            BenchmarkInstance.get_or_create(benchmark=benchmark_id)
 
     def teardown_method(self):
         logger.info('Clean database')
