@@ -24,6 +24,8 @@ eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
 conda activate $PLUGIN_NAME
 conda install pip
+pip install --upgrade pip setuptools
+
 if [ -f "$CONDA_ENV_PATH" ]; then
   output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
 fi
