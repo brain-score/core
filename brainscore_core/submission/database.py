@@ -99,7 +99,7 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
     benchmark_identifier = benchmark.identifier
     benchmark_type, created = BenchmarkType.get_or_create(identifier=benchmark_identifier,
-                                                          defaults=dict(domain=domain, order=999))
+                                                          defaults=dict(domain=domain, order=999, owner_id=2))
     if created:
         # store parent
         try:
