@@ -111,7 +111,7 @@ class TestBenchmark(SchemaTest):
 
     def test_benchmark_instance_existing_parent(self):
         # initially create the parent to see if the benchmark properly links to it
-        BenchmarkType.create(identifier='neural', order=3, domain='test')
+        BenchmarkType.create(identifier='neural', order=3, domain='test', owner_id=2)
         benchmark = _MockBenchmark()
         instance = benchmarkinstance_from_benchmark(benchmark, domain='test')
         assert instance.benchmark.parent.identifier == 'neural'
