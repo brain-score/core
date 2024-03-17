@@ -205,7 +205,7 @@ class TestPublic(SchemaTest):
 
     def test_one_public_benchmark(self):
         # create benchmarktypes and benchmarkinstances
-        BenchmarkType.create(identifier='dummy', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy', domain='test', visible=True, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy')
         # test
         public_benchmarks = public_benchmark_identifiers(domain='test')
@@ -213,10 +213,10 @@ class TestPublic(SchemaTest):
 
     def test_one_public_one_private_benchmark(self):
         # create benchmarktypes and benchmarkinstances
-        BenchmarkType.create(identifier='dummy_public', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_public', domain='test', visible=True, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_public')
 
-        BenchmarkType.create(identifier='dummy_private', domain='test', visible=False, order=1)
+        BenchmarkType.create(identifier='dummy_private', domain='test', visible=False, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_private')
         # test
         public_benchmarks = public_benchmark_identifiers(domain='test')
@@ -224,16 +224,16 @@ class TestPublic(SchemaTest):
 
     def test_two_public_two_private_benchmarks(self):
         # create benchmarktypes and benchmarkinstances
-        BenchmarkType.create(identifier='dummy_public1', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_public1', domain='test', visible=True, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_public1')
 
-        BenchmarkType.create(identifier='dummy_public2', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_public2', domain='test', visible=True, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_public2')
 
-        BenchmarkType.create(identifier='dummy_private1', domain='test', visible=False, order=1)
+        BenchmarkType.create(identifier='dummy_private1', domain='test', visible=False, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_private1')
 
-        BenchmarkType.create(identifier='dummy_private2', domain='test', visible=False, order=1)
+        BenchmarkType.create(identifier='dummy_private2', domain='test', visible=False, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_private2')
         # test
         public_benchmarks = public_benchmark_identifiers(domain='test')
@@ -241,12 +241,14 @@ class TestPublic(SchemaTest):
 
     def test_with_parent_benchmark(self):
         # create benchmarktypes and benchmarkinstances
-        BenchmarkType.create(identifier='dummy_parent', domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_parent', domain='test', visible=True, order=1, owner_id=2)
 
-        BenchmarkType.create(identifier='dummy_child1', parent="dummy_parent", domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_child1', parent="dummy_parent",
+                             domain='test', visible=True, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_child1')
 
-        BenchmarkType.create(identifier='dummy_child2', parent="dummy_parent", domain='test', visible=True, order=1)
+        BenchmarkType.create(identifier='dummy_child2', parent="dummy_parent",
+                             domain='test', visible=True, order=1, owner_id=2)
         BenchmarkInstance.create(benchmark='dummy_child2')
 
         # test
