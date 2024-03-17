@@ -110,7 +110,7 @@ class TestRunScoring:
         for model_id in ["dummymodel1", "dummymodel2"]:
             Model.get_or_create(name=model_id, domain="test", public=True, owner=2, submission=0)
         for benchmark_id in ["dummybenchmark1", "dummybenchmark2"]:
-            BenchmarkType.get_or_create(identifier=benchmark_id, domain="test", visible=True, order=999)
+            BenchmarkType.get_or_create(identifier=benchmark_id, domain="test", visible=True, order=999, owner_id=2)
             BenchmarkInstance.get_or_create(benchmark=benchmark_id)
 
     def teardown_method(self):
