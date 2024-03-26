@@ -37,7 +37,7 @@ class EnvironmentManager:
         shutil removal if deletion fails (not uncommon if build was interrupted)
         """
         completed_process = subprocess.run(f"output=`conda env remove -n {self.env_name} --yes 2>&1` || echo $output",
-                                           shell=True, timeout=60)
+                                           shell=True, timeout=5 * 60)
         if completed_process.returncode != 0:  # directly remove env dir if conda fails
             try:
                 shutil.rmtree(self.env_path)
