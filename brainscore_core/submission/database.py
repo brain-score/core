@@ -72,8 +72,10 @@ def public_model_identifiers(domain: str) -> List[str]:
 
 
 def public_benchmark_identifiers(domain: str) -> List[str]:
-    entries = BenchmarkType.select().where(BenchmarkType.visible & (BenchmarkType.domain == domain))
-    identifiers = [entry.identifier for entry in entries]
+    entries = BenchmarkInstance.select(BenchmarkType.identifier).join(BenchmarkType).where(
+        (BenchmarkType.domain == domain) & (BenchmarkType.visible)
+    )
+    identifiers = [entry.benchmark.identifier for entry in entries]
     return identifiers
 
 
@@ -97,7 +99,7 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
     benchmark_identifier = benchmark.identifier
     benchmark_type, created = BenchmarkType.get_or_create(identifier=benchmark_identifier,
-                                                          defaults=dict(domain=domain, order=999))
+                                                          defaults=dict(domain=domain, order=999, owner_id=2))
     if created:
         # store parent
         try:

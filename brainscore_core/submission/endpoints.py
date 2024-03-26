@@ -44,7 +44,7 @@ class UserManager:
         return temp_pass
 
     def create_new_user(self, user_email: str):
-        signup_url = 'http://www.brain-score.org/signup'
+        signup_url = 'https://www.brain-score.org/signup'
         temp_pass = self._generate_temp_pass(length=10)
         try:
             response = requests.get(signup_url)
@@ -258,7 +258,7 @@ def make_argparser() -> ArgumentParser:
     parser = ArgumentParser()
     parser.add_argument('jenkins_id', type=int,
                         help='The id of the current jenkins run')
-    parser.add_argument('public', type=bool, nargs='?', default=True,
+    parser.add_argument('--public', default=False, action="store_true",
                         help='Public (or private) submission?')
     parser.add_argument('--competition', type=noneable_string, nargs='?', default=None,
                         help='Name of competition for which submission is being scored')

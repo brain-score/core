@@ -198,7 +198,7 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
             changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
             for plugin_dirname in changed_plugins:
                 plugin_dir = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}')
-                tests_to_run.extend(get_test_file_paths(plugin_dir))
+                if plugin_dir.is_dir(): tests_to_run.extend(get_test_file_paths(plugin_dir))
 
     print(f"Running tests for new or modified plugins: {tests_to_run}")
     print(run_args(domain_root, tests_to_run))  # print tests to travis log

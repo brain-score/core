@@ -9,9 +9,22 @@ class PeeweeBase(PeeweeModel):
     def set_schema(cls, schema_name):
         for model in cls.__subclasses__():
             model._meta.schema = schema_name
-    
+
     class Meta:
         database = database_proxy
+
+
+class User(PeeweeBase):
+    id = PrimaryKeyField()
+    email = CharField(index=True, null=True)
+    is_active = BooleanField()
+    is_staff = BooleanField()
+    is_superuser = BooleanField()
+    last_login = DateTimeField(null=True)
+    password = CharField()
+
+    class Meta:
+        table_name = 'brainscore_user'
 
 
 class Reference(PeeweeBase):
@@ -31,6 +44,7 @@ class BenchmarkType(PeeweeBase):
     parent = ForeignKeyField(column_name='parent_id', field='identifier', model='self', null=True)
     visible = BooleanField(default=False, null=False)
     domain = CharField(max_length=200, default=None)
+    owner = ForeignKeyField(column_name='owner_id', field='id', model=User, null=False)
 
     class Meta:
         table_name = 'brainscore_benchmarktype'
@@ -55,19 +69,6 @@ class BenchmarkInstance(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarkinstance'
-
-
-class User(PeeweeBase):
-    id = PrimaryKeyField()
-    email = CharField(index=True, null=True)
-    is_active = BooleanField()
-    is_staff = BooleanField()
-    is_superuser = BooleanField()
-    last_login = DateTimeField(null=True)
-    password = CharField()
-
-    class Meta:
-        table_name = 'brainscore_user'
 
 
 class Submission(PeeweeBase):
@@ -122,6 +123,7 @@ def clear_schema():
     Reference.delete().execute()
     User.delete().execute()
 
+
 def create_schema(schema_name):
     """
     Creates an isolated schema for testing purposes.
@@ -132,11 +134,13 @@ def create_schema(schema_name):
     except Exception as e:
         print(f"Error creating schema {schema_name}: {e}")
 
+
 def drop_schema(schema_name):
     """
     Drops a schema that was used for testing purposes.
     """
     database_proxy.execute_sql(f'DROP SCHEMA IF EXISTS {schema_name} CASCADE')
+
 
 def create_tables():
     """

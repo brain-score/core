@@ -6,7 +6,7 @@ import botocore.exceptions
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import connect_db
-from brainscore_core.submission.database_models import Model, BenchmarkType, clear_schema
+from brainscore_core.submission.database_models import Model, BenchmarkType, BenchmarkInstance, clear_schema
 from brainscore_core.submission.endpoints import RunScoringEndpoint, DomainPlugins, UserManager, shorten_text, \
     resolve_models_benchmarks, resolve_models, resolve_benchmarks, make_argparser
 from tests.test_submission import init_users
@@ -40,8 +40,8 @@ class TestUserManager:
 
     def test_create_new_user(self, requests_mock):
         # mock GET & POST responses
-        get_adapter = requests_mock.get('http://www.brain-score.org/signup', cookies={'cookie_name': 'cookie_value'})
-        post_adapter = requests_mock.post('http://www.brain-score.org/signup', status_code=200)
+        get_adapter = requests_mock.get('https://www.brain-score.org/signup', cookies={'cookie_name': 'cookie_value'})
+        post_adapter = requests_mock.post('https://www.brain-score.org/signup', status_code=200)
 
         user_manager = UserManager(self.test_database)
         user_manager.create_new_user('test@example.com')
@@ -110,7 +110,8 @@ class TestRunScoring:
         for model_id in ["dummymodel1", "dummymodel2"]:
             Model.get_or_create(name=model_id, domain="test", public=True, owner=2, submission=0)
         for benchmark_id in ["dummybenchmark1", "dummybenchmark2"]:
-            BenchmarkType.get_or_create(identifier=benchmark_id, domain="test", visible=True, order=999)
+            BenchmarkType.get_or_create(identifier=benchmark_id, domain="test", visible=True, order=999, owner_id=2)
+            BenchmarkInstance.get_or_create(benchmark=benchmark_id)
 
     def teardown_method(self):
         logger.info('Clean database')

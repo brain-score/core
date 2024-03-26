@@ -2,6 +2,7 @@
 
 PLUGIN_PATH=$1
 PLUGIN_NAME=$2
+PLUGIN_SETUP_PATH=$PLUGIN_PATH/setup.py
 PLUGIN_REQUIREMENTS_PATH=$PLUGIN_PATH/requirements.txt
 PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
 SINGLE_TEST=$3
@@ -23,8 +24,13 @@ eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
 conda activate $PLUGIN_NAME
 conda install pip
+pip install --upgrade pip setuptools
+
 if [ -f "$CONDA_ENV_PATH" ]; then
   output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
+fi
+if [ -f "$PLUGIN_SETUP_PATH" ]; then
+  output=$(pip install $PLUGIN_PATH 2>&1)
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
