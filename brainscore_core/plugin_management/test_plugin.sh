@@ -24,7 +24,6 @@ eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
 conda activate $PLUGIN_NAME
 conda install pip
-pip install --upgrade pip setuptools
 
 if [ -f "$CONDA_ENV_PATH" ]; then
   output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
@@ -36,7 +35,9 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
 fi
 
-output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
+echo "conda list"
+conda env list
+echo "conda list end"
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
