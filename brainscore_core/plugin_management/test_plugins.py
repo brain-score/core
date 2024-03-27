@@ -38,7 +38,7 @@ class PluginTestRunner(EnvironmentManager):
         self.generic_plugin_test = self._resolve_generic_plugin_test()
         self.env_name = self.plugin_name
         self.test = test if test else False
-        self.returncode = None
+        self.returncode = 0
         self.script_path = Path(__file__).parent / 'test_plugin.sh'
         assert self.script_path.is_file(), f"bash file {self.script_path} does not exist"
 
@@ -46,7 +46,6 @@ class PluginTestRunner(EnvironmentManager):
         self.validate_plugin()
         self.run_tests()
         self.teardown()
-        return self.returncode
 
     def validate_plugin(self):
         self._validate_test_files()
@@ -94,7 +93,7 @@ class PluginTestRunner(EnvironmentManager):
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
 
-        self.result = completed_process.returncode
+        self.returncode = completed_process.returncode
 
         if "TRAVIS" in os.environ:
             print(f"travis_fold:end:{self.plugin_directory}")
@@ -120,7 +119,8 @@ def run_specified_tests(root_directory: Path, test_file: str, test: str) -> Dict
         f"Test file {filename} not recognized as test file, must match '{RECOGNIZED_TEST_FILES}'."
     assert plugin_type in PLUGIN_TYPES, "Filepath not recognized as plugin test file."
     plugin_test_runner = PluginTestRunner(plugin, test=test)
-    results[plugin_test_runner.plugin_name] = plugin_test_runner()
+    plugin_test_runner()
+    results[plugin_test_runner.plugin_name] = plugin_test_runner.returncode
 
     return results
 
@@ -133,7 +133,8 @@ def run_all_tests(root_directory: Path) -> Dict:
         for plugin in plugins_dir.glob('[!._]*'):
             if plugin.is_dir():
                 plugin_test_runner = PluginTestRunner(plugin)
-                results[plugin_test_runner.plugin_name] = plugin_test_runner()
+                plugin_test_runner()
+                results[plugin_test_runner.plugin_name] = plugin_test_runner.returncode
     return results
 
 
