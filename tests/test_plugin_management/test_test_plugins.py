@@ -56,11 +56,11 @@ class TestPluginTestRunner:
         dummy_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
         plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
         plugin_test_runner.run_tests()
-        assert plugin_test_runner.results[plugin_test_runner.plugin_name] == 0
+        assert plugin_test_runner.returncode == 0
 
     @pytest.mark.travis_slow
     def test_run_tests_with_r(self):
         r_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'r_plugin'
         plugin_test_runner = PluginTestRunner(r_plugin_path, {})
         plugin_test_runner.run_tests()
-        assert plugin_test_runner.results[plugin_test_runner.plugin_name] == 0
+        assert plugin_test_runner.returncode == 0
