@@ -8,6 +8,10 @@ from .test_plugins import run_args
 
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 SPECIAL_PLUGIN_FILES = ['brainscore_vision/model_interface.py', 'brainscore_language/artificial_subject.py']
+MODEL_SUBSET = ['hmax', 'alexnet', 'CORnet-S', 'resnet-50-robust', 'voneresnet-50-non_stochastic', 
+                'resnet18-local_aggregation', 'grcnn_robust_v1', 'custom_model_cv_18_dagger_408', 
+                'ViT_L_32_imagenet1k', 'mobilenet_v2_1.4_224', 'pixels', 'cvt_cvt-w24-384-in22k_finetuned-in1k_4', 
+                'resnext101_32x8d_wsl', 'effnetb1_cutmixpatch_augmix_robust32_avge4e7_manylayers_324x288']
 
 
 def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str], List[str]]:
@@ -193,7 +197,10 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
         if plugin_type in plugin_info_dict["test_all_plugins"]:
             plugin_type_dir = Path(f'{domain_root}/{plugin_type}')
             for plugin_dir in plugin_type_dir.iterdir():
-                if plugin_dir.is_dir(): tests_to_run.extend(get_test_file_paths(plugin_dir))
+                if plugin_dir.is_dir():
+                    if plugin_type == 'models' and plugin_dir.name not in MODEL_SUBSET:  # run subset of models to decrease test time
+                        continue
+                    tests_to_run.extend(get_test_file_paths(plugin_dir))
         else:
             changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
             for plugin_dirname in changed_plugins:
