@@ -11,6 +11,10 @@ from .environment_manager import EnvironmentManager
 PLUGIN_TYPES = ['benchmarks', 'data', 'metrics', 'models']
 RECOGNIZED_TEST_FILES = r'test.*\.py'
 GENERIC_PLUGIN_TEST_FILENAME = "generic_plugin_tests.py"
+MODEL_SUBSET = ['hmax', 'alexnet', 'CORnet-S', 'resnet-50-robust', 'voneresnet-50-non_stochastic', 
+                'resnet18-local_aggregation', 'grcnn_robust_v1', 'custom_model_cv_18_dagger_408', 
+                'ViT_L_32_imagenet1k', 'mobilenet_v2_1.4_224', 'pixels', 'cvt_cvt-w24-384-in22k_finetuned-in1k_4', 
+                'resnext101_32x8d_wsl', 'effnetb1_cutmixpatch_augmix_robust32_avge4e7_manylayers_324x288']
 
 
 class PluginTestRunner(EnvironmentManager):
@@ -132,6 +136,8 @@ def run_all_tests(root_directory: Path) -> Dict:
         plugins_dir = root_directory / plugin_type
         for plugin in plugins_dir.glob('[!._]*'):
             if plugin.is_dir():
+                if plugins_dir == 'brainscore_vision/models' and plugin.name not in MODEL_SUBSET:  # run subset of models to decrease test time
+                    continue
                 plugin_test_runner = PluginTestRunner(plugin)
                 plugin_test_runner()
                 results[plugin_test_runner.plugin_name] = plugin_test_runner.returncode

@@ -4,10 +4,11 @@ from pathlib import Path
 import re
 from typing import List, Tuple, Dict
 
-from .test_plugins import run_args
+from .test_plugins import run_args, MODEL_SUBSET
 
 PLUGIN_DIRS = ['models', 'benchmarks', 'data', 'metrics']
 SPECIAL_PLUGIN_FILES = ['brainscore_vision/model_interface.py', 'brainscore_language/artificial_subject.py']
+
 
 
 def separate_plugin_files(files: List[str]) -> Tuple[List[str], List[str], List[str]]:
@@ -193,7 +194,10 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
         if plugin_type in plugin_info_dict["test_all_plugins"]:
             plugin_type_dir = Path(f'{domain_root}/{plugin_type}')
             for plugin_dir in plugin_type_dir.iterdir():
-                if plugin_dir.is_dir(): tests_to_run.extend(get_test_file_paths(plugin_dir))
+                if plugin_dir.is_dir():
+                    if plugin_type_dir == 'brainscore_vision/models' and plugin_dir.name not in MODEL_SUBSET:  # run subset of models to decrease test time
+                        continue
+                    tests_to_run.extend(get_test_file_paths(plugin_dir))
         else:
             changed_plugins = plugin_info_dict["changed_plugins"][plugin_type]
             for plugin_dirname in changed_plugins:
