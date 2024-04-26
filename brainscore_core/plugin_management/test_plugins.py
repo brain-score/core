@@ -136,7 +136,7 @@ def run_all_tests(root_directory: Path) -> Dict:
         plugins_dir = root_directory / plugin_type
         for plugin in plugins_dir.glob('[!._]*'):
             if plugin.is_dir():
-                if plugins_dir == 'brainscore_vision/models' and plugin.name not in MODEL_SUBSET:  # run subset of models to decrease test time
+                if str(plugins_dir) == 'brainscore_vision/models' and plugin.name not in MODEL_SUBSET:  # run subset of models to decrease test time
                     continue
                 plugin_test_runner = PluginTestRunner(plugin)
                 plugin_test_runner()
