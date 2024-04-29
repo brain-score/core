@@ -40,7 +40,15 @@ output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE
+  if [ "${OPENMIND}" ]; then
+    pip install junitparser
+    PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
+    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--junitxml" $PLUGIN_XML_FILE --capture=no -o log_cli=true;
+    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
+    rm $PLUGIN_XML_FILE
+  else
+    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH
+  fi
 fi
 
 GENERIC_TEST_SUCCESS=$?
@@ -68,7 +76,6 @@ else
 fi
 
 PLUGIN_TEST_SUCCESS=$?
-
 if [ $GENERIC_TEST_SUCCESS -ne 0 ]; then
   exit "$GENERIC_TEST_SUCCESS"
 fi
