@@ -43,6 +43,8 @@ if [ "$GENERIC_TEST_PATH" != False ]; then
   pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE
 fi
 
+GENERIC_TEST_SUCCESS=$?
+
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
@@ -65,4 +67,10 @@ else
   fi 
 fi
 
-exit $?
+PLUGIN_TEST_SUCCESS=$?
+
+if [ $GENERIC_TEST_SUCCESS -ne 0 ]; then
+  exit "$GENERIC_TEST_SUCCESS"
+fi
+
+exit "$PLUGIN_TEST_SUCCESS"
