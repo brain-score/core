@@ -88,8 +88,6 @@ class PluginTestRunner(EnvironmentManager):
         runs all tests or selected test for specified plugin.
         If generic tests for the plugin type are defined by the domain library, those are run first.
         """
-        if "TRAVIS" in os.environ:
-            print(f"travis_fold:start:{self.plugin_directory}")
 
         run_command = f"bash {self.script_path} \
             {self.plugin_directory} {self.plugin_name} {self.test} {self.library_path} {self.generic_plugin_test}"
@@ -98,9 +96,6 @@ class PluginTestRunner(EnvironmentManager):
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
 
         self.returncode = completed_process.returncode
-
-        if "TRAVIS" in os.environ:
-            print(f"travis_fold:end:{self.plugin_directory}")
 
     def _resolve_generic_plugin_test(self) -> Union[bool, Path]:
         # remove plural and determine variable name, e.g. "models" -> "model"
