@@ -27,13 +27,13 @@ conda install pip
 pip install --upgrade pip setuptools
 
 if [ -f "$CONDA_ENV_PATH" ]; then
-  output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
+  conda env update --file $CONDA_ENV_PATH 2>&1
 fi
 if [ -f "$PLUGIN_SETUP_PATH" ]; then
-  output=$(pip install $PLUGIN_PATH 2>&1)
+  pip install $PLUGIN_PATH 2>&1
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
-  output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
+  pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1
 fi
 
 output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
