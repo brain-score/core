@@ -40,15 +40,7 @@ output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  if [ "${OPENMIND}" ]; then
-    pip install junitparser
-    PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
-    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--junitxml" $PLUGIN_XML_FILE --capture=no -o log_cli=true;
-    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
-    rm $PLUGIN_XML_FILE
-  else
-    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH
-  fi
+  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--junitxml" $XML_FILE "--capture=no" "-o log_cli=true";
 fi
 
 GENERIC_TEST_SUCCESS=$?
@@ -64,14 +56,8 @@ else
     elif [ "$PRIVATE_ACCESS" != 1 ]; then 
       pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
     fi
-  elif [ "${OPENMIND}" ]; then
-    pip install junitparser
-    PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH --junitxml $PLUGIN_XML_FILE --capture=no -o log_cli=true;
-    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
-    rm $PLUGIN_XML_FILE
   else
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
+    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $XML_FILE "--capture=no" "-o log_cli=true";
   fi 
 fi
 
