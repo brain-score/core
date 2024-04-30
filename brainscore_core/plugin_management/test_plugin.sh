@@ -14,6 +14,7 @@ PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.ve
 
 TRAVIS_PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow and not travis_slow"}
 PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not slow"}
+PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE" # XML_FILE comes from Openmind environment
 
 cd "$LIBRARY_PATH" || exit 2
 echo "$PLUGIN_NAME ($PLUGIN_PATH)"
@@ -41,9 +42,10 @@ output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE;
+  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $PLUGIN_XML_FILE;
+  junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
+  rm $PLUGIN_XML_FILE
 fi
-
 GENERIC_TEST_SUCCESS=$?
 
 ### RUN TESTING
@@ -58,11 +60,13 @@ else
       pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
     fi
   else
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $XML_FILE "-s" "-o log_cli=true";
+    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $PLUGIN_XML_FILE "-s" "-o log_cli=true";
+    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
+    rm $PLUGIN_XML_FILE
   fi 
 fi
-
 PLUGIN_TEST_SUCCESS=$?
+
 if [ $GENERIC_TEST_SUCCESS -ne 0 ]; then
   exit "$GENERIC_TEST_SUCCESS"
 fi
