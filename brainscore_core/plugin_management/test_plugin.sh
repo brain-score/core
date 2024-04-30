@@ -37,7 +37,7 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
 fi
 
 output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
-output =$(pip install junitparser 2>&1)
+output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
