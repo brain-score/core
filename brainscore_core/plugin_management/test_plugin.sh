@@ -40,7 +40,7 @@ output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--junitxml" $XML_FILE "--capture=no" "-o log_cli=true";
+  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE;
 fi
 
 GENERIC_TEST_SUCCESS=$?
@@ -57,7 +57,7 @@ else
       pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
     fi
   else
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $XML_FILE "--capture=no" "-o log_cli=true";
+    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $XML_FILE "-s" "-o log_cli=true";
   fi 
 fi
 
