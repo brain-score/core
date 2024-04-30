@@ -28,9 +28,7 @@ test = [
     "pytest",
     "pytest-check",
     "pytest-mock",
-    "requests-mock",
-    "junitparser"
-]
+    "requests-mock"]
 
 [build-system]
 requires = [
