@@ -47,10 +47,10 @@ output=$(pip install junitparser 2>&1)
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
   pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $PLUGIN_XML_FILE;
+  GENERIC_TEST_SUCCESS=$?
   junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
   rm $PLUGIN_XML_FILE
 fi
-GENERIC_TEST_SUCCESS=$?
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
@@ -59,17 +59,19 @@ if [ "$SINGLE_TEST" != False ]; then
 else
   if [ "${TRAVIS}" ]; then
     if [ "$PRIVATE_ACCESS" = 1 ]; then
-      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
+      PLUGIN_TEST_SUCCESS=$?
     elif [ "$PRIVATE_ACCESS" != 1 ]; then 
-      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
+      PLUGIN_TEST_SUCCESS=$?
     fi
   else
     pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $PLUGIN_XML_FILE "-s" "-o log_cli=true";
+    PLUGIN_TEST_SUCCESS=$?
     junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
     rm $PLUGIN_XML_FILE
   fi 
 fi
-PLUGIN_TEST_SUCCESS=$?
 
 echo "GENERIC_TEST_SUCCESS: $GENERIC_TEST_SUCCESS"
 echo "PLUGIN_TEST_SUCCESS: $PLUGIN_TEST_SUCCESS"
