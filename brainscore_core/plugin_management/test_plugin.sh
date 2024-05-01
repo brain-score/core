@@ -16,6 +16,10 @@ TRAVIS_PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_inten
 PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not slow"}
 PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE" # XML_FILE comes from Openmind environment
 
+echo "XML_FILE: $XML_FILE"
+echo "PLUGIN_XML_FILE: $PLUGIN_XML_FILE"
+
+
 cd "$LIBRARY_PATH" || exit 2
 echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 
