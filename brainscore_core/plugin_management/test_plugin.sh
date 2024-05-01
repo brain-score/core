@@ -21,19 +21,16 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 ### DEPENDENCIES
 echo "Setting up conda environment..."
 echo "Python version: $PYTHON_VERSION"
+dir_path=$(pwd)
+echo "Current directory: $dir_path"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 
 # check for env currently active
-echo "Current conda env: $CONDA_DEFAULT_ENV"
-if [ -z "$CONDA_DEFAULT_ENV" ]; then
-    echo "No Conda environment is currently active."
-    exit 1
-else
-    current_env=$(basename $CONDA_DEFAULT_ENV)
-fi
+env_name=$(basename $(dirname "$dir_path"))
+echo "Detected Conda environment name: $env_name"
 
 # clone current env
-output=$(conda create -n $PLUGIN_NAME --clone $current_env -y 2>&1)
+output=$(conda create -n $PLUGIN_NAME --clone $env_name -y 2>&1)
 echo "$output"
 if [ $? -ne 0 ]; then
   echo "Failed to create environment: $output"
