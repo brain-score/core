@@ -205,4 +205,4 @@ def run_changed_plugin_tests(changed_files: str, domain_root: str):
                 if plugin_dir.is_dir(): tests_to_run.extend(get_test_file_paths(plugin_dir))
 
     print(f"Running tests for new or modified plugins: {tests_to_run}")
-    print(run_args(domain_root, tests_to_run))  # print tests to travis log
+    run_args(domain_root, tests_to_run)  # print tests to travis log
