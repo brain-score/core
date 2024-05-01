@@ -25,9 +25,12 @@ dir_path=$(pwd)
 echo "Current directory: $dir_path"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 
-# check for env currently active
-env_name=$(basename $(dirname "$dir_path"))
-echo "Detected Conda environment name: $env_name"
+# reconstruct previously created conda env name
+prev_env_name=$(basename $(dirname "$dir_path"))
+echo "Detected Conda environment name: $prev_env_name"
+# Use awk to split the directory name and rearrange it to match the required environment name format
+env_name=$(echo "$prev_env_name" | awk -F'_' '{print $3 "_unittest_plugins_" $4}')
+echo "Constructed Conda environment name: $env_name"
 
 # clone current env
 output=$(conda create -n $PLUGIN_NAME --clone $env_name -y 2>&1)
