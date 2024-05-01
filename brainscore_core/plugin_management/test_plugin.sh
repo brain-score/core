@@ -22,7 +22,17 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 echo "Setting up conda environment..."
 echo "Python version: $PYTHON_VERSION"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
-current_env=$CONDA_DEFAULT_ENV
+
+# check for env currently active
+echo "Current conda env: $CONDA_DEFAULT_ENV"
+if [ -z "$CONDA_DEFAULT_ENV" ]; then
+    echo "No Conda environment is currently active."
+    exit 1
+else
+    current_env=$(basename $CONDA_DEFAULT_ENV)
+fi
+
+# clone current env
 output=$(conda create -n $PLUGIN_NAME --clone $current_env -y 2>&1)
 echo "$output"
 if [ $? -ne 0 ]; then
