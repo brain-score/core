@@ -20,8 +20,14 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 
 ### DEPENDENCIES
 echo "Setting up conda environment..."
+echo "Python version: $PYTHON_VERSION"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
+echo "$output"
+if [ $? -ne 0 ]; then
+  echo "Failed to create environment: $output"
+  exit 1
+fi
 conda activate $PLUGIN_NAME
 conda install pip
 pip install --upgrade pip setuptools
