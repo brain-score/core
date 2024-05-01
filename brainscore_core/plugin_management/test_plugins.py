@@ -155,7 +155,7 @@ def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]
         for test_file in test_files:
             assert Path(test_file).exists()
             results = run_specified_tests(root_directory=Path(root_directory), test_file=test_file, test=test)
-
+    print(f"RETURN CODES: {results}")
     plugins_with_errors = {k: v for k, v in results.items() if (v != 0) and (v != 5)}
     num_plugins_failed = len(plugins_with_errors)
     assert num_plugins_failed == 0, f"\n{num_plugins_failed} plugin tests failed\n{plugins_with_errors}"
