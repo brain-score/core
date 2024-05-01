@@ -16,6 +16,9 @@ TRAVIS_PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_inten
 PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not slow"}
 PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE" # XML_FILE comes from Openmind environment
 
+GENERIC_TEST_SUCCESS=0
+PLUGIN_TEST_SUCCESS=0
+
 echo "XML_FILE: $XML_FILE"
 echo "PLUGIN_XML_FILE: $PLUGIN_XML_FILE"
 
@@ -48,29 +51,32 @@ output=$(pip install junitparser 2>&1)
 if [ "$GENERIC_TEST_PATH" != False ]; then
   pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $PLUGIN_XML_FILE;
   GENERIC_TEST_SUCCESS=$?
-  junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
-  rm $PLUGIN_XML_FILE
+  if [ "${OPENMIND}" ]; then
+    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
+    rm $PLUGIN_XML_FILE
+  fi
 fi
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
   pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
+  PLUGIN_TEST_SUCCESS=$?
 else
   if [ "${TRAVIS}" ]; then
     if [ "$PRIVATE_ACCESS" = 1 ]; then
       pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
-      PLUGIN_TEST_SUCCESS=$?
     elif [ "$PRIVATE_ACCESS" != 1 ]; then 
       pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
-      PLUGIN_TEST_SUCCESS=$?
     fi
   else
     pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $PLUGIN_XML_FILE "-s" "-o log_cli=true";
-    PLUGIN_TEST_SUCCESS=$?
+  fi 
+  PLUGIN_TEST_SUCCESS=$?
+  if [ "${OPENMIND}" ]; then
     junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
     rm $PLUGIN_XML_FILE
-  fi 
+  fi
 fi
 
 echo "GENERIC_TEST_SUCCESS: $GENERIC_TEST_SUCCESS"
