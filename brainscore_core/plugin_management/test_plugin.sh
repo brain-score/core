@@ -75,24 +75,8 @@ else
   fi
 fi
 
-echo "GENERIC_TEST_SUCCESS: $GENERIC_TEST_SUCCESS"
-echo "PLUGIN_TEST_SUCCESS: $PLUGIN_TEST_SUCCESS"
-
-GENERIC_TEST_SUCCESS=0
-PLUGIN_TEST_SUCCESS=5
 (($GENERIC_TEST_SUCCESS == 0)) && echo "Generic tests succeeded" || echo "Generic tests failed, return code $GENERIC_TEST_SUCCESS"
-(($PLUGIN_TEST_SUCCESS == 0 || PLUGIN_TEST_SUCCESS == 5)) && echo "Plugin-specific tests succeeded" || echo "Generic tests failed, return code $PLUGIN_TEST_SUCCESS"
-
-GENERIC_TEST_SUCCESS=5
-PLUGIN_TEST_SUCCESS=0
-(($GENERIC_TEST_SUCCESS == 0)) && echo "Generic tests succeeded" || echo "Generic tests failed, return code $GENERIC_TEST_SUCCESS"
-(($PLUGIN_TEST_SUCCESS == 0 || PLUGIN_TEST_SUCCESS == 5)) && echo "Plugin-specific tests succeeded" || echo "Generic tests failed, return code $PLUGIN_TEST_SUCCESS"
-
-GENERIC_TEST_SUCCESS=0
-PLUGIN_TEST_SUCCESS=1
-(($GENERIC_TEST_SUCCESS == 0)) && echo "Generic tests succeeded" || echo "Generic tests failed, return code $GENERIC_TEST_SUCCESS"
-(($PLUGIN_TEST_SUCCESS == 0 || PLUGIN_TEST_SUCCESS == 5))) && echo "Plugin-specific tests succeeded" || echo "Generic tests failed, return code $PLUGIN_TEST_SUCCESS"
-
+(($PLUGIN_TEST_SUCCESS == 0 || $PLUGIN_TEST_SUCCESS == 5)) && echo "Plugin-specific tests succeeded" || echo "Plugin-specific tests failed, return code $PLUGIN_TEST_SUCCESS"
 
 if [ $GENERIC_TEST_SUCCESS -ne 0 ]; then
   exit "$GENERIC_TEST_SUCCESS"
