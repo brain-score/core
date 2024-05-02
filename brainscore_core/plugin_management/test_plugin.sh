@@ -35,7 +35,7 @@ echo "Constructed Conda environment name: $env_name"
 # clone current env
 conda create -n $PLUGIN_NAME --clone $env_name -y 2>&1
 if [ $? -ne 0 ]; then
-  echo "Failed to create environment: $output"
+  echo "Failed to create environment: $env_name"
   exit 1
 fi
 conda activate $PLUGIN_NAME
