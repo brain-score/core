@@ -20,26 +20,18 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 
 ### DEPENDENCIES
 echo "Setting up conda environment..."
-echo "Python version: $PYTHON_VERSION"
 dir_path=$(pwd)
 echo "Current directory: $dir_path"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
 
-# reconstruct previously created conda env name
-prev_env_name=$(basename $(dirname "$dir_path"))
-echo "Detected Conda environment name: $prev_env_name"
-# Use awk to split the directory name and rearrange it to match the required environment name format
-env_name=$(echo "$prev_env_name" | awk -F'_' '{print $3 "_unittest_plugins_" $4}')
-echo "Constructed Conda environment name: $env_name"
-
-# clone current env
-output=$(conda create -n $PLUGIN_NAME --clone $env_name -y 2>&1)
-echo "$output"
-if [ $? -ne 0 ]; then
-  echo "Failed to create environment: $output"
-  exit 1
-fi
+# setting up env the same as in unittests_plugins.sh
+output=$(conda create -n $PLUGIN_NAME python=3.7.16 -y 2>&1)
 conda activate $PLUGIN_NAME
+pip install unidep --default-timeout=600 --retries=5
+pip install tomli --default-timeout=600 --retries=5
+pip install awscli --default-timeout=600 --retries=5
+unidep install -e ".[test]"
+pip install --upgrade pip setuptools --default-timeout=600 --retries=5
 
 if [ -f "$CONDA_ENV_PATH" ]; then
   output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
