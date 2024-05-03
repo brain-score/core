@@ -33,7 +33,7 @@ env_name=$(echo "$prev_env_name" | awk -F'_' '{print $3 "_unittest_plugins_" $4}
 echo "Constructed Conda environment name: $env_name"
 
 # clone current env
-conda create -n $PLUGIN_NAME --clone $env_name -y 2>&1
+conda create -n $env_name --clone $prev_env_name -y 2>&1
 if [ $? -ne 0 ]; then
   echo "Failed to create environment: $env_name"
   exit 1
