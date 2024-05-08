@@ -24,18 +24,11 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 
 ### DEPENDENCIES
 echo "Setting up conda environment..."
-dir_path=$(pwd)
-echo "Current directory: $dir_path"
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
-
-# setting up env the same as in unittests_plugins.sh
-output=$(conda create -n $PLUGIN_NAME python=3.7.16 -y 2>&1)
+output=$(conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y 2>&1)
 conda activate $PLUGIN_NAME
-pip install unidep --default-timeout=600 --retries=5
-pip install tomli --default-timeout=600 --retries=5
-pip install awscli --default-timeout=600 --retries=5
-unidep install -e ".[test]"
-pip install --upgrade pip setuptools --default-timeout=600 --retries=5
+conda install pip
+pip install --upgrade pip setuptools
 
 if [ -f "$CONDA_ENV_PATH" ]; then
   conda env update --file $CONDA_ENV_PATH 2>&1
@@ -47,6 +40,7 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1
 fi
 
+output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
