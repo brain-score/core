@@ -45,12 +45,12 @@ output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $PLUGIN_XML_FILE;
-  GENERIC_TEST_SUCCESS=$?
   if [ "${OPENMIND}" ]; then
-    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
-    rm $PLUGIN_XML_FILE
+    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE;
+  else
+    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO";
   fi
+  GENERIC_TEST_SUCCESS=$?
 fi
 
 ### RUN TESTING
