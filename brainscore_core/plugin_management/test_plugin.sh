@@ -14,6 +14,10 @@ PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.ve
 
 TRAVIS_PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not requires_gpu and not memory_intense and not slow and not travis_slow"}
 PYTEST_SETTINGS=${PYTEST_SETTINGS:-"not slow"}
+PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE" # XML_FILE comes from Openmind environment
+
+GENERIC_TEST_SUCCESS=0
+PLUGIN_TEST_SUCCESS=0
 
 cd "$LIBRARY_PATH" || exit 2
 echo "$PLUGIN_NAME ($PLUGIN_PATH)"
@@ -27,42 +31,55 @@ conda install pip
 pip install --upgrade pip setuptools
 
 if [ -f "$CONDA_ENV_PATH" ]; then
-  output=$(conda env update --file $CONDA_ENV_PATH 2>&1)
+  conda env update --file $CONDA_ENV_PATH 2>&1
 fi
 if [ -f "$PLUGIN_SETUP_PATH" ]; then
-  output=$(pip install $PLUGIN_PATH 2>&1)
+  pip install $PLUGIN_PATH 2>&1
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
-  output=$(pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1)
+  pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1
 fi
 
 output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
+output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE
+  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $PLUGIN_XML_FILE;
+  GENERIC_TEST_SUCCESS=$?
+  if [ "${OPENMIND}" ]; then
+    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
+    rm $PLUGIN_XML_FILE
+  fi
 fi
 
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
   pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
+  PLUGIN_TEST_SUCCESS=$?
 else
   if [ "${TRAVIS}" ]; then
     if [ "$PRIVATE_ACCESS" = 1 ]; then
-      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
     elif [ "$PRIVATE_ACCESS" != 1 ]; then 
-      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH; 
+      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
     fi
-  elif [ "${OPENMIND}" ]; then
-    pip install junitparser
-    PLUGIN_XML_FILE="$PLUGIN_NAME"_"$XML_FILE"
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH --junitxml $PLUGIN_XML_FILE --capture=no -o log_cli=true;
+  else
+    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $PLUGIN_XML_FILE "-s" "-o log_cli=true";
+  fi 
+  PLUGIN_TEST_SUCCESS=$?
+  if [ "${OPENMIND}" ]; then
     junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
     rm $PLUGIN_XML_FILE
-  else
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
-  fi 
+  fi
 fi
 
-exit $?
+(($GENERIC_TEST_SUCCESS == 0)) && echo "Generic tests succeeded" || echo "Generic tests failed, return code $GENERIC_TEST_SUCCESS"
+(($PLUGIN_TEST_SUCCESS == 0 || $PLUGIN_TEST_SUCCESS == 5)) && echo "Plugin-specific tests succeeded" || echo "Plugin-specific tests failed, return code $PLUGIN_TEST_SUCCESS"
+
+if [ $GENERIC_TEST_SUCCESS -ne 0 ]; then
+  exit "$GENERIC_TEST_SUCCESS"
+fi
+
+exit "$PLUGIN_TEST_SUCCESS"
