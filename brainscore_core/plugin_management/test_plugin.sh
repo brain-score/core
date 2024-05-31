@@ -30,8 +30,6 @@ conda activate $PLUGIN_NAME
 conda install pip
 pip install --upgrade pip setuptools
 
-output=$(python -m pip install -e ".[test]" --default-timeout=600 --retries=5 2>&1) # install library requirements
-
 if [ -f "$CONDA_ENV_PATH" ]; then
   conda env update --file $CONDA_ENV_PATH 2>&1
 fi
@@ -42,6 +40,7 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   pip install -r $PLUGIN_REQUIREMENTS_PATH --default-timeout=600 --retries=5 2>&1
 fi
 
+output=$(python -m pip install -e ".[test]" --default-timeout=600 --retries=5 2>&1) # install library requirements
 output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
