@@ -42,10 +42,6 @@ if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
   pip install -r $PLUGIN_REQUIREMENTS_PATH --default-timeout=600 --retries=5 2>&1
 fi
 
-output=$(pip install pytest-xml 2>&1)
-output=$(pip install junitparser 2>&1)
-
-
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
   if [ "${OPENMIND}" ]; then

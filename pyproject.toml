@@ -21,6 +21,8 @@ dependencies = [
     "peewee",
     "pybtex",
     "requests",
+    "pytest-xml",
+    "junitparser"
 ]
 
 [project.optional-dependencies]
