@@ -40,6 +40,7 @@ if [ -f "$PLUGIN_SETUP_PATH" ]; then
   pip install $PLUGIN_PATH --default-timeout=600 --retries=5 2>&1
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
+  echo $PLUGIN_REQUIREMENTS_PATH
   pip install -r $PLUGIN_REQUIREMENTS_PATH --default-timeout=600 --retries=5 2>&1
 fi
 
