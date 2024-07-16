@@ -46,7 +46,10 @@ class ImportPlugin:
                 continue
             plugin_dirpath = self.plugins_dir / plugin_dirname
             init_file = plugin_dirpath / "__init__.py"
-            with open(init_file) as f:
+            if not init_file.is_file():
+                logger.warning(f"No __init__.py in {plugin_dirpath}")
+                continue
+            with open(init_file, encoding='utf-8') as f:
                 plugin_registrations = [line for line in f if f"{self.registry_name}['{self.identifier}']"
                                         in line.replace('\"', '\'')]
                 if len(plugin_registrations) > 0:
