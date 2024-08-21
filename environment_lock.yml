@@ -1,0 +1,15 @@
+name: brainscore_core
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11.9
+  - numpy=1.26.4
+  - tqdm=4.66.4
+  - fire=0.6.0
+  - peewee=3.17.5
+  - pybtex=0.24.0
+  - psycopg2-binary=2.9.9
+  - requests=2.32.2
+  - pip:
+      - brainio @ git+https://github.com/brain-score/brainio.git@main
