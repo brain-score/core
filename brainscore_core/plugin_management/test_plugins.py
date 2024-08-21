@@ -77,7 +77,7 @@ class PluginTestRunner(EnvironmentManager):
                 if len(python_specs) == 1:
                     python_spec = python_specs[0]
                     python_version = python_spec.split('python=')[1]
-                    assert python_version.startswith(('3.7', '3.8', '3.9'))  # should get these into a central place
+                    assert python_version.startswith(('3.11', '3.8', '3.9'))  # should get these into a central place
                 elif len(python_specs) > 1:
                     raise yaml.YAMLError('multiple versions of python found in environment.yml')
                 # (else) no python specifications, ignore
