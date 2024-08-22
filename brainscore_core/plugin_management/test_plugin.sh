@@ -30,27 +30,28 @@ conda activate $PLUGIN_NAME
 conda install pip
 pip install --upgrade pip setuptools
 
+output=$(python -m pip install -e ".[test]" --default-timeout=600 --retries=5 2>&1) # install library requirements
+
 if [ -f "$CONDA_ENV_PATH" ]; then
   conda env update --file $CONDA_ENV_PATH 2>&1
 fi
 if [ -f "$PLUGIN_SETUP_PATH" ]; then
-  pip install $PLUGIN_PATH 2>&1
+  pip install $PLUGIN_PATH --default-timeout=600 --retries=5 2>&1
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
-  pip install -r $PLUGIN_REQUIREMENTS_PATH 2>&1
+  pip install -r $PLUGIN_REQUIREMENTS_PATH --default-timeout=600 --retries=5 2>&1
 fi
 
-output=$(python -m pip install -e ".[test]" 2>&1) # install library requirements
 output=$(pip install junitparser 2>&1)
 
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
-  pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $PLUGIN_XML_FILE;
-  GENERIC_TEST_SUCCESS=$?
   if [ "${OPENMIND}" ]; then
-    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
-    rm $PLUGIN_XML_FILE
+    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE;
+  else
+    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO";
   fi
+  GENERIC_TEST_SUCCESS=$?
 fi
 
 ### RUN TESTING
