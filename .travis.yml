@@ -1,5 +1,6 @@
 version: ~> 1.0
 language: python
+dist: jammy
 before_install:
   - pip install poetry
 install:
