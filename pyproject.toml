@@ -4,16 +4,16 @@
 
 [project]
 name = "brainscore_core"
-version = "0.1.0"
+version = "2.1"
 description = ""
 authors = []
 license = { 'file' = 'LICENSE' }
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.11"
 
 dependencies = [
     "tqdm",
-    "numpy>=1.21",
+    "numpy>=1.21,<2.0",
     "brainio@git+https://github.com/brain-score/brainio.git@main",
     "psycopg2-binary", # postgres driver
     # submission
