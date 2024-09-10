@@ -14,7 +14,7 @@ requires-python = ">=3.11"
 dependencies = [
     "tqdm",
     "numpy>=1.21,<2.0",
-    "brainio@git+https://github.com/brain-score/brainio.git@sw/python_3-11_migration",
+    "brainio@git+https://github.com/brain-score/brainio.git@main",
     "psycopg2-binary", # postgres driver
     # submission
     "fire",
