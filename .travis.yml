@@ -17,48 +17,12 @@ install:
 jobs:
   include:
     - stage: "PR Build"
-      name: "Python 3.8"
-      python: 3.8
-      script:
-        - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
-      if: type = pull_request
-    - stage: "PR Build"
-      name: "Python 3.9"
-      python: 3.9
-      script:
-        - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
-      if: type = pull_request
-    - stage: "PR Build"
-      name: "Python 3.10"
-      python: 3.10
-      script:
-        - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
-      if: type = pull_request
-    - stage: "PR Build"
       name: "Python 3.11"
       python: 3.11
       script:
         - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
       if: type = pull_request
-  
-    - stage: "Branch Build"
-      name: "Python 3.8"
-      python: 3.8
-      script:
-        - pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"
-      if: type = push
-    - stage: "Branch Build"
-      name: "Python 3.9"
-      python: 3.9
-      script:
-        - pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"
-      if: type = push
-    - stage: "Branch Build"
-      name: "Python 3.10"
-      python: 3.10
-      script:
-        - pytest -m "not pr_only and not requires_gpu and not memory_intense and not slow and not travis_slow"
-      if: type = push
+
     - stage: "Branch Build"
       name: "Python 3.11"
       python: 3.11

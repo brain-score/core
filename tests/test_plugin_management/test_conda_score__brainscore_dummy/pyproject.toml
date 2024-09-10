@@ -3,7 +3,7 @@ name = "brainscore_dummy"
 version = "0.1.0"
 description = "provide a callable library with a score method for the `test_conda_score.py` tests"
 authors = []
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 
 dependencies = [
     "fire",
