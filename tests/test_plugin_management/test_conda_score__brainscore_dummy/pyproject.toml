@@ -7,5 +7,5 @@ requires-python = ">=3.11"
 
 dependencies = [
     "fire",
-    "brainio@git+https://github.com/brain-score/brainio.git@main",
+    "brainscore-brainio@git+https://github.com/brain-score/brainio.git@main",
 ]
