@@ -285,11 +285,11 @@ def call_jenkins(plugin_info: Union[str, Dict[str, Union[List[str], str]]]):
     Triggered when changes are merged to the GitHub repository, if those changes affect benchmarks or models.
     Starts run to score models on benchmarks (`run_scoring`).
     """
-    jenkins_base = "http://braintree.mit.edu:8080"
+    jenkins_base = "http://www.brain-score-jenkins.com:8080"
     jenkins_user = os.environ['JENKINS_USER']
     jenkins_token = os.environ['JENKINS_TOKEN']
     jenkins_trigger = os.environ['JENKINS_TRIGGER']
-    jenkins_job = "score_plugins"
+    jenkins_job = "dev_score_plugins"
 
     url = f'{jenkins_base}/job/{jenkins_job}/buildWithParameters?token={jenkins_trigger}'
 
