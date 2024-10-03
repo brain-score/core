@@ -25,6 +25,7 @@ from brainscore_core.submission.database import (
     update_score)
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class UserManager:
