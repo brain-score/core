@@ -15,6 +15,7 @@ from email.mime.text import MIMEText
 from typing import Any, Dict, List, Tuple, Union
 
 import requests
+import sqlalchemy
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
@@ -131,10 +132,14 @@ class RunScoringEndpoint:
         logger.debug(f"Scoring {model_identifier} on {benchmark_identifier}")
 
         try:
+            # Retrieve the region_layer_map for the model from the database
+            region_layer_map = self._get_region_layer_map(model_identifier)
+
+            # Score the model on the benchmark with the region_layer_map
             self._score_model_on_benchmark(model_identifier=model_identifier,
                                            benchmark_identifier=benchmark_identifier,
                                            submission_entry=submission_entry, domain=domain,
-                                           public=public, competition=competition)
+                                           public=public, competition=competition, region_layer_map=region_layer_map)
         except Exception as e:
             is_run_successful = False
             logging.error(
@@ -148,9 +153,51 @@ class RunScoringEndpoint:
         logger.info(f'Submission is stored as {submission_status}')
         submission_entry.save()
 
+    def _get_region_layer_map(self, model_identifier: str) -> Union[None, dict]:
+        """
+        Retrieve the region-layer mapping for a model from the brainscore_score table based on model
+        """
+        try:
+            # TODO: SQL JOIN might be a more efficient approach. Join MODEL and SCORE on Score.model_id=Model.id
+            #   where Model.name == model_identifier and select Score.comment.
+            # Retrieve model_id from brainscore_model table based on model_identifier
+            model_entry = database_models.Model.get(database_models.Model.name == model_identifier)
+            model_id = model_entry.id
+
+            # Query brainscore_score table using model_id
+            score_entries = database_models.Score.select().where(database_models.Score.model_id == model_id)
+
+            # Create blank region_layer_map dictionary
+            region_layer_map = {}
+
+            # Iterate score query and extract region-layer map from the comment field
+            for score_entry in score_entries:
+                comment = score_entry.comment
+                if comment and "layers" in comment:
+                    layer_map = json.loads(comment["layers: ", ""])
+                    for region, layer in layer_map.items():
+                        if region not in region_layer_map:
+                            region_layer_map[region] = layer
+                        elif region_layer_map[region] != layer:
+                            logger.warning(f"Inconsistent layer mapping for {region}: {region_layer_map[region]} vs {layer}")
+
+            # Ensure that the final region_layer_map has the expected regions
+            for region in ['V1', 'V2', 'V4', 'IT']:
+                if region not in region_layer_map:
+                    logger.warning(f"No layer mapping found for {region} in model {model_identifier}")
+
+            logger.info(f"Extracted region_layer_map for model {model_identifier}")
+            return region_layer_map
+
+
+        except Exception as e:
+            logger.error(f"Error retrieving region_layer_map for model {model_identifier}: {e}")
+            return None  # Returns None if an error occurs, which allows legacy scoring to proceed
+
+
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission, domain: str,
-                                  public: bool, competition: Union[None, str]):
+                                  public: bool, competition: Union[None, str], region_layer_map: Union[None, dict]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
         logger.info(f'Model database entry')
@@ -180,7 +227,8 @@ class RunScoringEndpoint:
         # run actual scoring mechanism
         try:
             score_result = self.domain_plugins.score(
-                model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
+                model_identifier=model_identifier, benchmark_identifier=benchmark_identifier,
+                region_layer_map=region_layer_map) # Pass the region_layer_map to the scoring method
             score_entry.end_timestamp = datetime.now()
             # store in database
             logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
