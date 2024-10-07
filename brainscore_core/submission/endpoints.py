@@ -154,6 +154,7 @@ class RunScoringEndpoint:
                                   public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
+        logger.setLevel(logging.INFO)
         logger.info(f'Model database entry')
         model = self.domain_plugins.load_model(model_identifier)
         model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
@@ -184,6 +185,7 @@ class RunScoringEndpoint:
                 model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
             score_entry.end_timestamp = datetime.now()
             # store in database
+            print('test')
             logger.warning(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)
         except Exception as e:
