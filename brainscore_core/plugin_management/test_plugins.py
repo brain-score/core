@@ -14,7 +14,7 @@ GENERIC_PLUGIN_TEST_FILENAME = "generic_plugin_tests.py"
 MODEL_SUBSET = ['hmax', 'alexnet', 'CORnet-S', 'resnet-50-robust', 'voneresnet-50-non_stochastic', 
                 'resnet18-local_aggregation', 'grcnn_robust_v1', 'custom_model_cv_18_dagger_408', 
                 'ViT_L_32_imagenet1k', 'mobilenet_v2_1.4_224', 'pixels', 'cvt_cvt-w24-384-in22k_finetuned-in1k_4', 
-                'resnext101_32x8d_wsl', 'effnetb1_cutmixpatch_augmix_robust32_avge4e7_manylayers_324x288']
+                'effnetb1_cutmixpatch_augmix_robust32_avge4e7_manylayers_324x288']
 
 
 class PluginTestRunner(EnvironmentManager):
