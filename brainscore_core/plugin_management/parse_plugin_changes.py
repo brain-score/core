@@ -94,6 +94,9 @@ def get_plugin_ids(plugin_type: str, new_plugin_dirs: List[str], domain_root: st
 
     for plugin_dirname in new_plugin_dirs:
         init_file = Path(f'{domain_root}/{plugin_type}/{plugin_dirname}/__init__.py')
+        if not init_file.exists():
+            print(f"Warning: {init_file} does not exist. Skipping.")
+            continue
         with open(init_file) as f:
             registry_name = plugin_type.strip(
                 's') + '_registry'  # remove plural and determine variable name, e.g. "models" -> "model_registry"
