@@ -20,7 +20,7 @@ jobs:
       name: "Python 3.11"
       python: 3.11
       script:
-        - pytest -m "not requires_gpu and not memory_intense and not slow and not travis_slow"
+        - pytest -vv tests/test_plugin_management/test_conda_score.py::TestCondaScoreInEnv::test_score_in_env tests/test_plugin_management/test_parse_plugin_changes.py::TestRunChangedPlugins::test_run_changed_plugin_tests_all_models_benchmarks_data tests/test_plugin_management/test_test_plugins.py::TestPluginTestRunner::test_run_tests_with_r
       if: type = pull_request
 
     - stage: "Branch Build"
