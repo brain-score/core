@@ -39,7 +39,7 @@ def test_save_and_consume_score():
 
 
 class TestCondaScoreInEnv:
-    dummy_container_dirpath = Path(tempfile.mkdtemp("-brainscore-dummy"))
+    dummy_container_dirpath = Path(tempfile.mkdtemp("_brainscore_dummy"))
 
     def setup_method(self):
         sys.path.append(str(self.dummy_container_dirpath))
