@@ -1,0 +1,201 @@
+import os
+import sys
+import yaml
+import json
+import argparse
+import subprocess
+
+# Allowed plugins for metadata
+ALLOWED_PLUGINS = {
+    "models",
+    "benchmarks"
+}
+
+# Allowed keys for a plugin metadata file
+ALLOWED_KEYS_BY_TYPE = {
+    "models": {
+        "architecture",
+        "model_family",
+        "total_parameter_count",
+        "trainable_parameter_count",
+        "total_layers",
+        "trainable_layers",
+        "model_size_MB",
+        "training_dataset",
+        "task_specialization",
+        "source_link",
+        "user_tags"
+    },
+    "benchmarks": set(),  # Fill out after testing models
+}
+
+
+def validate_metadata_file(metadata_path):
+    """
+    Validate a metadata file that is expected to have one of the allowed plugin types
+    as its top-level key (e.g. "models" or "benchmarks"). For plugin types that have an
+    allowed keys set defined, check that each plugin's metadata does not include extra keys.
+
+    Returns a tuple of (errors, data) where errors is a list of strings and data is the loaded YAML.
+    """
+    errors = []
+    try:
+        with open(metadata_path, 'r') as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        return [f"YAML parsing error: {e}"], None
+    except Exception as e:
+        return [f"Error reading file: {e}"], None
+
+    if not isinstance(data, dict):
+        errors.append("Top-level structure must be a dictionary.")
+        return errors, None
+
+    # Check that at least one allowed plugin type is present.
+    found_plugin_type = False
+    for plugin_type in data:
+        if plugin_type in ALLOWED_PLUGINS:
+            found_plugin_type = True
+            plugin_data = data[plugin_type]
+            if not isinstance(plugin_data, dict):
+                errors.append(f"'{plugin_type}' value must be a dictionary keyed by plugin names.")
+                continue
+
+            # Find keys based on plugin type
+            allowed_keys = ALLOWED_KEYS_BY_TYPE.get(plugin_type)
+            for plugin_name, metadata in plugin_data.items():
+                if not isinstance(metadata, dict):
+                    errors.append(f"Data for plugin '{plugin_name}' under '{plugin_type}' must be a dictionary.")
+                    continue
+                extra_keys = set(metadata.keys()) - allowed_keys
+                if extra_keys:
+                    errors.append(
+                        f"Plugin '{plugin_name}' under '{plugin_type}' has extra keys: {list(extra_keys)}"
+                    )
+        else:
+            errors.append(f"Top-level key '{plugin_type}' is not allowed. Allowed keys: {list(ALLOWED_PLUGINS)}")
+
+    if not found_plugin_type:
+        errors.append(f"Missing one of the required top-level keys: {list(ALLOWED_PLUGINS)}")
+
+    return errors, data
+
+
+def generate_dummy_metadata(plugin_dir, plugin_type):
+
+    # Dummy section for now. Replace with calling of Mike's script
+    # NOTE: How intesne is Mike's script? Will we be able to load the model on the specs provided by github actions?
+
+    if plugin_type == "models":
+        # Call mike script for generating model metadata here
+        dummy_data = {
+            "models": {
+                "dummy-model": {
+                    "architecture": None,
+                    "model_family": None,
+                    "total_parameter_count": None,
+                    "trainable_parameter_count": None,
+                    "total_layers": None,
+                    "trainable_layers": None,
+                    "model_size_MB": None,
+                    "training_dataset": None,
+                    "task_specialization": None,
+                    "source_link": None,
+                    "user_tags": None
+                }
+            }
+        }
+    elif plugin_type == "benchmarks":
+        # Call mike script for generating benchmark metadata here
+        dummy_data = {
+            "benchmarks": {
+                "dummy-benchmark": {
+                }
+            }
+        }
+    else:
+        raise ValueError(f"Unsupported plugin type: {plugin_type}")
+
+    metadata_path = os.path.join(plugin_dir, "metadata.yml")
+    with open(metadata_path, 'w') as f:
+        yaml.dump(dummy_data, f)
+    print(f"Dummy metadata.yml generated at: {metadata_path}")
+    return metadata_path
+
+
+def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
+    """
+    Create a PR that adds/updates the metadata.yml file.
+
+    This function uses git commands and the GitHub CLI (gh) to:
+      - Create a new branch,
+      - Add the metadata file,
+      - Commit the changes,
+      - Push the branch,
+      - Create a PR.
+    Note: This requires that the repo has been checked out with a full history,
+    and that gh is installed and authenticated.
+    """
+    metadata_path = os.path.join(plugin_dir, "metadata.yml")
+    try:
+        # Create a new branch.
+        subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+        # Add the metadata file.
+        subprocess.run(["git", "add", metadata_path], check=True)
+        # Commit the change.
+        subprocess.run(["git", "commit", "-m", "Auto-add/update metadata.yml for plugin"], check=True)
+        # Push the branch.
+        subprocess.run(["git", "push", "origin", branch_name], check=True)
+        # Create the pull request using the GitHub CLI.
+        pr_title = "Auto-add/update metadata.yml for plugin"
+        pr_body = "This PR was automatically generated to add or update the metadata.yml file."
+        subprocess.run([
+            "gh", "pr", "create",
+            "--title", pr_title,
+            "--body", pr_body,
+            "--label", "auto-merge"
+        ], check=True)
+        print("Pull request created successfully for metadata.yml update.")
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while creating the PR: {e}")
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Process and validate metadata.yml for a plugin, "
+                    "or generate one and create a PR if missing."
+    )
+    parser.add_argument("--plugin-dir", required=True, help="Path to the plugin directory")
+    parser.add_argument("--plugin-type", required=True, choices=list(ALLOWED_PLUGINS),
+                        help="Plugin type (e.g., models or benchmarks)")
+    args = parser.parse_args()
+
+    new_metadata = False
+    metadata_path = os.path.join(args.plugin_dir, "metadata.yml")
+    if not os.path.exists(metadata_path):
+        # If no metadata is found, generate metadata and PR, as well as save to .json
+        print("No metadata.yml found. Generating now.")
+        new_metadata = True
+        metadata_path = generate_dummy_metadata(args.plugin_dir, args.plugin_type)
+    else:
+        print("Found metadata.yml. Validating...")
+
+    errors, data = validate_metadata_file(metadata_path)
+    if errors:
+        print("Metadata validation errors:")
+        for error in errors:
+            print(f"  - {error}")
+        sys.exit(1)
+    else:
+        print("metadata.yml is valid.")
+        with open("validated_metadata.json", "w") as f:
+            json.dump(data, f)
+        print("Validated metadata saved to validated_metadata.json")
+
+    if new_metadata:
+        create_metadata_pr(args.plugin_dir)
+
+
+if __name__ == "__main__":
+    main()

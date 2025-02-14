@@ -8,7 +8,7 @@ from typing import List, Union
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
 from brainscore_core.submission.database_models import database_proxy, \
-    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, PeeweeBase
+    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, PeeweeBase
 from brainscore_core.submission.utils import get_secret
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def public_benchmark_identifiers(domain: str) -> List[str]:
 
 
 def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],
-                          submission: Submission, domain: str,
+                          submission: Submission, domain: str, model_meta: Union[None, dict],
                           bibtex: Union[None, str] = None) -> Model:
     model_entry, created = Model.get_or_create(name=model_identifier,
                                                defaults={
@@ -93,7 +93,40 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
         reference = reference_from_bibtex(bibtex)
         model_entry.reference = reference
         model_entry.save()
+    if model_meta is not None:
+        meta_entry = create_model_meta_entry(model_identifier, model_meta)
     return model_entry
+
+
+def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
+    """
+    Given a model identifier and a metadata dict, get or create a ModelMeta record.
+    The metadata dict can include keys such as architecture, model_family, etc.
+    """
+    # using get here in case certain fields don't exist
+    defaults = {
+        'architecture': metadata.get('architecture'),
+        'model_family': metadata.get('model_family'),
+        'total_parameter_count': metadata.get('total_parameter_count'),
+        'trainable_parameter_count': metadata.get('trainable_parameter_count'),
+        'total_layers': metadata.get('total_layers'),
+        'trainable_layers': metadata.get('trainable_layers'),
+        'model_size_MB': metadata.get('model_size_MB'),
+        'training_dataset': metadata.get('training_dataset'),
+        'task_specialization': metadata.get('task_specialization'),
+        'source_link': metadata.get('source_link'),
+    }
+    modelmeta, created = ModelMeta.get_or_create(model_name=model_identifier, defaults=defaults)
+    if not created:
+        # Optionally update fields if they have changed.
+        updated = False
+        for key, value in defaults.items():
+            if getattr(modelmeta, key) != value:
+                setattr(modelmeta, key, value)
+                updated = True
+        if updated:
+            modelmeta.save()
+    return modelmeta
 
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:

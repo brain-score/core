@@ -96,6 +96,23 @@ class Model(PeeweeBase):
         table_name = 'brainscore_model'
 
 
+class ModelMeta(PeeweeBase):
+    name = CharField(primary_key=True)
+    architecture = CharField(null=True)
+    model_family = CharField(null=True)
+    total_parameter_count = IntegerField(null=True)
+    trainable_parameter_count = IntegerField(null=True)
+    total_layers = IntegerField(null=True)
+    trainable_layers = IntegerField(null=True)
+    model_size_MB = FloatField(null=True)
+    training_dataset = CharField(null=True)
+    task_specialization = CharField(null=True)
+    source_link = CharField(null=True)
+
+    class Meta:
+        table_name = 'brainscore_modelmeta'
+
+
 class Score(PeeweeBase):
     benchmark = ForeignKeyField(column_name='benchmark_id', field='id', model=BenchmarkInstance)
     end_timestamp = DateTimeField(null=True)
