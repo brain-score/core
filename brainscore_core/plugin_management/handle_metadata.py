@@ -4,6 +4,7 @@ import yaml
 import json
 import argparse
 import subprocess
+import time
 
 # Allowed plugins for metadata
 ALLOWED_PLUGINS = {
@@ -137,6 +138,8 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
     and that gh is installed and authenticated.
     """
     metadata_path = os.path.join(plugin_dir, "metadata.yml")
+    unique_suffix = str(int(time.time()))
+    branch_name += unique_suffix
     try:
         # Create a new branch.
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
