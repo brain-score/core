@@ -139,7 +139,7 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
     """
     metadata_path = os.path.join(plugin_dir, "metadata.yml")
     unique_suffix = str(int(time.time()))
-    branch_name += unique_suffix
+    branch_name += f"_{unique_suffix}"
     try:
         # Create a new branch.
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
