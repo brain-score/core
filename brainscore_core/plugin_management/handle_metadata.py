@@ -120,7 +120,7 @@ def generate_dummy_metadata(plugin_dir, plugin_type):
     metadata_path = os.path.join(plugin_dir, "metadata.yml")
     with open(metadata_path, 'w') as f:
         yaml.dump(dummy_data, f)
-    print(f"Dummy metadata.yml generated at: {metadata_path}")
+    print(f"Dummy metadata.yml generated at: {metadata_path}", file=sys.stderr)
     return metadata_path
 
 
@@ -158,7 +158,7 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
             "--body", pr_body,
             "--label", "automerge-metadata"
         ], check=True)
-        print("Pull request created successfully for metadata.yml update.")
+        print("Pull request created successfully for metadata.yml update.", file=sys.stderr)
         time.sleep(5)
         pr_number = subprocess.check_output(
             ["gh", "pr", "view", "--json", "number", "--jq", ".number"],
@@ -166,7 +166,7 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
         ).strip()
         return pr_number
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred while creating the PR: {e}")
+        print(f"An error occurred while creating the PR: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -184,23 +184,23 @@ def main():
     metadata_path = os.path.join(args.plugin_dir, "metadata.yml")
     if not os.path.exists(metadata_path):
         # If no metadata is found, generate metadata and PR, as well as save to .json
-        print("No metadata.yml found. Generating now.")
+        print("No metadata.yml found. Generating now.", file=sys.stderr)
         new_metadata = True
         metadata_path = generate_dummy_metadata(args.plugin_dir, args.plugin_type)
     else:
-        print("Found metadata.yml. Validating...")
+        print("Found metadata.yml. Validating...", file=sys.stderr)
 
     errors, data = validate_metadata_file(metadata_path)
     if errors:
-        print("Metadata validation errors:")
+        print("Metadata validation errors:", file=sys.stderr)
         for error in errors:
-            print(f"  - {error}")
+            print(f"  - {error}", file=sys.stderr)
         sys.exit(1)
     else:
-        print("metadata.yml is valid.")
+        print("metadata.yml is valid.", file=sys.stderr)
         with open("validated_metadata.json", "w") as f:
             json.dump(data, f)
-        print("Validated metadata saved to validated_metadata.json")
+        print("Validated metadata saved to validated_metadata.json", file=sys.stderr)
 
     if new_metadata:
         pr_number = create_metadata_pr(args.plugin_dir)
