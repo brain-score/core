@@ -4,6 +4,7 @@ import yaml
 import json
 import argparse
 import subprocess
+import time
 
 # Allowed plugins for metadata
 ALLOWED_PLUGINS = {
@@ -156,6 +157,12 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
             "--label", "auto-merge"
         ], check=True)
         print("Pull request created successfully for metadata.yml update.")
+        time.sleep(5)
+        pr_number = subprocess.check_output(
+            ["gh", "pr", "view", "--json", "number", "--jq", ".number"],
+            universal_newlines=True
+        ).strip()
+        return pr_number
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while creating the PR: {e}")
         sys.exit(1)
@@ -194,7 +201,10 @@ def main():
         print("Validated metadata saved to validated_metadata.json")
 
     if new_metadata:
-        create_metadata_pr(args.plugin_dir)
+        pr_number = create_metadata_pr(args.plugin_dir)
+        print(pr_number)
+    else:
+        print("")
 
 
 if __name__ == "__main__":
