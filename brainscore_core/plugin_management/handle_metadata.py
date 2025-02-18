@@ -142,13 +142,13 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
     branch_name += f"_{unique_suffix}"
     try:
         # Create a new branch.
-        subprocess.run(["git", "checkout", "-b", branch_name], check=True)
+        subprocess.run(["git", "checkout", "-b", branch_name], check=True, stdout=sys.stderr, stderr=sys.stderr)
         # Add the metadata file.
-        subprocess.run(["git", "add", metadata_path], check=True)
+        subprocess.run(["git", "add", metadata_path], check=True, stdout=sys.stderr, stderr=sys.stderr)
         # Commit the change.
-        subprocess.run(["git", "commit", "-m", "Auto-add/update metadata.yml for plugin"], check=True)
+        subprocess.run(["git", "commit", "-m", "Auto-add/update metadata.yml for plugin"], check=True, stdout=sys.stderr, stderr=sys.stderr)
         # Push the branch.
-        subprocess.run(["git", "push", "origin", branch_name], check=True)
+        subprocess.run(["git", "push", "origin", branch_name], check=True, stdout=sys.stderr, stderr=sys.stderr)
         # Create the pull request using the GitHub CLI.
         pr_title = "Auto-add/update metadata.yml for plugin"
         pr_body = "This PR was automatically generated to add or update the metadata.yml file."
@@ -157,7 +157,7 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
             "--title", pr_title,
             "--body", pr_body,
             "--label", "automerge-metadata"
-        ], check=True)
+        ], check=True, stdout=sys.stderr, stderr=sys.stderr)
         print("Pull request created successfully for metadata.yml update.", file=sys.stderr)
         time.sleep(5)
         pr_number = subprocess.check_output(
