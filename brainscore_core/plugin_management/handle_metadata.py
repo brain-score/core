@@ -138,6 +138,8 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
     and that gh is installed and authenticated.
     """
     metadata_path = os.path.join(plugin_dir, "metadata.yml")
+    unique_suffix = str(int(time.time()))
+    branch_name += f"_{unique_suffix}"
     try:
         # Create a new branch.
         subprocess.run(["git", "checkout", "-b", branch_name], check=True)
@@ -154,7 +156,7 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
             "gh", "pr", "create",
             "--title", pr_title,
             "--body", pr_body,
-            "--label", "auto-merge"
+            "--label", "automerge-metadata"
         ], check=True)
         print("Pull request created successfully for metadata.yml update.")
         time.sleep(5)
