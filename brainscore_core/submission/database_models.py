@@ -50,7 +50,8 @@ class BenchmarkType(PeeweeBase):
         table_name = 'brainscore_benchmarktype'
 
 
-class BenchmarkMeta(PeeweeBase):
+class BenchmarkMeta(PeeweeBase):  # NOTE, need to update once Mike makes table
+    identifier = CharField(primary_key=True)
     number_of_stimuli = IntegerField(null=True)
     number_of_recording_sites = IntegerField(null=True)
     recording_sites = CharField(max_length=100, null=True)
@@ -97,7 +98,7 @@ class Model(PeeweeBase):
 
 
 class ModelMeta(PeeweeBase):
-    name = CharField(primary_key=True)
+    identifier = CharField(primary_key=True)
     architecture = CharField(null=True)
     model_family = CharField(null=True)
     total_parameter_count = IntegerField(null=True)
