@@ -8,7 +8,7 @@ from typing import List, Union
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
 from brainscore_core.submission.database_models import database_proxy, \
-    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, PeeweeBase
+    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, BenchmarkMeta, PeeweeBase
 from brainscore_core.submission.utils import get_secret
 
 logger = logging.getLogger(__name__)
@@ -116,17 +116,32 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
         'task_specialization': metadata.get('task_specialization'),
         'source_link': metadata.get('source_link'),
     }
-    modelmeta, created = ModelMeta.get_or_create(model_name=model_identifier, defaults=defaults)
-    if not created:
-        # Optionally update fields if they have changed.
-        updated = False
+    try:  # if model exists, overwrite all fields
+        modelmeta = ModelMeta.get(ModelMeta.identifier == model_identifier)
         for key, value in defaults.items():
-            if getattr(modelmeta, key) != value:
-                setattr(modelmeta, key, value)
-                updated = True
-        if updated:
-            modelmeta.save()
+            setattr(modelmeta, key, value)
+        modelmeta.save()
+    except ModelMeta.DoesNotExist:  # otherwise create a new entry
+        modelmeta = ModelMeta.create(identifier=model_identifier, **defaults)
     return modelmeta
+
+
+# NOTE: IN PROGRESS... can probably combine w/ above and generalize code.
+def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict) -> BenchmarkMeta:
+    """
+    Given a benchmark identifier and a metadata dict, get or create a BenchmarkMeta record.
+    The metadata dict can include keys such as
+    """
+    defaults = {
+    }
+    try:  # if benchmark exists, overwrite all fields
+        benchmarkmeta = BenchmarkMeta.get(BenchmarkMeta.identifier == benchmark_identifier)
+        for key, value in defaults.items():
+            setattr(benchmarkmeta, key, value)
+        benchmarkmeta.save()
+    except BenchmarkMeta.DoesNotExist:  # otherwise create a new entry
+        benchmarkmeta = BenchmarkMeta.create(identifier=benchmark_identifier, **defaults)
+    return benchmarkmeta
 
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
