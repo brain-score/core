@@ -18,9 +18,10 @@ import requests
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
+from brainscore_core.plugin_management.handle_metadata import validate_metadata_file
 from brainscore_core.submission.database import (
     benchmarkinstance_from_benchmark, connect_db, email_from_uid,
-    modelentry_from_model, public_benchmark_identifiers,
+    modelentry_from_model, create_model_meta_entry, create_benchmark_meta_entry, public_benchmark_identifiers,
     public_model_identifiers, submissionentry_from_meta, uid_from_email,
     update_score)
 
@@ -88,6 +89,66 @@ class UserManager:
 
         except Exception as e:
             logging.error(f'Could not send email to {user_email} because of {e}')
+            raise e
+
+
+class MetadataEndpoint:
+    """
+    Endpoint for processing metadata submissions. This endpoint is used when only
+    metadata.yml files have changed and no full scoring run is triggered.
+      - Connects to the database.
+      - Loads and validates the metadata.yml file from a plugin directory.
+      - Iterates through each plugin entry (e.g. each model) and updates db.
+    """
+
+    def __init__(self, db_secret: str):
+        logger.info(f"Connecting to db using secret '{db_secret}'")
+        connect_db(db_secret=db_secret)
+
+    def process_metadata(self, plugin_dir: str, plugin_type: str) -> dict:
+        """
+        Process the metadata file for a plugin.
+
+        :param plugin_dir: The directory containing the metadata.yml file.
+        :param plugin_type: The type of plugin ('models' or 'benchmarks').
+        :return: A dictionary mapping model identifiers to their updated ModelMeta records.
+        """
+        metadata_path = os.path.join(plugin_dir, "metadata.yml")
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"metadata.yml not found in {plugin_dir}")
+
+        logger.info(f"Loading metadata file from {metadata_path}")
+        errors, data = validate_metadata_file(metadata_path)
+        if errors:
+            raise ValueError(f"Metadata validation errors: {errors}")
+        logger.info("metadata.yml is valid.")
+
+        if plugin_type not in data:
+            raise ValueError(f"Expected top-level key '{plugin_type}' in metadata file.")
+
+        plugin_metadata = data[plugin_type]
+        results = {}
+        for identifier, metadata in plugin_metadata.items():
+            logger.info(f"Updating metadata for plugin '{identifier}'")
+            # Overwrite any existing entry with new metadata
+            if plugin_type == 'models':
+                result = create_model_meta_entry(identifier, metadata)
+            elif plugin_type == 'benchmarks':
+                result = create_benchmark_meta_entry(identifier, metadata)
+            else:
+                raise NotImplementedError(f"Plugin type not implemented yet: '{plugin_type}'")
+            results[identifier] = result
+            logger.info(f"Updated metadata for plugin '{identifier}': {json.dumps(metadata)}")
+        return results
+
+    def __call__(self, plugin_dir: str, plugin_type: str) -> None:
+        try:
+            results = self.process_metadata(plugin_dir, plugin_type)
+            logger.info("Metadata processing completed successfully.")
+            for model_id, record in results.items():
+                logger.info(f"Model '{model_id}' updated in db with record id {record.id}")
+        except Exception as e:
+            logger.error(f"Error processing metadata: {e}", exc_info=True)
             raise e
 
 
@@ -263,6 +324,8 @@ def make_argparser() -> ArgumentParser:
                         help='Public (or private) submission?')
     parser.add_argument('--competition', type=noneable_string, nargs='?', default=None,
                         help='Name of competition for which submission is being scored')
+    parser.add_argument('--model_meta', type=json.loads, default=None,
+                        help='JSON string representing a dictionary associated with model metadata')
     parser.add_argument('--user_id', type=int, nargs='?', default=None,
                         help='ID of submitting user in the postgres DB')
     parser.add_argument('--author_email', type=str, nargs='?', default=None,
