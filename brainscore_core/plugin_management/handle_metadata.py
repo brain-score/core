@@ -6,6 +6,8 @@ import argparse
 import subprocess
 import time
 
+from brainscore_core.submission.endpoints import MetadataEndpoint
+
 # Allowed plugins for metadata
 ALLOWED_PLUGINS = {
     "models",
@@ -178,15 +180,16 @@ def main():
     parser.add_argument("--plugin-dir", required=True, help="Path to the plugin directory")
     parser.add_argument("--plugin-type", required=True, choices=list(ALLOWED_PLUGINS),
                         help="Plugin type (e.g., models or benchmarks)")
+    parser.add_argument("--db-connection", action="store_true", default=False,
+                        help="If provided, establish a new database connection")
     args = parser.parse_args()
 
     new_metadata = False
     metadata_path = os.path.join(args.plugin_dir, "metadata.yml")
     if not os.path.exists(metadata_path):
-        # If no metadata is found, generate metadata and PR, as well as save to .json
         print("No metadata.yml found. Generating now.", file=sys.stderr)
         new_metadata = True
-        metadata_path = generate_dummy_metadata(args.plugin_dir, args.plugin_type)
+        metadata_path = generate_dummy_metadata(args.plugin_dir, args.plugin_type)  # insert mike function here
     else:
         print("Found metadata.yml. Validating...", file=sys.stderr)
 
@@ -202,7 +205,13 @@ def main():
             json.dump(data, f)
         print("Validated metadata saved to validated_metadata.json", file=sys.stderr)
 
-    if new_metadata:
+    if args.db_connection:  # if just metadata was altered, must upload to db on new connection
+        print("Creating metadata endpoint...", file=sys.stderr)
+        db_secret = os.environ.get("DB_SECRET")
+        create_endpoint = MetadataEndpoint(db_secret=db_secret)
+        create_endpoint(plugin_dir=args.plugin_dir, plugin_type=args.plugin_type)
+
+    if new_metadata:  # if metadata was created, create a pr that will be automerged and approved by github actions
         pr_number = create_metadata_pr(args.plugin_dir)
         print(pr_number)
     else:
