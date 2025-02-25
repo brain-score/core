@@ -208,7 +208,7 @@ def main():
 
     if args.db_connection:  # if just metadata was altered, must upload to db on new connection
         print("Creating metadata endpoint...", file=sys.stderr)
-        db_secret = os.environ.get("DB_SECRET")
+        db_secret = os.environ.get("BSC_DATABASESECRET")
         create_endpoint = MetadataEndpoint(db_secret=db_secret)
         create_endpoint(plugin_dir=args.plugin_dir, plugin_type=args.plugin_type)
 
