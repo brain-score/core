@@ -114,15 +114,28 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
         'model_size_MB': metadata.get('model_size_MB'),
         'training_dataset': metadata.get('training_dataset'),
         'task_specialization': metadata.get('task_specialization'),
-        'source_link': metadata.get('source_link'),
+        'brainscore_link': metadata.get('brainscore_link'),
+        'huggingface_link': metadata.get('huggingface_link'),
+        'extra_notes': metadata.get('extra_notes')
     }
     try:  # if model exists, overwrite all fields
         modelmeta = ModelMeta.get(ModelMeta.identifier == model_identifier)
         for key, value in defaults.items():
             setattr(modelmeta, key, value)
         modelmeta.save()
+        logger.info(f"Updated existing ModelMeta record for {model_identifier}")
     except ModelMeta.DoesNotExist:  # otherwise create a new entry
-        modelmeta = ModelMeta.create(identifier=model_identifier, **defaults)
+        # filter out fields that don't exist in the ModelMeta model
+        valid_defaults = {}
+        for key, value in defaults.items():
+            try:
+                if hasattr(ModelMeta, key):
+                    valid_defaults[key] = value
+            except Exception:
+                logger.warning(f"Field '{key}' not found in ModelMeta schema - skipping")
+
+        modelmeta = ModelMeta.create(identifier=model_identifier, **valid_defaults)
+        logger.info(f"Created new ModelMeta record for {model_identifier}")
     return modelmeta
 
 
