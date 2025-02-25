@@ -55,6 +55,8 @@ class BenchmarkMeta(PeeweeBase):
     number_of_recording_sites = IntegerField(null=True)
     recording_sites = CharField(max_length=100, null=True)
     behavioral_task = CharField(max_length=100, null=True)
+    inter_subject_ceiling = FloatField(null=True)
+    inter_subject_ceiling_error = FloatField(null=True)
 
     class Meta:
         table_name = 'brainscore_benchmarkmeta'
