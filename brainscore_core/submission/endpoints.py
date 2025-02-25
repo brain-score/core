@@ -8,6 +8,7 @@ import random
 import smtplib
 import string
 import traceback
+import yaml
 from abc import ABC
 from argparse import ArgumentParser
 from datetime import datetime
@@ -18,7 +19,6 @@ import requests
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
-from brainscore_core.plugin_management.handle_metadata import validate_metadata_file
 from brainscore_core.submission.database import (
     benchmarkinstance_from_benchmark, connect_db, email_from_uid,
     modelentry_from_model, create_model_meta_entry, create_benchmark_meta_entry, public_benchmark_identifiers,
@@ -114,14 +114,8 @@ class MetadataEndpoint:
         :return: A dictionary mapping model identifiers to their updated ModelMeta records.
         """
         metadata_path = os.path.join(plugin_dir, "metadata.yml")
-        if not os.path.exists(metadata_path):
-            raise FileNotFoundError(f"metadata.yml not found in {plugin_dir}")
-
-        logger.info(f"Loading metadata file from {metadata_path}")
-        errors, data = validate_metadata_file(metadata_path)
-        if errors:
-            raise ValueError(f"Metadata validation errors: {errors}")
-        logger.info("metadata.yml is valid.")
+        with open(metadata_path, 'r') as f:
+            data = yaml.safe_load(f)
 
         if plugin_type not in data:
             raise ValueError(f"Expected top-level key '{plugin_type}' in metadata file.")
