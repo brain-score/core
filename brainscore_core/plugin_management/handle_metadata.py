@@ -26,8 +26,9 @@ ALLOWED_KEYS_BY_TYPE = {
         "model_size_MB",
         "training_dataset",
         "task_specialization",
-        "source_link",
-        "user_tags"
+        "brainscore_link",
+        "huggingface_link",
+        "extra_notes"
     },
     "benchmarks": set(),  # Fill out after testing models
 }
