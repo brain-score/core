@@ -105,7 +105,7 @@ class ModelMeta(PeeweeBase):
     trainable_parameter_count = IntegerField(null=True)
     total_layers = IntegerField(null=True)
     trainable_layers = IntegerField(null=True)
-    model_size_mb = FloatField(null=True)
+    model_size_MB = FloatField(null=True)
     training_dataset = CharField(null=True)
     task_specialization = CharField(null=True)
     source_link = CharField(null=True)

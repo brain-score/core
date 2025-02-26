@@ -111,7 +111,7 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
         'trainable_parameter_count': metadata.get('trainable_parameter_count'),
         'total_layers': metadata.get('total_layers'),
         'trainable_layers': metadata.get('trainable_layers'),
-        'model_size_mb': metadata.get('model_size_mb'),
+        'model_size_MB': metadata.get('model_size_MB'),
         'training_dataset': metadata.get('training_dataset'),
         'task_specialization': metadata.get('task_specialization'),
         'brainscore_link': metadata.get('brainscore_link'),
