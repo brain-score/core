@@ -104,8 +104,9 @@ def generate_dummy_metadata(plugin_dir, plugin_type):
                     "model_size_MB": None,
                     "training_dataset": None,
                     "task_specialization": None,
-                    "source_link": None,
-                    "user_tags": None
+                    "brainscore_link": None,
+                    "huggingface_link": None,
+                    "extra_notes": None
                 }
             }
         }

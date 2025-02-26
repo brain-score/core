@@ -98,17 +98,19 @@ class Model(PeeweeBase):
 
 
 class ModelMeta(PeeweeBase):
-    identifier = CharField(primary_key=True)
-    architecture = CharField(null=True)
-    model_family = CharField(null=True)
+    identifier = CharField(primary_key=True, max_length=255)  # Updated max length
+    architecture = CharField(null=True, max_length=100)
+    model_family = CharField(null=True, max_length=100)
     total_parameter_count = IntegerField(null=True)
-    trainable_parameter_count = IntegerField(null=True)
     total_layers = IntegerField(null=True)
+    training_dataset = CharField(null=True, max_length=100)
+    task_specialization = CharField(null=True, max_length=100)
+    brainscore_link = CharField(null=True, max_length=256)  # Renamed from source_link
+    huggingface_link = CharField(null=True, max_length=256)  # New column
+    trainable_parameter_count = IntegerField(null=True)
     trainable_layers = IntegerField(null=True)
-    model_size_MB = FloatField(null=True)
-    training_dataset = CharField(null=True)
-    task_specialization = CharField(null=True)
-    source_link = CharField(null=True)
+    model_size_MB = FloatField(null=True)  # Peewee uses FloatField for PostgreSQL float8
+    extra_notes = CharField(null=True, max_length=512)  # New column
 
     class Meta:
         table_name = 'brainscore_modelmeta'
