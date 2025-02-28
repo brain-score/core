@@ -93,8 +93,8 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
         reference = reference_from_bibtex(bibtex)
         model_entry.reference = reference
         model_entry.save()
-    if model_meta is not None:
-        meta_entry = create_model_meta_entry(model_identifier, model_meta)
+    # if model_meta is not None:
+    #     meta_entry = create_model_meta_entry(model_identifier, model_meta)
     return model_entry
 
 

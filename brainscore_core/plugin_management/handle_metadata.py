@@ -207,7 +207,7 @@ def main():
             json.dump(data, f)
         print("Validated metadata saved to validated_metadata.json", file=sys.stderr)
 
-    if args.db_connection:  # if just metadata was altered, must upload to db on new connection
+    if args.db_connection:  # if metadata was altered, must upload to db on new connection
         print("Creating metadata endpoint...", file=sys.stderr)
         db_secret = os.environ.get("BSC_DATABASESECRET")
         create_endpoint = MetadataEndpoint(db_secret=db_secret)
