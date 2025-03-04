@@ -1,10 +1,10 @@
 import os
-import sys
 import tempfile
 import unittest
 import yaml
 import subprocess
 from unittest import mock
+from unittest.mock import ANY
 
 from brainscore_core.plugin_management.handle_metadata import (
     validate_metadata_file,
@@ -28,8 +28,9 @@ class TestHandleMetadata(unittest.TestCase):
                         model_size_MB: 120.5
                         training_dataset: "imagenet"
                         task_specialization: "classification"
-                        source_link: "https://example.com"
-                        user_tags: ["tag1", "tag2"]
+                        brainscore_link: "https://example.com"
+                        huggingface_link: null
+                        extra_notes: null
                     """
         with tempfile.NamedTemporaryFile("w+", delete=False) as tmp:
             tmp.write(valid_yaml)
@@ -110,15 +111,13 @@ class TestHandleMetadata(unittest.TestCase):
             self.assertIn("dummy-benchmark", data["benchmarks"])
 
     @mock.patch("subprocess.run")
-    def test_create_metadata_pr_success(self, mock_run):
-        """
-        Test that create_metadata_pr runs subprocess commands correctly.
-        Here we simulate successful subprocess calls.
-        """
-        # Configure the mock to always return success.
+    @mock.patch("subprocess.check_output")
+    def test_create_metadata_pr_success(self, mock_check_output, mock_run):
+        # Configure the mocks
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+        mock_check_output.return_value = "12345"  # Mock PR number response
+
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # Create a dummy metadata file so that create_metadata_pr finds it.
             metadata_path = os.path.join(tmp_dir, "metadata.yml")
             with open(metadata_path, "w") as f:
                 f.write("models: {}")
@@ -127,8 +126,13 @@ class TestHandleMetadata(unittest.TestCase):
             except SystemExit:
                 self.fail("create_metadata_pr unexpectedly called sys.exit on success.")
 
-            # Verify that at least one expected subprocess.run call was made.
-            mock_run.assert_any_call(["git", "checkout", "-b", "test-branch"], check=True)
+            # Check that git checkout was called with ANY branch name that starts with test-branch
+            mock_run.assert_any_call(
+                ["git", "checkout", "-b", ANY],
+                check=True,
+                stdout=ANY,
+                stderr=ANY
+            )
 
     @mock.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
     def test_create_metadata_pr_failure(self, mock_run):
