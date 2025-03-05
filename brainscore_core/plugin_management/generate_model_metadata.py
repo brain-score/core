@@ -5,6 +5,7 @@ import re
 import requests
 from brainscore_core.plugin_management.import_plugin import import_plugin
 from typing import List, Optional, Any
+import sys
 
 
 class ModelMetadataGenerator:
@@ -56,7 +57,7 @@ class ModelMetadataGenerator:
         """
         yaml_paths = set()
         for i, model_name in enumerate(model_list):
-            print(f"INFO: Generating metadata for model {i + 1}/{len(model_list)}: {model_name}")
+            print(f"INFO: Generating metadata for model {i + 1}/{len(model_list)}: {model_name}", file=sys.stderr)
             yaml_path = self.process_single_model(model_name)
             if yaml_path:
                 yaml_paths.add(yaml_path)
@@ -89,7 +90,7 @@ class ModelMetadataGenerator:
                             registered_models.extend(matches)
                     except Exception as e:
                         error_message = f"ERROR: Could not read __init__.py file path {init_file_path}: {e}"
-                        print(error_message)
+                        print(error_message, file=sys.stderr)
         return registered_models
 
     def load_model(self, identifier: str) -> Optional[object]:
@@ -113,7 +114,7 @@ class ModelMetadataGenerator:
             return model_instance
         except Exception as e:
             error_message = f"ERROR: Failed to load model '{identifier}': {e}"
-            print(error_message)
+            print(error_message, file=sys.stderr)
             return None, None
 
     def detect_model_architecture(self, model: nn.Module, model_name: str) -> str:
@@ -168,9 +169,9 @@ class ModelMetadataGenerator:
             response = requests.head(hf_url, timeout=1)
             if response.status_code == 200:
                 return hf_url
-            print(f"HuggingFace link for {model_name} found.")
+            print(f"HuggingFace link for {model_name} found.", file=sys.stderr)
         except requests.RequestException as e:
-            print(f"WARNING: checking HuggingFace link for '{model_name}': {e} failed.")
+            print(f"WARNING: checking HuggingFace link for '{model_name}': {e} failed.", file=sys.stderr)
         return None
 
     def get_model_family(self, model_name: str) -> Optional[str]:
@@ -270,7 +271,7 @@ class ModelMetadataGenerator:
             return yaml_path
         except Exception as e:
             error_message = f"ERROR: Failed to create YAML for '{model_name}': {e}"
-            print(error_message)
+            print(error_message, file=sys.stderr)
 
     def process_single_model(self, model_name: str) -> Optional[str]:
         """
@@ -292,6 +293,6 @@ class ModelMetadataGenerator:
             return yaml_path
         except Exception as e:
             error_message = f"ERROR: Unexpected error processing '{model_name}': {e}"
-            print(error_message)
+            print(error_message, file=sys.stderr)
             return None
 

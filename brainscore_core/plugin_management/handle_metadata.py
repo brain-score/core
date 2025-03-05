@@ -93,6 +93,8 @@ def generate_dummy_metadata(plugin_dir, plugin_type):
     if plugin_type == "models":
         generator = ModelMetadataGenerator(plugin_dir)
         model_list = generator.find_registered_models(plugin_dir)
+        print(f"plugin_dir: {plugin_dir}", file=sys.stderr)
+        print(f"model_list: {plugin_dir}", file=sys.stderr)
         metadata_path = generator(model_list)[0]  # get first metadata path (they are all the same)
 
     elif plugin_type == "benchmarks":
