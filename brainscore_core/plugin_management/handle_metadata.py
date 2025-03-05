@@ -7,6 +7,7 @@ import subprocess
 import time
 
 from brainscore_core.submission.endpoints import MetadataEndpoint
+from generate_model_metadata import ModelMetadataGenerator
 
 # Allowed plugins for metadata
 ALLOWED_PLUGINS = {
@@ -87,29 +88,13 @@ def validate_metadata_file(metadata_path):
 
 def generate_dummy_metadata(plugin_dir, plugin_type):
 
-    # Dummy section for now. Replace with calling of Mike's script
-    # NOTE: How intesne is Mike's script? Will we be able to load the model on the specs provided by github actions?
+    # NOTE: How intense is Mike's script? Will we be able to load the model on the specs provided by github actions?
 
     if plugin_type == "models":
-        # Call mike script for generating model metadata here
-        dummy_data = {
-            "models": {
-                "dummy-model": {
-                    "architecture": None,
-                    "model_family": None,
-                    "total_parameter_count": None,
-                    "trainable_parameter_count": None,
-                    "total_layers": None,
-                    "trainable_layers": None,
-                    "model_size_MB": None,
-                    "training_dataset": None,
-                    "task_specialization": None,
-                    "brainscore_link": None,
-                    "huggingface_link": None,
-                    "extra_notes": None
-                }
-            }
-        }
+        generator = ModelMetadataGenerator(plugin_dir)
+        model_list = generator.find_registered_models(plugin_dir)
+        metadata_path = generator(model_list)[0]  # get first metadata path (they are all the same)
+
     elif plugin_type == "benchmarks":
         # Call mike script for generating benchmark metadata here
         dummy_data = {
@@ -118,13 +103,11 @@ def generate_dummy_metadata(plugin_dir, plugin_type):
                 }
             }
         }
+        metadata_path = "dummy-benchmark.yaml"  # placeholder
     else:
         raise ValueError(f"Unsupported plugin type: {plugin_type}")
 
-    metadata_path = os.path.join(plugin_dir, "metadata.yml")
-    with open(metadata_path, 'w') as f:
-        yaml.dump(dummy_data, f)
-    print(f"Dummy metadata.yml generated at: {metadata_path}", file=sys.stderr)
+    print(f"{plugin_type} metadata.yml generated at: {metadata_path}", file=sys.stderr)
     return metadata_path
 
 
