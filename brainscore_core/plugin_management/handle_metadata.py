@@ -7,7 +7,7 @@ import subprocess
 import time
 
 from brainscore_core.submission.endpoints import MetadataEndpoint
-from generate_model_metadata import ModelMetadataGenerator
+from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
 
 # Allowed plugins for metadata
 ALLOWED_PLUGINS = {
