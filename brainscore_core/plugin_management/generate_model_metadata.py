@@ -77,20 +77,20 @@ class ModelMetadataGenerator:
         """
 
         registered_models = []
+        init_file_path = os.path.join(root_folder, "__init__.py")
 
-        for dirpath, _, filenames in os.walk(root_folder):
-            for filename in filenames:
-                if filename == "__init__.py":
-                    init_file_path = os.path.join(dirpath, filename)
-                    try:
-                        with open(init_file_path, "r", encoding="utf-8") as file:
-                            content = file.read()
-                        matches = re.findall(r'model_registry\[\s*["\'](.*?)["\']\s*\]\s*=\s*lambda:', content)
-                        if matches:
-                            registered_models.extend(matches)
-                    except Exception as e:
-                        error_message = f"ERROR: Could not read __init__.py file path {init_file_path}: {e}"
-                        print(error_message, file=sys.stderr)
+        # Ensure that `root_folder` is a model directory (must contain `__init__.py`)
+        if not os.path.isfile(init_file_path):
+            print(f"ERROR: {root_folder} does not contain an `__init__.py` file.", file=sys.stderr)
+            return []
+        try:
+            with open(init_file_path, "r", encoding="utf-8") as file:
+                content = file.read()
+            matches = re.findall(r'model_registry\[\s*["\'](.*?)["\']\s*\]\s*=\s*\\?\s*lambda\s*:', content, re.DOTALL)
+            if matches:
+                registered_models.extend(matches)
+        except Exception as e:
+            print(f"ERROR: Could not read {init_file_path}: {e}", file=sys.stderr)
         return registered_models
 
     def load_model(self, identifier: str) -> Optional[object]:
