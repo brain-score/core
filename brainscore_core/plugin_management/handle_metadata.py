@@ -31,7 +31,12 @@ ALLOWED_KEYS_BY_TYPE = {
         "huggingface_link",
         "extra_notes"
     },
-    "benchmarks": set(),  # Fill out after testing models
+    "benchmarks": {
+        "stimulus_set",
+        "data",
+        "metric",
+        "ceiling"
+    },
 }
 
 
@@ -87,15 +92,11 @@ def validate_metadata_file(metadata_path):
 
 
 def generate_dummy_metadata(plugin_dir, plugin_type):
-
-    # NOTE: How intense is Mike's script? Will we be able to load the model on the specs provided by github actions?
-
     if plugin_type == "models":
         generator = ModelMetadataGenerator(plugin_dir)
         model_list = generator.find_registered_models(plugin_dir)
         metadata_path = generator(model_list)
         metadata_path = metadata_path[0] if metadata_path else None  # return None on failure
-
     elif plugin_type == "benchmarks":
         # Call mike script for generating benchmark metadata here
         dummy_data = {
