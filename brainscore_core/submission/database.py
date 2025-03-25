@@ -7,8 +7,9 @@ from typing import List, Union
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
-from brainscore_core.submission.database_models import database_proxy, \
-    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, BenchmarkMeta, PeeweeBase
+from brainscore_core.submission.database_models import (database_proxy, \
+    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, BenchmarkMeta, PeeweeBase,
+    BenchmarkMetaData, BenchmarkMetaMetric, BenchmarkMetaCeiling, BenchmarkMetaStimulusSet)
 from brainscore_core.submission.utils import get_secret
 
 logger = logging.getLogger(__name__)
@@ -139,21 +140,105 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
     return modelmeta
 
 
-# NOTE: IN PROGRESS... can probably combine w/ above and generalize code.
 def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict) -> BenchmarkMeta:
     """
-    Given a benchmark identifier and a metadata dict, get or create a BenchmarkMeta record.
-    The metadata dict can include keys such as
+    Given a benchmark identifier and a metadata dict, create or update a BenchmarkMeta record
+    and its related records (stimulus_set, data, metric, ceiling).
     """
-    defaults = {
-    }
-    try:  # if benchmark exists, overwrite all fields
+    logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
+
+    # Create or update the main BenchmarkMeta entry
+    try:
         benchmarkmeta = BenchmarkMeta.get(BenchmarkMeta.identifier == benchmark_identifier)
-        for key, value in defaults.items():
-            setattr(benchmarkmeta, key, value)
-        benchmarkmeta.save()
-    except BenchmarkMeta.DoesNotExist:  # otherwise create a new entry
-        benchmarkmeta = BenchmarkMeta.create(identifier=benchmark_identifier, **defaults)
+        logger.info(f"Updating existing BenchmarkMeta record for {benchmark_identifier}")
+    except BenchmarkMeta.DoesNotExist:
+        benchmarkmeta = BenchmarkMeta.create(identifier=benchmark_identifier)
+        logger.info(f"Created new BenchmarkMeta record for {benchmark_identifier}")
+
+    # Process stimulus_set metadata
+    if 'stimulus_set' in metadata:
+        stimulus_data = metadata['stimulus_set']
+        defaults = {
+            'num_stimuli': stimulus_data.get('num_stimuli'),
+            'datatype': stimulus_data.get('datatype'),
+            'stimuli_subtype': stimulus_data.get('stimuli_subtype'),
+            'total_size_MB': stimulus_data.get('total_size_MB'),
+            'brainscore_link': stimulus_data.get('brainscore_link'),
+            'extra_notes': stimulus_data.get('extra_notes')
+        }
+
+        try:
+            stimulus_meta = BenchmarkMetaStimulusSet.get(BenchmarkMetaStimulusSet.benchmark == benchmark_identifier)
+            for key, value in defaults.items():
+                setattr(stimulus_meta, key, value)
+            stimulus_meta.save()
+        except BenchmarkMetaStimulusSet.DoesNotExist:
+            BenchmarkMetaStimulusSet.create(benchmark=benchmarkmeta, **defaults)
+
+    # Process data metadata
+    if 'data' in metadata:
+        data_info = metadata['data']
+        defaults = {
+            'benchmark_type': data_info.get('benchmark_type'),
+            'task': data_info.get('task'),
+            'region': data_info.get('region'),
+            'hemisphere': data_info.get('hemisphere'),
+            'num_recording_sites': data_info.get('num_recording_sites'),
+            'duration_ms': data_info.get('duration_ms'),
+            'species': data_info.get('species'),
+            'datatype': data_info.get('datatype'),
+            'num_subjects': data_info.get('num_subjects'),
+            'pre_processing': data_info.get('pre_processing'),
+            'brainscore_link': data_info.get('brainscore_link'),
+            'extra_notes': data_info.get('extra_notes')
+        }
+
+        try:
+            data_meta = BenchmarkMetaData.get(BenchmarkMetaData.benchmark == benchmark_identifier)
+            for key, value in defaults.items():
+                setattr(data_meta, key, value)
+            data_meta.save()
+        except BenchmarkMetaData.DoesNotExist:
+            BenchmarkMetaData.create(benchmark=benchmarkmeta, **defaults)
+
+    # Process metric metadata
+    if 'metric' in metadata:
+        metric_info = metadata['metric']
+        defaults = {
+            'type': metric_info.get('type'),
+            'reference': metric_info.get('reference'),
+            'public': metric_info.get('public'),
+            'brainscore_link': metric_info.get('brainscore_link'),
+            'extra_notes': metric_info.get('extra_notes')
+        }
+
+        try:
+            metric_meta = BenchmarkMetaMetric.get(BenchmarkMetaMetric.benchmark == benchmark_identifier)
+            for key, value in defaults.items():
+                setattr(metric_meta, key, value)
+            metric_meta.save()
+        except BenchmarkMetaMetric.DoesNotExist:
+            BenchmarkMetaMetric.create(benchmark=benchmarkmeta, **defaults)
+
+    # Process ceiling metadata
+    if 'ceiling' in metadata:
+        ceiling_info = metadata['ceiling']
+        defaults = {
+            'ceiling': ceiling_info.get('ceiling'),
+            'ceiling_error': ceiling_info.get('ceiling_error'),
+            'identifier': ceiling_info.get('identifier'),
+            'brainscore_link': ceiling_info.get('brainscore_link'),
+            'extra_notes': ceiling_info.get('extra_notes')
+        }
+
+        try:
+            ceiling_meta = BenchmarkMetaCeiling.get(BenchmarkMetaCeiling.benchmark == benchmark_identifier)
+            for key, value in defaults.items():
+                setattr(ceiling_meta, key, value)
+            ceiling_meta.save()
+        except BenchmarkMetaCeiling.DoesNotExist:
+            BenchmarkMetaCeiling.create(benchmark=benchmarkmeta, **defaults)
+
     return benchmarkmeta
 
 
