@@ -231,14 +231,14 @@ class ModelMetadataGenerator:
         :return: Optional[str], the file path of the generated YAML metadata file, or None if an error occurs.
 
         Notes:
-        - The YAML file (`metadata.yaml`) is stored in the specified `model_dir`.
+        - The YAML file (`metadata.yml`) is stored in the specified `model_dir`.
         - If an existing YAML file is found, it is updated rather than overwritten.
         - Extracts model architecture, family, parameter counts, layer details, and model size.
         - Adds links to Brain-Score and Hugging Face, if available.
         - Prints an error message and returns None if an exception occurs.
         """
         try:
-            yaml_filename = "metadata.yaml"
+            yaml_filename = "metadata.yml"
             yaml_path = os.path.join(model_dir, yaml_filename)
 
             model_dir_name = model_dir.split("/")[-1]

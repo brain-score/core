@@ -32,7 +32,12 @@ ALLOWED_KEYS_BY_TYPE = {
         "huggingface_link",
         "extra_notes"
     },
-    "benchmarks": set(),  # Fill out after testing models
+    "benchmarks": {
+        "stimulus_set",
+        "data",
+        "metric",
+        "ceiling"
+    },
 }
 
 
