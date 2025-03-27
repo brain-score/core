@@ -8,6 +8,7 @@ import time
 
 from brainscore_core.submission.endpoints import MetadataEndpoint
 from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
+from brainscore_core.plugin_management.generate_benchmark_metadata import BenchmarkMetadataGenerator
 
 # Allowed plugins for metadata
 ALLOWED_PLUGINS = {
@@ -86,25 +87,17 @@ def validate_metadata_file(metadata_path):
     return errors, data
 
 
-def generate_dummy_metadata(plugin_dir, plugin_type):
-
-    # NOTE: How intense is Mike's script? Will we be able to load the model on the specs provided by github actions?
-
+def generate_metadata(plugin_dir, plugin_type, benchmark_type="neural"):
     if plugin_type == "models":
         generator = ModelMetadataGenerator(plugin_dir)
         model_list = generator.find_registered_models(plugin_dir)
         metadata_path = generator(model_list)
-        metadata_path = metadata_path[0] if metadata_path else None  # return None on failure
-
+        metadata_path = metadata_path[0] if metadata_path else None
     elif plugin_type == "benchmarks":
-        # Call mike script for generating benchmark metadata here
-        dummy_data = {
-            "benchmarks": {
-                "dummy-benchmark": {
-                }
-            }
-        }
-        metadata_path = "dummy-benchmark.yaml"  # placeholder
+        generator = BenchmarkMetadataGenerator(plugin_dir, benchmark_type)  # need to get benchmark_type somehow
+        benchmark_list = generator.find_registered_benchmarks(plugin_dir)
+        metadata_path = generator(benchmark_list)
+        metadata_path = metadata_path[0] if metadata_path else None
     else:
         raise ValueError(f"Unsupported plugin type: {plugin_type}")
 
@@ -175,7 +168,7 @@ def main():
     if not os.path.exists(metadata_path):
         print("No metadata.yml found. Generating now.", file=sys.stderr)
         new_metadata = True
-        metadata_path = generate_dummy_metadata(args.plugin_dir, args.plugin_type)  # insert mike function here
+        metadata_path = generate_metadata(args.plugin_dir, args.plugin_type)
     else:
         print("Found metadata.yml. Validating...", file=sys.stderr)
 
