@@ -34,8 +34,7 @@ ALLOWED_KEYS_BY_TYPE = {
     "benchmarks": {
         "stimulus_set",
         "data",
-        "metric",
-        "ceiling"
+        "metric"
     },
 }
 
