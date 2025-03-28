@@ -147,7 +147,7 @@ def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
     """
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
 
-    # Find all BenchmarkInstance entries for this benchmark identifier
+    # Find BenchmarkInstance entries for this benchmark identifier
     benchmark_instances = BenchmarkInstance.select().join(BenchmarkType).where(
         BenchmarkType.identifier == benchmark_identifier
     )
@@ -194,10 +194,12 @@ def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
     metric_meta_id = None
     if 'metric' in metadata:
         metric_info = metadata['metric']
+        public_value = False if metric_info.get('public') is None else metric_info.get('public')
+
         metric_meta = BenchmarkMetricMeta.create(
             type=metric_info.get('type'),
             reference=metric_info.get('reference'),
-            public=metric_info.get('public'),
+            public=public_value,  # Use default value if null
             brainscore_link=metric_info.get('brainscore_link'),
             extra_notes=metric_info.get('extra_notes')
         )
