@@ -43,7 +43,7 @@ class BenchmarkMetadataGenerator:
         :param benchmark_dir: str, the directory where benchmark metadata files are stored.
         """
         self.benchmark_dir = benchmark_dir
-        self.benchmark_type = None  # default to neural
+        self.benchmark_type = None  # default to None
 
     def __call__(self, benchmark_list: List[str]) -> List[str]:
         """
@@ -184,12 +184,12 @@ class BenchmarkMetadataGenerator:
                 return None
 
         def get_datatype():
-            if self.benchmark_type == "neural":
-                return None
-            elif self.benchmark_type == "engineering":
+            if self.benchmark_type == "engineering":
                 return "engineering"
-            else:
+            elif self.benchmark_type == "behavioral":
                 return "behavioral"
+            else:  # either neural or unspecified will return None
+                return None
 
         new_metadata = {
             "benchmark_type": self.benchmark_type,
