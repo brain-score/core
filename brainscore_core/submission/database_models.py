@@ -61,20 +61,6 @@ class BenchmarkMeta(PeeweeBase):  # NOTE, need to update once Mike makes table
         table_name = 'brainscore_benchmarkmeta'
 
 
-class BenchmarkInstance(PeeweeBase):
-    benchmark = ForeignKeyField(column_name='benchmark_type_id', field='identifier', model=BenchmarkType)
-    ceiling = FloatField(null=True)
-    ceiling_error = FloatField(null=True)
-    version = IntegerField(null=True)
-    meta = ForeignKeyField(column_name='meta_id', field='id', model=BenchmarkMeta, null=True)
-    data_meta = ForeignKeyField(column_name='data_meta_id', field='id', model=BenchmarkDataMeta, null=True)
-    metric_meta = ForeignKeyField(column_name='metric_meta_id', field='id', model=BenchmarkMetricMeta, null=True)
-    stimuli_meta = ForeignKeyField(column_name='stimuli_meta_id', field='id', model=BenchmarkStimuliMeta, null=True)
-
-    class Meta:
-        table_name = 'brainscore_benchmarkinstance'
-
-
 class Submission(PeeweeBase):
     jenkins_id = IntegerField()
     submitter = ForeignKeyField(column_name='submitter_id', field='id', model=User)
@@ -163,16 +149,18 @@ class BenchmarkMetricMeta(PeeweeBase):
         table_name = 'brainscore_benchmark_metric_meta'
 
 
-class BenchmarkMetaCeiling(PeeweeBase):
-    benchmark = ForeignKeyField(column_name='benchmark_id', field='identifier', model=BenchmarkMeta, primary_key=True)
+class BenchmarkInstance(PeeweeBase):
+    benchmark = ForeignKeyField(column_name='benchmark_type_id', field='identifier', model=BenchmarkType)
     ceiling = FloatField(null=True)
     ceiling_error = FloatField(null=True)
-    identifier = CharField(max_length=255, null=True)
-    brainscore_link = CharField(max_length=256, null=True)
-    extra_notes = TextField(null=True)
+    version = IntegerField(null=True)
+    meta = ForeignKeyField(column_name='meta_id', field='id', model=BenchmarkMeta, null=True)
+    data_meta = ForeignKeyField(column_name='data_meta_id', field='id', model=BenchmarkDataMeta, null=True)
+    metric_meta = ForeignKeyField(column_name='metric_meta_id', field='id', model=BenchmarkMetricMeta, null=True)
+    stimuli_meta = ForeignKeyField(column_name='stimuli_meta_id', field='id', model=BenchmarkStimuliMeta, null=True)
 
     class Meta:
-        table_name = 'brainscore_benchmarkmeta_ceiling'
+        table_name = 'brainscore_benchmarkinstance'
 
 
 class Score(PeeweeBase):
