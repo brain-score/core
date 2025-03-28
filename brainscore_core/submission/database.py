@@ -140,24 +140,14 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
     return modelmeta
 
 
-def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict) -> BenchmarkMeta:
+def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
     """
-    Given a benchmark identifier and a metadata dict, create or update metadata entries for the benchmark
+    Given a benchmark identifier and a metadata dict, create metadata entries for the benchmark
     and update the BenchmarkInstance table to reference these entries.
 
-    If metadata entries already exist for this benchmark, they will be updated instead of creating new ones.
-
-    :return: A BenchmarkMeta instance for the benchmark
+    :return: A dictionary with the IDs of the created metadata entries
     """
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
-
-    # Create or get a BenchmarkMeta record to return
-    try:
-        benchmark_meta = BenchmarkMeta.get(BenchmarkMeta.identifier == benchmark_identifier)
-        logger.info(f"Found existing BenchmarkMeta record for {benchmark_identifier}")
-    except BenchmarkMeta.DoesNotExist:
-        benchmark_meta = BenchmarkMeta.create(identifier=benchmark_identifier)
-        logger.info(f"Created new BenchmarkMeta record for {benchmark_identifier}")
 
     # Find existing BenchmarkInstance entries for this benchmark identifier
     benchmark_instances = BenchmarkInstance.select().join(BenchmarkType).where(
@@ -312,8 +302,14 @@ def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict) -> Be
 
     logger.info(f"Successfully processed metadata for benchmark {benchmark_identifier}")
 
-    # Return the BenchmarkMeta instance
-    return benchmark_meta
+    # Return metadata IDs as a dictionary
+    return {
+        'benchmark_identifier': benchmark_identifier,
+        'id': stimuli_meta_id,  # Use one of the IDs to satisfy the expectations of the caller
+        'stimuli_meta_id': stimuli_meta_id,
+        'data_meta_id': data_meta_id,
+        'metric_meta_id': metric_meta_id
+    }
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
     benchmark_identifier = benchmark.identifier
