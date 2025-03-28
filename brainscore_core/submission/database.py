@@ -302,14 +302,21 @@ def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
 
     logger.info(f"Successfully processed metadata for benchmark {benchmark_identifier}")
 
-    # Return metadata IDs as a dictionary
-    return {
-        'benchmark_identifier': benchmark_identifier,
-        'id': stimuli_meta_id,  # Use one of the IDs to satisfy the expectations of the caller
-        'stimuli_meta_id': stimuli_meta_id,
-        'data_meta_id': data_meta_id,
-        'metric_meta_id': metric_meta_id
-    }
+    class BenchmarkMetaResult:
+        """A class to hold benchmark metadata results and provide the expected interface."""
+
+        def __init__(self, benchmark_identifier, **metadata_ids):
+            self.identifier = benchmark_identifier
+            self.id = metadata_ids.get('stimuli_meta_id')  # Use one of the IDs as our primary ID
+            for key, value in metadata_ids.items():
+                setattr(self, key, value)
+
+    return BenchmarkMetaResult(
+        benchmark_identifier=benchmark_identifier,
+        stimuli_meta_id=stimuli_meta_id,
+        data_meta_id=data_meta_id,
+        metric_meta_id=metric_meta_id
+    )
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
     benchmark_identifier = benchmark.identifier

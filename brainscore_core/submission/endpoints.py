@@ -139,8 +139,8 @@ class MetadataEndpoint:
         try:
             results = self.process_metadata(plugin_dir, plugin_type)
             logger.info("Metadata processing completed successfully.")
-            for model_id, record in results.items():
-                logger.info(f"Model '{model_id}' updated in db with record id {record.id}")
+            for plugin_id, record in results.items():
+                logger.info(f"Plugin '{plugin_id}' updated in db.")
         except Exception as e:
             logger.error(f"Error processing metadata: {e}", exc_info=True)
             raise e
