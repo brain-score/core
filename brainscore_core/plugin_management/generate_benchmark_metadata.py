@@ -223,12 +223,12 @@ class BenchmarkMetadataGenerator:
     def create_yaml(self, benchmark, benchmark_name: str, benchmark_dir: str):
         """Create or update YAML metadata for the benchmark, handling errors gracefully."""
         try:
-            yaml_filename = "metadata.yaml"
+            yaml_filename = "metadata.yml"
 
             if not benchmark_dir or not os.path.exists(benchmark_dir):
                 failure_dir = "FAILURES"
                 os.makedirs(failure_dir, exist_ok=True)
-                yaml_path = os.path.join(failure_dir, f"{benchmark_name}_metadata.yaml")
+                yaml_path = os.path.join(failure_dir, f"{benchmark_name}_metadata.yml")
                 print("Directory '{plugin_dir}' not found. Writing YAML to '{yaml_path}'", file=sys.stderr)
             else:
                 yaml_path = os.path.join(benchmark_dir, yaml_filename)
