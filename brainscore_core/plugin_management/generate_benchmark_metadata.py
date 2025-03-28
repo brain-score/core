@@ -220,18 +220,6 @@ class BenchmarkMetadataGenerator:
 
         return new_metadata
 
-    def create_ceiling_metadata(self, plugin, plugin_dir_name):
-
-        new_metadata = {
-            "ceiling": None,
-            "ceiling_error": None,
-            "identifier": plugin.identifier,
-            "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/benchmarks/{plugin_dir_name}",
-            "extra_notes": None
-        }
-
-        return new_metadata
-
     def create_yaml(self, benchmark, benchmark_name: str, benchmark_dir: str):
         """Create or update YAML metadata for the benchmark, handling errors gracefully."""
         try:
@@ -250,7 +238,6 @@ class BenchmarkMetadataGenerator:
                 "stimulus_set": self.create_stimuli_metadata(benchmark, benchmark_dir_name),
                 "data": self.create_data_metadata(benchmark, benchmark_dir_name),
                 "metric": self.create_metric_metadata(benchmark, benchmark_dir_name),
-                "ceiling": self.create_ceiling_metadata(benchmark, benchmark_dir_name),
             }
             if os.path.exists(yaml_path) and os.path.getsize(yaml_path) > 0:
                 with open(yaml_path, "r", encoding="utf-8") as file:
