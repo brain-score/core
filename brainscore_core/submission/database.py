@@ -140,72 +140,162 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
     return modelmeta
 
 
-def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
+def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict) -> BenchmarkMeta:
     """
-    Given a benchmark identifier and a metadata dict, create metadata entries for the benchmark
+    Given a benchmark identifier and a metadata dict, create or update metadata entries for the benchmark
     and update the BenchmarkInstance table to reference these entries.
+
+    If metadata entries already exist for this benchmark, they will be updated instead of creating new ones.
+
+    :return: A BenchmarkMeta instance for the benchmark
     """
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
 
-    # Find BenchmarkInstance entries for this benchmark identifier
+    # Create or get a BenchmarkMeta record to return
+    try:
+        benchmark_meta = BenchmarkMeta.get(BenchmarkMeta.identifier == benchmark_identifier)
+        logger.info(f"Found existing BenchmarkMeta record for {benchmark_identifier}")
+    except BenchmarkMeta.DoesNotExist:
+        benchmark_meta = BenchmarkMeta.create(identifier=benchmark_identifier)
+        logger.info(f"Created new BenchmarkMeta record for {benchmark_identifier}")
+
+    # Find existing BenchmarkInstance entries for this benchmark identifier
     benchmark_instances = BenchmarkInstance.select().join(BenchmarkType).where(
         BenchmarkType.identifier == benchmark_identifier
     )
 
-    if not benchmark_instances:
-        logger.warning(f"No BenchmarkInstance found for {benchmark_identifier}. "
-                       "Metadata will still be created but not linked.")
+    # Get existing metadata IDs from the first instance (if any)
+    existing_stimuli_meta_id = None
+    existing_data_meta_id = None
+    existing_metric_meta_id = None
+
+    if benchmark_instances:
+        instance = benchmark_instances[0]
+        existing_stimuli_meta_id = instance.stimuli_meta_id if hasattr(instance, 'stimuli_meta_id') else None
+        existing_data_meta_id = instance.data_meta_id if hasattr(instance, 'data_meta_id') else None
+        existing_metric_meta_id = instance.metric_meta_id if hasattr(instance, 'metric_meta_id') else None
 
     # Process stimulus_set metadata
     stimuli_meta_id = None
     if 'stimulus_set' in metadata:
         stimulus_data = metadata['stimulus_set']
-        stimuli_meta = BenchmarkStimuliMeta.create(
-            num_stimuli=stimulus_data.get('num_stimuli'),
-            datatype=stimulus_data.get('datatype'),
-            stimuli_subtype=stimulus_data.get('stimuli_subtype'),
-            total_size_mb=stimulus_data.get('total_size_MB'),  # Case conversion from YAML to DB
-            brainscore_link=stimulus_data.get('brainscore_link'),
-            extra_notes=stimulus_data.get('extra_notes')
-        )
-        stimuli_meta_id = stimuli_meta.id
+
+        if existing_stimuli_meta_id:
+            # Update existing record
+            try:
+                stimuli_meta = BenchmarkStimuliMeta.get(BenchmarkStimuliMeta.id == existing_stimuli_meta_id)
+                stimuli_meta.num_stimuli = stimulus_data.get('num_stimuli')
+                stimuli_meta.datatype = stimulus_data.get('datatype')
+                stimuli_meta.stimuli_subtype = stimulus_data.get('stimuli_subtype')
+                stimuli_meta.total_size_mb = stimulus_data.get('total_size_MB')
+                stimuli_meta.brainscore_link = stimulus_data.get('brainscore_link')
+                stimuli_meta.extra_notes = stimulus_data.get('extra_notes')
+                stimuli_meta.save()
+                logger.info(f"Updated existing BenchmarkStimuliMeta record id={existing_stimuli_meta_id}")
+                stimuli_meta_id = existing_stimuli_meta_id
+            except BenchmarkStimuliMeta.DoesNotExist:
+                # Record doesn't exist despite having ID in instance - create new
+                logger.warning(f"BenchmarkStimuliMeta with id={existing_stimuli_meta_id} not found, creating new")
+                existing_stimuli_meta_id = None
+
+        if not existing_stimuli_meta_id:
+            # Create new record
+            stimuli_meta = BenchmarkStimuliMeta.create(
+                num_stimuli=stimulus_data.get('num_stimuli'),
+                datatype=stimulus_data.get('datatype'),
+                stimuli_subtype=stimulus_data.get('stimuli_subtype'),
+                total_size_mb=stimulus_data.get('total_size_MB'),
+                brainscore_link=stimulus_data.get('brainscore_link'),
+                extra_notes=stimulus_data.get('extra_notes')
+            )
+            stimuli_meta_id = stimuli_meta.id
+            logger.info(f"Created new BenchmarkStimuliMeta record id={stimuli_meta_id}")
 
     # Process data metadata
     data_meta_id = None
     if 'data' in metadata:
         data_info = metadata['data']
-        data_meta = BenchmarkDataMeta.create(
-            benchmark_type=data_info.get('benchmark_type'),
-            task=data_info.get('task'),
-            region=data_info.get('region'),
-            hemisphere=data_info.get('hemisphere'),
-            num_recording_sites=data_info.get('num_recording_sites'),
-            duration_ms=data_info.get('duration_ms'),
-            species=data_info.get('species'),
-            datatype=data_info.get('datatype'),
-            num_subjects=data_info.get('num_subjects'),
-            pre_processing=data_info.get('pre_processing'),
-            brainscore_link=data_info.get('brainscore_link'),
-            extra_notes=data_info.get('extra_notes')
-        )
-        data_meta_id = data_meta.id
+
+        if existing_data_meta_id:
+            # Update existing record
+            try:
+                data_meta = BenchmarkDataMeta.get(BenchmarkDataMeta.id == existing_data_meta_id)
+                data_meta.benchmark_type = data_info.get('benchmark_type')
+                data_meta.task = data_info.get('task')
+                data_meta.region = data_info.get('region')
+                data_meta.hemisphere = data_info.get('hemisphere')
+                data_meta.num_recording_sites = data_info.get('num_recording_sites')
+                data_meta.duration_ms = data_info.get('duration_ms')
+                data_meta.species = data_info.get('species')
+                data_meta.datatype = data_info.get('datatype')
+                data_meta.num_subjects = data_info.get('num_subjects')
+                data_meta.pre_processing = data_info.get('pre_processing')
+                data_meta.brainscore_link = data_info.get('brainscore_link')
+                data_meta.extra_notes = data_info.get('extra_notes')
+                data_meta.save()
+                logger.info(f"Updated existing BenchmarkDataMeta record id={existing_data_meta_id}")
+                data_meta_id = existing_data_meta_id
+            except BenchmarkDataMeta.DoesNotExist:
+                # Record doesn't exist despite having ID in instance - create new
+                logger.warning(f"BenchmarkDataMeta with id={existing_data_meta_id} not found, creating new")
+                existing_data_meta_id = None
+
+        if not existing_data_meta_id:
+            # Create new record
+            data_meta = BenchmarkDataMeta.create(
+                benchmark_type=data_info.get('benchmark_type'),
+                task=data_info.get('task'),
+                region=data_info.get('region'),
+                hemisphere=data_info.get('hemisphere'),
+                num_recording_sites=data_info.get('num_recording_sites'),
+                duration_ms=data_info.get('duration_ms'),
+                species=data_info.get('species'),
+                datatype=data_info.get('datatype'),
+                num_subjects=data_info.get('num_subjects'),
+                pre_processing=data_info.get('pre_processing'),
+                brainscore_link=data_info.get('brainscore_link'),
+                extra_notes=data_info.get('extra_notes')
+            )
+            data_meta_id = data_meta.id
+            logger.info(f"Created new BenchmarkDataMeta record id={data_meta_id}")
 
     # Process metric metadata
     metric_meta_id = None
     if 'metric' in metadata:
         metric_info = metadata['metric']
+        # Set default value for public field
         public_value = False if metric_info.get('public') is None else metric_info.get('public')
 
-        metric_meta = BenchmarkMetricMeta.create(
-            type=metric_info.get('type'),
-            reference=metric_info.get('reference'),
-            public=public_value,  # Use default value if null
-            brainscore_link=metric_info.get('brainscore_link'),
-            extra_notes=metric_info.get('extra_notes')
-        )
-        metric_meta_id = metric_meta.id
+        if existing_metric_meta_id:
+            # Update existing record
+            try:
+                metric_meta = BenchmarkMetricMeta.get(BenchmarkMetricMeta.id == existing_metric_meta_id)
+                metric_meta.type = metric_info.get('type')
+                metric_meta.reference = metric_info.get('reference')
+                metric_meta.public = public_value
+                metric_meta.brainscore_link = metric_info.get('brainscore_link')
+                metric_meta.extra_notes = metric_info.get('extra_notes')
+                metric_meta.save()
+                logger.info(f"Updated existing BenchmarkMetricMeta record id={existing_metric_meta_id}")
+                metric_meta_id = existing_metric_meta_id
+            except BenchmarkMetricMeta.DoesNotExist:
+                # Record doesn't exist despite having ID in instance - create new
+                logger.warning(f"BenchmarkMetricMeta with id={existing_metric_meta_id} not found, creating new")
+                existing_metric_meta_id = None
 
-    # Update all BenchmarkInstance entries with new metadata IDs
+        if not existing_metric_meta_id:
+            # Create new record
+            metric_meta = BenchmarkMetricMeta.create(
+                type=metric_info.get('type'),
+                reference=metric_info.get('reference'),
+                public=public_value,
+                brainscore_link=metric_info.get('brainscore_link'),
+                extra_notes=metric_info.get('extra_notes')
+            )
+            metric_meta_id = metric_meta.id
+            logger.info(f"Created new BenchmarkMetricMeta record id={metric_meta_id}")
+
+    # Update all BenchmarkInstance entries with metadata IDs
     for instance in benchmark_instances:
         update_fields = {}
         if stimuli_meta_id is not None:
@@ -222,13 +312,8 @@ def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
 
     logger.info(f"Successfully processed metadata for benchmark {benchmark_identifier}")
 
-    # Return the created metadata IDs for reference
-    return {
-        'stimuli_meta_id': stimuli_meta_id,
-        'data_meta_id': data_meta_id,
-        'metric_meta_id': metric_meta_id
-    }
-
+    # Return the BenchmarkMeta instance
+    return benchmark_meta
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
     benchmark_identifier = benchmark.identifier
