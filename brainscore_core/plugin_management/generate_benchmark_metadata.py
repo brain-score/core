@@ -12,7 +12,7 @@ class BenchmarkMetadataGenerator:
     """
     - Generates metadata for machine learning benchmarks by extracting architecture, family, parameter counts, and more.
 
-    This class provides utilities for discovering, loading, processing, and analyzing ML models, primarily using
+    This class provides utilities for discovering, loading, processing, and analyzing ML benchmarks, primarily using
     the `brainscore_vision` framework. It supports metadata extraction, YAML generation, and integration with
     external platforms like Hugging Face and Brain-Score.
 
@@ -20,18 +20,18 @@ class BenchmarkMetadataGenerator:
     - plugin_dir (str): The directory where plugin-related metadata is stored.
 
     Methods:
-    - __call__(model_list: List[str]) -> List[str]: Processes multiple models and returns unique YAML paths.
-    - find_registered_models(root_folder: str) -> List[str]: Finds registered models in `__init__.py` files.
-    - load_model(identifier: str) -> Optional[object]: Loads a model using `brainscore_vision`.
-    - detect_model_architecture(model: nn.Module, model_name: str) -> str: Identifies the model's architecture.
-    - get_huggingface_link(model_name: str) -> Optional[str]: Checks if a Hugging Face repository exists for the model.
-    - get_model_family(model_name: str) -> Optional[str]: Extracts the model family from the name.
-    - create_yaml(model: Any, model_name: str) -> Optional[str]: Generates a YAML metadata file.
-    - process_single_model(model_name: str) -> Optional[str]: Processes a single model.
+    - __call__(benchmark: List[str]) -> List[str]: Processes multiple benchmarks and returns unique YAML paths.
+    - find_registered_benchmarks(root_folder: str) -> List[str]: Finds registered benchmarks in `__init__.py` files.
+    - load_benchmark(identifier: str) -> Optional[object]: Loads a benchmark using `brainscore_vision`.
+    - detect_benchmark_architecture(benchmark: nn.Module, benchmark_name: str) -> str: Identifies the benchmark's architecture.
+    - get_huggingface_link(benchmark_name: str) -> Optional[str]: Checks if a Hugging Face repository exists for the benchmark.
+    - get_benchmark_family(benchmark_name: str) -> Optional[str]: Extracts the benchmark family from the name.
+    - create_yaml(benchmark: Any, benchmark_name: str) -> Optional[str]: Generates a YAML metadata file.
+    - process_single_benchmark(benchmark_name: str) -> Optional[str]: Processes a single benchmark.
 
     Notes:
-    - Designed for models following the `brainscore_vision` plugin structure.
-    - Uses regex to classify models based on naming conventions.
+    - Designed for benchmarks following the `brainscore_vision` plugin structure.
+    - Uses regex to classify benchmarks based on naming conventions.
     - Handles metadata extraction, storage, and linking to external sources.
     - All error handling is printed to prevent silent failures.
     """
@@ -53,7 +53,7 @@ class BenchmarkMetadataGenerator:
         :return: List[str], a list of unique YAML file paths generated.
 
         Notes:
-        - Calls `process_single_model` for each benchmark in the list.
+        - Calls `process_single_benchmark` for each benchmark in the list.
         - Ensures duplicate YAML paths are removed.
         """
         yaml_paths = set()
@@ -69,12 +69,12 @@ class BenchmarkMetadataGenerator:
         """
         - Finds all registered benchmarks inside `__init__.py` files within a given root directory.
 
-        :param root_folder: str, the root directory to search for model registrations.
-        :return: List[str], a list of model names found in `model_registry` assignments.
+        :param root_folder: str, the root directory to search for benchmark registrations.
+        :return: List[str], a list of benchmark names found in `benchmark_registry` assignments.
 
         Notes:
         - Recursively searches for `__init__.py` files in the specified directory.
-        - Extracts benchmark names assigned to `model_registry[...]` using regex.
+        - Extracts benchmark names assigned to `benchmark_registry[...]` using regex.
         - Logs an error message if any `__init__.py` file cannot be read.
         """
 
@@ -104,7 +104,7 @@ class BenchmarkMetadataGenerator:
 
         Notes:
         - Uses `import_plugin` to dynamically load the benchmark from `brainscore_vision.benchmark`.
-        - Retrieves the model instance from `benchmark_registry` using the given identifier.
+        - Retrieves the benchmark instance from `benchmark_registry` using the given identifier.
         - Returns `None` if an error occurs during benchmark loading.
         - Prints an error message if the benchmark fails to load.
         """
@@ -257,7 +257,7 @@ class BenchmarkMetadataGenerator:
 
     def process_single_benchmark(self, benchmark_name: str) -> Optional[str]:
         """
-        - Processes a single model by loading it and generating a YAML metadata file.
+        - Processes a single benchmark by loading it and generating a YAML metadata file.
 
         :param benchmark_name: str, the name of the benchmark to be processed.
         :return: Optional[str], the file path of the generated YAML metadata file, or None if the benchmark fails to load.
