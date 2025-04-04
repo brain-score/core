@@ -10,13 +10,13 @@ from brainscore_core.submission.endpoints import MetadataEndpoint
 from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
 from brainscore_core.plugin_management.generate_benchmark_metadata import BenchmarkMetadataGenerator
 
-# Allowed plugins for metadata
+# allowed plugin types for metadata
 ALLOWED_PLUGINS = {
     "models",
     "benchmarks"
 }
 
-# Allowed keys for a plugin metadata file
+# allowed keys for plugin metadata files
 ALLOWED_KEYS_BY_TYPE = {
     "models": {
         "architecture",
@@ -61,7 +61,7 @@ def validate_metadata_file(metadata_path):
         errors.append("Top-level structure must be a dictionary.")
         return errors, None
 
-    # Check that at least one allowed plugin type is present.
+    # check that at least one allowed plugin type is present.
     found_plugin_type = False
     for plugin_type in data:
         if plugin_type in ALLOWED_PLUGINS:
@@ -71,7 +71,7 @@ def validate_metadata_file(metadata_path):
                 errors.append(f"'{plugin_type}' value must be a dictionary keyed by plugin names.")
                 continue
 
-            # Find keys based on plugin type
+            # find keys based on plugin type
             allowed_keys = ALLOWED_KEYS_BY_TYPE.get(plugin_type)
             for plugin_name, metadata in plugin_data.items():
                 if not isinstance(metadata, dict):
@@ -98,7 +98,7 @@ def generate_metadata(plugin_dir, plugin_type, benchmark_type="neural"):
         metadata_path = generator(model_list)
         metadata_path = metadata_path[0] if metadata_path else None
     elif plugin_type == "benchmarks":
-        generator = BenchmarkMetadataGenerator(plugin_dir, benchmark_type)  # need to get benchmark_type somehow
+        generator = BenchmarkMetadataGenerator(plugin_dir, benchmark_type)
         benchmark_list = generator.find_registered_benchmarks(plugin_dir)
         metadata_path = generator(benchmark_list)
         metadata_path = metadata_path[0] if metadata_path else None
@@ -119,22 +119,18 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
       - Commit the changes,
       - Push the branch,
       - Create a PR.
-    Note: This requires that the repo has been checked out with a full history,
-    and that gh is installed and authenticated.
+    Note: This requires that repo has been checked out with a full history,
+    and that gh is installed/authenticated.
     """
     metadata_path = os.path.join(plugin_dir, "metadata.yml")
     unique_suffix = str(int(time.time()))
     branch_name += f"_{unique_suffix}"
     try:
-        # Create a new branch.
+        # create branch, add metadata, commit, push, create PR
         subprocess.run(["git", "checkout", "-b", branch_name], check=True, stdout=sys.stderr, stderr=sys.stderr)
-        # Add the metadata file.
         subprocess.run(["git", "add", metadata_path], check=True, stdout=sys.stderr, stderr=sys.stderr)
-        # Commit the change.
         subprocess.run(["git", "commit", "-m", "Auto-add/update metadata.yml for plugin"], check=True, stdout=sys.stderr, stderr=sys.stderr)
-        # Push the branch.
         subprocess.run(["git", "push", "origin", branch_name], check=True, stdout=sys.stderr, stderr=sys.stderr)
-        # Create the pull request using the GitHub CLI.
         pr_title = "Auto-add/update metadata.yml for plugin"
         pr_body = "This PR was automatically generated to add or update the metadata.yml file."
         subprocess.run([
