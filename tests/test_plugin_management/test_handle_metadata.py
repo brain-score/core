@@ -8,7 +8,6 @@ from unittest.mock import ANY
 
 from brainscore_core.plugin_management.handle_metadata import (
     validate_metadata_file,
-    generate_dummy_metadata,
     create_metadata_pr,
 )
 
@@ -89,26 +88,6 @@ class TestHandleMetadata(unittest.TestCase):
         os.remove(tmp_path)
         self.assertTrue(errors)
         self.assertIn("Top-level structure must be a dictionary.", errors)
-
-    def test_generate_dummy_metadata_models(self):
-        """Test that dummy metadata is generated correctly for models."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            metadata_path = generate_dummy_metadata(tmp_dir, "models")
-            self.assertTrue(os.path.exists(metadata_path))
-            with open(metadata_path, "r") as f:
-                data = yaml.safe_load(f)
-            self.assertIn("models", data)
-            self.assertIn("dummy-model", data["models"])
-
-    def test_generate_dummy_metadata_benchmarks(self):
-        """Test that dummy metadata is generated correctly for benchmarks."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            metadata_path = generate_dummy_metadata(tmp_dir, "benchmarks")
-            self.assertTrue(os.path.exists(metadata_path))
-            with open(metadata_path, "r") as f:
-                data = yaml.safe_load(f)
-            self.assertIn("benchmarks", data)
-            self.assertIn("dummy-benchmark", data["benchmarks"])
 
     @mock.patch("subprocess.run")
     @mock.patch("subprocess.check_output")
