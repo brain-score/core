@@ -50,7 +50,7 @@ class BenchmarkType(PeeweeBase):
         table_name = 'brainscore_benchmarktype'
 
 
-class BenchmarkMeta(PeeweeBase):  # NOTE, need to update once Mike makes table
+class BenchmarkMeta(PeeweeBase):
     identifier = CharField(primary_key=True)
     number_of_stimuli = IntegerField(null=True)
     number_of_recording_sites = IntegerField(null=True)
@@ -87,19 +87,19 @@ class Model(PeeweeBase):
 
 
 class ModelMeta(PeeweeBase):
-    identifier = CharField(primary_key=True, max_length=255)  # Updated max length
+    identifier = CharField(primary_key=True, max_length=255)
     architecture = CharField(null=True, max_length=100)
     model_family = CharField(null=True, max_length=100)
     total_parameter_count = IntegerField(null=True)
     total_layers = IntegerField(null=True)
     training_dataset = CharField(null=True, max_length=100)
     task_specialization = CharField(null=True, max_length=100)
-    brainscore_link = CharField(null=True, max_length=256)  # Renamed from source_link
-    huggingface_link = CharField(null=True, max_length=256)  # New column
+    brainscore_link = CharField(null=True, max_length=256)
+    huggingface_link = CharField(null=True, max_length=256)
     trainable_parameter_count = IntegerField(null=True)
     trainable_layers = IntegerField(null=True)
-    model_size_MB = FloatField(null=True)  # Peewee uses FloatField for PostgreSQL float8
-    extra_notes = CharField(null=True, max_length=512)  # New column
+    model_size_MB = FloatField(null=True)
+    extra_notes = CharField(null=True, max_length=512)
 
     class Meta:
         table_name = 'brainscore_modelmeta'
@@ -110,7 +110,7 @@ class BenchmarkStimuliMeta(PeeweeBase):
     num_stimuli = IntegerField(null=True)
     datatype = CharField(max_length=100, null=True)
     stimuli_subtype = CharField(max_length=100, null=True)
-    total_size_mb = FloatField(null=True)  # Note: lowercase 'mb'
+    total_size_mb = FloatField(null=True)
     brainscore_link = CharField(max_length=200, null=True)
     extra_notes = CharField(max_length=1000, null=True)
 
@@ -125,7 +125,7 @@ class BenchmarkDataMeta(PeeweeBase):
     region = CharField(max_length=100, null=True)
     hemisphere = CharField(max_length=100, null=True)
     num_recording_sites = IntegerField(null=True)
-    duration_ms = FloatField(null=True)  # This is float8, not int4
+    duration_ms = FloatField(null=True)
     species = CharField(max_length=100, null=True)
     datatype = CharField(max_length=100, null=True)
     num_subjects = IntegerField(null=True)
