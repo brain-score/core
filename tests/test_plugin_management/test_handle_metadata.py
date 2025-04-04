@@ -1,14 +1,12 @@
 import os
 import tempfile
 import unittest
-import yaml
 import subprocess
 from unittest import mock
 from unittest.mock import ANY
 
 from brainscore_core.plugin_management.handle_metadata import (
     validate_metadata_file,
-    generate_dummy_metadata,
     create_metadata_pr,
 )
 
@@ -90,32 +88,12 @@ class TestHandleMetadata(unittest.TestCase):
         self.assertTrue(errors)
         self.assertIn("Top-level structure must be a dictionary.", errors)
 
-    def test_generate_dummy_metadata_models(self):
-        """Test that dummy metadata is generated correctly for models."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            metadata_path = generate_dummy_metadata(tmp_dir, "models")
-            self.assertTrue(os.path.exists(metadata_path))
-            with open(metadata_path, "r") as f:
-                data = yaml.safe_load(f)
-            self.assertIn("models", data)
-            self.assertIn("dummy-model", data["models"])
-
-    def test_generate_dummy_metadata_benchmarks(self):
-        """Test that dummy metadata is generated correctly for benchmarks."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            metadata_path = generate_dummy_metadata(tmp_dir, "benchmarks")
-            self.assertTrue(os.path.exists(metadata_path))
-            with open(metadata_path, "r") as f:
-                data = yaml.safe_load(f)
-            self.assertIn("benchmarks", data)
-            self.assertIn("dummy-benchmark", data["benchmarks"])
-
     @mock.patch("subprocess.run")
     @mock.patch("subprocess.check_output")
     def test_create_metadata_pr_success(self, mock_check_output, mock_run):
-        # Configure the mocks
+        # configure mocks
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-        mock_check_output.return_value = "12345"  # Mock PR number response
+        mock_check_output.return_value = "12345"  # mock PR number response
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             metadata_path = os.path.join(tmp_dir, "metadata.yml")
@@ -126,7 +104,7 @@ class TestHandleMetadata(unittest.TestCase):
             except SystemExit:
                 self.fail("create_metadata_pr unexpectedly called sys.exit on success.")
 
-            # Check that git checkout was called with ANY branch name that starts with test-branch
+            # check that git checkout was called with ANY branch name that starts with test-branch
             mock_run.assert_any_call(
                 ["git", "checkout", "-b", ANY],
                 check=True,
