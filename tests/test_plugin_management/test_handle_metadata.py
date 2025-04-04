@@ -1,7 +1,6 @@
 import os
 import tempfile
 import unittest
-import yaml
 import subprocess
 from unittest import mock
 from unittest.mock import ANY
@@ -92,9 +91,9 @@ class TestHandleMetadata(unittest.TestCase):
     @mock.patch("subprocess.run")
     @mock.patch("subprocess.check_output")
     def test_create_metadata_pr_success(self, mock_check_output, mock_run):
-        # Configure the mocks
+        # configure mocks
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
-        mock_check_output.return_value = "12345"  # Mock PR number response
+        mock_check_output.return_value = "12345"  # mock PR number response
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             metadata_path = os.path.join(tmp_dir, "metadata.yml")
@@ -105,7 +104,7 @@ class TestHandleMetadata(unittest.TestCase):
             except SystemExit:
                 self.fail("create_metadata_pr unexpectedly called sys.exit on success.")
 
-            # Check that git checkout was called with ANY branch name that starts with test-branch
+            # check that git checkout was called with ANY branch name that starts with test-branch
             mock_run.assert_any_call(
                 ["git", "checkout", "-b", ANY],
                 check=True,
