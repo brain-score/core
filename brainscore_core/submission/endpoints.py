@@ -124,7 +124,7 @@ class MetadataEndpoint:
         results = {}
         for identifier, metadata in plugin_metadata.items():
             logger.info(f"Updating metadata for plugin '{identifier}'")
-            # Overwrite any existing entry with new metadata
+            # overwrite any existing entry with new metadata
             if plugin_type == 'models':
                 result = create_model_meta_entry(identifier, metadata)
             elif plugin_type == 'benchmarks':
@@ -170,8 +170,7 @@ class RunScoringEndpoint:
         connect_db(db_secret=db_secret)
 
     def __call__(self, domain: str, jenkins_id: int, model_identifier: str, benchmark_identifier: str,
-                 user_id: int, model_type: str, public: bool, model_meta: Union[None, dict],
-                 benchmark_meta: Union[None, dict], competition: Union[None, str]):
+                 user_id: int, model_type: str, public: bool, competition: Union[None, str]):
         """
         Run the `model_identifier` on the `benchmark_identifier`, and write resulting score to the database.
 
@@ -190,7 +189,7 @@ class RunScoringEndpoint:
             self._score_model_on_benchmark(model_identifier=model_identifier,
                                            benchmark_identifier=benchmark_identifier,
                                            submission_entry=submission_entry, domain=domain,
-                                           public=public, competition=competition, model_meta=model_meta)
+                                           public=public, competition=competition)
         except Exception as e:
             is_run_successful = False
             logging.error(
@@ -206,14 +205,14 @@ class RunScoringEndpoint:
 
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission, domain: str,
-                                  public: bool, model_meta: Union[None, dict], competition: Union[None, str]):
+                                  public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
         logger.info(f'Model database entry')
         model = self.domain_plugins.load_model(model_identifier)
         model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
                                             submission=submission_entry, public=public, competition=competition,
-                                            model_meta=model_meta, bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
+                                            bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
 
         logger.info(f'Benchmark database entry')
         benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
@@ -318,8 +317,6 @@ def make_argparser() -> ArgumentParser:
                         help='Public (or private) submission?')
     parser.add_argument('--competition', type=noneable_string, nargs='?', default=None,
                         help='Name of competition for which submission is being scored')
-    parser.add_argument('--model_meta', type=json.loads, default=None,
-                        help='JSON string representing a dictionary associated with model metadata')
     parser.add_argument('--user_id', type=int, nargs='?', default=None,
                         help='ID of submitting user in the postgres DB')
     parser.add_argument('--author_email', type=str, nargs='?', default=None,
