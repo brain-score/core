@@ -98,7 +98,7 @@ class ModelMeta(PeeweeBase):
     huggingface_link = CharField(null=True, max_length=256)
     trainable_parameter_count = IntegerField(null=True)
     trainable_layers = IntegerField(null=True)
-    model_size_MB = FloatField(null=True)
+    model_size_mb = FloatField(null=True)
     extra_notes = CharField(null=True, max_length=512)
 
     class Meta:
