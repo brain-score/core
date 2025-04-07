@@ -88,18 +88,18 @@ class Model(PeeweeBase):
 
 class ModelMeta(PeeweeBase):
     identifier = CharField(primary_key=True, max_length=255)
-    architecture = CharField(null=True, max_length=100)
-    model_family = CharField(null=True, max_length=100)
-    total_parameter_count = IntegerField(null=True)
-    total_layers = IntegerField(null=True)
-    training_dataset = CharField(null=True, max_length=100)
-    task_specialization = CharField(null=True, max_length=100)
-    brainscore_link = CharField(null=True, max_length=256)
-    huggingface_link = CharField(null=True, max_length=256)
-    trainable_parameter_count = IntegerField(null=True)
-    trainable_layers = IntegerField(null=True)
-    model_size_mb = FloatField(null=True)
-    extra_notes = CharField(null=True, max_length=512)
+    architecture = CharField(max_length=100, null=True, default=None)
+    model_family = CharField(max_length=100, null=True, default=None)
+    total_parameter_count = IntegerField(null=True, default=None)
+    total_layers = IntegerField(null=True, default=None)
+    training_dataset = CharField(max_length=100, null=True, default=None)
+    task_specialization = CharField(max_length=100, null=True, default=None)
+    brainscore_link = CharField(max_length=256, null=True, default=None)
+    hugging_face_link = CharField(max_length=256, null=True, default=None)
+    trainable_parameter_count = IntegerField(null=True, default=None)
+    trainable_layers = IntegerField(null=True, default=None)
+    model_size_mb = FloatField(null=True, default=None)
+    extra_notes = CharField(max_length=1000, null=True, default=None)
 
     class Meta:
         table_name = 'brainscore_modelmeta'
