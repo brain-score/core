@@ -23,7 +23,7 @@ class TestHandleMetadata(unittest.TestCase):
                         trainable_parameter_count: 900000
                         total_layers: 50
                         trainable_layers: 20
-                        model_size_MB: 120.5
+                        model_size_mb: 120.5
                         training_dataset: "imagenet"
                         task_specialization: "classification"
                         brainscore_link: "https://example.com"

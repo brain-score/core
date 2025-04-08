@@ -50,7 +50,7 @@ def process_stimuli_metadata(stimulus_data, existing_id):
         'num_stimuli': stimulus_data.get('num_stimuli'),
         'datatype': stimulus_data.get('datatype'),
         'stimuli_subtype': stimulus_data.get('stimuli_subtype'),
-        'total_size_mb': stimulus_data.get('total_size_MB'),
+        'total_size_mb': stimulus_data.get('total_size_mb'),
         'brainscore_link': stimulus_data.get('brainscore_link'),
         'extra_notes': stimulus_data.get('extra_notes')
     }

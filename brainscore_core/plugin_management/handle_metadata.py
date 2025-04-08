@@ -25,7 +25,7 @@ ALLOWED_KEYS_BY_TYPE = {
         "trainable_parameter_count",
         "total_layers",
         "trainable_layers",
-        "model_size_MB",
+        "model_size_mb",
         "training_dataset",
         "task_specialization",
         "brainscore_link",
@@ -33,10 +33,36 @@ ALLOWED_KEYS_BY_TYPE = {
         "extra_notes"
     },
     "benchmarks": {
-        "stimulus_set",
-        "data",
-        "metric"
-    },
+        "stimulus_set": {
+            "num_stimuli",
+            "datatype",
+            "stimuli_subtype",
+            "total_size_mb",
+            "brainscore_link",
+            "extra_notes"
+        },
+        "data": {
+            "benchmark_type",
+            "task",
+            "region",
+            "hemisphere",
+            "num_recording_sites",
+            "duration_ms",
+            "species",
+            "datatype",
+            "num_subjects",
+            "pre_processing",
+            "brainscore_link",
+            "extra_notes"
+        },
+        "metric": {
+            "type",
+            "reference",
+            "public",
+            "brainscore_link",
+            "extra_notes"
+        }
+    }
 }
 
 
@@ -77,11 +103,31 @@ def validate_metadata_file(metadata_path):
                 if not isinstance(metadata, dict):
                     errors.append(f"Data for plugin '{plugin_name}' under '{plugin_type}' must be a dictionary.")
                     continue
-                extra_keys = set(metadata.keys()) - allowed_keys
-                if extra_keys:
-                    errors.append(
-                        f"Plugin '{plugin_name}' under '{plugin_type}' has extra keys: {list(extra_keys)}"
-                    )
+                if plugin_type == "benchmarks":  # for benchmarks check two layers of keys
+                    for top_key, top_value in metadata.items():
+                        if top_key not in allowed_keys:
+                            errors.append(
+                                f"Plugin '{plugin_name}' has invalid top-level key: '{top_key}'. Allowed keys: {list(allowed_keys.keys())}"
+                            )
+                            continue
+
+                        if not isinstance(top_value, dict):
+                            errors.append(f"Value for '{top_key}' in plugin '{plugin_name}' must be a dictionary.")
+                            continue
+
+                        # Check nested keys
+                        nested_allowed_keys = allowed_keys[top_key]
+                        extra_nested_keys = set(top_value.keys()) - nested_allowed_keys
+                        if extra_nested_keys:
+                            errors.append(
+                                f"Plugin '{plugin_name}' has extra keys under '{top_key}': {list(extra_nested_keys)}"
+                            )
+                else:
+                    extra_keys = set(metadata.keys()) - allowed_keys
+                    if extra_keys:
+                        errors.append(
+                            f"Plugin '{plugin_name}' under '{plugin_type}' has extra keys: {list(extra_keys)}"
+                        )
         else:
             errors.append(f"Top-level key '{plugin_type}' is not allowed. Allowed keys: {list(ALLOWED_PLUGINS)}")
 
