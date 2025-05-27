@@ -5,11 +5,54 @@ import yaml
 from pathlib import Path
 from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
 from brainscore_core.plugin_management.generate_benchmark_metadata import BenchmarkMetadataGenerator
+import importlib.util
+
+
+def get_installed_package_path(subpath=None):
+    """
+    Helper function to get the path to a subdirectory within the installed brainscore_vision package.
+    Addresses issue of different vision paths in different environments.
+    
+    Args:
+        subpath (str, optional): Additional path components to append to the package root.
+            For example: "models/resnet50_tutorial" or "benchmarks/rajalingham2020"
+    
+    Returns:
+        Path: The full path to the requested subdirectory
+    
+    Raises:
+        ImportError: If brainscore_vision package is not found
+    """
+    # Find the actual location of brainscore_vision package
+    spec = importlib.util.find_spec('brainscore_vision')
+    if spec is None or spec.origin is None:
+        raise ImportError("brainscore_vision package not found. Please ensure it is installed.")
+        
+    # Get the package root directory (parent of __init__.py)
+    package_root = Path(spec.origin).parent.parent
+
+    # Construct the full path
+    if subpath:
+        full_path = package_root / "brainscore_vision" / subpath
+    else:
+        full_path = package_root / "brainscore_vision"
+    
+    # Check if the directory exists
+    if not full_path.exists():
+        print(f"Warning: Directory does not exist: {full_path}")
+        parent_dir = full_path.parent
+        if parent_dir.exists():
+            print("Available directories:")
+            print("\n".join(f"  - {d.name}" for d in parent_dir.iterdir() if d.is_dir()))
+        else:
+            print(f"Parent directory does not exist at: {parent_dir}")
+    
+    return full_path
 
 
 class TestModelMetadataGenerator:
     def setup_method(self):
-        self.model_path = "vision/brainscore_vision/models/resnet50_tutorial"
+        self.model_path = str(get_installed_package_path("models/resnet50_tutorial"))
         self.model_name = "resnet50_tutorial"
         self.generator = ModelMetadataGenerator(self.model_path)
         self.model_list = self.generator.find_registered_models(self.model_path)
@@ -72,7 +115,7 @@ class TestModelMetadataGenerator:
 
 class TestBenchmarkMetadataGeneratorNeural:
     def setup_method(self):
-        self.benchmark_path = "vision/brainscore_vision/benchmarks/rajalingham2020"
+        self.benchmark_path = str(get_installed_package_path("benchmarks/rajalingham2020"))
         self.benchmark_name = "Rajalingham2020.IT-pls"
         self.generator = BenchmarkMetadataGenerator(self.benchmark_path, benchmark_type="neural")
         self.benchmark_list = self.generator.find_registered_benchmarks(self.benchmark_path)
@@ -173,7 +216,7 @@ class TestBenchmarkMetadataGeneratorNeural:
 
 class TestBenchmarkMetadataGeneratorBehavioral:
     def setup_method(self):
-        self.benchmark_path = "vision/brainscore_vision/benchmarks/coggan2024_behavior"
+        self.benchmark_path = str(get_installed_package_path("benchmarks/coggan2024_behavior"))
         self.benchmark_name = "tong.Coggan2024_behavior-ConditionWiseAccuracySimilarity"
         self.generator = BenchmarkMetadataGenerator(self.benchmark_path, benchmark_type="behavioral")
         self.benchmark_list = self.generator.find_registered_benchmarks(self.benchmark_path)
@@ -274,7 +317,7 @@ class TestBenchmarkMetadataGeneratorBehavioral:
 
 class TestBenchmarkMetadataGeneratorEngineering:
     def setup_method(self):
-        self.benchmark_path = "vision/brainscore_vision/benchmarks/objectnet"
+        self.benchmark_path = str(get_installed_package_path("benchmarks/objectnet"))
         self.benchmark_name = "ObjectNet-top1"
         self.generator = BenchmarkMetadataGenerator(self.benchmark_path, benchmark_type="engineering")
         self.benchmark_list = self.generator.find_registered_benchmarks(self.benchmark_path)
