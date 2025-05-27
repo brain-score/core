@@ -44,8 +44,12 @@ class TestCondaScoreInEnv:
     def setup_method(self):
         sys.path.append(str(self.dummy_container_dirpath))
         local_resource = Path(__file__).parent / 'test_conda_score__brainscore_dummy'  # contains dummy-library scripts
+        # Copy all files including pyproject.toml
         for local_file in local_resource.iterdir():
-            shutil.copy(local_file, self.dummy_container_dirpath)
+            if local_file.name == 'pyproject.toml':
+                shutil.copy(local_file, self.dummy_container_dirpath / 'pyproject.toml')
+            else:
+                shutil.copy(local_file, self.dummy_container_dirpath)
 
     def teardown_method(self):
         shutil.rmtree(self.dummy_container_dirpath)
