@@ -36,14 +36,14 @@ class BenchmarkMetadataGenerator:
     - All error handling is printed to prevent silent failures.
     """
 
-    def __init__(self, benchmark_dir: str, benchmark_type: str):
+    def __init__(self, benchmark_dir: str, benchmark_type: str = None):
         """
         - Initializes the metadata generator with a specified benchmark directory.
 
         :param benchmark_dir: str, the directory where benchmark metadata files are stored.
         """
         self.benchmark_dir = benchmark_dir
-        self.benchmark_type = None  # default to None
+        self.benchmark_type = benchmark_type 
 
     def __call__(self, benchmark_list: List[str]) -> List[str]:
         """
@@ -214,7 +214,7 @@ class BenchmarkMetadataGenerator:
             "type": None,
             "reference": None,
             "public": None,
-            "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/data/{plugin_dir_name}",
+            "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/benchmarks/{plugin_dir_name}",
             "extra_notes": None
         }
 
