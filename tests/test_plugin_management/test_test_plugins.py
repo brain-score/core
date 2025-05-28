@@ -4,8 +4,42 @@ import subprocess
 import tempfile
 from pathlib import Path
 import ctypes
+import platform
 
 from brainscore_core.plugin_management.test_plugins import PluginTestRunner
+
+
+def get_glibc_version():
+    """
+    Get GLIBC version on Linux systems, return None on other systems.
+    Handles different return types from gnu_get_libc_version():
+    - Some systems return bytes (needs decode)
+    - Some systems return integer pointer (needs c_char_p conversion)
+    - Some systems return string directly
+    """
+    if platform.system() != 'Linux':
+        return None
+        
+    try:
+        libc = ctypes.CDLL('libc.so.6')
+        version = libc.gnu_get_libc_version()
+        
+        # Handle different return types
+        if isinstance(version, bytes):
+            version_str = version.decode('ascii')
+        elif isinstance(version, int):
+            # Convert integer pointer to string
+            version_str = ctypes.c_char_p(version).value.decode('ascii')
+        elif isinstance(version, str):
+            version_str = version
+        else:
+            raise TypeError(f"Unexpected return type from gnu_get_libc_version: {type(version)}")
+            
+        # Split and rejoin to normalize version format
+        return '.'.join(str(x) for x in version_str.split('.'))
+    except (OSError, AttributeError, TypeError) as e:
+        print(f"Error getting GLIBC version: {e}")
+        return None
 
 
 class TestPluginTestRunner:
@@ -61,11 +95,13 @@ class TestPluginTestRunner:
 
     @pytest.mark.travis_slow
     def test_run_tests_with_r(self):
-        # Check GLIBC version
-        libc = ctypes.CDLL('libc.so.6')
-        glibc_version = '.'.join(str(x) for x in (libc.gnu_get_libc_version().decode('ascii').split('.')))
-        if float(glibc_version) < 2.34:  # rpy2 3.6.0 requires GLIBC 2.34 or higher
-            pytest.skip(f"Test requires GLIBC 2.34 or higher, but found {glibc_version}")
+        # Check if we're on Linux and have a compatible GLIBC version
+        glibc_version = get_glibc_version()
+        if glibc_version is not None:  # We're on Linux
+            if float(glibc_version) < 2.34:  # rpy2 3.6.0 requires GLIBC 2.34 or higher
+                pytest.skip(f"Test requires GLIBC 2.34 or higher, but found {glibc_version}")
+        else:  # Not on Linux
+            pytest.skip("This test is only supported on Linux systems with GLIBC 2.34 or higher")
 
         r_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'r_plugin'
         plugin_test_runner = PluginTestRunner(r_plugin_path, {})
