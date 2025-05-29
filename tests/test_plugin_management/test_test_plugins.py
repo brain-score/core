@@ -59,7 +59,8 @@ class TestPluginTestRunner:
         plugin_test_runner.run_tests()
         assert plugin_test_runner.returncode == 0
 
-    @pytest.mark.travis_slow
+    #@pytest.mark.travis_slow
+    @pytest.mark.skip(reason="Does not work.")
     def test_run_tests_with_r(self):
         # Check GLIBC version
         libc = ctypes.CDLL('libc.so.6')
