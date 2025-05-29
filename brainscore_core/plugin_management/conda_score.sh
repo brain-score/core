@@ -11,24 +11,23 @@ BENCHMARK_ID="$4"     # Benchmark identifier
 ENV_NAME="$5"         # Name for the conda environment
 ENVS_DIR="$6"         # Directory for conda environments
 
-# Print parameters for debugging
-echo "Parameters:"
-echo "  Library path: $LIBRARY_PATH"
-echo "  Library name: $LIBRARY_NAME"
-echo "  Model ID: $MODEL_ID"
-echo "  Benchmark ID: $BENCHMARK_ID"
-echo "  Environment name: $ENV_NAME"
-echo "  Environments directory: $ENVS_DIR"
-
 # Get current Python version for the new environment
-PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 echo "Using Python version: $PYTHON_VERSION"
 
-# Change to the library directory
-cd "$LIBRARY_PATH/$LIBRARY_NAME" || {
-    echo "Error: Could not change to directory $LIBRARY_PATH/$LIBRARY_NAME"
-    exit 1
+# Function to get plugin directory using the brainscore plugin management system
+get_plugin_dir() {
+    local plugin_type="$1"
+    local plugin_id="$2"
+    python -m brainscore_core.plugin_management.import_plugin print_plugin_dir "$LIBRARY_NAME" "$plugin_type" "$plugin_id" || {
+        echo "Warning: Could not retrieve plugin directory for $plugin_type/$plugin_id"
+        return 1
+    }
 }
+
+# Determine plugin-specific directories and environment files
+MODEL_PLUGIN_DIR=$(get_plugin_dir "models" "$MODEL_ID")
+BENCHMARK_PLUGIN_DIR=$(get_plugin_dir "benchmarks" "$BENCHMARK_ID")
 
 # Remove existing environment if it exists
 if [ -d "$ENVS_DIR/$ENV_NAME" ]; then
@@ -54,6 +53,12 @@ conda install pip -y || {
     exit 1
 }
 
+# Change to the library directory
+cd "$LIBRARY_PATH/$LIBRARY_NAME" || {
+    echo "Error: Could not change to directory $LIBRARY_PATH/$LIBRARY_NAME"
+    exit 1
+}
+
 # Install the library in editable mode
 echo "Installing library in editable mode"
 if [ -f "requirements.txt" ]; then
@@ -67,6 +72,25 @@ else
         echo "Error: Failed to install library"
         exit 1
     }
+fi
+
+# Install plugin specific dependencies
+if [ -n "$MODEL_PLUGIN_DIR" ]; then
+    MODEL_DIR="$LIBRARY_NAME/models/$MODEL_PLUGIN_DIR"
+    MODEL_ENV_YML="$MODEL_DIR/environment.yml"
+    echo "Model directory: $MODEL_DIR"
+else
+    echo "Warning: Could not determine model plugin directory"
+    MODEL_ENV_YML=""
+fi
+
+if [ -n "$BENCHMARK_PLUGIN_DIR" ]; then
+    BENCHMARK_DIR="$LIBRARY_NAME/benchmarks/$BENCHMARK_PLUGIN_DIR"
+    BENCHMARK_ENV_YML="$BENCHMARK_DIR/environment.yml"
+    echo "Benchmark directory: $BENCHMARK_DIR"
+else
+    echo "Warning: Could not determine benchmark plugin directory"
+    BENCHMARK_ENV_YML=""
 fi
 
 # Run the scoring command
