@@ -99,7 +99,7 @@ class MockDomainPlugin(DomainPluginInterface):
                 "num_stimuli": 616,
                 "datatype": "image",
                 "stimuli_subtype": None,
-                "total_size_MB": 3.5858,
+                "total_size_mb": 3.5858,
                 "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/data/{plugin_dir_name}",
                 "extra_notes": None
             }
@@ -108,7 +108,7 @@ class MockDomainPlugin(DomainPluginInterface):
                 "num_stimuli": 22560,
                 "datatype": "image", 
                 "stimuli_subtype": None,
-                "total_size_MB": 12.6584,
+                "total_size_mb": 12.6584,
                 "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/data/{plugin_dir_name}",
                 "extra_notes": None
             }
@@ -117,7 +117,7 @@ class MockDomainPlugin(DomainPluginInterface):
                 "num_stimuli": None,
                 "datatype": "image",
                 "stimuli_subtype": None,
-                "total_size_MB": None,
+                "total_size_mb": None,
                 "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/data/{plugin_dir_name}",
                 "extra_notes": None
             }
@@ -236,7 +236,7 @@ class MockDomainPlugin(DomainPluginInterface):
             "trainable_parameter_count": 1500,
             "total_layers": 1,
             "trainable_layers": 1,
-            "model_size_MB": 0.006,
+            "model_size_mb": 0.006,
             "training_dataset": None,
             "task_specialization": None,
             "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/models/{model_dir_name}",
@@ -356,7 +356,7 @@ class TestModelMetadataGeneratorMock:
         required_fields = [
             "architecture", "model_family", "total_parameter_count", 
             "trainable_parameter_count", "total_layers", "trainable_layers",
-            "model_size_MB", "training_dataset", "task_specialization",
+            "model_size_mb", "training_dataset", "task_specialization",
             "brainscore_link", "huggingface_link", "extra_notes"
         ]
         for field in required_fields:
@@ -476,7 +476,7 @@ class TestBenchmarkMetadataGeneratorBehavioralMock:
         # stimulus set fields:
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["num_stimuli"] == 22560
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["datatype"] == "image"
-        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_MB"] == 12.6584
+        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_mb"] == 12.6584
 
         # data fields:
         assert metadata['benchmarks'][self.benchmark_name]['data']["benchmark_type"] == "behavioral"
@@ -510,7 +510,7 @@ class TestBenchmarkMetadataGeneratorEngineeringMock:
         # stimulus set fields:
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["num_stimuli"] is None
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["datatype"] == "image"
-        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_MB"] is None
+        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_mb"] is None
 
         # data fields:
         assert metadata['benchmarks'][self.benchmark_name]['data']["benchmark_type"] == "engineering"
