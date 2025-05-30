@@ -251,7 +251,7 @@ class ModelMetadataGenerator:
                 "trainable_parameter_count": sum(p.numel() for p in model.parameters() if p.requires_grad),
                 "total_layers": sum(1 for _ in model.modules()),
                 "trainable_layers": sum(1 for p in model.parameters() if p.requires_grad and p.dim() > 1),
-                "model_size_MB": round(sum(p.element_size() * p.numel() for p in model.parameters()) / 1e6, 2),
+                "model_size_mb": round(sum(p.element_size() * p.numel() for p in model.parameters()) / 1e6, 2),
                 "training_dataset": None,
                 "task_specialization": None,
                 "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/models/{model_dir_name}",

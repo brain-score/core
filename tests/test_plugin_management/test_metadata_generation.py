@@ -86,7 +86,7 @@ class TestModelMetadataGenerator:
         assert "trainable_parameter_count" in metadata['models'][self.model_name]
         assert "total_layers" in metadata['models'][self.model_name]
         assert "trainable_layers" in metadata['models'][self.model_name]
-        assert "model_size_MB" in metadata['models'][self.model_name]
+        assert "model_size_mb" in metadata['models'][self.model_name]
         assert "training_dataset" in metadata['models'][self.model_name]
         assert "task_specialization" in metadata['models'][self.model_name]
         assert "brainscore_link" in metadata['models'][self.model_name]
@@ -104,7 +104,7 @@ class TestModelMetadataGenerator:
         assert metadata['models'][self.model_name]["trainable_parameter_count"] == 25557032
         assert metadata['models'][self.model_name]["total_layers"] == 151
         assert metadata['models'][self.model_name]["trainable_layers"] == 54
-        assert metadata['models'][self.model_name]["model_size_MB"] == 102.23
+        assert metadata['models'][self.model_name]["model_size_mb"] == 102.23
         assert metadata['models'][self.model_name]["training_dataset"] is None
         assert metadata['models'][self.model_name]["task_specialization"] is None
         assert (metadata['models'][self.model_name]["brainscore_link"] ==
@@ -149,7 +149,7 @@ class TestBenchmarkMetadataGeneratorNeural:
         assert "num_stimuli" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "datatype" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "stimuli_subtype" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
-        assert "total_size_MB" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
+        assert "total_size_mb" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "brainscore_link" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "extra_notes" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
 
@@ -186,7 +186,7 @@ class TestBenchmarkMetadataGeneratorNeural:
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["num_stimuli"] == 616
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["datatype"] == "image"
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["stimuli_subtype"] is None
-        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_MB"] == 3.5858
+        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_mb"] == 3.5858
         assert (metadata['benchmarks'][self.benchmark_name]['stimulus_set']["brainscore_link"] ==
                 "https://github.com/brain-score/vision/tree/master/brainscore_vision/data/rajalingham2020")
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["extra_notes"] is None
@@ -250,7 +250,7 @@ class TestBenchmarkMetadataGeneratorBehavioral:
         assert "num_stimuli" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "datatype" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "stimuli_subtype" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
-        assert "total_size_MB" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
+        assert "total_size_mb" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "brainscore_link" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "extra_notes" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
 
@@ -287,7 +287,7 @@ class TestBenchmarkMetadataGeneratorBehavioral:
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["num_stimuli"] == 22560
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["datatype"] == "image"
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["stimuli_subtype"] is None
-        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_MB"] == 12.6584
+        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_mb"] == 12.6584
         assert (metadata['benchmarks'][self.benchmark_name]['stimulus_set']["brainscore_link"] ==
                 "https://github.com/brain-score/vision/tree/master/brainscore_vision/data/coggan2024_behavior")
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["extra_notes"] is None
@@ -351,7 +351,7 @@ class TestBenchmarkMetadataGeneratorEngineering:
         assert "num_stimuli" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "datatype" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "stimuli_subtype" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
-        assert "total_size_MB" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
+        assert "total_size_mb" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "brainscore_link" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
         assert "extra_notes" in metadata['benchmarks'][self.benchmark_name]['stimulus_set']
 
@@ -388,7 +388,7 @@ class TestBenchmarkMetadataGeneratorEngineering:
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["num_stimuli"] is None
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["datatype"] == "image"
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["stimuli_subtype"] is None
-        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_MB"] is None
+        assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["total_size_mb"] is None
         assert (metadata['benchmarks'][self.benchmark_name]['stimulus_set']["brainscore_link"] ==
                 "https://github.com/brain-score/vision/tree/master/brainscore_vision/data/objectnet")
         assert metadata['benchmarks'][self.benchmark_name]['stimulus_set']["extra_notes"] is None

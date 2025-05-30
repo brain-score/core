@@ -147,7 +147,7 @@ class BenchmarkMetadataGenerator:
             "num_stimuli": get_num_stimuli(stimulus_set),
             "datatype": "image",
             "stimuli_subtype": None,
-            "total_size_MB": total_size_mb(stimulus_set),
+            "total_size_mb": total_size_mb(stimulus_set),
             "brainscore_link": f"https://github.com/brain-score/vision/tree/master/brainscore_vision/data/{plugin_dir_name}",
             "extra_notes": None
         }
