@@ -31,7 +31,8 @@ ALLOWED_KEYS_BY_TYPE = {
         "task_specialization",
         "brainscore_link",
         "huggingface_link",
-        "extra_notes"
+        "extra_notes",
+        "runnable"
     },
     "benchmarks": {
         "stimulus_set": {
@@ -54,7 +55,8 @@ ALLOWED_KEYS_BY_TYPE = {
             "num_subjects",
             "pre_processing",
             "brainscore_link",
-            "extra_notes"
+            "extra_notes",
+            "data_publicly_available"
         },
         "metric": {
             "type",

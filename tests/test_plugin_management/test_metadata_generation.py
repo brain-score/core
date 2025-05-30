@@ -289,7 +289,7 @@ class TestModelMetadataGenerator:
         assert "trainable_parameter_count" in metadata['models'][self.model_name]
         assert "total_layers" in metadata['models'][self.model_name]
         assert "trainable_layers" in metadata['models'][self.model_name]
-        assert "model_size_MB" in metadata['models'][self.model_name]
+        assert "model_size_mb" in metadata['models'][self.model_name]
         assert "training_dataset" in metadata['models'][self.model_name]
         assert "task_specialization" in metadata['models'][self.model_name]
         assert "brainscore_link" in metadata['models'][self.model_name]
@@ -307,7 +307,7 @@ class TestModelMetadataGenerator:
         assert metadata['models'][self.model_name]["trainable_parameter_count"] == 25557032
         assert metadata['models'][self.model_name]["total_layers"] == 151
         assert metadata['models'][self.model_name]["trainable_layers"] == 54
-        assert metadata['models'][self.model_name]["model_size_MB"] == 102.23
+        assert metadata['models'][self.model_name]["model_size_mb"] == 102.23
         assert metadata['models'][self.model_name]["training_dataset"] is None
         assert metadata['models'][self.model_name]["task_specialization"] is None
         assert (metadata['models'][self.model_name]["brainscore_link"] ==

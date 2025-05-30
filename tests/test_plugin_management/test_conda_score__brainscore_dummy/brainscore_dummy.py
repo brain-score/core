@@ -10,10 +10,10 @@ def _run_score(model_identifier, benchmark_identifier):
     return Score(.42)
 
 
-def score(model_identifier, benchmark_identifier):
+def score(model_identifier, benchmark_identifier, conda_active=False):
     result = wrap_score(__file__,
                         model_identifier=model_identifier, benchmark_identifier=benchmark_identifier,
-                        score_function=_run_score)
+                        score_function=_run_score, conda_active=conda_active)
     print(result)
 
 
