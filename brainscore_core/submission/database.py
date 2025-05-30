@@ -116,7 +116,8 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
         'task_specialization': metadata.get('task_specialization'),
         'brainscore_link': metadata.get('brainscore_link'),
         'huggingface_link': metadata.get('huggingface_link'),
-        'extra_notes': metadata.get('extra_notes')
+        'extra_notes': metadata.get('extra_notes'),
+        'runnable': metadata.get('runnable')
     }
     try:  # if model exists, overwrite all fields
         modelmeta = ModelMeta.get(ModelMeta.identifier == model_identifier)

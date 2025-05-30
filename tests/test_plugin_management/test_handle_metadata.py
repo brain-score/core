@@ -29,6 +29,7 @@ class TestHandleMetadata(unittest.TestCase):
                         brainscore_link: "https://example.com"
                         huggingface_link: null
                         extra_notes: null
+                        runnable: False
                     """
         with tempfile.NamedTemporaryFile("w+", delete=False) as tmp:
             tmp.write(valid_yaml)
