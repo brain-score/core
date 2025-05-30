@@ -222,21 +222,30 @@ class TestRunChangedPlugins:
             'modifies_plugins': True, 'test_all_plugins': ['data', 'benchmarks', 'models'],
             'changed_plugins': {'models': [], 'benchmarks': [], 'data': [], 'metrics': []},
             'is_automergeable': False, 'run_score': 'True'}
-
+    
         run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
         run_args_mock.return_value = "Mock test run"
-
+    
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
             run_changed_plugin_tests('mocked_changed_files',
                                      self.domain_root)
             output = f.getvalue()
-
-        assert "Running tests for new or modified plugins: [" \
-               f"'{self.domain_root}/models/dummy_model/test.py', " \
-               f"'{self.domain_root}/benchmarks/dummy_benchmark/test.py', " \
-               f"'{self.domain_root}/benchmarks/dummy_benchmark_2/test.py', " \
-               f"'{self.domain_root}/data/dummy_data/test.py']" in output
+    
+        # Extract the list of test files from the output and sort them
+        import re
+        test_files_match = re.search(r"Running tests for new or modified plugins: \[(.*?)\]", output)
+        if test_files_match:
+            actual_test_files = sorted(eval(test_files_match.group(1)))
+            expected_test_files = sorted([
+                f'{self.domain_root}/models/dummy_model/test.py',
+                f'{self.domain_root}/benchmarks/dummy_benchmark/test.py',
+                f'{self.domain_root}/benchmarks/dummy_benchmark_2/test.py',
+                f'{self.domain_root}/data/dummy_data/test.py'
+            ])
+            assert actual_test_files == expected_test_files
+        else:
+            assert False, "Could not find test files list in output"
 
     def test_model_generic_test_plugin(self):
         """ Test the pytest call to generic model plugin testing,
