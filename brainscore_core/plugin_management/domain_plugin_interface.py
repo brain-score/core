@@ -8,7 +8,7 @@ class DomainPluginInterface(ABC):
     
     This class defines the contract for domain-specific implementations
     that handle loading benchmarks/models and creating metadata for different
-    domains (e.g., vision, audio, language).
+    domains (e.g., vision, language, etc.).
     """
 
     # ============================================================================
