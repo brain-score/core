@@ -7,9 +7,12 @@ from typing import List, Union
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
-from brainscore_core.submission.database_models import database_proxy, \
-    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, PeeweeBase
+from brainscore_core.submission.database_models import (database_proxy, \
+    Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, PeeweeBase)
 from brainscore_core.submission.utils import get_secret
+from brainscore_core.plugin_management.metadata_utils import (get_existing_meta_ids, process_stimuli_metadata,
+                                                              process_data_metadata, process_metric_metadata,
+                                                              update_benchmark_instances, BenchmarkMetaResult)
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +83,7 @@ def public_benchmark_identifiers(domain: str) -> List[str]:
 
 
 def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],
-                          submission: Submission, domain: str,
-                          bibtex: Union[None, str] = None) -> Model:
+                          submission: Submission, domain: str, bibtex: Union[None, str] = None) -> Model:
     model_entry, created = Model.get_or_create(name=model_identifier,
                                                defaults={
                                                    'owner': submission.submitter,
@@ -94,6 +96,86 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
         model_entry.reference = reference
         model_entry.save()
     return model_entry
+
+
+def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
+    """
+    Given a model identifier and a metadata dict, get or create a ModelMeta record.
+    The metadata dict can include keys such as architecture, model_family, etc.
+    """
+    # using get here in case certain fields don't exist
+    defaults = {
+        'architecture': metadata.get('architecture'),
+        'model_family': metadata.get('model_family'),
+        'total_parameter_count': metadata.get('total_parameter_count'),
+        'trainable_parameter_count': metadata.get('trainable_parameter_count'),
+        'total_layers': metadata.get('total_layers'),
+        'trainable_layers': metadata.get('trainable_layers'),
+        'model_size_mb': metadata.get('model_size_mb'),
+        'training_dataset': metadata.get('training_dataset'),
+        'task_specialization': metadata.get('task_specialization'),
+        'brainscore_link': metadata.get('brainscore_link'),
+        'huggingface_link': metadata.get('huggingface_link'),
+        'extra_notes': metadata.get('extra_notes'),
+        'runnable': metadata.get('runnable')
+    }
+    try:  # if model exists, overwrite all fields
+        modelmeta = ModelMeta.get(ModelMeta.identifier == model_identifier)
+        for key, value in defaults.items():
+            setattr(modelmeta, key, value)
+        modelmeta.save()
+        logger.info(f"Updated existing ModelMeta record for {model_identifier}")
+    except ModelMeta.DoesNotExist:  # otherwise create a new entry
+        # filter out fields that don't exist in the ModelMeta model
+        valid_defaults = {}
+        for key, value in defaults.items():
+            try:
+                if hasattr(ModelMeta, key):
+                    valid_defaults[key] = value
+            except Exception:
+                logger.warning(f"Field '{key}' not found in ModelMeta schema - skipping")
+
+        modelmeta = ModelMeta.create(identifier=model_identifier, **valid_defaults)
+        logger.info(f"Created new ModelMeta record for {model_identifier}")
+    return modelmeta
+
+
+def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
+    """
+    Given a benchmark identifier and a metadata dict, create metadata entries for the benchmark
+    and update the BenchmarkInstance table to reference these entries.
+
+    :return: A BenchmarkMetaResult object with the IDs of the created metadata entries
+    """
+    logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
+
+    # get benchmark instances and existing metadata IDs
+    benchmark_instances = BenchmarkInstance.select().join(BenchmarkType).where(
+        BenchmarkType.identifier == benchmark_identifier
+    )
+    existing_meta_ids = get_existing_meta_ids(benchmark_instances)
+
+    # process each metadata type
+    meta_ids = {}
+    if 'stimulus_set' in metadata:
+        meta_ids['stimuli_meta_id'] = process_stimuli_metadata(
+            metadata['stimulus_set'], existing_meta_ids['stimuli_meta_id'])
+    if 'data' in metadata:
+        meta_ids['data_meta_id'] = process_data_metadata(
+            metadata['data'], existing_meta_ids['data_meta_id'])
+    if 'metric' in metadata:
+        meta_ids['metric_meta_id'] = process_metric_metadata(
+            metadata['metric'], existing_meta_ids['metric_meta_id'])
+
+    update_benchmark_instances(benchmark_instances, meta_ids)
+    logger.info(f"Successfully processed metadata for benchmark {benchmark_identifier}")
+
+    return BenchmarkMetaResult(
+        benchmark_identifier=benchmark_identifier,
+        stimuli_meta_id=meta_ids.get('stimuli_meta_id'),
+        data_meta_id=meta_ids.get('data_meta_id'),
+        metric_meta_id=meta_ids.get('metric_meta_id')
+    )
 
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:

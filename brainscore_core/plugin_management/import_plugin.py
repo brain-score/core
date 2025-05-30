@@ -79,10 +79,20 @@ class ImportPlugin:
             )
         
         if setup_file.is_file():
-            subprocess.run(f"pip install {self.plugins_dir / self.plugin_dirname}", shell=True)
+            subprocess.run(
+                f"pip install {self.plugins_dir / self.plugin_dirname}",
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
 
         if requirements_file.is_file():
-            subprocess.run(f"pip install -r {requirements_file}", shell=True)
+            subprocess.run(
+                f"pip install -r {requirements_file}",
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
 
 
 def installation_preference():

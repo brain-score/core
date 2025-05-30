@@ -8,6 +8,7 @@ import random
 import smtplib
 import string
 import traceback
+import yaml
 from abc import ABC
 from argparse import ArgumentParser
 from datetime import datetime
@@ -20,7 +21,7 @@ from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
 from brainscore_core.submission.database import (
     benchmarkinstance_from_benchmark, connect_db, email_from_uid,
-    modelentry_from_model, public_benchmark_identifiers,
+    modelentry_from_model, create_model_meta_entry, create_benchmark_meta_entry, public_benchmark_identifiers,
     public_model_identifiers, submissionentry_from_meta, uid_from_email,
     update_score)
 
@@ -88,6 +89,60 @@ class UserManager:
 
         except Exception as e:
             logging.error(f'Could not send email to {user_email} because of {e}')
+            raise e
+
+
+class MetadataEndpoint:
+    """
+    Endpoint for processing metadata submissions. This endpoint is used when only
+    metadata.yml files have changed and no full scoring run is triggered.
+      - Connects to the database.
+      - Loads and validates the metadata.yml file from a plugin directory.
+      - Iterates through each plugin entry (e.g. each model) and updates db.
+    """
+
+    def __init__(self, db_secret: str):
+        logger.info(f"Connecting to db using secret '{db_secret}'")
+        connect_db(db_secret=db_secret)
+
+    def process_metadata(self, plugin_dir: str, plugin_type: str) -> dict:
+        """
+        Process the metadata file for a plugin.
+
+        :param plugin_dir: The directory containing the metadata.yml file.
+        :param plugin_type: The type of plugin ('models' or 'benchmarks').
+        :return: A dictionary mapping model identifiers to their updated ModelMeta records.
+        """
+        metadata_path = os.path.join(plugin_dir, "metadata.yml")
+        with open(metadata_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        if plugin_type not in data:
+            raise ValueError(f"Expected top-level key '{plugin_type}' in metadata file.")
+
+        plugin_metadata = data[plugin_type]
+        results = {}
+        for identifier, metadata in plugin_metadata.items():
+            logger.info(f"Updating metadata for plugin '{identifier}'")
+            # overwrite any existing entry with new metadata
+            if plugin_type == 'models':
+                result = create_model_meta_entry(identifier, metadata)
+            elif plugin_type == 'benchmarks':
+                result = create_benchmark_meta_entry(identifier, metadata)
+            else:
+                raise NotImplementedError(f"Plugin type not implemented yet: '{plugin_type}'")
+            results[identifier] = result
+            logger.info(f"Updated metadata for plugin '{identifier}': {json.dumps(metadata)}")
+        return results
+
+    def __call__(self, plugin_dir: str, plugin_type: str) -> None:
+        try:
+            results = self.process_metadata(plugin_dir, plugin_type)
+            logger.info("Metadata processing completed successfully.")
+            for plugin_id, record in results.items():
+                logger.info(f"Plugin '{plugin_id}' updated in db.")
+        except Exception as e:
+            logger.error(f"Error processing metadata: {e}", exc_info=True)
             raise e
 
 
