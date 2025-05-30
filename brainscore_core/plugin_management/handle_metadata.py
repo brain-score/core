@@ -5,6 +5,7 @@ import json
 import argparse
 import subprocess
 import time
+import importlib
 
 from brainscore_core.submission.endpoints import MetadataEndpoint
 from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
@@ -139,14 +140,57 @@ def validate_metadata_file(metadata_path):
     return errors, data
 
 
-def generate_metadata(plugin_dir, plugin_type, benchmark_type="neural"):
+def load_domain_plugin(domain: str, benchmark_type: str = "neural"):
+    """
+    Dynamically load domain plugin without circular dependencies.
+    
+    Uses importlib to dynamically import domain plugins following naming convention:
+    brainscore_{domain}.plugin_management.{Domain}DomainPlugin
+    
+    :param domain: str, the domain name (e.g., "vision", "audio", "language")
+    :param benchmark_type: str, the benchmark type for domain plugin initialization
+    :return: Domain plugin instance
+    """
+    try:
+        # Dynamic import following naming convention
+        domain_module_name = f"brainscore_{domain}.plugin_management"
+        domain_class_name = f"{domain.capitalize()}DomainPlugin"
+        
+        # Import the module
+        domain_module = importlib.import_module(domain_module_name)
+        
+        # Get the plugin class
+        domain_plugin_class = getattr(domain_module, domain_class_name)
+        
+        # Instantiate the plugin
+        domain_plugin = domain_plugin_class(benchmark_type=benchmark_type)
+        
+        return domain_plugin
+        
+    except ImportError as e:
+        print(f"ERROR: Could not import {domain_module_name}: {e}", file=sys.stderr)
+        print(f"Please install brainscore_{domain} package.", file=sys.stderr)
+        return None
+    except AttributeError as e:
+        print(f"ERROR: Could not find {domain_class_name} in {domain_module_name}: {e}", file=sys.stderr)
+        return None
+
+
+def generate_metadata(plugin_dir, plugin_type, benchmark_type="neural", domain="vision"):
+    """Generate metadata using domain plugins for both models and benchmarks."""
+    
+    # Use dynamic plugin loading instead of hardcoded imports
+    domain_plugin = load_domain_plugin(domain, benchmark_type)
+    if domain_plugin is None:
+        return None
+    
     if plugin_type == "models":
-        generator = ModelMetadataGenerator(plugin_dir)
+        generator = ModelMetadataGenerator(plugin_dir, domain_plugin)
         model_list = generator.find_registered_models(plugin_dir)
         metadata_path = generator(model_list)
         metadata_path = metadata_path[0] if metadata_path else None
     elif plugin_type == "benchmarks":
-        generator = BenchmarkMetadataGenerator(plugin_dir, benchmark_type)
+        generator = BenchmarkMetadataGenerator(plugin_dir, domain_plugin)
         benchmark_list = generator.find_registered_benchmarks(plugin_dir)
         metadata_path = generator(benchmark_list)
         metadata_path = metadata_path[0] if metadata_path else None
@@ -207,6 +251,8 @@ def main():
     parser.add_argument("--plugin-dir", required=True, help="Path to the plugin directory")
     parser.add_argument("--plugin-type", required=True, choices=list(ALLOWED_PLUGINS),
                         help="Plugin type (e.g., models or benchmarks)")
+    parser.add_argument("--domain", default="vision", choices=["vision"], 
+                        help="Domain type (currently only 'vision' is supported)")
     parser.add_argument("--db-connection", action="store_true", default=False,
                         help="If provided, establish a new database connection")
     args = parser.parse_args()
@@ -216,7 +262,7 @@ def main():
     if not os.path.exists(metadata_path):
         print("No metadata.yml found. Generating now.", file=sys.stderr)
         new_metadata = True
-        metadata_path = generate_metadata(args.plugin_dir, args.plugin_type)
+        metadata_path = generate_metadata(args.plugin_dir, args.plugin_type, domain=args.domain)
     else:
         print("Found metadata.yml. Validating...", file=sys.stderr)
 
