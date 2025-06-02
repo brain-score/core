@@ -1,9 +1,8 @@
 import os
 import tempfile
-import unittest
+import pytest
 import subprocess
-from unittest import mock
-from unittest.mock import ANY
+from unittest.mock import Mock, patch, ANY
 
 from brainscore_core.plugin_management.handle_metadata import (
     validate_metadata_file,
@@ -11,7 +10,7 @@ from brainscore_core.plugin_management.handle_metadata import (
 )
 
 
-class TestHandleMetadata(unittest.TestCase):
+class TestHandleMetadata:
     def test_validate_metadata_file_valid_models(self):
         """Test that a valid metadata file for models passes validation."""
         valid_yaml = """
@@ -37,9 +36,9 @@ class TestHandleMetadata(unittest.TestCase):
 
         errors, data = validate_metadata_file(tmp_path)
         os.remove(tmp_path)
-        self.assertEqual(errors, [])
-        self.assertIn("models", data)
-        self.assertIn("test-model", data["models"])
+        assert errors == []
+        assert "models" in data
+        assert "test-model" in data["models"]
 
     def test_validate_metadata_file_extra_keys(self):
         """Test that a metadata file with extra keys is flagged."""
@@ -55,8 +54,8 @@ class TestHandleMetadata(unittest.TestCase):
 
         errors, data = validate_metadata_file(tmp_path)
         os.remove(tmp_path)
-        self.assertTrue(errors)
-        self.assertTrue(any("extra keys" in err for err in errors))
+        assert len(errors) > 0
+        assert any("extra keys" in err for err in errors)
 
     def test_validate_metadata_file_invalid_top_level(self):
         """Test that a metadata file with an invalid top-level key is flagged."""
@@ -71,8 +70,8 @@ class TestHandleMetadata(unittest.TestCase):
 
         errors, data = validate_metadata_file(tmp_path)
         os.remove(tmp_path)
-        self.assertTrue(errors)
-        self.assertTrue(any("not allowed" in err for err in errors))
+        assert len(errors) > 0
+        assert any("not allowed" in err for err in errors)
 
     def test_validate_metadata_file_non_dict_top_level(self):
         """Test that a non-dictionary top-level YAML structure is flagged."""
@@ -86,12 +85,13 @@ class TestHandleMetadata(unittest.TestCase):
 
         errors, data = validate_metadata_file(tmp_path)
         os.remove(tmp_path)
-        self.assertTrue(errors)
-        self.assertIn("Top-level structure must be a dictionary.", errors)
+        assert len(errors) > 0
+        assert "Top-level structure must be a dictionary." in errors
 
-    @mock.patch("subprocess.run")
-    @mock.patch("subprocess.check_output")
+    @patch("subprocess.run")
+    @patch("subprocess.check_output")
     def test_create_metadata_pr_success(self, mock_check_output, mock_run):
+        """Test that create_metadata_pr succeeds with proper subprocess calls."""
         # configure mocks
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
         mock_check_output.return_value = "12345"  # mock PR number response
@@ -100,10 +100,9 @@ class TestHandleMetadata(unittest.TestCase):
             metadata_path = os.path.join(tmp_dir, "metadata.yml")
             with open(metadata_path, "w") as f:
                 f.write("models: {}")
-            try:
-                create_metadata_pr(tmp_dir, branch_name="test-branch")
-            except SystemExit:
-                self.fail("create_metadata_pr unexpectedly called sys.exit on success.")
+            
+            # Should not raise SystemExit on success
+            create_metadata_pr(tmp_dir, branch_name="test-branch")
 
             # check that git checkout was called with ANY branch name that starts with test-branch
             mock_run.assert_any_call(
@@ -113,18 +112,13 @@ class TestHandleMetadata(unittest.TestCase):
                 stderr=ANY
             )
 
-    @mock.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
+    @patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "cmd"))
     def test_create_metadata_pr_failure(self, mock_run):
-        """
-        Test that create_metadata_pr calls sys.exit when subprocess.run fails.
-        """
+        """Test that create_metadata_pr calls sys.exit when subprocess.run fails."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             metadata_path = os.path.join(tmp_dir, "metadata.yml")
             with open(metadata_path, "w") as f:
                 f.write("models: {}")
-            with self.assertRaises(SystemExit):
+            
+            with pytest.raises(SystemExit):
                 create_metadata_pr(tmp_dir, branch_name="test-branch")
-
-
-if __name__ == "__main__":
-    unittest.main()

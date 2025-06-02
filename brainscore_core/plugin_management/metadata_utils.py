@@ -71,7 +71,8 @@ def process_data_metadata(data_info, existing_id):
         'num_subjects': data_info.get('num_subjects'),
         'pre_processing': data_info.get('pre_processing'),
         'brainscore_link': data_info.get('brainscore_link'),
-        'extra_notes': data_info.get('extra_notes')
+        'extra_notes': data_info.get('extra_notes'),
+        'data_publicly_available': data_info.get('data_publicly_available'),
     }
     return update_or_create_meta_record(BenchmarkDataMeta, existing_id, field_mapping)
 
