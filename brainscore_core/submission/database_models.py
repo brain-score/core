@@ -87,20 +87,21 @@ class Model(PeeweeBase):
 
 
 class ModelMeta(PeeweeBase):
-    identifier = CharField(primary_key=True, max_length=255)
+
+    model = IntegerField(primary_key=True)
     architecture = CharField(max_length=100, null=True, default=None)
     model_family = CharField(max_length=100, null=True, default=None)
     total_parameter_count = IntegerField(null=True, default=None)
+    trainable_parameter_count = IntegerField(null=True, default=None)
     total_layers = IntegerField(null=True, default=None)
+    trainable_layers = IntegerField(null=True, default=None)
+    model_size_mb = FloatField(null=True, default=None)
     training_dataset = CharField(max_length=100, null=True, default=None)
     task_specialization = CharField(max_length=100, null=True, default=None)
     brainscore_link = CharField(max_length=256, null=True, default=None)
     hugging_face_link = CharField(max_length=256, null=True, default=None)
-    trainable_parameter_count = IntegerField(null=True, default=None)
-    trainable_layers = IntegerField(null=True, default=None)
-    model_size_mb = FloatField(null=True, default=None)
+    runnable = BooleanField(default=True, null=True)
     extra_notes = CharField(max_length=1000, null=True, default=None)
-    runnable = BooleanField(default=False)
 
     class Meta:
         table_name = 'brainscore_modelmeta'
@@ -133,7 +134,7 @@ class BenchmarkDataMeta(PeeweeBase):
     pre_processing = CharField(max_length=100, null=True)
     brainscore_link = CharField(max_length=200, null=True)
     extra_notes = CharField(max_length=1000, null=True)
-    data_publicly_available = BooleanField(default=False)
+    data_publicly_available = BooleanField(default=True)
 
     class Meta:
         table_name = 'brainscore_benchmark_data_meta'
