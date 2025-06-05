@@ -211,19 +211,30 @@ def get_model_with_metadata(model_identifier: str) -> Union[Tuple[Model, ModelMe
         return model_entry, None
 
 
-def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
+def create_benchmark_meta_entry(benchmark: Benchmark, domain: str, metadata: dict):
     """
-    Given a benchmark identifier and a metadata dict, create metadata entries for the benchmark
+    Given a loaded benchmark object, domain, and a metadata dict, create metadata entries for the benchmark
     and update the BenchmarkInstance table to reference these entries.
-
+        
+    :param benchmark: The loaded benchmark object (same as scoring uses)
+    :param domain: The domain (e.g., "vision", "language") 
+    :param metadata: Dictionary containing benchmark metadata
     :return: A BenchmarkMetaResult object with the IDs of the created metadata entries
     """
+    benchmark_identifier = benchmark.identifier
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
 
-    # get benchmark instances and existing metadata IDs
-    benchmark_instances = BenchmarkInstance.select().join(BenchmarkType).where(
-        BenchmarkType.identifier == benchmark_identifier
-    )
+    try:
+        # Same benchmark-finding logic as scoring uses
+        benchmark_instance = benchmarkinstance_from_benchmark(benchmark, domain=domain)
+        logger.info(f"Found benchmark instance using scoring logic: {benchmark_instance.id} for '{benchmark_identifier}' version {benchmark.version}")
+        
+    except Exception as e:
+        raise ValueError(f"Could not find benchmark instance for '{benchmark_identifier}' (version {benchmark.version}). "
+                        f"Error: {e}")
+
+    # Process metadata for this specific benchmark instance (same as scoring uses)
+    benchmark_instances = [benchmark_instance]  # Single instance from scoring logic
     existing_meta_ids = get_existing_meta_ids(benchmark_instances)
 
     # process each metadata type

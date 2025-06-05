@@ -281,8 +281,15 @@ def main():
     if args.db_connection:  # if metadata was altered, must upload to db on new connection
         print("Creating metadata endpoint...", file=sys.stderr)
         db_secret = os.environ.get("BSC_DATABASESECRET")
-        create_endpoint = MetadataEndpoint(db_secret=db_secret)
-        create_endpoint(plugin_dir=args.plugin_dir, plugin_type=args.plugin_type)
+        
+        # Load domain plugin (same as generate_metadata does)
+        domain_plugin = load_domain_plugin(args.domain, benchmark_type="neural")
+        if domain_plugin is None:
+            print(f"ERROR: Could not load domain plugin for '{args.domain}'", file=sys.stderr)
+            sys.exit(1)
+        
+        create_endpoint = MetadataEndpoint(domain_plugins=domain_plugin, db_secret=db_secret)
+        create_endpoint(plugin_dir=args.plugin_dir, plugin_type=args.plugin_type, domain=args.domain)
 
     if new_metadata:  # if metadata was created, create a pr that will be automerged and approved by github actions
         pr_number = create_metadata_pr(args.plugin_dir)
