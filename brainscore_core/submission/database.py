@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
 from pybtex.database.input import bibtex
-from typing import List, Union
+from typing import List, Union, Tuple
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
@@ -102,7 +102,51 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
     """
     Given a model identifier and a metadata dict, get or create a ModelMeta record.
     The metadata dict can include keys such as architecture, model_family, etc.
+    
+    Uses the exact same model-finding logic as scoring by calling modelentry_from_model().
+    This ensures perfect consistency between scoring and metadata systems.
     """
+    # Use the exact same function that scoring uses to find/get the model
+    # We need to provide dummy values for scoring-specific parameters
+    try:
+        # Get a dummy user and create a temporary submission for the lookup
+        dummy_user = User.select().first()
+        if not dummy_user:
+            raise ValueError("No users found in database - cannot perform model lookup")
+        
+        # Create a temporary submission for the model lookup
+        temp_submission = Submission.create(
+            jenkins_id=0,  # Dummy jenkins_id for metadata lookup
+            submitter=dummy_user,
+            model_type="metadata_lookup",
+            status="temporary",
+            timestamp=datetime.now()
+        )
+        
+        # Use the EXACT same function that scoring uses
+        model_entry = modelentry_from_model(
+            model_identifier=model_identifier,
+            domain="unknown",  # Default domain - will use existing model's domain if it exists
+            submission=temp_submission,
+            public=False,  # Default public status - will use existing model's status if it exists  
+            competition=None,
+            bibtex=None
+        )
+        
+        # Clean up the temporary submission
+        temp_submission.delete_instance()
+        
+        logger.info(f"Found model for metadata using scoring logic: ID={model_entry.id}, identifier='{model_identifier}'")
+        
+    except Exception as e:
+        # Clean up temp submission if it was created
+        try:
+            temp_submission.delete_instance()
+        except:
+            pass
+        raise ValueError(f"Model with identifier '{model_identifier}' not found. "
+                        f"Model must exist before creating metadata. Error: {e}")
+    
     # using get here in case certain fields don't exist
     defaults = {
         'architecture': metadata.get('architecture'),
@@ -119,12 +163,13 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
         'extra_notes': metadata.get('extra_notes'),
         'runnable': metadata.get('runnable')
     }
-    try:  # if model exists, overwrite all fields
-        modelmeta = ModelMeta.get(ModelMeta.identifier == model_identifier)
+    
+    try:  # if model metadata exists, overwrite all fields
+        modelmeta = ModelMeta.get(ModelMeta.model == model_entry.id)
         for key, value in defaults.items():
             setattr(modelmeta, key, value)
         modelmeta.save()
-        logger.info(f"Updated existing ModelMeta record for {model_identifier}")
+        logger.info(f"Updated existing ModelMeta record for model_id {model_entry.id} (identifier: {model_identifier})")
     except ModelMeta.DoesNotExist:  # otherwise create a new entry
         # filter out fields that don't exist in the ModelMeta model
         valid_defaults = {}
@@ -135,9 +180,35 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
             except Exception:
                 logger.warning(f"Field '{key}' not found in ModelMeta schema - skipping")
 
-        modelmeta = ModelMeta.create(identifier=model_identifier, **valid_defaults)
-        logger.info(f"Created new ModelMeta record for {model_identifier}")
+        modelmeta = ModelMeta.create(model=model_entry, **valid_defaults)
+        logger.info(f"Created new ModelMeta record for model_id {model_entry.id} (identifier: {model_identifier})")
     return modelmeta
+
+
+def get_model_metadata_by_identifier(model_identifier: str) -> Union[ModelMeta, None]:
+    """
+    Retrieve ModelMeta record by model identifier string.
+    Returns None if model or metadata doesn't exist.
+    """
+    try:
+        model_entry = Model.get(Model.name == model_identifier)
+        return ModelMeta.get(ModelMeta.model == model_entry.id)
+    except (Model.DoesNotExist, ModelMeta.DoesNotExist):
+        return None
+
+
+def get_model_with_metadata(model_identifier: str) -> Union[Tuple[Model, ModelMeta], Tuple[Model, None]]:
+    """
+    Retrieve Model and its associated ModelMeta record by identifier.
+    Returns (Model, ModelMeta) if both exist, (Model, None) if only model exists.
+    Raises Model.DoesNotExist if model doesn't exist.
+    """
+    model_entry = Model.get(Model.name == model_identifier)
+    try:
+        metadata = ModelMeta.get(ModelMeta.model == model_entry.id)
+        return model_entry, metadata
+    except ModelMeta.DoesNotExist:
+        return model_entry, None
 
 
 def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):

@@ -87,7 +87,7 @@ class Model(PeeweeBase):
 
 
 class ModelMeta(PeeweeBase):
-    identifier = CharField(primary_key=True, max_length=255)
+    model = ForeignKeyField(column_name='model_id', field='id', model=Model, primary_key=True)
     architecture = CharField(max_length=100, null=True, default=None)
     model_family = CharField(max_length=100, null=True, default=None)
     total_parameter_count = IntegerField(null=True, default=None)
