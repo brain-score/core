@@ -211,6 +211,56 @@ def get_model_with_metadata(model_identifier: str) -> Union[Tuple[Model, ModelMe
         return model_entry, None
 
 
+def get_benchmark_metadata_by_identifier(benchmark_identifier: str) -> Union[BenchmarkMetaResult, None]:
+    """
+    Retrieve benchmark metadata by benchmark identifier string.
+    Returns BenchmarkMetaResult if benchmark exists, None if benchmark doesn't exist.
+    """
+    try:
+        # Find benchmark instance - use first instance if multiple versions exist
+        benchmark_instance = BenchmarkInstance.select().join(BenchmarkType).where(
+            BenchmarkType.identifier == benchmark_identifier
+        ).first()
+        
+        if not benchmark_instance:
+            return None
+            
+        # Collect metadata IDs from the instance
+        metadata_ids = {
+            'stimuli_meta_id': benchmark_instance.stimuli_meta_id if hasattr(benchmark_instance, 'stimuli_meta_id') else None,
+            'data_meta_id': benchmark_instance.data_meta_id if hasattr(benchmark_instance, 'data_meta_id') else None,
+            'metric_meta_id': benchmark_instance.metric_meta_id if hasattr(benchmark_instance, 'metric_meta_id') else None
+        }
+        
+        # Return BenchmarkMetaResult object
+        return BenchmarkMetaResult(
+            benchmark_identifier=benchmark_identifier,
+            **metadata_ids
+        )
+        
+    except Exception:
+        return None
+
+
+def get_benchmark_with_metadata(benchmark_identifier: str) -> Union[Tuple[BenchmarkInstance, BenchmarkMetaResult], Tuple[BenchmarkInstance, None]]:
+    """
+    Retrieve BenchmarkInstance and its associated metadata by identifier.
+    Returns (BenchmarkInstance, BenchmarkMetaResult) if both exist, (BenchmarkInstance, None) if only benchmark exists.
+    Raises BenchmarkType.DoesNotExist if benchmark doesn't exist.
+    """
+    # Find benchmark instance - use first instance if multiple versions exist
+    benchmark_instance = BenchmarkInstance.select().join(BenchmarkType).where(
+        BenchmarkType.identifier == benchmark_identifier
+    ).first()
+    
+    if not benchmark_instance:
+        raise BenchmarkType.DoesNotExist(f"Benchmark with identifier '{benchmark_identifier}' not found")
+        
+    # Try to get metadata
+    metadata = get_benchmark_metadata_by_identifier(benchmark_identifier)
+    return benchmark_instance, metadata
+
+
 def create_benchmark_meta_entry(benchmark: Benchmark, domain: str, metadata: dict):
     """
     Given a loaded benchmark object, domain, and a metadata dict, create metadata entries for the benchmark

@@ -19,11 +19,25 @@ import requests
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
+
+# User management imports
 from brainscore_core.submission.database import (
-    benchmarkinstance_from_benchmark, connect_db, email_from_uid,
-    modelentry_from_model, create_model_meta_entry, create_benchmark_meta_entry, public_benchmark_identifiers,
-    public_model_identifiers, submissionentry_from_meta, uid_from_email,
-    update_score)
+    connect_db, uid_from_email, email_from_uid, submissionentry_from_meta)
+
+# Model imports  
+from brainscore_core.submission.database import (
+    modelentry_from_model, create_model_meta_entry, 
+    get_model_metadata_by_identifier, get_model_with_metadata,
+    public_model_identifiers)
+
+# Benchmark imports
+from brainscore_core.submission.database import (
+    benchmarkinstance_from_benchmark, create_benchmark_meta_entry,
+    get_benchmark_metadata_by_identifier, get_benchmark_with_metadata,
+    public_benchmark_identifiers)
+
+# Scoring imports
+from brainscore_core.submission.database import update_score
 
 logger = logging.getLogger(__name__)
 
