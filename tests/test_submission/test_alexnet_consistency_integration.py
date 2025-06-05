@@ -214,13 +214,25 @@ class TestAlexNetConsistencyIntegration(unittest.TestCase):
             found_model = Model.get(Model.id == created_model_id)
             self.assertEqual(found_model.name, model_identifier)
             
-            # Verify metadata fields
-            self.assertEqual(metadata_result.architecture, 'CNN')
-            self.assertEqual(metadata_result.model_family, 'AlexNet')
-            self.assertEqual(metadata_result.total_parameter_count, 62000000)
-            self.assertEqual(metadata_result.runnable, False)
+            # Test requerying metadata using just the identifier
+            from brainscore_core.submission.database import get_model_metadata_by_identifier, get_model_with_metadata
             
-            logger.info("SUCCESS: Metadata correctly linked to alexnet model")
+            # Test get_model_metadata_by_identifier
+            requeried_metadata = get_model_metadata_by_identifier(found_model.name)
+            self.assertIsNotNone(requeried_metadata, "Should be able to find metadata by identifier")
+            self.assertEqual(requeried_metadata.architecture, 'CNN')
+            self.assertEqual(requeried_metadata.model_family, 'AlexNet')
+            self.assertEqual(requeried_metadata.total_parameter_count, 62000000)
+            self.assertEqual(requeried_metadata.runnable, False)
+            
+            # Test get_model_with_metadata
+            requeried_model, requeried_meta = get_model_with_metadata(model_identifier)
+            self.assertEqual(requeried_model.id, created_model_id)
+            self.assertEqual(requeried_model.name, model_identifier)
+            self.assertIsNotNone(requeried_meta, "Should return metadata along with model")
+            self.assertEqual(requeried_meta.architecture, 'CNN')
+            
+            logger.info("SUCCESS: Metadata correctly linked to alexnet model and can be requeried by identifier") 
             
         finally:
             # Clean up
