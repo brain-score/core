@@ -148,7 +148,7 @@ def load_domain_plugin(domain: str, benchmark_type: str = "neural"):
     brainscore_{domain}.plugin_management.{Domain}DomainPlugin
     
     :param domain: str, the domain name (e.g., "vision", "audio", "language")
-    :param benchmark_type: str, the benchmark type for domain plugin initialization
+    :param benchmark_type: str, the benchmark type for domain plugin initialization (optional for models)
     :return: Domain plugin instance
     """
     try:
@@ -283,7 +283,7 @@ def main():
         db_secret = os.environ.get("BSC_DATABASESECRET")
         
         # Load domain plugin (same as generate_metadata does)
-        domain_plugin = load_domain_plugin(args.domain, benchmark_type="neural")
+        domain_plugin = load_domain_plugin(args.domain)
         if domain_plugin is None:
             print(f"ERROR: Could not load domain plugin for '{args.domain}'", file=sys.stderr)
             sys.exit(1)
