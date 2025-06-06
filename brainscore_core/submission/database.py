@@ -202,6 +202,8 @@ def get_model_with_metadata(model_identifier: str) -> Union[Tuple[Model, ModelMe
     Retrieve Model and its associated ModelMeta record by identifier.
     Returns (Model, ModelMeta) if both exist, (Model, None) if only model exists.
     Raises Model.DoesNotExist if model doesn't exist.
+
+    Only used during `text_alexnet_consistency_integration.py`
     """
     model_entry = Model.get(Model.name == model_identifier)
     try:
@@ -247,6 +249,8 @@ def get_benchmark_with_metadata(benchmark_identifier: str) -> Union[Tuple[Benchm
     Retrieve BenchmarkInstance and its associated metadata by identifier.
     Returns (BenchmarkInstance, BenchmarkMetaResult) if both exist, (BenchmarkInstance, None) if only benchmark exists.
     Raises BenchmarkType.DoesNotExist if benchmark doesn't exist.
+
+    Only used during `text_alexnet_consistency_integration.py`
     """
     # Find benchmark instance - use first instance if multiple versions exist
     benchmark_instance = BenchmarkInstance.select().join(BenchmarkType).where(
