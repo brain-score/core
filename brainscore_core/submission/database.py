@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
 from pybtex.database.input import bibtex
-from typing import List, Union
+from typing import List, Union, Tuple
 
 from brainscore_core.benchmarks import Benchmark
 from brainscore_core.metrics import Score as ScoreObject
@@ -102,7 +102,51 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
     """
     Given a model identifier and a metadata dict, get or create a ModelMeta record.
     The metadata dict can include keys such as architecture, model_family, etc.
+    
+    Uses the exact same model-finding logic as scoring by calling modelentry_from_model().
+    This ensures perfect consistency between scoring and metadata systems.
     """
+    # Use the exact same function that scoring uses to find/get the model
+    # We need to provide dummy values for scoring-specific parameters
+    try:
+        # Get a dummy user and create a temporary submission for the lookup
+        dummy_user = User.select().first()
+        if not dummy_user:
+            raise ValueError("No users found in database - cannot perform model lookup")
+        
+        # Create a temporary submission for the model lookup
+        temp_submission = Submission.create(
+            jenkins_id=0,  # Dummy jenkins_id for metadata lookup
+            submitter=dummy_user,
+            model_type="metadata_lookup",
+            status="temporary",
+            timestamp=datetime.now()
+        )
+        
+        # Use the EXACT same function that scoring uses
+        model_entry = modelentry_from_model(
+            model_identifier=model_identifier,
+            domain="unknown",  # Default domain - will use existing model's domain if it exists
+            submission=temp_submission,
+            public=False,  # Default public status - will use existing model's status if it exists  
+            competition=None,
+            bibtex=None
+        )
+        
+        # Clean up the temporary submission
+        temp_submission.delete_instance()
+        
+        logger.info(f"Found model for metadata using scoring logic: ID={model_entry.id}, identifier='{model_identifier}'")
+        
+    except Exception as e:
+        # Clean up temp submission if it was created
+        try:
+            temp_submission.delete_instance()
+        except:
+            pass
+        raise ValueError(f"Model with identifier '{model_identifier}' not found. "
+                        f"Model must exist before creating metadata. Error: {e}")
+    
     # using get here in case certain fields don't exist
     defaults = {
         'architecture': metadata.get('architecture'),
@@ -119,12 +163,13 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
         'extra_notes': metadata.get('extra_notes'),
         'runnable': metadata.get('runnable')
     }
-    try:  # if model exists, overwrite all fields
-        modelmeta = ModelMeta.get(ModelMeta.identifier == model_identifier)
+    
+    try:  # if model metadata exists, overwrite all fields
+        modelmeta = ModelMeta.get(ModelMeta.model == model_entry.id)
         for key, value in defaults.items():
             setattr(modelmeta, key, value)
         modelmeta.save()
-        logger.info(f"Updated existing ModelMeta record for {model_identifier}")
+        logger.info(f"Updated existing ModelMeta record for model_id {model_entry.id} (identifier: {model_identifier})")
     except ModelMeta.DoesNotExist:  # otherwise create a new entry
         # filter out fields that don't exist in the ModelMeta model
         valid_defaults = {}
@@ -135,24 +180,115 @@ def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
             except Exception:
                 logger.warning(f"Field '{key}' not found in ModelMeta schema - skipping")
 
-        modelmeta = ModelMeta.create(identifier=model_identifier, **valid_defaults)
-        logger.info(f"Created new ModelMeta record for {model_identifier}")
+        modelmeta = ModelMeta.create(model=model_entry, **valid_defaults)
+        logger.info(f"Created new ModelMeta record for model_id {model_entry.id} (identifier: {model_identifier})")
     return modelmeta
 
 
-def create_benchmark_meta_entry(benchmark_identifier: str, metadata: dict):
+def get_model_metadata_by_identifier(model_identifier: str) -> Union[ModelMeta, None]:
     """
-    Given a benchmark identifier and a metadata dict, create metadata entries for the benchmark
-    and update the BenchmarkInstance table to reference these entries.
+    Retrieve ModelMeta record by model identifier string.
+    Returns None if model or metadata doesn't exist.
+    """
+    try:
+        model_entry = Model.get(Model.name == model_identifier)
+        return ModelMeta.get(ModelMeta.model == model_entry.id)
+    except (Model.DoesNotExist, ModelMeta.DoesNotExist):
+        return None
 
+
+def get_model_with_metadata(model_identifier: str) -> Union[Tuple[Model, ModelMeta], Tuple[Model, None]]:
+    """
+    Retrieve Model and its associated ModelMeta record by identifier.
+    Returns (Model, ModelMeta) if both exist, (Model, None) if only model exists.
+    Raises Model.DoesNotExist if model doesn't exist.
+
+    Only used during `text_alexnet_consistency_integration.py`
+    """
+    model_entry = Model.get(Model.name == model_identifier)
+    try:
+        metadata = ModelMeta.get(ModelMeta.model == model_entry.id)
+        return model_entry, metadata
+    except ModelMeta.DoesNotExist:
+        return model_entry, None
+
+
+def get_benchmark_metadata_by_identifier(benchmark_identifier: str) -> Union[BenchmarkMetaResult, None]:
+    """
+    Retrieve benchmark metadata by benchmark identifier string.
+    Returns BenchmarkMetaResult if benchmark exists, None if benchmark doesn't exist.
+    """
+    try:
+        # Find benchmark instance - use first instance if multiple versions exist
+        benchmark_instance = BenchmarkInstance.select().join(BenchmarkType).where(
+            BenchmarkType.identifier == benchmark_identifier
+        ).first()
+        
+        if not benchmark_instance:
+            return None
+            
+        # Collect metadata IDs from the instance
+        metadata_ids = {
+            'stimuli_meta_id': benchmark_instance.stimuli_meta_id if hasattr(benchmark_instance, 'stimuli_meta_id') else None,
+            'data_meta_id': benchmark_instance.data_meta_id if hasattr(benchmark_instance, 'data_meta_id') else None,
+            'metric_meta_id': benchmark_instance.metric_meta_id if hasattr(benchmark_instance, 'metric_meta_id') else None
+        }
+        
+        # Return BenchmarkMetaResult object
+        return BenchmarkMetaResult(
+            benchmark_identifier=benchmark_identifier,
+            **metadata_ids
+        )
+        
+    except Exception:
+        return None
+
+
+def get_benchmark_with_metadata(benchmark_identifier: str) -> Union[Tuple[BenchmarkInstance, BenchmarkMetaResult], Tuple[BenchmarkInstance, None]]:
+    """
+    Retrieve BenchmarkInstance and its associated metadata by identifier.
+    Returns (BenchmarkInstance, BenchmarkMetaResult) if both exist, (BenchmarkInstance, None) if only benchmark exists.
+    Raises BenchmarkType.DoesNotExist if benchmark doesn't exist.
+
+    Only used during `text_alexnet_consistency_integration.py`
+    """
+    # Find benchmark instance - use first instance if multiple versions exist
+    benchmark_instance = BenchmarkInstance.select().join(BenchmarkType).where(
+        BenchmarkType.identifier == benchmark_identifier
+    ).first()
+    
+    if not benchmark_instance:
+        raise BenchmarkType.DoesNotExist(f"Benchmark with identifier '{benchmark_identifier}' not found")
+        
+    # Try to get metadata
+    metadata = get_benchmark_metadata_by_identifier(benchmark_identifier)
+    return benchmark_instance, metadata
+
+
+def create_benchmark_meta_entry(benchmark: Benchmark, domain: str, metadata: dict):
+    """
+    Given a loaded benchmark object, domain, and a metadata dict, create metadata entries for the benchmark
+    and update the BenchmarkInstance table to reference these entries.
+        
+    :param benchmark: The loaded benchmark object (same as scoring uses)
+    :param domain: The domain (e.g., "vision", "language") 
+    :param metadata: Dictionary containing benchmark metadata
     :return: A BenchmarkMetaResult object with the IDs of the created metadata entries
     """
+    benchmark_identifier = benchmark.identifier
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
 
-    # get benchmark instances and existing metadata IDs
-    benchmark_instances = BenchmarkInstance.select().join(BenchmarkType).where(
-        BenchmarkType.identifier == benchmark_identifier
-    )
+    try:
+        # Same benchmark-finding logic as scoring uses
+        benchmark_instance = benchmarkinstance_from_benchmark(benchmark, domain=domain)
+        logger.info(f"Found benchmark instance using scoring logic: {benchmark_instance.id} for '{benchmark_identifier}' version {benchmark.version}")
+        
+    except Exception as e:
+        raise ValueError(f"Could not find benchmark instance for '{benchmark_identifier}' (version {benchmark.version}). "
+                        f"Error: {e}")
+
+    # Process metadata for this specific benchmark instance (same as scoring uses)
+    benchmark_instances = [benchmark_instance]  # Single instance from scoring logic
     existing_meta_ids = get_existing_meta_ids(benchmark_instances)
 
     # process each metadata type

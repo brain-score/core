@@ -19,11 +19,25 @@ import requests
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
 from brainscore_core.submission import database_models
+
+# User management imports
 from brainscore_core.submission.database import (
-    benchmarkinstance_from_benchmark, connect_db, email_from_uid,
-    modelentry_from_model, create_model_meta_entry, create_benchmark_meta_entry, public_benchmark_identifiers,
-    public_model_identifiers, submissionentry_from_meta, uid_from_email,
-    update_score)
+    connect_db, uid_from_email, email_from_uid, submissionentry_from_meta)
+
+# Model imports  
+from brainscore_core.submission.database import (
+    modelentry_from_model, create_model_meta_entry, 
+    get_model_metadata_by_identifier, get_model_with_metadata,
+    public_model_identifiers)
+
+# Benchmark imports
+from brainscore_core.submission.database import (
+    benchmarkinstance_from_benchmark, create_benchmark_meta_entry,
+    get_benchmark_metadata_by_identifier, get_benchmark_with_metadata,
+    public_benchmark_identifiers)
+
+# Scoring imports
+from brainscore_core.submission.database import update_score
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +106,20 @@ class UserManager:
             raise e
 
 
+class DomainPlugins(ABC):
+    """
+    Interface for domain-specific model + benchmark loaders and the score method.
+    """
+
+    def load_model(self, model_identifier: str):
+        raise NotImplementedError()
+
+    def load_benchmark(self, benchmark_identifier: str) -> Benchmark:
+        raise NotImplementedError()
+
+    def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
+        raise NotImplementedError()
+
 class MetadataEndpoint:
     """
     Endpoint for processing metadata submissions. This endpoint is used when only
@@ -101,16 +129,18 @@ class MetadataEndpoint:
       - Iterates through each plugin entry (e.g. each model) and updates db.
     """
 
-    def __init__(self, db_secret: str):
+    def __init__(self, domain_plugins: DomainPlugins, db_secret: str):
+        self.domain_plugins = domain_plugins
         logger.info(f"Connecting to db using secret '{db_secret}'")
         connect_db(db_secret=db_secret)
 
-    def process_metadata(self, plugin_dir: str, plugin_type: str) -> dict:
+    def process_metadata(self, plugin_dir: str, plugin_type: str, domain: str = None) -> dict:
         """
         Process the metadata file for a plugin.
 
         :param plugin_dir: The directory containing the metadata.yml file.
         :param plugin_type: The type of plugin ('models' or 'benchmarks').
+        :param domain: The domain ('vision' or 'language'). Required for benchmarks.
         :return: A dictionary mapping model identifiers to their updated ModelMeta records.
         """
         metadata_path = os.path.join(plugin_dir, "metadata.yml")
@@ -128,37 +158,35 @@ class MetadataEndpoint:
             if plugin_type == 'models':
                 result = create_model_meta_entry(identifier, metadata)
             elif plugin_type == 'benchmarks':
-                result = create_benchmark_meta_entry(identifier, metadata)
+                if domain is None:
+                    raise ValueError("Domain parameter is required for benchmark metadata processing")
+                
+                # Load benchmark in ENDPOINT layer (same pattern as RunScoringEndpoint)
+                try:
+                    benchmark = self.domain_plugins.load_benchmark(identifier)
+                    if benchmark is None:
+                        raise ValueError(f"Failed to load benchmark '{identifier}'")
+                    logger.info(f"Loaded benchmark '{identifier}' in endpoint layer")
+                except Exception as e:
+                    raise ValueError(f"Could not load benchmark '{identifier}': {e}")
+                
+                # Pass loaded benchmark object to DATABASE layer
+                result = create_benchmark_meta_entry(benchmark, domain, metadata)
             else:
                 raise NotImplementedError(f"Plugin type not implemented yet: '{plugin_type}'")
             results[identifier] = result
             logger.info(f"Updated metadata for plugin '{identifier}': {json.dumps(metadata)}")
         return results
 
-    def __call__(self, plugin_dir: str, plugin_type: str) -> None:
+    def __call__(self, plugin_dir: str, plugin_type: str, domain: str = None) -> None:
         try:
-            results = self.process_metadata(plugin_dir, plugin_type)
+            results = self.process_metadata(plugin_dir, plugin_type, domain)
             logger.info("Metadata processing completed successfully.")
             for plugin_id, record in results.items():
                 logger.info(f"Plugin '{plugin_id}' updated in db.")
         except Exception as e:
             logger.error(f"Error processing metadata: {e}", exc_info=True)
             raise e
-
-
-class DomainPlugins(ABC):
-    """
-    Interface for domain-specific model + benchmark loaders and the score method.
-    """
-
-    def load_model(self, model_identifier: str):
-        raise NotImplementedError()
-
-    def load_benchmark(self, benchmark_identifier: str) -> Benchmark:
-        raise NotImplementedError()
-
-    def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
-        raise NotImplementedError()
 
 
 class RunScoringEndpoint:
