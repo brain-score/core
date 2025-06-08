@@ -26,7 +26,7 @@ from brainscore_core.submission.database import (
 
 # Model imports  
 from brainscore_core.submission.database import (
-    modelentry_from_model, create_model_meta_entry, 
+    modelentry_from_model, create_model_meta_entry, safe_create_model_meta_entry,
     get_model_metadata_by_identifier, get_model_with_metadata,
     public_model_identifiers)
 
@@ -154,9 +154,9 @@ class MetadataEndpoint:
         results = {}
         for identifier, metadata in plugin_metadata.items():
             logger.info(f"Updating metadata for plugin '{identifier}'")
-            # overwrite any existing entry with new metadata
             if plugin_type == 'models':
-                result = create_model_meta_entry(identifier, metadata)
+                # overwrite any existing entry with new metadata
+                result = safe_create_model_meta_entry(identifier, metadata)
             elif plugin_type == 'benchmarks':
                 if domain is None:
                     raise ValueError("Domain parameter is required for benchmark metadata processing")

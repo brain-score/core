@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import datetime
 from peewee import PostgresqlDatabase, SqliteDatabase, DoesNotExist
 from pybtex.database.input import bibtex
@@ -96,6 +97,24 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
         model_entry.reference = reference
         model_entry.save()
     return model_entry
+
+
+def safe_create_model_meta_entry(model_identifier: str, metadata: dict, max_attempts: int = 10, sleep_seconds: int = 60) -> ModelMeta:
+    """
+    Retry `create_model_meta_entry` until the model exists, or a timeout is reached.
+    """
+    for attempt in range(max_attempts):
+        try:
+            return create_model_meta_entry(model_identifier, metadata)
+        except ValueError as e:
+            if "not found" in str(e):
+                logger.warning(
+                    f"[Retry {attempt + 1}/{max_attempts}] Model '{model_identifier}' not found yet – retrying in {sleep_seconds}s..."
+                )
+                time.sleep(sleep_seconds)
+            else:
+                raise  # Let unexpected errors through
+    raise TimeoutError(f"Timed out waiting for model '{model_identifier}' to exist after {max_attempts} attempts.")
 
 
 def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
