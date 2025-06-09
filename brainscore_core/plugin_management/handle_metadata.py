@@ -258,13 +258,22 @@ def main():
     args = parser.parse_args()
 
     new_metadata = False
-    metadata_path = os.path.join(args.plugin_dir, "metadata.yml")
-    if not os.path.exists(metadata_path):
-        print("No metadata.yml found. Generating now.", file=sys.stderr)
+    yml_path = os.path.join(args.plugin_dir, "metadata.yml")
+    yaml_path = os.path.join(args.plugin_dir, "metadata.yaml")
+
+    if os.path.exists(yml_path) and os.path.exists(yaml_path):
+        print("ERROR: Both metadata.yml and metadata.yaml exist. Please keep only one.", file=sys.stderr)
+        sys.exit(1)
+    
+    # prioritize .yml, fall back to .yaml
+    metadata_path = yml_path if os.path.exists(yml_path) else yaml_path if os.path.exists(yaml_path) else None
+    
+    if metadata_path is None:
+        print("No metadata.yml or metadata.yaml found. Generating now.", file=sys.stderr)
         new_metadata = True
         metadata_path = generate_metadata(args.plugin_dir, args.plugin_type, domain=args.domain)
     else:
-        print("Found metadata.yml. Validating...", file=sys.stderr)
+        print(f"Found metadata at {metadata_path}. Validating...", file=sys.stderr)
 
     errors, data = validate_metadata_file(metadata_path)
     if errors:
