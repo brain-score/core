@@ -143,7 +143,17 @@ class MetadataEndpoint:
         :param domain: The domain ('vision' or 'language'). Required for benchmarks.
         :return: A dictionary mapping model identifiers to their updated ModelMeta records.
         """
-        metadata_path = os.path.join(plugin_dir, "metadata.yml")
+        # allow for either yml or yaml extension
+        yml_path = os.path.join(plugin_dir, "metadata.yml")
+        yaml_path = os.path.join(plugin_dir, "metadata.yaml")
+        
+        if os.path.isfile(yml_path):
+            metadata_path = yml_path
+        elif os.path.isfile(yaml_path):
+            metadata_path = yaml_path
+        else:
+            raise FileNotFoundError(f"No metadata.yml or metadata.yaml found in {plugin_dir}")
+            
         with open(metadata_path, 'r') as f:
             data = yaml.safe_load(f)
 
