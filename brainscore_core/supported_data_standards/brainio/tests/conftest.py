@@ -12,12 +12,14 @@ from brainio.assemblies import DataAssembly, SpikeTimesAssembly, MetadataAssembl
 from brainio.packaging import write_netcdf
 
 
-BUCKET_NAME = "brainio-temp"
+def parse_bucket_info(bucket_string):
+    if "/" in bucket_string:
+        bucket, prefix = bucket_string.split("/", 1)
+        return bucket, prefix + "/"
+    else:
+        return bucket_string, ""
 
-
-@pytest.fixture
-def test_catalog_identifier():
-    return "brainio_test"
+BUCKET_NAME, BUCKET_PREFIX = parse_bucket_info("brainscore-storage/brainio-temp")
 
 
 def get_nc_path(check=True):

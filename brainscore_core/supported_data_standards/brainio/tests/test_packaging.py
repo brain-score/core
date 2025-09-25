@@ -108,15 +108,13 @@ def test_append(test_catalog_identifier, test_write_netcdf_path, restore_this_fi
 
 
 @pytest.mark.private_access
-def test_package_stimulus_set(test_stimulus_set_identifier, test_catalog_identifier, brainio_home, restore_this_file,
-                              restore_catalog):
+def test_package_stimulus_set(test_stimulus_set_identifier, brainio_home, restore_this_file):
     stimulus_set = StimulusSet(make_stimulus_set_df())
     stimulus_set.stimulus_paths = {row["stimulus_id"]: Path(__file__).parent / f'images/{row["filename"]}'
                                    for _, row in stimulus_set.iterrows()}
     del stimulus_set["filename"]
     identifier = test_stimulus_set_identifier
-    restore_catalog(test_catalog_identifier)
-    result = package_stimulus_set(test_catalog_identifier, stimulus_set, identifier, bucket_name=BUCKET_NAME)
+    result = package_stimulus_set(None, stimulus_set, identifier, bucket_name=BUCKET_NAME)
     # Catalog functionality has been removed - just verify packaging returns result
     assert result['identifier'] == identifier
     assert 'csv_sha1' in result
@@ -125,8 +123,7 @@ def test_package_stimulus_set(test_stimulus_set_identifier, test_catalog_identif
 
 
 @pytest.mark.private_access
-def test_package_data_assembly(test_stimulus_set_identifier, test_catalog_identifier, brainio_home,
-                               restore_this_file, restore_catalog):
+def test_package_data_assembly(test_stimulus_set_identifier, brainio_home, restore_this_file):
     # catalog = lookup.get_catalog(test_catalog_identifier)
     # assert 'lookup_source' not in catalog
     # assert 'source_catalog' not in catalog
@@ -135,8 +132,7 @@ def test_package_data_assembly(test_stimulus_set_identifier, test_catalog_identi
                                    for _, row in stimulus_set.iterrows()}
     del stimulus_set["filename"]
     identifier = test_stimulus_set_identifier
-    restore_catalog(test_catalog_identifier)
-    package_stimulus_set(test_catalog_identifier, stimulus_set, identifier, bucket_name=BUCKET_NAME)
+    package_stimulus_set(None, stimulus_set, identifier, bucket_name=BUCKET_NAME)
     assy = DataAssembly(
         data=[[[1], [2], [3]], [[4], [5], [6]], [[7], [8], [9]], [[10], [11], [12]], [[13], [14], [15]], [[16], [17], [18]]],
         coords={
@@ -151,7 +147,7 @@ def test_package_data_assembly(test_stimulus_set_identifier, test_catalog_identi
     )
     identifier = "test.package_assembly"
     result = package_data_assembly(
-        test_catalog_identifier, assy, identifier, test_stimulus_set_identifier, "DataAssembly", "brainio-temp")
+        None, assy, identifier, test_stimulus_set_identifier, "DataAssembly", BUCKET_NAME)
     # Catalog functionality has been removed - just verify packaging returns result
     assert result['identifier'] == identifier
     assert 'sha1' in result
@@ -159,22 +155,20 @@ def test_package_data_assembly(test_stimulus_set_identifier, test_catalog_identi
 
 
 @pytest.mark.private_access
-def test_package_extras(test_stimulus_set_identifier, test_catalog_identifier, brainio_home,
-                        restore_catalog):
+def test_package_extras(test_stimulus_set_identifier, brainio_home):
     stimulus_set = StimulusSet(make_stimulus_set_df())
     stimulus_set.stimulus_paths = {row["stimulus_id"]: Path(__file__).parent / f'images/{row["filename"]}'
                                    for _, row in stimulus_set.iterrows()}
     del stimulus_set["filename"]
     identifier = test_stimulus_set_identifier
-    restore_catalog(test_catalog_identifier)
-    package_stimulus_set(test_catalog_identifier, stimulus_set, identifier, bucket_name=BUCKET_NAME)
+    package_stimulus_set(None, stimulus_set, identifier, bucket_name=BUCKET_NAME)
     assy = make_spk_assembly()
     identifier = "test.package_assembly_extras"
     assy_extra = make_meta_assembly()
     assy_extra.name = "test"
     extras = {assy_extra.name: assy_extra}
-    result = package_data_assembly(test_catalog_identifier, assy, identifier, test_stimulus_set_identifier,
-                          "SpikeTimesAssembly", "brainio-temp", extras)
+    result = package_data_assembly(None, assy, identifier, test_stimulus_set_identifier,
+                          "SpikeTimesAssembly", BUCKET_NAME, extras)
     # Catalog functionality has been removed - just verify packaging returns result
     assert result['identifier'] == identifier
     assert 'sha1' in result
