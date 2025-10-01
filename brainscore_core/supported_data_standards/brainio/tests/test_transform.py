@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+from brainscore_vision.data_helpers.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
+from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly, NeuronRecordingAssembly
 from brainscore_core.supported_data_standards.brainio.transform import subset, index_efficient
 
 
@@ -111,14 +112,23 @@ class TestSubset:
         np.testing.assert_array_equal(subset_assembly, target_assembly)
         assert (subset_assembly == target_assembly).all()
 
-    # @pytest.mark.private_access
-    # def test_category_subselection(self, brainio_home):
-    #     assembly = get_assembly('dicarlo.MajajHong2015')
-    #     categories = np.unique(assembly['category_name'])
-    #     target = xr.DataArray([0] * len(categories), coords={'category_name': categories},
-    #                           dims=['category_name']).stack(presentation=['category_name'])
-    #     sub_assembly = subset(assembly, target, repeat=True, dims_must_match=False)
-    #     assert (assembly == sub_assembly).all()
+    @pytest.mark.private_access
+    def test_category_subselection(self, brainio_home):
+        assembly = load_assembly_from_s3(identifier='dicarlo.MajajHong2015.public', version_id="null", 
+                                     sha1="13d28ca0ce88ee550b54db3004374ae19096e9b9",
+                                     bucket="brainscore-storage/brainio-brainscore", cls=NeuronRecordingAssembly, 
+                                     stimulus_set_loader= lambda: load_stimulus_set_from_s3(identifier="hvm-public",bucket="brainscore-storage/brainio-brainscore",
+                                              csv_sha1="5ca7a3da00d8e9c694a9cd725df5ba0ad6d735af",
+                                              zip_sha1="8aa44e038d7b551efa8077467622f9d48d72e473",
+                                              csv_version_id="null",
+                                              zip_version_id="null"
+                                            ),
+                                    )
+        categories = np.unique(assembly['category_name'])
+        target = xr.DataArray([0] * len(categories), coords={'category_name': categories},
+                              dims=['category_name']).stack(presentation=['category_name'])
+        sub_assembly = subset(assembly, target, repeat=True, dims_must_match=False)
+        assert (assembly == sub_assembly).all()
 
     def test_repeated_dim(self):
         source_assembly = np.random.rand(5, 5)
