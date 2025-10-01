@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from brainscore_vision.data_helpers.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
+from brainscore_core.supported_data_standards.brainio.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly, NeuronRecordingAssembly
 from brainscore_core.supported_data_standards.brainio.transform import subset, index_efficient
 

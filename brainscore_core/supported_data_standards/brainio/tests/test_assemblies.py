@@ -4,12 +4,11 @@ import pytest
 import numpy as np
 import pandas as pd
 import xarray as xr
-from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-from brainscore_core.supported_data_standards.brainio.tests.conftest import get_nc_extras_path, get_nc_path, get_csv_path, get_dir_path, make_proto_assembly
 from xarray import DataArray
-
-from brainscore_vision.data_helpers.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
+from brainscore_core.supported_data_standards.brainio.tests.conftest import get_nc_extras_path, get_nc_path, get_csv_path, get_dir_path, make_proto_assembly
 from brainscore_core.supported_data_standards import brainio
+from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+from brainscore_core.supported_data_standards.brainio.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
 from brainscore_core.supported_data_standards.brainio import assemblies
 from brainscore_core.supported_data_standards.brainio import fetch
 from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, get_levels, gather_indexes, is_fastpath, MetadataAssembly, \

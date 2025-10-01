@@ -8,7 +8,7 @@ import pytest
 from brainscore_core.supported_data_standards import brainio
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 from brainscore_core.supported_data_standards.brainio.tests.conftest import get_csv_path, get_dir_path
-from brainscore_vision.data_helpers.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
+from brainscore_core.supported_data_standards.brainio.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
 
 MJ2015_STIM = load_stimulus_set_from_s3(identifier="hvm-public",bucket="brainscore-storage/brainio-brainscore",
                                               csv_sha1="5ca7a3da00d8e9c694a9cd725df5ba0ad6d735af",
@@ -75,7 +75,7 @@ def test_existence(stimulus_set_identifier, bucket, csv_sha1, zip_sha1):
                                               csv_sha1=csv_sha1,
                                               zip_sha1=zip_sha1,
                                               csv_version_id="null", # hardcoded null 
-                                              zip_version_id="nuill"  # hardcoded null 
+                                              zip_version_id="null"  # hardcoded null 
                                             )   
     assert stimulus_set is not None
 
