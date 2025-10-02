@@ -30,6 +30,12 @@ conda activate $PLUGIN_NAME
 conda install pip
 pip install --upgrade pip setuptools
 
+# Install brainscore_core first
+LIBRARY_PATH_ABS="$(realpath "$LIBRARY_PATH")"
+CORE_PATH="$(dirname "$LIBRARY_PATH_ABS")/core"
+echo "Installing local brainscore_core from $CORE_PATH"
+python -m pip install -e "$CORE_PATH" --default-timeout=600 --retries=5
+
 output=$(python -m pip install -e ".[test]" --default-timeout=600 --retries=5 2>&1) # install library requirements
 
 if [ -f "$CONDA_ENV_PATH" ]; then
