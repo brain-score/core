@@ -12,6 +12,10 @@ KEY FUNCTIONS:
 - load_file_from_s3(): Download any file from S3 to local path
 - load_weight_file(): Download model weights (backwards compatibility)
 - load_folder_from_s3(): Batch download multiple files
+- load_assembly_from_s3(): Load data assemblies with stimulus set merging
+- load_stimulus_set_from_s3(): Load stimulus sets from S3 (CSV + ZIP)
+- get_path(): Resolve S3 paths for assemblies and stimulus sets
+- download_file_if_not_exists(): Conditional download utility
 - sha1_hash(): Calculate file integrity hashes
 
 CORE FUNCTIONALITY:
@@ -22,20 +26,110 @@ CORE FUNCTIONALITY:
 - Integrates with BotoFetcher for authenticated/unauthenticated access
 - Provides backwards compatibility for existing model loading code
 
-This was originally in brainscore_vision.model_helpers.s3 but moved to core
-since S3 operations are domain-agnostic infrastructure that should be shared
-across all Brain-Score domains (vision, language, etc.).
+This module combines S3 functionality from multiple sources:
+- Original brainscore_vision.model_helpers.s3 (model weights, general S3 ops)
+- brainscore_vision.data_helpers.s3 (assembly/stimulus set loading)
+All moved to core since S3 operations are domain-agnostic infrastructure
+that should be shared across all Brain-Score domains (vision, language, etc.).
 """
 
 import os
 from pathlib import Path
 from os.path import expanduser
 import logging
-from typing import Tuple, List, Union
+import functools
+from typing import Tuple, List, Union, Callable
 
-from .fetch import BotoFetcher, verify_sha1
+import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
+
+from .fetch import BotoFetcher, verify_sha1, fetch_file, unzip, resolve_stimulus_set_class
+from .assemblies import DataAssembly, AssemblyLoader, StimulusMergeAssemblyLoader, StimulusReferenceAssemblyLoader
+from .stimuli import StimulusSetLoader, StimulusSet
 
 _logger = logging.getLogger(__name__)
+
+
+def get_path(identifier: str, file_type: str, bucket: str, version_id: str, sha1: str, filename_prefix: str = None, folder_name: str = None):
+    """
+    Finds path of desired file (for .csvs, .zips, and .ncs).
+    """
+    if filename_prefix is None:
+        filename_prefix = 'stimulus_' if file_type in ('csv', 'zip') else 'assy_'
+    
+    filename = f"{filename_prefix}{identifier.replace('.', '_')}.{file_type}"
+    if folder_name:
+        remote_path = f"{folder_name}/{filename}"
+    else:
+        remote_path = filename
+    file_path = fetch_file(location_type="S3",
+                           location=f"https://{bucket}.s3.amazonaws.com/{remote_path}",
+                           version_id=version_id,
+                           sha1=sha1)
+    return file_path
+
+
+def load_assembly_from_s3(identifier: str, version_id: str, sha1: str, bucket: str, cls: type,
+                          stimulus_set_loader: Callable[[], StimulusSet] = None,
+                          merge_stimulus_set_meta: bool = True) -> DataAssembly:
+    """
+    Load a data assembly from S3, optionally within a specific folder.
+    """
+    # Parse bucket name and folder name
+    if '/' in bucket:
+        parts = bucket.split('/', 1)  # Split only on first '/', preserving the rest as folder path
+        bucket = parts[0]
+        folder_name = parts[1]
+    else:
+        folder_name = None
+    file_path = get_path(identifier, 'nc', bucket, version_id, sha1, folder_name=folder_name)
+    if stimulus_set_loader:  # merge stimulus set meta into assembly if `stimulus_set_loader` is passed
+        stimulus_set = stimulus_set_loader()
+        loader_base_class = StimulusMergeAssemblyLoader if merge_stimulus_set_meta else StimulusReferenceAssemblyLoader
+        loader_class = functools.partial(loader_base_class,
+                                         stimulus_set_identifier=stimulus_set.identifier, stimulus_set=stimulus_set)
+    else:  # if no `stimulus_set_loader` passed, just load assembly
+        loader_class = AssemblyLoader
+    loader = loader_class(cls=cls, file_path=file_path)
+    assembly = loader.load()
+    assembly.attrs['identifier'] = identifier
+    return assembly
+
+
+def load_stimulus_set_from_s3(identifier: str, bucket: str, csv_sha1: str, zip_sha1: str,
+                              csv_version_id: str, zip_version_id: str, filename_prefix: str = None):
+    # Parse bucket name and folder name
+    if '/' in bucket:
+        parts = bucket.split('/', 1)  # Split only on first '/', preserving the rest as folder path
+        bucket = parts[0]
+        folder_name = parts[1]
+    else:
+        folder_name = None
+    csv_path = get_path(identifier, 'csv', bucket, csv_version_id, csv_sha1, filename_prefix=filename_prefix, folder_name=folder_name)
+    zip_path = get_path(identifier, 'zip', bucket, zip_version_id, zip_sha1, filename_prefix=filename_prefix, folder_name=folder_name)
+    stimuli_directory = unzip(zip_path)
+    loader = StimulusSetLoader(
+        csv_path=csv_path,
+        stimuli_directory=stimuli_directory,
+        cls=resolve_stimulus_set_class('StimulusSet')
+    )
+    stimulus_set = loader.load()
+    stimulus_set.identifier = identifier
+    # ensure perfect overlap
+    stimuli_paths = [Path(stimuli_directory) / local_path for local_path in os.listdir(stimuli_directory)
+                     if not local_path.endswith('.zip') and not local_path.endswith('.csv')]
+    assert set(stimulus_set.stimulus_paths.values()) == set(stimuli_paths), \
+        "Inconsistency: unzipped stimuli paths do not match csv paths"
+    return stimulus_set
+
+
+def download_file_if_not_exists(local_path: Union[str, Path], bucket: str, remote_filepath: str):
+    if local_path.is_file():
+        return  # nothing to do, file already exists
+    unsigned_config = Config(signature_version=UNSIGNED)  # do not attempt to look up credentials
+    s3 = boto3.client('s3', config=unsigned_config)
+    s3.download_file(bucket, remote_filepath, str(local_path))
 
 
 def load_folder_from_s3(bucket: str, folder_path: str, filename_version_sha: List[Tuple[str, str, str]],

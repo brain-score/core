@@ -4,15 +4,22 @@ import pytest
 import numpy as np
 import pandas as pd
 import xarray as xr
-from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-from brainscore_core.supported_data_standards.brainio.tests.conftest import get_nc_extras_path, get_nc_path, get_csv_path, get_dir_path, make_proto_assembly
 from xarray import DataArray
-
+from brainscore_core.supported_data_standards.brainio.tests.conftest import get_nc_extras_path, get_nc_path, get_csv_path, get_dir_path, make_proto_assembly
 from brainscore_core.supported_data_standards import brainio
+from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+from brainscore_core.supported_data_standards.brainio.s3 import load_stimulus_set_from_s3, load_assembly_from_s3
 from brainscore_core.supported_data_standards.brainio import assemblies
 from brainscore_core.supported_data_standards.brainio import fetch
 from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, get_levels, gather_indexes, is_fastpath, MetadataAssembly, \
-    SpikeTimesAssembly, get_metadata, BRAINIO_CHUNKS
+    SpikeTimesAssembly, NeuronRecordingAssembly, get_metadata, BRAINIO_CHUNKS, PropertyAssembly
+
+# prefetch assembly to save time on tests:
+MJ2015 = load_assembly_from_s3(identifier='dicarlo.MajajHong2015.public', version_id="null", 
+                                     sha1="13d28ca0ce88ee550b54db3004374ae19096e9b9",
+                                     bucket="brainscore-storage/brainio-brainscore", cls=NeuronRecordingAssembly, 
+                                     stimulus_set_loader=None,
+                                    )
 
 
 def test_get_metadata():
@@ -416,110 +423,148 @@ class TestMultiDimApply:
         assert g.equals(d)
 
 
-# @pytest.mark.parametrize('assembly_identifier', [
-#     pytest.param('dicarlo.MajajHong2015', marks=[pytest.mark.private_access]),
-#     pytest.param('dicarlo.MajajHong2015.public', marks=[]),
-#     pytest.param('dicarlo.MajajHong2015.private', marks=[pytest.mark.private_access]),
-#     pytest.param('tolias.Cadena2017', marks=[pytest.mark.private_access]),
-#     pytest.param('dicarlo.BashivanKar2019.naturalistic', marks=[pytest.mark.private_access]),
-#     pytest.param('dicarlo.BashivanKar2019.synthetic', marks=[pytest.mark.private_access]),
-# ])
-# def test_existence(assembly_identifier, brainio_home_session):
-#     assert brainio.get_assembly(assembly_identifier) is not None
+@pytest.mark.parametrize('assembly_id, assembly_version_id, assembly_sha, assembly_bucket, assembly_cls, assembly_stimulus_set_loader,', [
+    pytest.param('dicarlo.MajajHong2015', 'null', 'bf8f8d01010d727e3db3f85a9bd5f95f9456b7ec', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, marks=[pytest.mark.private_access]),
+    pytest.param('dicarlo.MajajHong2015.public', 'null', '13d28ca0ce88ee550b54db3004374ae19096e9b9', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, marks=[]),
+    pytest.param('dicarlo.MajajHong2015.private', 'null', '7a40d16148d6f82939155f0bd976d310857fb156', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, marks=[pytest.mark.private_access]),
+    pytest.param('tolias.Cadena2017','null', '69bcaaa9370dceb0027beaa06235ef418c3d7063', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, marks=[pytest.mark.private_access]),
+    pytest.param('dicarlo.BashivanKar2019.naturalistic', 'null', '1ec2f32ef800f0c6e15879d883be1d55b51b8b67', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, marks=[pytest.mark.private_access]),
+    pytest.param('dicarlo.BashivanKar2019.synthetic', 'null', 'f687c8d26f8943dc379dbcbe94d3feb148400c6b', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, marks=[pytest.mark.private_access]),
+])
+def test_existence(assembly_id, assembly_version_id, assembly_sha, assembly_bucket, assembly_cls, assembly_stimulus_set_loader):
+    assy = load_assembly_from_s3(identifier=assembly_id, version_id=assembly_version_id, 
+                                 sha1=assembly_sha,
+                                 bucket=assembly_bucket, cls=assembly_cls, 
+                                 stimulus_set_loader=assembly_stimulus_set_loader,
+                                )
+    assert assy is not None
 
 
-# def test_nr_assembly_ctor(brainio_home_session):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     assert isinstance(assy_hvm, DataAssembly)
+
+def test_nr_assembly_ctor(brainio_home_session):
+    assy_hvm = MJ2015
+    assert isinstance(assy_hvm, DataAssembly)
 
 
-# def test_load(brainio_home):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     assert assy_hvm.shape == (256, 148480, 1)
-#     print(assy_hvm)
+def test_load(brainio_home):
+    assy_hvm = MJ2015
+    assert assy_hvm.shape == (256, 148480, 1)
+    print(assy_hvm)
 
 
-# class TestDask:
-#     def test_dask(self, brainio_home):
-#         assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#         try:
-#             import dask
-#             assert assy_hvm.chunks is not None
-#         except ModuleNotFoundError as e:
-#             assert assy_hvm.chunks is None
+class TestDask:
+    def test_dask(self, brainio_home):
+        assy_hvm = MJ2015
+        try:
+            import dask
+            assert assy_hvm.chunks is not None
+        except ModuleNotFoundError as e:
+            assert assy_hvm.chunks is None
 
-#     def test_dask_override(self, brainio_home, monkeypatch):
-#         with monkeypatch.context() as patch:
-#             patch.setenv(BRAINIO_CHUNKS, 'None')
-#             assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#         assert assy_hvm.chunks is None
-
-
-# def test_repr(brainio_home_session):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     repr_hvm = repr(assy_hvm)
-#     assert "neuroid" in repr_hvm
-#     assert "presentation" in repr_hvm
-#     assert "256" in repr_hvm
-#     assert "148480" in repr_hvm
-#     assert "animal" in repr_hvm
-#     print(repr_hvm)
+    def test_dask_override(self, brainio_home, monkeypatch):
+        with monkeypatch.context() as patch:
+            patch.setenv(BRAINIO_CHUNKS, 'None')
+            assy_hvm = load_assembly_from_s3(identifier='dicarlo.MajajHong2015.public', version_id="null", 
+                                     sha1="13d28ca0ce88ee550b54db3004374ae19096e9b9",
+                                     bucket="brainscore-storage/brainio-brainscore", cls=NeuronRecordingAssembly, 
+                                     stimulus_set_loader=None,
+                                    )
+        assert assy_hvm.chunks is None
 
 
-# def test_getitem(brainio_home_session):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     single = assy_hvm[0, 0, 0]
-#     assert type(single) is type(assy_hvm)
+def test_repr(brainio_home_session):
+    assy_hvm = MJ2015
+    repr_hvm = repr(assy_hvm)
+    assert "neuroid" in repr_hvm
+    assert "presentation" in repr_hvm
+    assert "256" in repr_hvm
+    assert "148480" in repr_hvm
+    assert "animal" in repr_hvm
+    print(repr_hvm)
+
+
+def test_getitem(brainio_home_session):
+    assy_hvm = MJ2015
+    single = assy_hvm[0, 0, 0]
+    assert type(single) is type(assy_hvm)
 
 
 def test_fetch(brainio_home):
     local_path = fetch.fetch_file(
         location_type='S3',
-        location='https://brainio.dicarlo.s3.amazonaws.com/assy_dicarlo_MajajHong2015_public.nc',
+        location='https://brainscore-storage.s3.us-east-2.amazonaws.com/brainio-brainscore/assy_dicarlo_MajajHong2015_public.nc',
         sha1='13d28ca0ce88ee550b54db3004374ae19096e9b9')
     assert os.path.exists(local_path)
 
 
-# def test_wrap(brainio_home_session):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     hvm_v3 = assy_hvm.sel(variation=3)
-#     assert isinstance(hvm_v3, assemblies.NeuronRecordingAssembly)
+def test_wrap(brainio_home_session):
 
-#     hvm_it_v3 = hvm_v3.sel(region="IT")
-#     assert isinstance(hvm_it_v3, assemblies.NeuronRecordingAssembly)
+    assy_hvm = load_assembly_from_s3(identifier='dicarlo.MajajHong2015.public', version_id="null", 
+                                     sha1="13d28ca0ce88ee550b54db3004374ae19096e9b9",
+                                     bucket="brainscore-storage/brainio-brainscore", cls=NeuronRecordingAssembly, 
+                                     stimulus_set_loader= lambda: load_stimulus_set_from_s3(identifier="hvm-public",bucket="brainscore-storage/brainio-brainscore",
+                                              csv_sha1="5ca7a3da00d8e9c694a9cd725df5ba0ad6d735af",
+                                              zip_sha1="8aa44e038d7b551efa8077467622f9d48d72e473",
+                                              csv_version_id="null",
+                                              zip_version_id="null"
+                                            ),
+                                    )
+    hvm_v3 = assy_hvm.sel(variation=3)
+    assert isinstance(hvm_v3, assemblies.NeuronRecordingAssembly)
 
-#     hvm_it_v3.coords["cat_obj"] = hvm_it_v3.coords["category_name"] + hvm_it_v3.coords["object_name"]
-#     hvm_it_v3.load()
-#     hvm_it_v3_grp = hvm_it_v3.multi_groupby(["category_name", "object_name"])
-#     assert not isinstance(hvm_it_v3_grp, xr.core.groupby.GroupBy)
-#     assert isinstance(hvm_it_v3_grp, assemblies.GroupbyBridge)
+    hvm_it_v3 = hvm_v3.sel(region="IT")
+    assert isinstance(hvm_it_v3, assemblies.NeuronRecordingAssembly)
 
-#     hvm_it_v3_obj = hvm_it_v3_grp.mean(dim="presentation")
-#     assert isinstance(hvm_it_v3_obj, assemblies.NeuronRecordingAssembly)
+    hvm_it_v3.coords["cat_obj"] = hvm_it_v3.coords["category_name"] + hvm_it_v3.coords["object_name"]
+    hvm_it_v3.load()
+    hvm_it_v3_grp = hvm_it_v3.multi_groupby(["category_name", "object_name"])
+    assert not isinstance(hvm_it_v3_grp, xr.core.groupby.GroupBy)
+    assert isinstance(hvm_it_v3_grp, assemblies.GroupbyBridge)
 
-#     hvm_it_v3_sqz = hvm_it_v3_obj.squeeze("time_bin")
-#     assert isinstance(hvm_it_v3_sqz, assemblies.NeuronRecordingAssembly)
+    hvm_it_v3_obj = hvm_it_v3_grp.mean(dim="presentation")
+    assert isinstance(hvm_it_v3_obj, assemblies.NeuronRecordingAssembly)
 
-#     hvm_it_v3_t = hvm_it_v3_sqz.T
-#     assert isinstance(hvm_it_v3_t, assemblies.NeuronRecordingAssembly)
+    hvm_it_v3_sqz = hvm_it_v3_obj.squeeze("time_bin")
+    assert isinstance(hvm_it_v3_sqz, assemblies.NeuronRecordingAssembly)
 
-
-# def test_multi_group(brainio_home_session):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     hvm_it_v3 = assy_hvm.sel(variation=3).sel(region="IT")
-#     hvm_it_v3.load()
-#     hvm_it_v3_obj = hvm_it_v3.multi_groupby(["category_name", "object_name"]).mean(dim="presentation")
-#     assert "category_name" in hvm_it_v3_obj.indexes["presentation"].names
-#     assert "object_name" in hvm_it_v3_obj.indexes["presentation"].names
+    hvm_it_v3_t = hvm_it_v3_sqz.T
+    assert isinstance(hvm_it_v3_t, assemblies.NeuronRecordingAssembly)
 
 
-# def test_stimulus_set_from_assembly(brainio_home):
-#     assy_hvm = brainio.get_assembly(identifier="dicarlo.MajajHong2015.public")
-#     stimulus_set = assy_hvm.attrs["stimulus_set"]
-#     assert stimulus_set.shape[0] == np.unique(assy_hvm["image_id"]).shape[0]
-#     for stimulus_id in stimulus_set['stimulus_id']:
-#         stimulus_path = stimulus_set.get_stimulus(stimulus_id)
-#         assert os.path.exists(stimulus_path)
+def test_multi_group(brainio_home_session):
+    assy_hvm = load_assembly_from_s3(identifier='dicarlo.MajajHong2015.public', version_id="null", 
+                                     sha1="13d28ca0ce88ee550b54db3004374ae19096e9b9",
+                                     bucket="brainscore-storage/brainio-brainscore", cls=NeuronRecordingAssembly, 
+                                     stimulus_set_loader= lambda: load_stimulus_set_from_s3(identifier="hvm-public",bucket="brainscore-storage/brainio-brainscore",
+                                              csv_sha1="5ca7a3da00d8e9c694a9cd725df5ba0ad6d735af",
+                                              zip_sha1="8aa44e038d7b551efa8077467622f9d48d72e473",
+                                              csv_version_id="null",
+                                              zip_version_id="null"
+                                            ),
+                                    )
+    hvm_it_v3 = assy_hvm.sel(variation=3).sel(region="IT")
+    hvm_it_v3.load()
+    hvm_it_v3_obj = hvm_it_v3.multi_groupby(["category_name", "object_name"]).mean(dim="presentation")
+    assert "category_name" in hvm_it_v3_obj.indexes["presentation"].names
+    assert "object_name" in hvm_it_v3_obj.indexes["presentation"].names
+
+
+def test_stimulus_set_from_assembly(brainio_home):
+    assy_hvm = load_assembly_from_s3(identifier='dicarlo.MajajHong2015.public', version_id="null", 
+                                     sha1="13d28ca0ce88ee550b54db3004374ae19096e9b9",
+                                     bucket="brainscore-storage/brainio-brainscore", cls=NeuronRecordingAssembly, 
+                                     stimulus_set_loader= lambda: load_stimulus_set_from_s3(identifier="hvm-public",bucket="brainscore-storage/brainio-brainscore",
+                                              csv_sha1="5ca7a3da00d8e9c694a9cd725df5ba0ad6d735af",
+                                              zip_sha1="8aa44e038d7b551efa8077467622f9d48d72e473",
+                                              csv_version_id="null",
+                                              zip_version_id="null"
+                                            ),
+                                    )
+    stimulus_set = assy_hvm.stimulus_set
+    assert stimulus_set.shape[0] == np.unique(assy_hvm["image_id"]).shape[0]
+    for stimulus_id in stimulus_set['stimulus_id']:
+        stimulus_path = stimulus_set.get_stimulus(stimulus_id)
+        assert os.path.exists(stimulus_path)
 
 
 def test_inplace():
@@ -529,14 +574,18 @@ def test_inplace():
     assert "inplace" in str(te.value)
 
 
-# @pytest.mark.parametrize('assembly,shape,nans', [
-#     pytest.param('dicarlo.BashivanKar2019.naturalistic', (24320, 233, 1), 309760, marks=[pytest.mark.private_access]),
-#     pytest.param('dicarlo.BashivanKar2019.synthetic', (21360, 233, 1), 4319940, marks=[pytest.mark.private_access]),
-# ])
-# def test_synthetic(assembly, shape, nans, brainio_home_session):
-#     assy = brainio.get_assembly(assembly)
-#     assert assy.shape == shape
-#     assert np.count_nonzero(np.isnan(assy)) == nans
+@pytest.mark.parametrize('assembly_id, assembly_version_id, assembly_sha, assembly_bucket, assembly_cls, assembly_stimulus_set_loader, shape, nans,', [
+    pytest.param('dicarlo.BashivanKar2019.naturalistic', 'null', '1ec2f32ef800f0c6e15879d883be1d55b51b8b67', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, (24320, 233, 1), 309760, marks=[pytest.mark.private_access]),
+    pytest.param('dicarlo.BashivanKar2019.synthetic', 'null', 'f687c8d26f8943dc379dbcbe94d3feb148400c6b', "brainscore-storage/brainio-brainscore", NeuronRecordingAssembly, None, (21360, 233, 1), 4319940, marks=[pytest.mark.private_access]),
+])
+def test_synthetic(assembly_id, assembly_version_id, assembly_sha, assembly_bucket, assembly_cls, assembly_stimulus_set_loader, shape, nans, brainio_home_session):
+    assy = load_assembly_from_s3(identifier=assembly_id, version_id=assembly_version_id, 
+                                 sha1=assembly_sha,
+                                 bucket=assembly_bucket, cls=assembly_cls, 
+                                 stimulus_set_loader=assembly_stimulus_set_loader,
+                                )
+    assert assy.shape == shape
+    assert np.count_nonzero(np.isnan(assy)) == nans
 
 
 class TestFromFiles:
@@ -558,7 +607,4 @@ class TestFromFiles:
         assert isinstance(extra, MetadataAssembly)
         assert "stimulus_set" in extra.attrs
         assert extra.shape == (40,)
-
-
-
 

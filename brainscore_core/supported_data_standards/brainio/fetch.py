@@ -25,7 +25,7 @@ CATALOG SYSTEM REMOVED:
 ----------------------
 The original BrainIO get_assembly() and get_stimulus_set() functions that
 relied on CSV catalog lookups are replaced with direct S3 parameter functions
-in the vision.data_helpers.s3 module.
+in the brainscore_core.supported_data_standards.brainio.s3 module.
 """
 
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -196,7 +196,7 @@ def get_assembly(identifier):
     """
     raise NotImplementedError(
         "get_assembly requires direct S3 parameters in brainio-lite. "
-        "Use the load_assembly_from_s3 function from brainscore_vision.data_helpers.s3 instead."
+        "Use the load_assembly_from_s3 function from brainscore_core.supported_data_standards.brainio.s3 instead."
     )
 
 
@@ -207,7 +207,7 @@ def get_stimulus_set(identifier):
     """
     raise NotImplementedError(
         "get_stimulus_set requires direct S3 parameters in brainio-lite. "
-        "Use the load_stimulus_set_from_s3 function from brainscore_vision.data_helpers.s3 instead."
+        "Use the load_stimulus_set_from_s3 function from brainscore_core.supported_data_standards.brainio.s3 instead."
     )
 
 
