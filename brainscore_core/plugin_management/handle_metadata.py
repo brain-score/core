@@ -10,6 +10,7 @@ import importlib
 from brainscore_core.submission.endpoints import MetadataEndpoint
 from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
 from brainscore_core.plugin_management.generate_benchmark_metadata import BenchmarkMetadataGenerator
+from brainscore_core.plugin_management.extract_templates import TemplateExtractor
 
 # allowed plugin types for metadata
 ALLOWED_PLUGINS = {
@@ -35,6 +36,7 @@ ALLOWED_KEYS_BY_TYPE = {
         "runnable"
     },
     "benchmarks": {
+        # Legacy format (old metadata files)
         "stimulus_set": {
             "num_stimuli",
             "datatype",
@@ -62,6 +64,42 @@ ALLOWED_KEYS_BY_TYPE = {
             "type",
             "reference",
             "public",
+            "brainscore_link",
+            "extra_notes",
+            "description"  # Allow description field in metrics
+        },
+        # New inheritance format
+        "data_id": None,  # Simple string, no nested validation needed
+        "metric_id": None,  # Simple string, no nested validation needed
+        # Optional overrides for inheritance format
+        "data_overrides": {
+            "benchmark_type",
+            "task",
+            "region",
+            "hemisphere",
+            "num_recording_sites",
+            "duration_ms",
+            "species",
+            "datatype",
+            "num_subjects",
+            "pre_processing",
+            "brainscore_link",
+            "extra_notes",
+            "data_publicly_available"
+        },
+        "metric_overrides": {
+            "type",
+            "reference",
+            "public",
+            "brainscore_link",
+            "extra_notes",
+            "description"  # Allow description field in metric overrides
+        },
+        "stimulus_set_overrides": {
+            "num_stimuli",
+            "datatype",
+            "stimuli_subtype",
+            "total_size_mb",
             "brainscore_link",
             "extra_notes"
         }
@@ -107,24 +145,56 @@ def validate_metadata_file(metadata_path):
                     errors.append(f"Data for plugin '{plugin_name}' under '{plugin_type}' must be a dictionary.")
                     continue
                 if plugin_type == "benchmarks":  # for benchmarks check two layers of keys
-                    for top_key, top_value in metadata.items():
-                        if top_key not in allowed_keys:
-                            errors.append(
-                                f"Plugin '{plugin_name}' has invalid top-level key: '{top_key}'. Allowed keys: {list(allowed_keys.keys())}"
-                            )
-                            continue
+                    # Check if this is using the new inheritance format
+                    has_data_id = "data_id" in metadata
+                    has_metric_id = "metric_id" in metadata
+                    has_legacy_keys = any(key in metadata for key in ["stimulus_set", "data", "metric"])
+                    
+                    if has_data_id or has_metric_id:
+                        # New inheritance format validation
+                        for top_key, top_value in metadata.items():
+                            if top_key not in allowed_keys:
+                                errors.append(
+                                    f"Plugin '{plugin_name}' has invalid top-level key: '{top_key}'. Allowed keys: {list(allowed_keys.keys())}"
+                                )
+                                continue
+                            
+                            # For inheritance format, data_id and metric_id should be strings
+                            if top_key in ["data_id", "metric_id"]:
+                                if not isinstance(top_value, str):
+                                    errors.append(f"Value for '{top_key}' in plugin '{plugin_name}' must be a string.")
+                                continue
+                            
+                            # For override keys, validate nested structure
+                            if top_key.endswith("_overrides") and isinstance(top_value, dict):
+                                nested_allowed_keys = allowed_keys[top_key]
+                                if nested_allowed_keys:  # Only validate if we have allowed keys defined
+                                    extra_nested_keys = set(top_value.keys()) - nested_allowed_keys
+                                    if extra_nested_keys:
+                                        errors.append(
+                                            f"Plugin '{plugin_name}' has extra keys under '{top_key}': {list(extra_nested_keys)}"
+                                        )
+                    else:
+                        # Legacy format validation
+                        for top_key, top_value in metadata.items():
+                            if top_key not in allowed_keys:
+                                errors.append(
+                                    f"Plugin '{plugin_name}' has invalid top-level key: '{top_key}'. Allowed keys: {list(allowed_keys.keys())}"
+                                )
+                                continue
 
-                        if not isinstance(top_value, dict):
-                            errors.append(f"Value for '{top_key}' in plugin '{plugin_name}' must be a dictionary.")
-                            continue
+                            if not isinstance(top_value, dict):
+                                errors.append(f"Value for '{top_key}' in plugin '{plugin_name}' must be a dictionary.")
+                                continue
 
-                        # Check nested keys
-                        nested_allowed_keys = allowed_keys[top_key]
-                        extra_nested_keys = set(top_value.keys()) - nested_allowed_keys
-                        if extra_nested_keys:
-                            errors.append(
-                                f"Plugin '{plugin_name}' has extra keys under '{top_key}': {list(extra_nested_keys)}"
-                            )
+                            # Check nested keys for legacy format
+                            nested_allowed_keys = allowed_keys[top_key]
+                            if isinstance(nested_allowed_keys, set):  # Only validate if we have a set of allowed keys
+                                extra_nested_keys = set(top_value.keys()) - nested_allowed_keys
+                                if extra_nested_keys:
+                                    errors.append(
+                                        f"Plugin '{plugin_name}' has extra keys under '{top_key}': {list(extra_nested_keys)}"
+                                    )
                 else:
                     extra_keys = set(metadata.keys()) - allowed_keys
                     if extra_keys:
@@ -201,6 +271,49 @@ def generate_metadata(plugin_dir, plugin_type, benchmark_type="neural", domain="
     return metadata_path
 
 
+def extract_templates(plugin_dir, domain="vision", dry_run=False):
+    """Extract templates from repetitive benchmark metadata."""
+    
+    # Load domain plugin
+    domain_plugin = load_domain_plugin(domain)
+    if domain_plugin is None:
+        print(f"ERROR: Could not load domain plugin for '{domain}'", file=sys.stderr)
+        return None
+    
+    # Create extractor
+    extractor = TemplateExtractor(domain_plugin)
+    
+    # Find registered benchmarks
+    benchmark_list = domain_plugin.find_registered_benchmarks(plugin_dir)
+    if not benchmark_list:
+        print("ERROR: No benchmarks found", file=sys.stderr)
+        return None
+    
+    print(f"Found {len(benchmark_list)} benchmarks for template extraction", file=sys.stderr)
+    
+    # Extract templates
+    templates = extractor.extract_templates_from_benchmarks(benchmark_list, plugin_dir)
+    
+    if dry_run:
+        print("=== DRY RUN - Would create these templates ===", file=sys.stderr)
+        print(f"Data templates: {list(templates['data_templates'].keys())}", file=sys.stderr)
+        print(f"Metric templates: {list(templates['metric_templates'].keys())}", file=sys.stderr)
+        print(f"Inheritance metadata: {len(templates['inheritance_metadata'])} benchmarks", file=sys.stderr)
+        
+        # Show sample data template
+        if templates['data_templates']:
+            data_plugin = list(templates['data_templates'].keys())[0]
+            print(f"\nSample data template for {data_plugin}:", file=sys.stderr)
+            sample_yaml = yaml.dump(templates['data_templates'][data_plugin], default_flow_style=False, indent=2)
+            print(sample_yaml, file=sys.stderr)
+    else:
+        # Write templates
+        extractor.write_templates(templates, plugin_dir)
+        print("Template extraction completed!", file=sys.stderr)
+    
+    return templates
+
+
 def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
     """
     Create a PR that adds/updates the metadata.yml file.
@@ -255,7 +368,26 @@ def main():
                         help="Domain type (currently only 'vision' is supported)")
     parser.add_argument("--db-connection", action="store_true", default=False,
                         help="If provided, establish a new database connection")
+    parser.add_argument("--extract-templates", action="store_true", default=False,
+                        help="Extract templates from repetitive benchmark metadata")
+    parser.add_argument("--dry-run", action="store_true", default=False,
+                        help="Show what templates would be extracted without writing files")
     args = parser.parse_args()
+
+    # Handle template extraction mode
+    if args.extract_templates:
+        if args.plugin_type != "benchmarks":
+            print("ERROR: Template extraction is only supported for benchmark plugins", file=sys.stderr)
+            sys.exit(1)
+        
+        print("Extracting templates from benchmark metadata...", file=sys.stderr)
+        templates = extract_templates(args.plugin_dir, domain=args.domain, dry_run=args.dry_run)
+        
+        if templates and not args.dry_run:
+            print("Templates extracted successfully! You can now use inheritance format.", file=sys.stderr)
+            print("Run the same command without --extract-templates to generate inheritance format metadata.", file=sys.stderr)
+        
+        return
 
     new_metadata = False
     yml_path = os.path.join(args.plugin_dir, "metadata.yml")

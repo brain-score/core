@@ -32,15 +32,17 @@ class BenchmarkMetadataGenerator:
     - All error handling is printed to prevent silent failures.
     """
 
-    def __init__(self, benchmark_dir: str, domain_plugin: DomainPluginInterface):
+    def __init__(self, benchmark_dir: str, domain_plugin: DomainPluginInterface, use_inheritance_format: bool = True):
         """
         - Initializes the metadata generator with a specified benchmark directory and domain plugin.
 
         :param benchmark_dir: str, the directory where benchmark metadata files are stored.
         :param domain_plugin: DomainPluginInterface, the domain-specific plugin for handling benchmark operations.
+        :param use_inheritance_format: bool, whether to generate inheritance format (data_id/metric_id) or expanded format.
         """
         self.benchmark_dir = benchmark_dir
         self.domain_plugin = domain_plugin
+        self.use_inheritance_format = use_inheritance_format
 
     def __call__(self, benchmark_list: List[str]) -> List[str]:
         """
@@ -50,17 +52,76 @@ class BenchmarkMetadataGenerator:
         :return: List[str], a list of unique YAML file paths generated.
 
         Notes:
-        - Calls `process_single_benchmark` for each benchmark in the list.
-        - Ensures duplicate YAML paths are removed.
+        - Collects metadata for all benchmarks first, then writes atomically.
+        - Ensures no partial files are created if process is interrupted.
         """
-        yaml_paths = set()
+        if not benchmark_list:
+            return []
+        
+        # Collect all benchmark metadata first (batch approach)
+        all_metadata = {}
+        benchmark_dir_name = self.benchmark_dir.split("/")[-1]
+        
         for i, benchmark_name in enumerate(benchmark_list):
             print(f"INFO: Generating metadata for benchmark {i + 1}/{len(benchmark_list)}: {benchmark_name}",
                   file=sys.stderr)
-            yaml_path = self.process_single_benchmark(benchmark_name)
-            if yaml_path:
-                yaml_paths.add(yaml_path)
-        return list(yaml_paths)
+            try:
+                benchmark = self.domain_plugin.load_benchmark(benchmark_name)
+                if benchmark is None:
+                    print(f"ERROR: Failed to load benchmark '{benchmark_name}', skipping", file=sys.stderr)
+                    continue
+                
+                # Generate metadata for this benchmark
+                if self.use_inheritance_format and hasattr(self.domain_plugin, 'create_inheritance_metadata'):
+                    metadata = self.domain_plugin.create_inheritance_metadata(benchmark, benchmark_dir_name)
+                else:
+                    # Fall back to expanded format
+                    metadata = {
+                        "stimulus_set": self.domain_plugin.create_stimuli_metadata(benchmark, benchmark_dir_name),
+                        "data": self.domain_plugin.create_data_metadata(benchmark, benchmark_dir_name),
+                        "metric": self.domain_plugin.create_metric_metadata(benchmark, benchmark_dir_name),
+                    }
+                
+                all_metadata[benchmark_name] = metadata
+                
+            except Exception as e:
+                print(f"ERROR: Failed to process benchmark '{benchmark_name}': {e}", file=sys.stderr)
+                continue
+        
+        # Write all metadata atomically
+        if all_metadata:
+            yaml_path = self._write_metadata_file(all_metadata)
+            return [yaml_path] if yaml_path else []
+        else:
+            print("ERROR: No benchmarks were successfully processed", file=sys.stderr)
+            return []
+
+    def _write_metadata_file(self, all_metadata: dict) -> Optional[str]:
+        """Write all metadata to file atomically."""
+        try:
+            yaml_filename = "metadata.yml"
+            
+            if not self.benchmark_dir or not os.path.exists(self.benchmark_dir):
+                failure_dir = "FAILURES"
+                os.makedirs(failure_dir, exist_ok=True)
+                yaml_path = os.path.join(failure_dir, f"batch_metadata.yml")
+                print(f"Directory '{self.benchmark_dir}' not found. Writing YAML to '{yaml_path}'", file=sys.stderr)
+            else:
+                yaml_path = os.path.join(self.benchmark_dir, yaml_filename)
+            
+            # Create final metadata structure
+            final_metadata = {"benchmarks": all_metadata}
+            
+            # Write atomically
+            with open(yaml_path, "w", encoding="utf-8") as file:
+                yaml.dump(final_metadata, file, default_flow_style=False, sort_keys=False, indent=4)
+            
+            print(f"Saved metadata to {yaml_path}", file=sys.stderr)
+            return yaml_path
+            
+        except Exception as e:
+            print(f"ERROR: Failed to write metadata file: {e}", file=sys.stderr)
+            return None
 
     def create_yaml(self, benchmark, benchmark_name: str, benchmark_dir: str):
         """Create or update YAML metadata for the benchmark, handling errors gracefully."""
@@ -76,11 +137,17 @@ class BenchmarkMetadataGenerator:
                 yaml_path = os.path.join(benchmark_dir, yaml_filename)
 
             benchmark_dir_name = benchmark_dir.split("/")[-1]
-            new_metadata = {
-                "stimulus_set": self.domain_plugin.create_stimuli_metadata(benchmark, benchmark_dir_name),
-                "data": self.domain_plugin.create_data_metadata(benchmark, benchmark_dir_name),
-                "metric": self.domain_plugin.create_metric_metadata(benchmark, benchmark_dir_name),
-            }
+            
+            # Choose format based on flag
+            if self.use_inheritance_format and hasattr(self.domain_plugin, 'create_inheritance_metadata'):
+                new_metadata = self.domain_plugin.create_inheritance_metadata(benchmark, benchmark_dir_name)
+            else:
+                # Fall back to expanded format
+                new_metadata = {
+                    "stimulus_set": self.domain_plugin.create_stimuli_metadata(benchmark, benchmark_dir_name),
+                    "data": self.domain_plugin.create_data_metadata(benchmark, benchmark_dir_name),
+                    "metric": self.domain_plugin.create_metric_metadata(benchmark, benchmark_dir_name),
+                }
             if os.path.exists(yaml_path) and os.path.getsize(yaml_path) > 0:
                 with open(yaml_path, "r", encoding="utf-8") as file:
                     existing_metadata = yaml.safe_load(file) or {}
