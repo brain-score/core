@@ -53,6 +53,11 @@ conda install pip -y || {
     exit 1
 }
 
+# Install brainscore_core first
+CORE_PATH="$LIBRARY_PATH/core"
+echo "Installing local brainscore_core from $CORE_PATH"
+pip install -e "$CORE_PATH"
+
 # Change to the library directory
 cd "$LIBRARY_PATH/$LIBRARY_NAME" || {
     echo "Error: Could not change to directory $LIBRARY_PATH/$LIBRARY_NAME"
