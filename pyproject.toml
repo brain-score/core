@@ -14,7 +14,11 @@ requires-python = ">=3.11"
 dependencies = [
     "tqdm",
     "numpy>=1.21,<2.0",
-    "brainscore-brainio",
+    "boto3", # AWS S3 client for brainio lite
+    "netCDF4", # NetCDF file format for brainio lite
+    "xarray", # Data arrays for brainio lite
+    "pandas", # DataFrames for brainio lite
+    "Pillow", # Image processing for brainio lite
     "psycopg2-binary", # postgres driver
     # submission
     "fire",
