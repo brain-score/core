@@ -152,7 +152,6 @@ class BenchmarkMetricMeta(PeeweeBase):
 
 
 class BenchmarkInstance(PeeweeBase):
-    id = PrimaryKeyField()
     benchmark = ForeignKeyField(column_name='benchmark_type_id', field='identifier', model=BenchmarkType)
     ceiling = FloatField(null=True)
     ceiling_error = FloatField(null=True)

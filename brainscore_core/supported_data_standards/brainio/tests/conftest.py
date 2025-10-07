@@ -3,13 +3,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-import brainio.fetch
 import numpy as np
 import pandas as pd
 import pytest
-from brainio import lookup
-from brainio.assemblies import DataAssembly, SpikeTimesAssembly, MetadataAssembly
-from brainio.packaging import write_netcdf
+from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, SpikeTimesAssembly, MetadataAssembly
+from brainscore_core.supported_data_standards.brainio.packaging import write_netcdf
 
 
 def parse_bucket_info(bucket_string):
@@ -229,7 +227,8 @@ def restore_catalog(restore_this_file):
 
 @pytest.fixture
 def brainio_home(tmp_path, monkeypatch):
-    monkeypatch.setattr(brainio.fetch, "_local_data_path", str(tmp_path))
+    from brainscore_core.supported_data_standards.brainio import fetch
+    monkeypatch.setattr(fetch, "_local_data_path", str(tmp_path))
     yield tmp_path
 
 
@@ -241,6 +240,7 @@ def home_path(tmp_path_factory):
 
 @pytest.fixture # for tests not intended to test fetching and loading specifically
 def brainio_home_session(monkeypatch, home_path):
-    monkeypatch.setattr(brainio.fetch, "_local_data_path", str(home_path))
+    from brainscore_core.supported_data_standards.brainio import fetch
+    monkeypatch.setattr(fetch, "_local_data_path", str(home_path))
     yield home_path
 

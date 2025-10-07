@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from numpy.random import RandomState
 
-from brainio.assemblies import DataAssembly
+from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly
 from brainscore_core.metrics import Score
 from brainscore_core.plugin_management.conda_score import CondaScore
 

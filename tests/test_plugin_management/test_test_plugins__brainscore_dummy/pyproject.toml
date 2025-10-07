@@ -6,7 +6,6 @@ authors = []
 requires-python = ">=3.11"
 
 dependencies = [
-    "brainscore-brainio@git+https://github.com/brain-score/brainio.git@main",
 ]
 
 [project.optional-dependencies]
