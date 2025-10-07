@@ -3,13 +3,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-import brainio.fetch
 import numpy as np
 import pandas as pd
 import pytest
-from brainio import lookup
-from brainio.assemblies import DataAssembly, SpikeTimesAssembly, MetadataAssembly
-from brainio.packaging import write_netcdf
+from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, SpikeTimesAssembly, MetadataAssembly
+from brainscore_core.supported_data_standards.brainio.packaging import write_netcdf
 
 
 def parse_bucket_info(bucket_string):
