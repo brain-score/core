@@ -51,6 +51,7 @@ class BenchmarkType(PeeweeBase):
 
 
 class BenchmarkMeta(PeeweeBase):
+    identifier = CharField(primary_key=True)
     number_of_stimuli = IntegerField(null=True)
     number_of_recording_sites = IntegerField(null=True)
     recording_sites = CharField(max_length=100, null=True)
@@ -58,17 +59,6 @@ class BenchmarkMeta(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_benchmarkmeta'
-
-
-class BenchmarkInstance(PeeweeBase):
-    benchmark = ForeignKeyField(column_name='benchmark_type_id', field='identifier', model=BenchmarkType)
-    ceiling = FloatField(null=True)
-    ceiling_error = FloatField(null=True)
-    version = IntegerField(null=True)
-    meta = ForeignKeyField(model=BenchmarkMeta, null=True)
-
-    class Meta:
-        table_name = 'brainscore_benchmarkinstance'
 
 
 class Submission(PeeweeBase):
@@ -94,6 +84,85 @@ class Model(PeeweeBase):
 
     class Meta:
         table_name = 'brainscore_model'
+
+
+class ModelMeta(PeeweeBase):
+    model = ForeignKeyField(column_name='model_id', field='id', model=Model, primary_key=True)
+    architecture = CharField(max_length=100, null=True, default=None)
+    model_family = CharField(max_length=100, null=True, default=None)
+    total_parameter_count = IntegerField(null=True, default=None)
+    total_layers = IntegerField(null=True, default=None)
+    training_dataset = CharField(max_length=100, null=True, default=None)
+    task_specialization = CharField(max_length=100, null=True, default=None)
+    brainscore_link = CharField(max_length=256, null=True, default=None)
+    hugging_face_link = CharField(max_length=256, null=True, default=None)
+    trainable_parameter_count = IntegerField(null=True, default=None)
+    trainable_layers = IntegerField(null=True, default=None)
+    model_size_mb = FloatField(null=True, default=None)
+    extra_notes = CharField(max_length=1000, null=True, default=None)
+    runnable = BooleanField(default=True, null=True)
+
+    class Meta:
+        table_name = 'brainscore_modelmeta'
+
+
+class BenchmarkStimuliMeta(PeeweeBase):
+    id = PrimaryKeyField()
+    num_stimuli = IntegerField(null=True)
+    datatype = CharField(max_length=100, null=True)
+    stimuli_subtype = CharField(max_length=100, null=True)
+    total_size_mb = FloatField(null=True)
+    brainscore_link = CharField(max_length=200, null=True)
+    extra_notes = CharField(max_length=1000, null=True)
+
+    class Meta:
+        table_name = 'brainscore_benchmark_stimuli_meta'
+
+
+class BenchmarkDataMeta(PeeweeBase):
+    id = PrimaryKeyField()
+    benchmark_type = CharField(max_length=100, null=True)
+    task = CharField(max_length=100, null=True)
+    region = CharField(max_length=100, null=True)
+    hemisphere = CharField(max_length=100, null=True)
+    num_recording_sites = IntegerField(null=True)
+    duration_ms = FloatField(null=True)
+    species = CharField(max_length=100, null=True)
+    datatype = CharField(max_length=100, null=True)
+    num_subjects = IntegerField(null=True)
+    pre_processing = CharField(max_length=100, null=True)
+    brainscore_link = CharField(max_length=200, null=True)
+    extra_notes = CharField(max_length=1000, null=True)
+    data_publicly_available = BooleanField(default=True, null=False)
+
+    class Meta:
+        table_name = 'brainscore_benchmark_data_meta'
+
+
+class BenchmarkMetricMeta(PeeweeBase):
+    id = PrimaryKeyField()
+    type = CharField(max_length=100, null=True)
+    reference = CharField(max_length=100, null=True)
+    public = BooleanField(null=True)
+    brainscore_link = CharField(max_length=200, null=True)
+    extra_notes = CharField(max_length=1000, null=True)
+
+    class Meta:
+        table_name = 'brainscore_benchmark_metric_meta'
+
+
+class BenchmarkInstance(PeeweeBase):
+    benchmark = ForeignKeyField(column_name='benchmark_type_id', field='identifier', model=BenchmarkType)
+    ceiling = FloatField(null=True)
+    ceiling_error = FloatField(null=True)
+    version = IntegerField(null=True)
+    meta = ForeignKeyField(column_name='meta_id', field='id', model=BenchmarkMeta, null=True)
+    data_meta = ForeignKeyField(column_name='data_meta_id', field='id', model=BenchmarkDataMeta, null=True)
+    metric_meta = ForeignKeyField(column_name='metric_meta_id', field='id', model=BenchmarkMetricMeta, null=True)
+    stimuli_meta = ForeignKeyField(column_name='stimuli_meta_id', field='id', model=BenchmarkStimuliMeta, null=True)
+
+    class Meta:
+        table_name = 'brainscore_benchmarkinstance'
 
 
 class Score(PeeweeBase):

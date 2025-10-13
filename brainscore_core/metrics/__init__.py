@@ -8,7 +8,7 @@ and can also be used to compare two primate measurements (e.g. for ceiling estim
 import logging
 import warnings
 
-from brainio.assemblies import DataAssembly, merge_data_arrays
+from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, merge_data_arrays
 
 _logger = logging.getLogger(__name__)
 
