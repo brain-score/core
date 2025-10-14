@@ -29,6 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+    "imageio",
+    "moto",
     "pytest",
     "pytest-check",
     "pytest-mock",
