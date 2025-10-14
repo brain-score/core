@@ -160,7 +160,7 @@ def test_get_user_info():
     client = boto3.client('sts', region_name='us-east-1')
 
     # mocking the get_caller_identity method on the client instance
-    with patch('brainio.packaging.boto3.client') as mock_boto_client:
+    with patch('brainscore_core.supported_data_standards.brainio.packaging.boto3.client') as mock_boto_client:
         mock_boto_client.return_value = client
 
         with patch.object(client, 'get_caller_identity', return_value={
