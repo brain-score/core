@@ -16,7 +16,7 @@ dependencies = [
     "numpy>=1.21,<2.0",
     "boto3", # AWS S3 client for brainio lite
     "netCDF4", # NetCDF file format for brainio lite
-    "xarray", # Data arrays for brainio lite
+    "xarray<2022.6",  # groupby bug was introduced in index refactor: https://github.com/pydata/xarray/issues/6836
     "pandas", # DataFrames for brainio lite
     "Pillow", # Image processing for brainio lite
     "psycopg2-binary", # postgres driver
