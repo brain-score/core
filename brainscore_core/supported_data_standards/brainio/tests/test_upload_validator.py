@@ -5,24 +5,20 @@ Tests validation of stimulus sets and assemblies with various scenarios.
 """
 
 import os
-import sys
 import tempfile
 import numpy as np
 import pandas as pd
 import xarray as xr
 from pathlib import Path
 
-# Add the current directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'brainscore_core', 'supported_data_standards'))
-
-from brainio.upload_validator import (
+from brainscore_core.supported_data_standards.brainio.upload_validator import (
     validate_stimulus_set_only,
     validate_assembly_only,
     validate_packaging_data,
     ValidationError
 )
-from brainio.stimuli import StimulusSet
-from brainio.packaging import package_stimulus_set_locally, package_data_assembly_locally
+from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+from brainscore_core.supported_data_standards.brainio.packaging import package_stimulus_set_locally, package_data_assembly_locally
 
 
 def create_valid_stimulus_set():
