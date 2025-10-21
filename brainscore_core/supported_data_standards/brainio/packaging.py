@@ -48,6 +48,7 @@ from xarray import DataArray
 from . import fetch
 from .fetch import resolve_assembly_class
 from .s3 import sha1_hash
+from .upload_validator import validate_packaging_data, validate_stimulus_set_only, validate_assembly_only, ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -336,6 +337,14 @@ def package_stimulus_set_locally(proto_stimulus_set, stimulus_set_identifier, do
     """
     _logger.debug(f"Packaging {stimulus_set_identifier} locally")
 
+    # Validate stimulus set before packaging
+    try:
+        validate_stimulus_set_only(proto_stimulus_set, stimulus_set_identifier)
+        _logger.debug(f"Stimulus set {stimulus_set_identifier} validation passed")
+    except ValidationError as e:
+        _logger.error(f"Stimulus set validation failed: {e}")
+        raise ValueError(f"Invalid stimulus set '{stimulus_set_identifier}': {e}")
+
     # for legacy packages
     id_col_present = 'stimulus_id' in proto_stimulus_set.columns or 'image_id' in proto_stimulus_set.columns
     assert id_col_present, "StimulusSet needs to have a `stimulus_id` column"
@@ -405,6 +414,15 @@ def package_data_assembly_locally(proto_data_assembly, assembly_identifier, stim
     assembly_class = resolve_assembly_class(assembly_class_name)
     assembly = assembly_class(proto_data_assembly)
     assembly.attrs['stimulus_set_identifier'] = stimulus_set_identifier
+    
+    # Validate assembly before packaging
+    try:
+        validate_assembly_only(assembly, assembly_identifier)
+        _logger.debug(f"Assembly {assembly_identifier} validation passed")
+    except ValidationError as e:
+        _logger.error(f"Assembly validation failed: {e}")
+        raise ValueError(f"Invalid assembly '{assembly_identifier}': {e}")
+    
     assembly.validate()
 
     # identifiers
