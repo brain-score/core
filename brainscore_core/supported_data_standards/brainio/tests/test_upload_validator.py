@@ -135,10 +135,10 @@ def test_valid_stimulus_set():
     
     try:
         result = validate_stimulus_set_only(stimulus_set, "valid_stimulus_set")
-        print(f"✅ Valid stimulus set passed validation: {result}")
+        print(f"Valid stimulus set passed validation: {result}")
         return True
     except Exception as e:
-        print(f"❌ Valid stimulus set failed validation: {e}")
+        print(f"Valid stimulus set failed validation: {e}")
         return False
     finally:
         # Clean up
@@ -154,13 +154,13 @@ def test_invalid_stimulus_set_no_stimulus_id():
     
     try:
         validate_stimulus_set_only(stimulus_set, "invalid_stimulus_set")
-        print("❌ Invalid stimulus set should have failed validation")
+        print("Invalid stimulus set should have failed validation")
         return False
     except ValidationError as e:
-        print(f"✅ Invalid stimulus set correctly failed validation: {e}")
+        print(f"Invalid stimulus set correctly failed validation: {e}")
         return True
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         return False
 
 
@@ -172,13 +172,13 @@ def test_invalid_stimulus_set_no_other_columns():
     
     try:
         validate_stimulus_set_only(stimulus_set, "invalid_stimulus_set")
-        print("❌ Invalid stimulus set should have failed validation")
+        print("Invalid stimulus set should have failed validation")
         return False
     except ValidationError as e:
-        print(f"✅ Invalid stimulus set correctly failed validation: {e}")
+        print(f"Invalid stimulus set correctly failed validation: {e}")
         return True
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         return False
 
 
@@ -190,10 +190,10 @@ def test_valid_assembly():
     
     try:
         result = validate_assembly_only(assembly, "valid_assembly")
-        print(f"✅ Valid assembly passed validation: {result}")
+        print(f"Valid assembly passed validation: {result}")
         return True
     except Exception as e:
-        print(f"❌ Valid assembly failed validation: {e}")
+        print(f"Valid assembly failed validation: {e}")
         return False
 
 
@@ -205,13 +205,13 @@ def test_invalid_assembly_no_stimulus_id():
     
     try:
         validate_assembly_only(assembly, "invalid_assembly")
-        print("❌ Invalid assembly should have failed validation")
+        print("Invalid assembly should have failed validation")
         return False
     except ValidationError as e:
-        print(f"✅ Invalid assembly correctly failed validation: {e}")
+        print(f"Invalid assembly correctly failed validation: {e}")
         return True
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         return False
 
 
@@ -231,7 +231,7 @@ def test_packaging_with_validation():
                 stimulus_set_identifier="test.valid.2024",
                 downloads_path=temp_output
             )
-            print(f"✅ Valid stimulus set packaged successfully")
+            print(f"Valid stimulus set packaged successfully")
             
             # Test assembly packaging
             result2 = package_data_assembly_locally(
@@ -241,11 +241,11 @@ def test_packaging_with_validation():
                 assembly_class_name="NeuroidAssembly",  # Use available class
                 downloads_path=temp_output
             )
-            print(f"✅ Valid assembly packaged successfully")
+            print(f"Valid assembly packaged successfully")
             
         return True
     except Exception as e:
-        print(f"❌ Valid data packaging failed: {e}")
+        print(f"Valid data packaging failed: {e}")
         return False
     finally:
         # Clean up
@@ -267,19 +267,19 @@ def test_packaging_with_invalid_data():
                 stimulus_set_identifier="test.invalid.2024",
                 downloads_path=temp_output
             )
-            print("❌ Invalid stimulus set should have been rejected")
+            print("Invalid stimulus set should have been rejected")
             return False
     except ValueError as e:
-        print(f"✅ Invalid stimulus set correctly rejected: {e}")
+        print(f"Invalid stimulus set correctly rejected: {e}")
         return True
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         return False
 
 
 def main():
     """Run all validation tests."""
-    print("🧪 Testing Upload Validator")
+    print("Testing Upload Validator")
     print("=" * 50)
     
     tests = [
@@ -301,13 +301,13 @@ def main():
             passed += 1
         print("-" * 30)
     
-    print(f"\n📊 Test Results: {passed}/{total} tests passed")
+    print(f"\nTest Results: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 All tests passed! Validator is working correctly.")
+        print("All tests passed! Validator is working correctly.")
         return 0
     else:
-        print("❌ Some tests failed. Check the output above.")
+        print("Some tests failed. Check the output above.")
         return 1
 
 

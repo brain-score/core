@@ -22,6 +22,7 @@ import logging
 from typing import Dict, List, Set, Tuple, Any
 import pandas as pd
 import xarray as xr
+from brainscore_core.supported_data_standards.brainio.assemblies import get_metadata
 
 _logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def validate_assembly(assembly, identifier="assembly") -> bool:
         raise ValidationError(f"{identifier}: Missing 'coords' attribute")
     
     # Check for stimulus_id coordinate
-    if 'stimulus_id' not in assembly.coords:
+    if hasattr(assembly, 'stimulus_id') :
         raise ValidationError(f"{identifier}: Missing required 'stimulus_id' coordinate")
     
     # Check for at least one other coordinate (besides stimulus_id)
@@ -134,7 +135,7 @@ def get_common_columns(stimulus_set, assembly) -> Set[str]:
         Set of common column names
     """
     stimulus_columns = set(stimulus_set.columns)
-    assembly_coords = set(assembly.coords.keys())
+    assembly_coords = set(get_metadata(assembly, names_only=True, include_coords=True, include_levels=True))
     
     # Find intersection (common columns)
     common_columns = stimulus_columns.intersection(assembly_coords)

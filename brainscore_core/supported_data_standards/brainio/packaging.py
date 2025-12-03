@@ -274,7 +274,7 @@ def write_netcdf(assembly, target_netcdf_file, append=False, group=None, compres
 
 
 def package_data_assembly(catalog_identifier, proto_data_assembly, assembly_identifier, stimulus_set_identifier,
-                          assembly_class_name="NeuronRecordingAssembly", bucket_name="brainio-temp", extras=None):
+                          assembly_class_name="NeuroidAssembly", bucket_name="brainio-temp", extras=None):
     """
     Package a set of data along with its metadata for the BrainIO system.
     :param catalog_identifier: The name of the lookup catalog to add the data assembly to.
@@ -379,7 +379,7 @@ def package_stimulus_set_locally(proto_stimulus_set, stimulus_set_identifier, do
 
 
 def package_data_assembly_locally(proto_data_assembly, assembly_identifier, stimulus_set_identifier,
-                                 assembly_class_name="NeuronRecordingAssembly", downloads_path=None, extras=None):
+                                 assembly_class_name="NeuroidAssembly", downloads_path=None, extras=None):
     """
     Package a set of data locally to Downloads folder instead of uploading to S3.
     :param proto_data_assembly: An xarray DataArray containing experimental measurements and all related metadata.
