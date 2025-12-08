@@ -248,9 +248,22 @@ class RunScoringEndpoint:
         #  in the `score` method.
         logger.info(f'Model database entry')
         model = self.domain_plugins.load_model(model_identifier)
+        # Extract visual_degrees from model if available (domain-agnostic check)
+        visual_degrees = None
+        try:
+            if hasattr(model, 'visual_degrees'):
+                visual_degrees_value = getattr(model, 'visual_degrees')
+                if callable(visual_degrees_value):
+                    visual_degrees = visual_degrees_value()
+                else:
+                    visual_degrees = visual_degrees_value
+        except Exception:
+            pass  # visual_degrees remains None if extraction fails
+        
         model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
                                             submission=submission_entry, public=public, competition=competition,
-                                            bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
+                                            bibtex=model.bibtex if hasattr(model, 'bibtex') else None,
+                                            visual_degrees=visual_degrees)
 
         logger.info(f'Benchmark database entry')
         benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)

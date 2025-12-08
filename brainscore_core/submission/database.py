@@ -84,7 +84,8 @@ def public_benchmark_identifiers(domain: str) -> List[str]:
 
 
 def modelentry_from_model(model_identifier: str, public: bool, competition: Union[None, str],
-                          submission: Submission, domain: str, bibtex: Union[None, str] = None) -> Model:
+                          submission: Submission, domain: str, bibtex: Union[None, str] = None,
+                          visual_degrees: Union[None, int] = None) -> Model:
     model_entry, created = Model.get_or_create(name=model_identifier,
                                                defaults={
                                                    'owner': submission.submitter,
@@ -96,6 +97,11 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
         reference = reference_from_bibtex(bibtex)
         model_entry.reference = reference
         model_entry.save()
+    # Set visual_degrees if provided (for new entries or existing entries without it)
+    if visual_degrees is not None:
+        if created or model_entry.visual_degrees is None:
+            model_entry.visual_degrees = visual_degrees
+            model_entry.save()
     return model_entry
 
 
