@@ -102,7 +102,7 @@ def validate_assembly(assembly, identifier="assembly") -> bool:
         raise ValidationError(f"{identifier}: Missing 'coords' attribute")
     
     # Check for stimulus_id coordinate
-    if hasattr(assembly, 'stimulus_id') :
+    if not hasattr(assembly, 'stimulus_id') :
         raise ValidationError(f"{identifier}: Missing required 'stimulus_id' coordinate")
     
     # Check for at least one other coordinate (besides stimulus_id)
