@@ -48,6 +48,7 @@ from xarray import DataArray
 from . import fetch
 from .fetch import resolve_assembly_class
 from .s3 import sha1_hash
+from .upload_validator import validate_packaging_data, validate_stimulus_set_only, validate_assembly_only, ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -273,7 +274,7 @@ def write_netcdf(assembly, target_netcdf_file, append=False, group=None, compres
 
 
 def package_data_assembly(catalog_identifier, proto_data_assembly, assembly_identifier, stimulus_set_identifier,
-                          assembly_class_name="NeuronRecordingAssembly", bucket_name="brainio-temp", extras=None):
+                          assembly_class_name="NeuroidAssembly", bucket_name="brainio-temp", extras=None):
     """
     Package a set of data along with its metadata for the BrainIO system.
     :param catalog_identifier: The name of the lookup catalog to add the data assembly to.
@@ -322,3 +323,121 @@ def package_data_assembly(catalog_identifier, proto_data_assembly, assembly_iden
                   f"bucket_name={bucket_name}, cls={assembly_class_name}")
     return {"identifier": assembly_identifier, "version_id": version_id, "sha1": netcdf_kf_sha1,
             "bucket": bucket_name, "cls": assembly_class_name}
+
+
+def package_stimulus_set_locally(proto_stimulus_set, stimulus_set_identifier, downloads_path=None):
+    """
+    Package a set of stimuli locally to Downloads folder instead of uploading to S3.
+    :param proto_stimulus_set: A StimulusSet containing one row for each stimulus,
+        and the columns {'stimulus_id', ['stimulus_path_within_store' (optional to structure zip directory layout)]}
+        and columns for all stimulus-set-specific metadata but not the column 'filename'.
+    :param stimulus_set_identifier: A unique name identifying the stimulus set
+        <lab identifier>.<first author e.g. 'Rajalingham' or 'MajajHong' for shared first-author><YYYY year of publication>.
+    :param downloads_path: Optional path to save files. Defaults to ~/Downloads/brainscore_packages/
+    """
+    _logger.debug(f"Packaging {stimulus_set_identifier} locally")
+
+    # Validate stimulus set before packaging
+    try:
+        validate_stimulus_set_only(proto_stimulus_set, stimulus_set_identifier)
+        _logger.debug(f"Stimulus set {stimulus_set_identifier} validation passed")
+    except ValidationError as e:
+        _logger.error(f"Stimulus set validation failed: {e}")
+        raise ValueError(f"Invalid stimulus set '{stimulus_set_identifier}': {e}")
+
+    # for legacy packages
+    id_col_present = 'stimulus_id' in proto_stimulus_set.columns or 'image_id' in proto_stimulus_set.columns
+    assert id_col_present, "StimulusSet needs to have a `stimulus_id` column"
+
+    # Set up local directory
+    if downloads_path is None:
+        downloads_path = Path.home() / "Downloads" / "brainscore_packages"
+    else:
+        downloads_path = Path(downloads_path)
+    
+    downloads_path.mkdir(parents=True, exist_ok=True)
+
+    # naming
+    stimulus_store_identifier = "stimulus_" + stimulus_set_identifier.replace(".", "_")
+    # - csv
+    csv_file_name = stimulus_store_identifier + ".csv"
+    target_csv_path = downloads_path / csv_file_name
+    # - zip
+    zip_file_name = stimulus_store_identifier + ".zip"
+    target_zip_path = downloads_path / zip_file_name
+    
+    # create csv and zip files
+    stimulus_zip_sha1, zip_filenames = create_stimulus_zip(proto_stimulus_set, str(target_zip_path))
+    assert 'filename' not in proto_stimulus_set.columns, "StimulusSet already has column 'filename'"
+    proto_stimulus_set['filename'] = zip_filenames  # keep record of zip (or later local) filenames
+    csv_sha1 = create_stimulus_csv(proto_stimulus_set, str(target_csv_path))
+    
+    _logger.debug(f"stimulus set {stimulus_set_identifier} packaged locally:\n csv_path={target_csv_path}, "
+                  f"zip_path={target_zip_path}, csv_sha1={csv_sha1}, zip_sha1={stimulus_zip_sha1}")
+    return {"identifier": stimulus_set_identifier, "csv_path": str(target_csv_path), "zip_path": str(target_zip_path),
+            "csv_sha1": csv_sha1, "zip_sha1": stimulus_zip_sha1}
+
+
+def package_data_assembly_locally(proto_data_assembly, assembly_identifier, stimulus_set_identifier,
+                                 assembly_class_name="NeuroidAssembly", downloads_path=None, extras=None):
+    """
+    Package a set of data locally to Downloads folder instead of uploading to S3.
+    :param proto_data_assembly: An xarray DataArray containing experimental measurements and all related metadata.
+        * The dimensions of the DataArray must be appropriate for the DataAssembly class:
+            * NeuroidAssembly and its subclasses:  "presentation", "neuroid"[, "time_bin"]
+                * except for SpikeTimesAssembly:  "event"
+            * MetaDataAssembly:  "event"
+            * BehavioralAssembly:  should have a "presentation" dimension, but can be flexible about its other dimensions.
+        * A presentation dimension must have a stimulus_id coordinate and should have coordinates for presentation-level metadata such as repetition.
+          The presentation dimension should not have coordinates for stimulus-specific metadata, these will be drawn from the StimulusSet based on stimulus_id.
+        * The neuroid dimension must have a neuroid_id coordinate and should have coordinates for as much neural metadata as possible (e.g. region, subregion, animal, row in array, column in array, etc.)
+        * The time_bin dimension should have coordinates time_bin_start and time_bin_end.
+    :param assembly_identifier: A dot-separated string starting with a lab identifier.
+        * For published: <lab identifier>.<first author e.g. 'Rajalingham' or 'MajajHong' for shared first-author><YYYY year of publication>
+        * For requests: <lab identifier>.<b for behavioral|n for neuroidal>.<m for monkey|h for human>.<proposer e.g. 'Margalit'>.<pull request number>
+    :param stimulus_set_identifier: The unique name of an existing StimulusSet in the BrainIO system.
+    :param assembly_class_name: The name of a DataAssembly subclass.
+    :param downloads_path: Optional path to save files. Defaults to ~/Downloads/brainscore_packages/
+    :param extras: Optional dictionary of additional DataArrays to include in the NetCDF file.
+    """
+    _logger.debug(f"Packaging {assembly_identifier} locally")
+
+    # Set up local directory
+    if downloads_path is None:
+        downloads_path = Path.home() / "Downloads" / "brainscore_packages"
+    else:
+        downloads_path = Path(downloads_path)
+    
+    downloads_path.mkdir(parents=True, exist_ok=True)
+
+    # verify
+    assembly_class = resolve_assembly_class(assembly_class_name)
+    assembly = assembly_class(proto_data_assembly)
+    assembly.attrs['stimulus_set_identifier'] = stimulus_set_identifier
+    
+    # Validate assembly before packaging
+    try:
+        validate_assembly_only(assembly, assembly_identifier)
+        _logger.debug(f"Assembly {assembly_identifier} validation passed")
+    except ValidationError as e:
+        _logger.error(f"Assembly validation failed: {e}")
+        raise ValueError(f"Invalid assembly '{assembly_identifier}': {e}")
+    
+    assembly.validate()
+
+    # identifiers
+    assembly_store_identifier = "assy_" + assembly_identifier.replace(".", "_")
+    netcdf_file_name = assembly_store_identifier + ".nc"
+    target_netcdf_path = downloads_path / netcdf_file_name
+
+    # execute
+    netcdf_kf_sha1 = write_netcdf(assembly, target_netcdf_path)
+    if extras is not None:
+        for k, ex in extras.items():
+            assert isinstance(ex, DataArray)
+            netcdf_kf_sha1 = write_netcdf(ex, target_netcdf_path, append=True, group=k)
+
+    _logger.debug(f"assembly {assembly_identifier} packaged locally:\n path={target_netcdf_path}, "
+                  f"sha1={netcdf_kf_sha1}, cls={assembly_class_name}")
+    return {"identifier": assembly_identifier, "path": str(target_netcdf_path), "sha1": netcdf_kf_sha1,
+            "cls": assembly_class_name}
