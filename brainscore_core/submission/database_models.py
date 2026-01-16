@@ -156,7 +156,7 @@ class BenchmarkInstance(PeeweeBase):
     ceiling = FloatField(null=True)
     ceiling_error = FloatField(null=True)
     version = IntegerField(null=True)
-    meta = ForeignKeyField(column_name='meta_id', field='id', model=BenchmarkMeta, null=True)
+    meta = ForeignKeyField(column_name='meta_id', field='identifier', model=BenchmarkMeta, null=True)
     data_meta = ForeignKeyField(column_name='data_meta_id', field='id', model=BenchmarkDataMeta, null=True)
     metric_meta = ForeignKeyField(column_name='metric_meta_id', field='id', model=BenchmarkMetricMeta, null=True)
     stimuli_meta = ForeignKeyField(column_name='stimuli_meta_id', field='id', model=BenchmarkStimuliMeta, null=True)
