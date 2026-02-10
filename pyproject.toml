@@ -4,7 +4,7 @@
 
 [project]
 name = "brainscore_core"
-version = "2.3.2"
+version = "2.3.3"
 description = ""
 authors = []
 license = { 'file' = 'LICENSE' }
