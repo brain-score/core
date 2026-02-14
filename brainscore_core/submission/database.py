@@ -361,6 +361,15 @@ def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> Bench
         ceiling = benchmark.ceiling
         bench_inst.ceiling = ceiling.item()
         bench_inst.ceiling_error = _retrieve_score_error(ceiling)
+
+        # attach inter-subject ceiling
+        try:
+            inter_subject_ceiling = benchmark.ceiling
+            bench_inst.inter_subject_ceiling = inter_subject_ceiling.item()
+            bench_inst.inter_subject_ceiling_error = _retrieve_score_error(inter_subject_ceiling)
+        except Exception as e:
+            logger.warning(f"Failed to compute inter-subject-ceiling: {e}")
+
         bench_inst.save()
     return bench_inst
 
