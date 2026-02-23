@@ -81,6 +81,7 @@ class Model(PeeweeBase):
     visual_degrees = IntegerField(null=True)  # null during creation of new model without having model object loaded
     public = BooleanField()
     competition = CharField(max_length=200, default=None, null=True)
+    group = CharField(max_length=200, null=True, default=None)
 
     class Meta:
         table_name = 'brainscore_model'
