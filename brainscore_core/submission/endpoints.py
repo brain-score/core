@@ -41,6 +41,7 @@ from brainscore_core.submission.database import (
 from brainscore_core.submission.database import update_score
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class UserManager:
@@ -275,6 +276,7 @@ class RunScoringEndpoint:
                                   public: bool, competition: Union[None, str]):
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
+        logger.setLevel(logging.INFO)
         logger.info(f'Model database entry')
         model = self.domain_plugins.load_model(model_identifier)
         model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
@@ -305,7 +307,7 @@ class RunScoringEndpoint:
                 model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
             score_entry.end_timestamp = datetime.now()
             # store in database
-            logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
+            print(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)
             self._upload_score_to_s3(score_result, model_identifier, benchmark_identifier, domain)
         except Exception as e:
