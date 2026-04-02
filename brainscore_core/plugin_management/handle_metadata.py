@@ -255,6 +255,8 @@ def main():
                         help="Domain type (currently only 'vision' is supported)")
     parser.add_argument("--db-connection", action="store_true", default=False,
                         help="If provided, establish a new database connection")
+    parser.add_argument("--skip-pr", action="store_true", default=False,
+                        help="If provided, skip PR creation and output metadata path instead")
     args = parser.parse_args()
 
     new_metadata = False
@@ -300,9 +302,14 @@ def main():
         create_endpoint = MetadataEndpoint(domain_plugins=domain_plugin, db_secret=db_secret)
         create_endpoint(plugin_dir=args.plugin_dir, plugin_type=args.plugin_type, domain=args.domain)
 
-    if new_metadata:  # if metadata was created, create a pr that will be automerged and approved by github actions
-        pr_number = create_metadata_pr(args.plugin_dir)
-        print(pr_number)
+    if new_metadata:
+        if args.skip_pr:
+            # Output the metadata path for the workflow to collect
+            print(metadata_path)
+        else:
+            # Create a PR that will be automerged and approved by github actions
+            pr_number = create_metadata_pr(args.plugin_dir)
+            print(pr_number)
     else:
         print("")
 
