@@ -6,7 +6,7 @@ benchmarks combine neural/behavioral data with a metric to score models on their
 and models are evaluated as computational hypotheses of natural intelligence.
 
 This repository implements core functionality including a plugin system to manage data assemblies and models,
-as well as metrics to compare e.g. neural recordings or behavioral mesurements.
+as well as metrics to compare e.g. neural recordings or behavioral measurements.
 Data assemblies and model predictions are organized in BrainIO_.
 
 .. _BrainIO: https://github.com/brain-score/brainio
