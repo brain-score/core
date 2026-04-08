@@ -63,7 +63,7 @@ class UnifiedModel(ABC):
         ...
 
     def start_task(self, task_context: TaskContext) -> None:
-        self._task_context = task_context
+        self._task_context: Optional[TaskContext] = task_context
 
     def start_recording(self, recording_target: str,
                         time_bins: Optional[List[Tuple[int, int]]] = None,
@@ -239,7 +239,8 @@ class BrainScoreModel(UnifiedModel):
         )
 
     def start_recording(self, recording_target: str,
-                        time_bins=None, **kwargs) -> None:
+                        time_bins: Optional[List[Tuple[int, int]]] = None,
+                        recording_type: Optional[str] = None) -> None:
         self._recording_layer = self._region_layer_map_dict.get(
             recording_target, recording_target
         )
