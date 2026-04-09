@@ -250,16 +250,19 @@ def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
         return design + target + design * 2 + components + cv_copy + cv_target_copy
 
     if category == 'ridge':
-        # Ridge: Gram matrix (F x F) dominates for large feature dims
-        gram = n_features * n_features * 4
+        # Ridge: sklearn uses dual formulation when n_samples < n_features,
+        # so the Gram matrix is min(S, F)^2, not F^2.
+        gram_dim = min(n_stimuli, n_features)
+        gram = gram_dim * gram_dim * 4
         solution = n_features * n_targets * 4  # (F, T) weight matrix
         return gram + design + target + solution
 
     if category == 'ridgecv':
-        # RidgeCV: grid search over A alphas, sklearn allocates
-        # (S, T, A) for leave-one-out predictions + (F, F) gram
+        # RidgeCV: sklearn uses dual when n_samples < n_features.
+        # LOO predictions: (S, T, A) for leave-one-out cross-validation.
         n_alphas = _get_n_alphas(benchmark)
-        gram = n_features * n_features * 4
+        gram_dim = min(n_stimuli, n_features)
+        gram = gram_dim * gram_dim * 4
         loo_predictions = n_stimuli * n_targets * n_alphas * 4
         return gram + design + target + loo_predictions
 
@@ -324,16 +327,23 @@ def check_memory(
     import psutil
     baseline = psutil.Process().memory_info().rss
 
-    # Single-stimulus probe: measures forward pass peak and discovers
-    # the actual feature dimension (which can be 9K-150K+ depending on
-    # the model layer, NOT the 1000 we'd assume from PCA).
+    # Single-stimulus probe: discovers the actual feature dimension
+    # (which can be 9K-150K+ depending on the model layer) and measures
+    # the persistent memory cost (model overhead + PCA components + cache).
+    #
+    # We measure RSS AFTER the probe (not peak DURING) because:
+    # - The transient peak includes PCA calibration (~1000 ImageNet images)
+    #   which is cached to disk and freed. It won't recur during scoring.
+    # - The persistent delta captures what actually stays in memory:
+    #   PCA components, cached activations, model state.
     try:
-        result, peak_1 = _measure_peak_rss(model.process, probe)
+        result = model.process(probe)
     except Exception as e:
         logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
         return
 
-    forward_pass_peak = max(peak_1 - baseline, 0)
+    rss_after_probe = psutil.Process().memory_info().rss
+    forward_pass_overhead = max(rss_after_probe - baseline, 0)
 
     # Read the actual feature dimension from the probe result.
     # This is critical: models with region_layer_map skip PCA entirely,
@@ -356,7 +366,7 @@ def check_memory(
     stored_activations = per_stimulus_cost * n_stimuli * n_extraction_calls
     cache_copy = stored_activations  # @store_xarray keeps a cache copy in memory
 
-    estimated_scoring_memory = forward_pass_peak + stored_activations + cache_copy
+    estimated_scoring_memory = forward_pass_overhead + stored_activations + cache_copy
     estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
 
     # Include the pre-scoring baseline (Python runtime + loaded model + libraries).
@@ -370,7 +380,7 @@ def check_memory(
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
             f"{total_estimated / 1e9:.1f} GB "
             f"(baseline: {baseline / 1e9:.1f} GB, "
-            f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
+            f"model overhead: {forward_pass_overhead / 1e9:.1f} GB, "
             f"activations: {stored_activations / 1e9:.1f} GB "
             f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli}], "
             f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
@@ -388,7 +398,7 @@ def check_memory(
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
         f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB "
         f"(baseline: {baseline / 1e9:.1f} GB, "
-        f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
+        f"model overhead: {forward_pass_overhead / 1e9:.1f} GB, "
         f"activations+cache: {(stored_activations + cache_copy) / 1e9:.1f} GB "
         f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli} x {n_extraction_calls}calls x 2], "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
