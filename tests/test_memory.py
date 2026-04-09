@@ -16,14 +16,21 @@ from brainscore_core.model_interface import UnifiedModel
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+class FakeResult:
+    """Mimics a DataAssembly with nbytes."""
+    def __init__(self, nbytes=8000):
+        self.nbytes = nbytes
+
+
 class FakeModel(UnifiedModel):
 
     def __init__(self, identifier='test-model', modalities=None,
-                 region_layer_map=None, process_result=None):
+                 region_layer_map=None, process_result=None,
+                 activation_nbytes=8000):
         self._id = identifier
         self._modalities = modalities or {'vision'}
         self._rlm = region_layer_map or {}
-        self._process_result = process_result
+        self._process_result = process_result or FakeResult(nbytes=activation_nbytes)
 
     @property
     def identifier(self) -> str:
@@ -155,22 +162,21 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_raises_when_insufficient_memory(self):
-        model = FakeModel()
-        bench = FakeBenchmark(n_stimuli=1000, batch_size=64)
-        # Mock: available=1GB, per-stimulus cost=100MB
-        with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
+        # forward_pass=100MB, activation=100KB/stim, n_stimuli=1000
+        # total = (100MB + 100KB*1000 + ~0) * 1.5 = 300MB. Available=200MB. Fail.
+        model = FakeModel(activation_nbytes=100_000)
+        bench = FakeBenchmark(n_stimuli=1000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=200_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 100_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
             with pytest.raises(MemoryError, match="Estimated memory"):
                 check_memory(model, bench)
 
     def test_warns_at_high_utilization(self):
-        model = FakeModel()
+        # forward_pass=600MB, activation=1KB/stim, n_stimuli=10
+        # total = (600MB + 1KB*10 + ~0) * 1.5 ≈ 900MB. Available=1GB. 90%. Warn.
+        model = FakeModel(activation_nbytes=1000)
         bench = FakeBenchmark(n_stimuli=10)
-        # Mock: available=1GB, estimated will be ~85% of available
-        # per_stimulus=100MB, batch_size=1, metric~0, safety=1.5
-        # total = 100MB * 1 * 1.5 = 150MB... not enough for 80%
-        # Need total > 800MB: per_stimulus=600MB, safety=1.5 => 900MB
         with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 600_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
@@ -196,10 +202,12 @@ class TestCheckMemory:
         check_memory(model, bench)  # should not raise
 
     def test_custom_safety_factor(self):
-        model = FakeModel()
+        # forward_pass=100MB, activation=1KB/stim, n_stimuli=10
+        # base = 100MB + 10KB ≈ 100MB
+        # safety=1.0: total ≈ 100MB. Available=150MB. Pass.
+        # safety=2.0: total ≈ 200MB. Available=150MB. Fail.
+        model = FakeModel(activation_nbytes=1000)
         bench = FakeBenchmark(n_stimuli=10)
-        # With safety_factor=1.0, total = 100MB. Available = 150MB. Should pass.
-        # With safety_factor=2.0, total = 200MB. Available = 150MB. Should fail.
         with patch('brainscore_core.memory.get_available_memory', return_value=150_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 100_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
@@ -212,29 +220,31 @@ class TestCheckMemory:
                 check_memory(model, bench, safety_factor=2.0)
 
     def test_error_message_includes_identifiers(self):
-        model = FakeModel(identifier='big-vit')
-        bench = FakeBenchmark(identifier='MajajHong2015', n_stimuli=1000,
-                              batch_size=64)
-        with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
+        # forward_pass=100MB, activation=100KB/stim, n_stimuli=1000
+        # total = (100MB + 100MB) * 1.5 = 300MB. Available=200MB. Fail.
+        model = FakeModel(identifier='big-vit', activation_nbytes=100_000)
+        bench = FakeBenchmark(identifier='MajajHong2015', n_stimuli=1000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=200_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 100_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
             with pytest.raises(MemoryError, match="big-vit") as exc_info:
                 check_memory(model, bench)
             assert "MajajHong2015" in str(exc_info.value)
 
-    def test_batch_size_affects_estimate(self):
-        model = FakeModel()
-        # batch_size=1: total = 50MB * 1 * 1.5 = 75MB. Available=200MB. Pass.
-        bench_small = FakeBenchmark(n_stimuli=1000, batch_size=1)
-        with patch('brainscore_core.memory.get_available_memory', return_value=200_000_000), \
-             patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 50_000_000]), \
+    def test_n_stimuli_scales_activation_estimate(self):
+        # forward_pass=10MB, activation=10KB/stim
+        # 10 stimuli: total = (10MB + 100KB) * 1.5 ≈ 15MB. Available=500MB. Pass.
+        model = FakeModel(activation_nbytes=10_000)
+        bench_small = FakeBenchmark(n_stimuli=10)
+        with patch('brainscore_core.memory.get_available_memory', return_value=500_000_000), \
+             patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 10_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
             check_memory(model, bench_small)  # passes
 
-        # batch_size=64: total = 50MB * 64 * 1.5 = 4.8GB. Available=200MB. Fail.
-        bench_large = FakeBenchmark(n_stimuli=1000, batch_size=64)
-        with patch('brainscore_core.memory.get_available_memory', return_value=200_000_000), \
-             patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 50_000_000]), \
+        # 5000 stimuli: total = (10MB + 50MB) * 1.5 = 90MB. Available=50MB. Fail.
+        bench_large = FakeBenchmark(n_stimuli=5000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=50_000_000), \
+             patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 10_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
             with pytest.raises(MemoryError):
                 check_memory(model, bench_large)

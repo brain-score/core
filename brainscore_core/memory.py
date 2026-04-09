@@ -149,7 +149,7 @@ def check_memory(
     baseline = get_peak_memory()
 
     try:
-        model.process(probe)
+        result = model.process(probe)
     except Exception as e:
         # If the probe itself fails, let the benchmark handle the error later.
         # Don't mask real errors behind a memory check.
@@ -157,12 +157,18 @@ def check_memory(
         return
 
     peak = get_peak_memory()
-    per_stimulus_cost = max(peak - baseline, 0)
+    forward_pass_peak = max(peak - baseline, 0)
 
-    # Extrapolate to full benchmark
-    batch_size = getattr(benchmark, 'batch_size', 1)
-    # Memory scales with batch size, not total stimuli (batches are sequential)
-    estimated_model_memory = per_stimulus_cost * batch_size
+    # Separate forward-pass overhead (constant) from per-stimulus activation
+    # storage (scales with total stimuli). The probe result's nbytes tells us
+    # how much memory one stimulus's activations occupy.
+    activation_bytes = getattr(result, 'nbytes', 0) if result is not None else 0
+
+    # Extrapolate to full benchmark: stored activations scale with n_stimuli,
+    # forward-pass overhead is constant (model runs in batches, frees intermediates)
+    n_stimuli = len(stimulus_set)
+    stored_activations = activation_bytes * n_stimuli
+    estimated_model_memory = forward_pass_peak + stored_activations
     estimated_metric_memory = estimate_metric_memory(benchmark)
     total_estimated = (estimated_model_memory + estimated_metric_memory) * safety_factor
 
@@ -171,7 +177,8 @@ def check_memory(
             f"Estimated memory for '{model.identifier}' on "
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
             f"{total_estimated / 1e9:.1f} GB "
-            f"(model: {estimated_model_memory / 1e9:.1f} GB per batch, "
+            f"(forward pass: {forward_pass_peak / 1e9:.1f} GB, "
+            f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
             f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
             f"safety: {safety_factor}x). "
             f"Available: {available / 1e9:.1f} GB. "
@@ -184,7 +191,8 @@ def check_memory(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}': "
         f"{total_estimated / 1e9:.1f} GB "
-        f"(model: {estimated_model_memory / 1e9:.1f} GB, "
+        f"(forward pass: {forward_pass_peak / 1e9:.1f} GB, "
+        f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
         f"safety: {safety_factor}x) — "
         f"{available / 1e9:.1f} GB available "
