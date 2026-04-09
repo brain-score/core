@@ -198,7 +198,7 @@ SAFETY_FACTORS = {
 }
 
 
-def estimate_metric_memory(benchmark) -> int:
+def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
     """
     Estimate memory required for the benchmark's metric computation.
 
@@ -212,12 +212,20 @@ def estimate_metric_memory(benchmark) -> int:
     - RSA:      O(S^2)                                   ~quadratic in stimuli
     - Behavioral: negligible
 
+    Args:
+        benchmark: the benchmark to estimate for.
+        n_features: actual model feature dimension from probe. If None,
+            falls back to benchmark.expected_feature_dim or 1000. This is
+            critical because models with region_layer_map skip PCA, so
+            features can be 9K (alexnet) to 148K+ (ViT-L).
+
     Returns estimate in bytes.
     """
     category = _detect_metric_category(benchmark)
     n_stimuli = _get_n_stimuli(benchmark)
     n_targets = _get_n_targets(benchmark)
-    n_features = getattr(benchmark, 'expected_feature_dim', 1000)
+    if n_features is None:
+        n_features = getattr(benchmark, 'expected_feature_dim', 1000)
 
     if category == 'behavioral' or n_stimuli == 0:
         return 0
@@ -312,40 +320,33 @@ def check_memory(
     import psutil
     baseline = psutil.Process().memory_info().rss
 
-    # Probe 1: single stimulus with peak RSS tracking.
-    # A background thread polls RSS at 5ms intervals to capture transient
-    # spikes (e.g., raw activations allocated during extraction that are
-    # freed before model.process() returns).
+    # Single-stimulus probe: measures forward pass peak and discovers
+    # the actual feature dimension (which can be 9K-150K+ depending on
+    # the model layer, NOT the 1000 we'd assume from PCA).
     try:
         result, peak_1 = _measure_peak_rss(model.process, probe)
     except Exception as e:
         logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
         return
 
-    rss_after_1 = psutil.Process().memory_info().rss
     forward_pass_peak = max(peak_1 - baseline, 0)
 
-    # Probe 2: larger batch to measure per-stimulus marginal cost.
-    # The marginal between probe peaks tells us how much each additional
-    # stimulus costs, including transient raw activation storage.
-    n_probe_2 = min(10, len(stimulus_set))
-    marginal_per_stimulus = 0
-    if n_probe_2 > max_probe_stimuli:
-        probe_2 = stimulus_set.iloc[max_probe_stimuli:n_probe_2]
-        try:
-            _, peak_2 = _measure_peak_rss(model.process, probe_2)
-            n_new = n_probe_2 - max_probe_stimuli
-            marginal_per_stimulus = max(peak_2 - peak_1, 0) / n_new if n_new > 0 else 0
-        except Exception:
-            pass  # fall back to single-probe estimate
-
+    # Read the actual feature dimension from the probe result.
+    # This is critical: models with region_layer_map skip PCA entirely,
+    # so features can be 9K (alexnet) to 148K+ (ViT-L). The metric
+    # formulas scale with n_features^2, so getting this right is essential.
+    n_features = 1000  # fallback
+    if result is not None:
+        shape = getattr(result, 'shape', None)
+        if shape is not None and len(shape) >= 2:
+            n_features = shape[-1]
     activation_bytes = getattr(result, 'nbytes', 0) if result is not None else 0
-    per_stimulus_cost = max(marginal_per_stimulus, activation_bytes)
+    per_stimulus_cost = max(activation_bytes // max(max_probe_stimuli, 1), 0)
 
     n_stimuli = len(stimulus_set)
-    stored_activations = int(per_stimulus_cost * n_stimuli)
+    stored_activations = per_stimulus_cost * n_stimuli
     estimated_scoring_memory = forward_pass_peak + stored_activations
-    estimated_metric_memory = estimate_metric_memory(benchmark)
+    estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
 
     # Include the pre-scoring baseline (Python runtime + loaded model + libraries).
     # This memory is already consumed and must be counted toward OOM risk.

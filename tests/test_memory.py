@@ -22,20 +22,21 @@ from brainscore_core.model_interface import UnifiedModel
 # ── Helpers ──────────────────────────────────────────────────────────
 
 class FakeResult:
-    """Mimics a DataAssembly with nbytes."""
-    def __init__(self, nbytes=8000):
+    """Mimics a DataAssembly with nbytes and shape."""
+    def __init__(self, nbytes=8000, n_features=1000):
         self.nbytes = nbytes
+        self.shape = (1, n_features)
 
 
 class FakeModel(UnifiedModel):
 
     def __init__(self, identifier='test-model', modalities=None,
                  region_layer_map=None, process_result=None,
-                 activation_nbytes=8000):
+                 activation_nbytes=8000, n_features=1000):
         self._id = identifier
         self._modalities = modalities or {'vision'}
         self._rlm = region_layer_map or {}
-        self._process_result = process_result or FakeResult(nbytes=activation_nbytes)
+        self._process_result = process_result or FakeResult(nbytes=activation_nbytes, n_features=n_features)
 
     @property
     def identifier(self) -> str:
@@ -296,24 +297,30 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_raises_when_insufficient_memory(self):
-        # PLS: baseline=500MB, peak_1=700MB (200MB forward+transient),
-        # peak_2=750MB (50MB for 9 more stim → 5.5MB/stim marginal)
-        # stored = 5.5MB * 1000 = 5.5GB. total = 500MB + (200MB + 5.5GB) * 1.5 ≈ 9GB.
-        model = FakeModel(activation_nbytes=100_000)
-        bench = FakeBenchmark(identifier='test-pls', n_stimuli=1000)
-        mock_psutil, mock_peak = _mock_memory(500_000_000, 700_000_000, 750_000_000)
-        with patch('brainscore_core.memory.get_available_memory', return_value=1_500_000_000), \
+        # PLS with large features: baseline=500MB, peak=700MB (200MB forward)
+        # n_features=10000, n_stimuli=1000, per_stim=100KB
+        # stored = 100KB * 1000 = 100MB
+        # metric(PLS, 10K features): design=40MB + target=0.4MB + deflated=80MB + components=0.4MB ≈ 121MB
+        # total = 500MB + (200MB + 100MB + 121MB) * 1.5 ≈ 1.13GB. system=2GB.
+        # But with n_features=10000 the gram in the metric formula is bigger.
+        # Use ridge instead: gram = 10000^2 * 4 = 400MB
+        # total = 500MB + (200MB + 100MB + 400MB+40MB+0.4MB) * 2.0 ≈ 1.98GB. system=1.5+0.5=2GB. Fail.
+        model = FakeModel(activation_nbytes=100_000, n_features=10000)
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
+        mock_psutil, mock_peak = _mock_memory(500_000_000, 700_000_000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
              mock_psutil, mock_peak:
             with pytest.raises(MemoryError, match="Estimated memory"):
                 check_memory(model, bench)
 
     def test_warns_at_high_utilization(self):
-        # PLS: baseline=200MB, peak_1=900MB (700MB forward+transient),
-        # peak_2=920MB (20MB/9≈2.2MB/stim marginal), stored=22MB
-        # total = 200 + (700+22)*1.5 = 1283MB. system=200+1200=1400MB. 92%. Warn.
+        # PLS: baseline=200MB, peak=900MB (700MB forward+transient)
+        # n_features=1000, per_stim=1KB, stored=10KB
+        # metric(PLS, 1000): ~5MB
+        # total = 200 + (700 + 0.01 + 5) * 1.5 ≈ 1258MB. system=1400MB. 90%. Warn.
         model = FakeModel(activation_nbytes=1000)
         bench = FakeBenchmark(identifier='test-pls', n_stimuli=10)
-        mock_psutil, mock_peak = _mock_memory(200_000_000, 900_000_000, 920_000_000)
+        mock_psutil, mock_peak = _mock_memory(200_000_000, 900_000_000)
         with patch('brainscore_core.memory.get_available_memory', return_value=1_200_000_000), \
              mock_psutil, mock_peak:
             with pytest.warns(ResourceWarning, match="OOM risk"):
@@ -337,46 +344,40 @@ class TestCheckMemory:
         check_memory(model, bench)  # should not raise
 
     def test_custom_safety_factor(self):
-        # baseline=100MB, peak_1=200MB (100MB forward), peak_2=210MB (1MB/stim)
-        # safety=1.0: total = 100 + (100 + 10) * 1.0 = 210MB. system=250MB. Pass.
-        # safety=2.0: total = 100 + (100 + 10) * 2.0 = 320MB. system=250MB. Fail.
+        # baseline=100MB, peak=200MB (100MB forward), per_stim=1KB, n_stimuli=10
+        # metric ≈ tiny for behavioral
+        # safety=1.0: total = 100 + (100 + 0.01) * 1.0 ≈ 200MB. system=250MB. Pass.
+        # safety=2.0: total = 100 + (100 + 0.01) * 2.0 ≈ 300MB. system=250MB. Fail.
         model = FakeModel(activation_nbytes=1000)
         bench = FakeBenchmark(n_stimuli=10)
-        mock_psutil, mock_peak = _mock_memory(100_000_000, 200_000_000, 209_000_000)
+        mock_psutil, mock_peak = _mock_memory(100_000_000, 200_000_000)
         with patch('brainscore_core.memory.get_available_memory', return_value=150_000_000), \
              mock_psutil, mock_peak:
             check_memory(model, bench, safety_factor=1.0)  # passes
 
-        mock_psutil, mock_peak = _mock_memory(100_000_000, 200_000_000, 209_000_000)
+        mock_psutil, mock_peak = _mock_memory(100_000_000, 200_000_000)
         with patch('brainscore_core.memory.get_available_memory', return_value=150_000_000), \
              mock_psutil, mock_peak:
             with pytest.raises(MemoryError):
                 check_memory(model, bench, safety_factor=2.0)
 
     def test_error_message_includes_identifiers(self):
-        model = FakeModel(identifier='big-vit', activation_nbytes=100_000)
-        bench = FakeBenchmark(identifier='MajajHong2015-pls', n_stimuli=1000)
-        mock_psutil, mock_peak = _mock_memory(500_000_000, 700_000_000, 750_000_000)
-        with patch('brainscore_core.memory.get_available_memory', return_value=1_500_000_000), \
+        model = FakeModel(identifier='big-vit', activation_nbytes=100_000, n_features=10000)
+        bench = FakeBenchmark(identifier='MajajHong2015-ridge', n_stimuli=1000)
+        mock_psutil, mock_peak = _mock_memory(500_000_000, 700_000_000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
              mock_psutil, mock_peak:
             with pytest.raises(MemoryError, match="big-vit") as exc_info:
                 check_memory(model, bench)
             assert "MajajHong2015" in str(exc_info.value)
 
-    def test_peak_captures_transient_spike(self):
-        # baseline=500MB. Peak during probe=1.5GB (transient raw activations),
-        # but RSS after probe settles back to 510MB. Peak tracking captures 1.5GB.
-        # forward_pass_peak = 1.5GB - 500MB = 1GB.
-        # peak_2=1.6GB → marginal = (1.6GB-1.5GB)/9 ≈ 11MB/stim
-        # 5000 stimuli: total = 500MB + (1GB + 55GB) * 1.5 ≈ 84GB. Fail.
-        model = FakeModel(activation_nbytes=10_000)
-        bench = FakeBenchmark(identifier='test-pls', n_stimuli=5000)
-        mock_psutil, mock_peak = _mock_memory(
-            500_000_000,         # baseline RSS
-            1_500_000_000,       # peak during 1-stim probe (transient spike!)
-            1_600_000_000,       # peak during N-stim probe
-        )
-        with patch('brainscore_core.memory.get_available_memory', return_value=10_000_000_000), \
+    def test_large_features_trigger_oom(self):
+        # Model with 100K features (like ViT-L without PCA).
+        # Ridge gram matrix: 100K^2 * 4 = 40 GB. Must trigger MemoryError.
+        model = FakeModel(activation_nbytes=400_000, n_features=100_000)
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=500)
+        mock_psutil, mock_peak = _mock_memory(2_000_000_000, 2_500_000_000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=30_000_000_000), \
              mock_psutil, mock_peak:
             with pytest.raises(MemoryError):
                 check_memory(model, bench)
@@ -387,14 +388,14 @@ class TestCheckMemory:
         bench_pls = FakeBenchmark(identifier='test-pls', n_stimuli=10)
         bench_cv = FakeBenchmark(identifier='test-ridgecv', n_stimuli=10)
         # baseline=100MB, peak=500MB (400MB forward).
-        # PLS: 100 + (400+10)*1.5 = 715MB < 1GB system. Pass.
-        # RidgeCV: 100 + (400+10+metric)*3.0 > 1GB system. Fail.
-        mock_psutil, mock_peak = _mock_memory(100_000_000, 500_000_000, 509_000_000)
+        # PLS: 100 + (400 + tiny)*1.5 = 700MB < 1GB system. Pass.
+        # RidgeCV: 100 + (400 + metric)*3.0 > 1GB system. Fail.
+        mock_psutil, mock_peak = _mock_memory(100_000_000, 500_000_000)
         with patch('brainscore_core.memory.get_available_memory', return_value=900_000_000), \
              mock_psutil, mock_peak:
             check_memory(model, bench_pls)  # passes at 1.5x
 
-        mock_psutil, mock_peak = _mock_memory(100_000_000, 500_000_000, 509_000_000)
+        mock_psutil, mock_peak = _mock_memory(100_000_000, 500_000_000)
         with patch('brainscore_core.memory.get_available_memory', return_value=900_000_000), \
              mock_psutil, mock_peak:
             with pytest.raises(MemoryError):
