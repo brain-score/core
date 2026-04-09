@@ -8,3 +8,4 @@ from .model_interface import (
     BrainScoreModel,
 )
 from .compatibility import CompatibilityError, CompatibilityWarning, check_compatibility
+from .memory import MemoryError, check_memory, get_available_memory
