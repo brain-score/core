@@ -286,34 +286,42 @@ def check_memory(
     # forward-pass overhead is constant (model runs in batches, frees intermediates)
     n_stimuli = len(stimulus_set)
     stored_activations = activation_bytes * n_stimuli
-    estimated_model_memory = forward_pass_peak + stored_activations
+    estimated_scoring_memory = forward_pass_peak + stored_activations
     estimated_metric_memory = estimate_metric_memory(benchmark)
-    total_estimated = (estimated_model_memory + estimated_metric_memory) * safety_factor
 
-    if total_estimated > available:
+    # Include the pre-scoring baseline (Python runtime + loaded model + libraries).
+    # This memory is already consumed and must be counted toward OOM risk.
+    total_estimated = baseline + (estimated_scoring_memory + estimated_metric_memory) * safety_factor
+
+    if total_estimated > available + baseline:
+        # Compare against total system memory (available + what we already hold)
         raise MemoryError(
             f"Estimated memory for '{model.identifier}' on "
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
             f"{total_estimated / 1e9:.1f} GB "
-            f"(forward pass: {forward_pass_peak / 1e9:.1f} GB, "
+            f"(baseline: {baseline / 1e9:.1f} GB, "
+            f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
             f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
             f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
             f"safety: {safety_factor}x). "
-            f"Available: {available / 1e9:.1f} GB. "
-            f"Options: reduce batch_size, use a larger instance, or "
+            f"Available: {(available + baseline) / 1e9:.1f} GB total. "
+            f"Options: use a larger instance or "
             f"set check_mem=False to skip this check."
         )
 
-    utilization = total_estimated / available
+    # Utilization against total system memory
+    total_system = available + baseline
+    utilization = total_estimated / total_system if total_system > 0 else 0
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
         f"[{category}]: {total_estimated / 1e9:.1f} GB "
-        f"(forward pass: {forward_pass_peak / 1e9:.1f} GB, "
+        f"(baseline: {baseline / 1e9:.1f} GB, "
+        f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
         f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
         f"safety: {safety_factor}x) — "
-        f"{available / 1e9:.1f} GB available "
+        f"{total_system / 1e9:.1f} GB total system "
         f"({utilization:.0%} utilization)"
     )
     if utilization > 0.8:
