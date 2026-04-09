@@ -9,8 +9,11 @@ Cross-platform: CUDA (torch.cuda), MPS (psutil), CPU (psutil).
 brainscore_core stays free of heavy dependencies -- torch is optional.
 """
 
+import logging
 import warnings
 from typing import Optional, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .model_interface import UnifiedModel
@@ -156,6 +159,16 @@ def check_memory(
         )
 
     utilization = total_estimated / available
+    logger.info(
+        f"Memory estimate for '{model.identifier}' on "
+        f"'{getattr(benchmark, 'identifier', 'unknown')}': "
+        f"{total_estimated / 1e9:.1f} GB "
+        f"(model: {estimated_model_memory / 1e9:.1f} GB, "
+        f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
+        f"safety: {safety_factor}x) — "
+        f"{available / 1e9:.1f} GB available "
+        f"({utilization:.0%} utilization)"
+    )
     if utilization > 0.8:
         warnings.warn(
             f"Memory utilization for '{model.identifier}' estimated at "
