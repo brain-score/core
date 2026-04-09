@@ -120,6 +120,7 @@ def check_memory(
     # Get a probe stimulus (single item from the benchmark's stimulus set)
     stimulus_set = getattr(benchmark, 'stimulus_set', None)
     if stimulus_set is None or len(stimulus_set) == 0:
+        logger.info("Memory check skipped: benchmark has no stimulus_set")
         return  # can't probe without stimuli
 
     probe = stimulus_set.iloc[:max_probe_stimuli]
@@ -130,9 +131,10 @@ def check_memory(
 
     try:
         model.process(probe)
-    except Exception:
+    except Exception as e:
         # If the probe itself fails, let the benchmark handle the error later.
         # Don't mask real errors behind a memory check.
+        logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
         return
 
     peak = get_peak_memory()
