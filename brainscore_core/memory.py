@@ -1,15 +1,19 @@
 """
 Probe-based memory pre-check for Brain-Score.
 
-Runs a single stimulus through the model, measures peak memory,
-and extrapolates to the full benchmark. Prevents OOM failures
-after hours of computation.
+Runs a small batch of stimuli through the model, measures peak memory
+(including transient spikes), and extrapolates to the full benchmark.
+Prevents OOM failures after hours of computation.
 
 Cross-platform: CUDA (torch.cuda), MPS (psutil), CPU (psutil).
 brainscore_core stays free of heavy dependencies -- torch is optional.
 """
 
 import logging
+import resource
+import sys
+import threading
+import time
 import warnings
 from typing import Optional, TYPE_CHECKING
 
@@ -71,6 +75,49 @@ def reset_peak_memory() -> None:
             torch.cuda.reset_peak_memory_stats()
     except ImportError:
         pass
+
+
+def _get_hwm_bytes() -> int:
+    """Get the OS-level high-water mark RSS in bytes.
+
+    Linux: ru_maxrss is in KB. macOS: ru_maxrss is in bytes.
+    This is the peak RSS since process start (monotonically increasing).
+    """
+    maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == 'linux':
+        return maxrss * 1024
+    return maxrss
+
+
+def _measure_peak_rss(func, *args, **kwargs):
+    """Run func while polling RSS in a background thread.
+
+    Returns (result, peak_rss_bytes). The peak captures transient spikes
+    (e.g., raw activations that are freed before func returns).
+    """
+    import psutil
+    peak = [psutil.Process().memory_info().rss]
+    stop = threading.Event()
+
+    def poll():
+        proc = psutil.Process()
+        while not stop.is_set():
+            try:
+                rss = proc.memory_info().rss
+                if rss > peak[0]:
+                    peak[0] = rss
+            except Exception:
+                pass
+            time.sleep(0.005)  # 5ms polling
+
+    thread = threading.Thread(target=poll, daemon=True)
+    thread.start()
+    try:
+        result = func(*args, **kwargs)
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
+    return result, peak[0]
 
 
 def _detect_metric_category(benchmark) -> str:
@@ -262,38 +309,37 @@ def check_memory(
         timebins = getattr(benchmark, 'timebins', None)
         model.start_recording(region, time_bins=timebins)
 
-    # Two-probe approach: measure RSS after 1 stimulus, then after a small
-    # batch, to compute the marginal per-stimulus cost. This captures the
-    # raw activation storage that accumulates during extraction (before PCA
-    # compresses it). A single probe only shows the tiny post-PCA result.
     import psutil
     baseline = psutil.Process().memory_info().rss
 
+    # Probe 1: single stimulus with peak RSS tracking.
+    # A background thread polls RSS at 5ms intervals to capture transient
+    # spikes (e.g., raw activations allocated during extraction that are
+    # freed before model.process() returns).
     try:
-        result = model.process(probe)
+        result, peak_1 = _measure_peak_rss(model.process, probe)
     except Exception as e:
         logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
         return
 
     rss_after_1 = psutil.Process().memory_info().rss
+    forward_pass_peak = max(peak_1 - baseline, 0)
 
-    # Second probe with a larger batch to measure marginal per-stimulus cost
+    # Probe 2: larger batch to measure per-stimulus marginal cost.
+    # The marginal between probe peaks tells us how much each additional
+    # stimulus costs, including transient raw activation storage.
     n_probe_2 = min(10, len(stimulus_set))
+    marginal_per_stimulus = 0
     if n_probe_2 > max_probe_stimuli:
         probe_2 = stimulus_set.iloc[max_probe_stimuli:n_probe_2]
         try:
-            model.process(probe_2)
+            _, peak_2 = _measure_peak_rss(model.process, probe_2)
+            n_new = n_probe_2 - max_probe_stimuli
+            marginal_per_stimulus = max(peak_2 - peak_1, 0) / n_new if n_new > 0 else 0
         except Exception:
             pass  # fall back to single-probe estimate
-        rss_after_n = psutil.Process().memory_info().rss
-        n_new = n_probe_2 - max_probe_stimuli
-        marginal_per_stimulus = max(rss_after_n - rss_after_1, 0) / n_new if n_new > 0 else 0
-    else:
-        marginal_per_stimulus = 0
 
-    forward_pass_peak = max(rss_after_1 - baseline, 0)
     activation_bytes = getattr(result, 'nbytes', 0) if result is not None else 0
-    # Use the measured marginal if available, otherwise fall back to result.nbytes
     per_stimulus_cost = max(marginal_per_stimulus, activation_bytes)
 
     n_stimuli = len(stimulus_set)
