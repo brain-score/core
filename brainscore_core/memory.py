@@ -262,30 +262,42 @@ def check_memory(
         timebins = getattr(benchmark, 'timebins', None)
         model.start_recording(region, time_bins=timebins)
 
-    # Measure memory for one stimulus
-    reset_peak_memory()
-    baseline = get_peak_memory()
+    # Two-probe approach: measure RSS after 1 stimulus, then after a small
+    # batch, to compute the marginal per-stimulus cost. This captures the
+    # raw activation storage that accumulates during extraction (before PCA
+    # compresses it). A single probe only shows the tiny post-PCA result.
+    import psutil
+    baseline = psutil.Process().memory_info().rss
 
     try:
         result = model.process(probe)
     except Exception as e:
-        # If the probe itself fails, let the benchmark handle the error later.
-        # Don't mask real errors behind a memory check.
         logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
         return
 
-    peak = get_peak_memory()
-    forward_pass_peak = max(peak - baseline, 0)
+    rss_after_1 = psutil.Process().memory_info().rss
 
-    # Separate forward-pass overhead (constant) from per-stimulus activation
-    # storage (scales with total stimuli). The probe result's nbytes tells us
-    # how much memory one stimulus's activations occupy.
+    # Second probe with a larger batch to measure marginal per-stimulus cost
+    n_probe_2 = min(10, len(stimulus_set))
+    if n_probe_2 > max_probe_stimuli:
+        probe_2 = stimulus_set.iloc[max_probe_stimuli:n_probe_2]
+        try:
+            model.process(probe_2)
+        except Exception:
+            pass  # fall back to single-probe estimate
+        rss_after_n = psutil.Process().memory_info().rss
+        n_new = n_probe_2 - max_probe_stimuli
+        marginal_per_stimulus = max(rss_after_n - rss_after_1, 0) / n_new if n_new > 0 else 0
+    else:
+        marginal_per_stimulus = 0
+
+    forward_pass_peak = max(rss_after_1 - baseline, 0)
     activation_bytes = getattr(result, 'nbytes', 0) if result is not None else 0
+    # Use the measured marginal if available, otherwise fall back to result.nbytes
+    per_stimulus_cost = max(marginal_per_stimulus, activation_bytes)
 
-    # Extrapolate to full benchmark: stored activations scale with n_stimuli,
-    # forward-pass overhead is constant (model runs in batches, frees intermediates)
     n_stimuli = len(stimulus_set)
-    stored_activations = activation_bytes * n_stimuli
+    stored_activations = int(per_stimulus_cost * n_stimuli)
     estimated_scoring_memory = forward_pass_peak + stored_activations
     estimated_metric_memory = estimate_metric_memory(benchmark)
 
@@ -301,7 +313,8 @@ def check_memory(
             f"{total_estimated / 1e9:.1f} GB "
             f"(baseline: {baseline / 1e9:.1f} GB, "
             f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
-            f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
+            f"activations: {stored_activations / 1e9:.1f} GB "
+            f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli}], "
             f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
             f"safety: {safety_factor}x). "
             f"Available: {(available + baseline) / 1e9:.1f} GB total. "
@@ -318,7 +331,8 @@ def check_memory(
         f"[{category}]: {total_estimated / 1e9:.1f} GB "
         f"(baseline: {baseline / 1e9:.1f} GB, "
         f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
-        f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
+        f"activations: {stored_activations / 1e9:.1f} GB "
+        f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli}], "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
         f"safety: {safety_factor}x) — "
         f"{total_system / 1e9:.1f} GB total system "
