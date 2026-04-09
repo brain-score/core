@@ -241,19 +241,23 @@ def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
     target = n_stimuli * n_targets * 4
 
     if category == 'pls':
-        # PLS: design + target + deflated matrices (~2x design) + components
+        # PLS: design + target + centered/deflated copies + components
+        # Cross-validation (10-fold): train split (~90% of design) + test split
         n_components = 25
         components = n_features * n_components * 4
-        return design + target + design * 2 + components
+        cv_copy = int(n_stimuli * 0.9) * n_features * 4  # train split copy
+        cv_target_copy = int(n_stimuli * 0.9) * n_targets * 4
+        return design + target + design * 2 + components + cv_copy + cv_target_copy
 
     if category == 'ridge':
-        # Ridge: normal equations F x F + design + target
+        # Ridge: Gram matrix (F x F) dominates for large feature dims
         gram = n_features * n_features * 4
-        return gram + design + target
+        solution = n_features * n_targets * 4  # (F, T) weight matrix
+        return gram + design + target + solution
 
     if category == 'ridgecv':
         # RidgeCV: grid search over A alphas, sklearn allocates
-        # (S, T, A) for leave-one-out predictions + (F, F) gram per alpha
+        # (S, T, A) for leave-one-out predictions + (F, F) gram
         n_alphas = _get_n_alphas(benchmark)
         gram = n_features * n_features * 4
         loo_predictions = n_stimuli * n_targets * n_alphas * 4
@@ -344,8 +348,15 @@ def check_memory(
     per_stimulus_cost = max(activation_bytes // max(max_probe_stimuli, 1), 0)
 
     n_stimuli = len(stimulus_set)
-    stored_activations = per_stimulus_cost * n_stimuli
-    estimated_scoring_memory = forward_pass_peak + stored_activations
+
+    # Activation storage: the extraction result is stored AND cached in memory
+    # by @store_xarray. The cache holds a second copy. For TrainTest benchmarks,
+    # both train and test extractions are cached separately.
+    n_extraction_calls = 2 if hasattr(benchmark, 'train_assembly') else 1
+    stored_activations = per_stimulus_cost * n_stimuli * n_extraction_calls
+    cache_copy = stored_activations  # @store_xarray keeps a cache copy in memory
+
+    estimated_scoring_memory = forward_pass_peak + stored_activations + cache_copy
     estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
 
     # Include the pre-scoring baseline (Python runtime + loaded model + libraries).
@@ -375,11 +386,11 @@ def check_memory(
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
-        f"[{category}]: {total_estimated / 1e9:.1f} GB "
+        f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB "
         f"(baseline: {baseline / 1e9:.1f} GB, "
         f"forward pass: {forward_pass_peak / 1e9:.1f} GB, "
-        f"activations: {stored_activations / 1e9:.1f} GB "
-        f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli}], "
+        f"activations+cache: {(stored_activations + cache_copy) / 1e9:.1f} GB "
+        f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli} x {n_extraction_calls}calls x 2], "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
         f"safety: {safety_factor}x) — "
         f"{total_system / 1e9:.1f} GB total system "
