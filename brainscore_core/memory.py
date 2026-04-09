@@ -136,6 +136,14 @@ def check_memory(
 
     probe = stimulus_set.iloc[:max_probe_stimuli]
 
+    # Configure model for recording if the benchmark specifies a region.
+    # Benchmarks normally call start_recording() before running the model;
+    # we replicate that here so the probe produces real activations.
+    region = getattr(benchmark, 'region', None)
+    if region is not None and hasattr(model, 'start_recording'):
+        timebins = getattr(benchmark, 'timebins', None)
+        model.start_recording(region, time_bins=timebins)
+
     # Measure memory for one stimulus
     reset_peak_memory()
     baseline = get_peak_memory()
