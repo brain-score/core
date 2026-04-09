@@ -10,6 +10,11 @@ from brainscore_core.memory import (
     reset_peak_memory,
     estimate_metric_memory,
     check_memory,
+    _detect_metric_category,
+    _get_n_targets,
+    _get_n_stimuli,
+    _get_n_alphas,
+    SAFETY_FACTORS,
 )
 from brainscore_core.model_interface import UnifiedModel
 
@@ -70,18 +75,26 @@ class FakeStimulusSet:
         return FakeStimulusSet(n=1)
 
 
+class FakeAssembly:
+    """Minimal assembly with sizes dict."""
+    def __init__(self, n_neuroids=100, n_stimuli=10):
+        self.sizes = {'neuroid': n_neuroids, 'presentation': n_stimuli}
+        self.stimulus_set = FakeStimulusSet(n=n_stimuli)
+
+
 class FakeBenchmark:
 
     def __init__(self, identifier='test-bench', n_stimuli=100,
-                 batch_size=None, n_targets=None, expected_feature_dim=None):
+                 n_targets=None, expected_feature_dim=None,
+                 assembly=None):
         self.identifier = identifier
         self.stimulus_set = FakeStimulusSet(n=n_stimuli)
-        if batch_size is not None:
-            self.batch_size = batch_size
         if n_targets is not None:
             self.n_targets = n_targets
         if expected_feature_dim is not None:
             self.expected_feature_dim = expected_feature_dim
+        if assembly is not None:
+            self._assembly = assembly
 
 
 # ── get_available_memory ─────────────────────────────────────────────
@@ -117,35 +130,127 @@ class TestResetPeakMemory:
         reset_peak_memory()  # should not raise
 
 
+# ── _detect_metric_category ──────────────────────────────────────────
+
+class TestDetectMetricCategory:
+
+    def test_pls_from_identifier(self):
+        bench = FakeBenchmark(identifier='MajajHong2015.IT-pls')
+        assert _detect_metric_category(bench) == 'pls'
+
+    def test_ridge_from_identifier(self):
+        bench = FakeBenchmark(identifier='Allen2022_fmri_surface.IT-ridge')
+        assert _detect_metric_category(bench) == 'ridge'
+
+    def test_ridgecv_from_identifier(self):
+        bench = FakeBenchmark(identifier='Papale2025.IT-ridgecv')
+        assert _detect_metric_category(bench) == 'ridgecv'
+
+    def test_ridgecv_preferred_over_ridge(self):
+        bench = FakeBenchmark(identifier='something-ridgecv-split')
+        assert _detect_metric_category(bench) == 'ridgecv'
+
+    def test_rsa_from_rdm(self):
+        bench = FakeBenchmark(identifier='Allen2022_fmri_surface.IT-rdm')
+        assert _detect_metric_category(bench) == 'rsa'
+
+    def test_behavioral_no_assembly(self):
+        bench = FakeBenchmark(identifier='Rajalingham2018-i2n')
+        assert _detect_metric_category(bench) == 'behavioral'
+
+    def test_neural_with_assembly_defaults_to_pls(self):
+        bench = FakeBenchmark(identifier='SomeBench',
+                              assembly=FakeAssembly())
+        assert _detect_metric_category(bench) == 'pls'
+
+    def test_no_identifier(self):
+        bench = MagicMock(spec=[])
+        assert _detect_metric_category(bench) == 'behavioral'
+
+
+class TestGetNTargets:
+
+    def test_reads_from_assembly(self):
+        bench = FakeBenchmark(assembly=FakeAssembly(n_neuroids=3000))
+        assert _get_n_targets(bench) == 3000
+
+    def test_reads_from_train_assembly(self):
+        bench = FakeBenchmark()
+        bench.train_assembly = FakeAssembly(n_neuroids=5000)
+        assert _get_n_targets(bench) == 5000
+
+    def test_falls_back_to_n_targets_attr(self):
+        bench = FakeBenchmark(n_targets=200)
+        assert _get_n_targets(bench) == 200
+
+    def test_falls_back_to_default(self):
+        bench = FakeBenchmark()
+        assert _get_n_targets(bench) == 100
+
+
+class TestGetNStimuli:
+
+    def test_from_stimulus_set(self):
+        bench = FakeBenchmark(n_stimuli=500)
+        assert _get_n_stimuli(bench) == 500
+
+    def test_from_assembly(self):
+        bench = MagicMock(spec=['identifier', '_assembly'])
+        bench.identifier = 'test'
+        bench.stimulus_set = None
+        bench._assembly = FakeAssembly(n_stimuli=300)
+        assert _get_n_stimuli(bench) == 300
+
+
 # ── estimate_metric_memory ───────────────────────────────────────────
 
 class TestEstimateMetricMemory:
 
-    def test_zero_stimuli(self):
-        bench = FakeBenchmark(n_stimuli=0)
+    def test_behavioral_returns_zero(self):
+        bench = FakeBenchmark(identifier='Ferguson2024-value_delta', n_stimuli=50)
         assert estimate_metric_memory(bench) == 0
 
-    def test_uses_defaults(self):
-        bench = FakeBenchmark(n_stimuli=100)
-        # default n_targets=100, n_features=1000
-        # design = 100 * 1000 * 4 = 400_000
-        # target = 100 * 100 * 4 = 40_000
-        # intermediate = 400_000 * 3 = 1_200_000
-        # total = 400_000 + 40_000 + 1_200_000 = 1_640_000
-        assert estimate_metric_memory(bench) == 1_640_000
+    def test_pls_includes_components(self):
+        bench = FakeBenchmark(identifier='MajajHong2015.IT-pls', n_stimuli=100,
+                              assembly=FakeAssembly(n_neuroids=600))
+        mem = estimate_metric_memory(bench)
+        # Should include design + target + deflated + components
+        assert mem > 0
+        # PLS should be smaller than ridgecv for same dimensions
+        bench_cv = FakeBenchmark(identifier='test-ridgecv', n_stimuli=100,
+                                 assembly=FakeAssembly(n_neuroids=600))
+        assert mem < estimate_metric_memory(bench_cv)
 
-    def test_custom_targets_and_features(self):
-        bench = FakeBenchmark(n_stimuli=50, n_targets=20000,
-                              expected_feature_dim=2048)
-        # design = 50 * 2048 * 4 = 409_600
-        # target = 50 * 20000 * 4 = 4_000_000
-        # intermediate = 409_600 * 3 = 1_228_800
-        # total = 409_600 + 4_000_000 + 1_228_800 = 5_638_400
-        assert estimate_metric_memory(bench) == 5_638_400
+    def test_ridgecv_scales_with_alphas(self):
+        bench = FakeBenchmark(identifier='Papale2025.IT-ridgecv', n_stimuli=100,
+                              assembly=FakeAssembly(n_neuroids=800))
+        mem = estimate_metric_memory(bench)
+        # RidgeCV with 115 alphas: loo = 100 * 800 * 115 * 4 = 36.8 MB
+        # Plus gram (4MB) + design (0.4MB) + target (0.32MB) ≈ 41.5 MB
+        assert mem > 36_000_000
+        # Verify it's much larger than PLS for same dimensions
+        bench_pls = FakeBenchmark(identifier='test-pls', n_stimuli=100,
+                                  assembly=FakeAssembly(n_neuroids=800))
+        assert mem > estimate_metric_memory(bench_pls) * 5
 
-    def test_no_stimulus_set(self):
-        bench = MagicMock(spec=[])  # no attributes at all
+    def test_rsa_scales_quadratically(self):
+        bench_small = FakeBenchmark(identifier='test-rdm', n_stimuli=50)
+        bench_large = FakeBenchmark(identifier='test-rdm', n_stimuli=500)
+        mem_small = estimate_metric_memory(bench_small)
+        mem_large = estimate_metric_memory(bench_large)
+        # 500^2 / 50^2 = 100x ratio
+        assert mem_large / mem_small == pytest.approx(100, rel=0.01)
+
+    def test_zero_stimuli_pls(self):
+        bench = FakeBenchmark(identifier='test-pls', n_stimuli=0)
         assert estimate_metric_memory(bench) == 0
+
+    def test_ridge_includes_gram_matrix(self):
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=100,
+                              assembly=FakeAssembly(n_neuroids=200))
+        mem = estimate_metric_memory(bench)
+        # gram = 1000 * 1000 * 4 = 4MB. Must be included.
+        assert mem >= 4_000_000
 
 
 # ── check_memory ─────────────────────────────────────────────────────
@@ -162,10 +267,10 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_raises_when_insufficient_memory(self):
-        # forward_pass=100MB, activation=100KB/stim, n_stimuli=1000
-        # total = (100MB + 100KB*1000 + ~0) * 1.5 = 300MB. Available=200MB. Fail.
+        # PLS benchmark (safety=1.5): forward_pass=100MB, activation=100KB/stim, n_stimuli=1000
+        # total = (100MB + 100MB + metric) * 1.5 > 200MB available. Fail.
         model = FakeModel(activation_nbytes=100_000)
-        bench = FakeBenchmark(n_stimuli=1000)
+        bench = FakeBenchmark(identifier='test-pls', n_stimuli=1000)
         with patch('brainscore_core.memory.get_available_memory', return_value=200_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 100_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
@@ -173,10 +278,10 @@ class TestCheckMemory:
                 check_memory(model, bench)
 
     def test_warns_at_high_utilization(self):
-        # forward_pass=600MB, activation=1KB/stim, n_stimuli=10
-        # total = (600MB + 1KB*10 + ~0) * 1.5 ≈ 900MB. Available=1GB. 90%. Warn.
+        # PLS benchmark (safety=1.5): forward_pass=600MB, small activations
+        # total ≈ 900MB. Available=1GB. 90%. Warn.
         model = FakeModel(activation_nbytes=1000)
-        bench = FakeBenchmark(n_stimuli=10)
+        bench = FakeBenchmark(identifier='test-pls', n_stimuli=10)
         with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 600_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
@@ -220,10 +325,9 @@ class TestCheckMemory:
                 check_memory(model, bench, safety_factor=2.0)
 
     def test_error_message_includes_identifiers(self):
-        # forward_pass=100MB, activation=100KB/stim, n_stimuli=1000
-        # total = (100MB + 100MB) * 1.5 = 300MB. Available=200MB. Fail.
+        # PLS benchmark: forward_pass=100MB, activation=100KB/stim, n_stimuli=1000
         model = FakeModel(identifier='big-vit', activation_nbytes=100_000)
-        bench = FakeBenchmark(identifier='MajajHong2015', n_stimuli=1000)
+        bench = FakeBenchmark(identifier='MajajHong2015-pls', n_stimuli=1000)
         with patch('brainscore_core.memory.get_available_memory', return_value=200_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 100_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
@@ -232,19 +336,40 @@ class TestCheckMemory:
             assert "MajajHong2015" in str(exc_info.value)
 
     def test_n_stimuli_scales_activation_estimate(self):
-        # forward_pass=10MB, activation=10KB/stim
-        # 10 stimuli: total = (10MB + 100KB) * 1.5 ≈ 15MB. Available=500MB. Pass.
+        # PLS benchmark (safety=1.5): forward_pass=10MB, activation=10KB/stim
+        # 10 stimuli: total ≈ 15MB. Available=500MB. Pass.
         model = FakeModel(activation_nbytes=10_000)
-        bench_small = FakeBenchmark(n_stimuli=10)
+        bench_small = FakeBenchmark(identifier='test-pls', n_stimuli=10)
         with patch('brainscore_core.memory.get_available_memory', return_value=500_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 10_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
             check_memory(model, bench_small)  # passes
 
-        # 5000 stimuli: total = (10MB + 50MB) * 1.5 = 90MB. Available=50MB. Fail.
-        bench_large = FakeBenchmark(n_stimuli=5000)
+        # 5000 stimuli: total ≈ (10MB + 50MB) * 1.5 = 90MB. Available=50MB. Fail.
+        bench_large = FakeBenchmark(identifier='test-pls', n_stimuli=5000)
         with patch('brainscore_core.memory.get_available_memory', return_value=50_000_000), \
              patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 10_000_000]), \
              patch('brainscore_core.memory.reset_peak_memory'):
             with pytest.raises(MemoryError):
                 check_memory(model, bench_large)
+
+    def test_auto_safety_factor_by_category(self):
+        """Default safety_factor is chosen by metric category."""
+        model = FakeModel(activation_nbytes=1000)
+        # PLS → 1.5x
+        bench_pls = FakeBenchmark(identifier='test-pls', n_stimuli=10)
+        # RidgeCV → 3.0x: same model memory but higher multiplier triggers error
+        bench_cv = FakeBenchmark(identifier='test-ridgecv', n_stimuli=10)
+        # forward_pass=400MB. base ≈ 400MB.
+        # PLS: 400MB * 1.5 = 600MB < 700MB available. Pass.
+        # RidgeCV: (400MB + metric) * 3.0 > 700MB. Fail.
+        with patch('brainscore_core.memory.get_available_memory', return_value=700_000_000), \
+             patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 400_000_000]), \
+             patch('brainscore_core.memory.reset_peak_memory'):
+            check_memory(model, bench_pls)  # passes at 1.5x
+
+        with patch('brainscore_core.memory.get_available_memory', return_value=700_000_000), \
+             patch('brainscore_core.memory.get_peak_memory', side_effect=[0, 400_000_000]), \
+             patch('brainscore_core.memory.reset_peak_memory'):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench_cv)  # fails at 3.0x

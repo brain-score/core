@@ -73,34 +73,145 @@ def reset_peak_memory() -> None:
         pass
 
 
+def _detect_metric_category(benchmark) -> str:
+    """
+    Detect the benchmark's metric category from its identifier and attributes.
+
+    Returns one of: 'ridgecv', 'ridge', 'pls', 'rsa', 'behavioral'.
+    """
+    bench_id = getattr(benchmark, 'identifier', '')
+    bench_id_lower = bench_id.lower()
+
+    # Check identifier suffixes (most reliable signal)
+    if 'ridgecv' in bench_id_lower:
+        return 'ridgecv'
+    if 'ridge' in bench_id_lower:
+        return 'ridge'
+    if 'rdm' in bench_id_lower or 'rsa' in bench_id_lower:
+        return 'rsa'
+    if 'pls' in bench_id_lower:
+        return 'pls'
+
+    # Check for neural vs behavioral by looking for assemblies
+    has_assembly = (hasattr(benchmark, '_assembly')
+                    or hasattr(benchmark, 'train_assembly'))
+    if not has_assembly:
+        return 'behavioral'
+
+    # Default: assume PLS (most common neural metric)
+    return 'pls'
+
+
+def _get_n_targets(benchmark) -> int:
+    """Read actual neuroid/voxel count from the benchmark's assembly."""
+    for attr in ('_assembly', 'train_assembly', 'test_assembly'):
+        assembly = getattr(benchmark, attr, None)
+        if assembly is not None:
+            sizes = getattr(assembly, 'sizes', None)
+            if sizes is not None and 'neuroid' in sizes:
+                return sizes['neuroid']
+    return getattr(benchmark, 'n_targets', 100)
+
+
+def _get_n_stimuli(benchmark) -> int:
+    """Get total stimulus count from the benchmark."""
+    # Direct attribute
+    stimulus_set = getattr(benchmark, 'stimulus_set', None)
+    if stimulus_set is not None and len(stimulus_set) > 0:
+        return len(stimulus_set)
+    # From assemblies
+    for attr in ('_assembly', 'train_assembly'):
+        assembly = getattr(benchmark, attr, None)
+        if assembly is not None:
+            stim = getattr(assembly, 'stimulus_set', None)
+            if stim is not None:
+                return len(stim)
+    return 0
+
+
+def _get_n_alphas(benchmark) -> int:
+    """Read the RidgeCV alpha grid size from the benchmark or its metric."""
+    # Check for ALPHA_LIST or alpha_list on the benchmark's module
+    for attr in ('_similarity_metric', 'similarity_metric', 'metric'):
+        metric = getattr(benchmark, attr, None)
+        if metric is not None:
+            alphas = getattr(metric, 'alphas', None)
+            if alphas is not None:
+                return len(alphas)
+    # Default RidgeCV grid in brain-score benchmarks
+    return 115
+
+
+SAFETY_FACTORS = {
+    'pls': 1.5,
+    'ridge': 2.0,
+    'ridgecv': 3.0,
+    'rsa': 2.0,
+    'behavioral': 1.2,
+}
+
+
 def estimate_metric_memory(benchmark) -> int:
     """
-    Estimate memory required for the benchmark's metric (regression).
+    Estimate memory required for the benchmark's metric computation.
 
-    For static benchmarks: negligible.
-    For naturalistic benchmarks with ridge regression against
-    ~20,000 cortical vertices: can be 2-3 GB per fold.
+    Metric-aware: reads the actual target count and metric type from the
+    benchmark to produce realistic estimates instead of using hardcoded defaults.
+
+    Memory scaling by metric type:
+    - PLS:      O(S * F * n_components + S * T)         ~small
+    - Ridge:    O(F^2 + F * T + S * T)                  ~moderate
+    - RidgeCV:  O(F^2 * A + S * T * A)                  ~large (A=n_alphas)
+    - RSA:      O(S^2)                                   ~quadratic in stimuli
+    - Behavioral: negligible
 
     Returns estimate in bytes.
     """
-    n_stimuli = len(getattr(benchmark, 'stimulus_set', []))
-    n_targets = getattr(benchmark, 'n_targets', 100)
+    category = _detect_metric_category(benchmark)
+    n_stimuli = _get_n_stimuli(benchmark)
+    n_targets = _get_n_targets(benchmark)
     n_features = getattr(benchmark, 'expected_feature_dim', 1000)
 
-    # Design matrix: (n_stimuli, n_features) float32
-    design = n_stimuli * n_features * 4
-    # Target matrix: (n_stimuli, n_targets) float32
-    target = n_stimuli * n_targets * 4
-    # SVD/Cholesky intermediate: ~3x design matrix
-    intermediate = design * 3
+    if category == 'behavioral' or n_stimuli == 0:
+        return 0
 
-    return design + target + intermediate
+    if category == 'rsa':
+        # Dissimilarity matrix: S x S float64, plus model RDM
+        rdm_size = n_stimuli * n_stimuli * 8
+        return rdm_size * 2  # neural RDM + model RDM
+
+    # Shared: design and target matrices
+    # Design: (S, F) float32;  Target: (S, T) float32
+    design = n_stimuli * n_features * 4
+    target = n_stimuli * n_targets * 4
+
+    if category == 'pls':
+        # PLS: design + target + deflated matrices (~2x design) + components
+        n_components = 25
+        components = n_features * n_components * 4
+        return design + target + design * 2 + components
+
+    if category == 'ridge':
+        # Ridge: normal equations F x F + design + target
+        gram = n_features * n_features * 4
+        return gram + design + target
+
+    if category == 'ridgecv':
+        # RidgeCV: grid search over A alphas, sklearn allocates
+        # (S, T, A) for leave-one-out predictions + (F, F) gram per alpha
+        n_alphas = _get_n_alphas(benchmark)
+        gram = n_features * n_features * 4
+        loo_predictions = n_stimuli * n_targets * n_alphas * 4
+        return gram + design + target + loo_predictions
+
+    # Fallback
+    return design + target + design * 3
 
 
 def check_memory(
     model: 'UnifiedModel',
     benchmark,
-    safety_factor: float = 1.5,
+    safety_factor: Optional[float] = None,
     max_probe_stimuli: int = 1,
 ) -> None:
     """
@@ -112,10 +223,17 @@ def check_memory(
 
     :param model: the model to check
     :param benchmark: the benchmark to check against
-    :param safety_factor: multiplier for memory estimate (default 1.5x)
+    :param safety_factor: multiplier for memory estimate. If None (default),
+        auto-selects based on benchmark metric type: PLS=1.5, ridge=2.0,
+        ridgecv=3.0, RSA=2.0, behavioral=1.2.
     :param max_probe_stimuli: number of stimuli in probe (default 1)
     """
     available = get_available_memory()
+
+    # Auto-detect safety factor from benchmark metric category
+    category = _detect_metric_category(benchmark)
+    if safety_factor is None:
+        safety_factor = SAFETY_FACTORS.get(category, 1.5)
 
     # Get a probe stimulus from the benchmark's stimulus set.
     # Benchmarks store stimuli in different places:
@@ -189,8 +307,8 @@ def check_memory(
     utilization = total_estimated / available
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
-        f"'{getattr(benchmark, 'identifier', 'unknown')}': "
-        f"{total_estimated / 1e9:.1f} GB "
+        f"'{getattr(benchmark, 'identifier', 'unknown')}' "
+        f"[{category}]: {total_estimated / 1e9:.1f} GB "
         f"(forward pass: {forward_pass_peak / 1e9:.1f} GB, "
         f"activations: {stored_activations / 1e9:.1f} GB for {n_stimuli} stimuli, "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
