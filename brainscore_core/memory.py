@@ -117,8 +117,19 @@ def check_memory(
     """
     available = get_available_memory()
 
-    # Get a probe stimulus (single item from the benchmark's stimulus set)
+    # Get a probe stimulus from the benchmark's stimulus set.
+    # Benchmarks store stimuli in different places:
+    #   - benchmark.stimulus_set (some benchmarks expose directly)
+    #   - benchmark._assembly.stimulus_set (NeuralBenchmark, PropertiesBenchmark)
+    #   - benchmark.train_assembly.stimulus_set (TrainTestNeuralBenchmark)
     stimulus_set = getattr(benchmark, 'stimulus_set', None)
+    if stimulus_set is None:
+        for attr in ('_assembly', 'train_assembly'):
+            assembly = getattr(benchmark, attr, None)
+            if assembly is not None:
+                stimulus_set = getattr(assembly, 'stimulus_set', None)
+                if stimulus_set is not None:
+                    break
     if stimulus_set is None or len(stimulus_set) == 0:
         logger.info("Memory check skipped: benchmark has no stimulus_set")
         return  # can't probe without stimuli
