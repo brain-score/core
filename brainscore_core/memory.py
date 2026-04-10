@@ -150,14 +150,35 @@ def _detect_metric_category(benchmark) -> str:
 
 
 def _get_n_targets(benchmark) -> int:
-    """Read actual neuroid/voxel count from the benchmark's assembly."""
+    """Read actual neuroid/voxel count from the benchmark's assembly.
+
+    If the benchmark fits per-subject (alpha_coord), returns the per-subject
+    count (total / n_subjects) since subjects are fitted sequentially.
+    """
+    n_targets = None
     for attr in ('_assembly', 'train_assembly', 'test_assembly'):
         assembly = getattr(benchmark, attr, None)
         if assembly is not None:
             sizes = getattr(assembly, 'sizes', None)
             if sizes is not None and 'neuroid' in sizes:
-                return sizes['neuroid']
-    return getattr(benchmark, 'n_targets', 100)
+                n_targets = sizes['neuroid']
+                break
+    if n_targets is None:
+        n_targets = getattr(benchmark, 'n_targets', 100)
+
+    # If benchmark fits per-subject, the metric only processes one subject's
+    # neuroids at a time. Approximate per-subject count by dividing total.
+    alpha_coord = getattr(benchmark, 'alpha_coord', None)
+    if alpha_coord and assembly is not None:
+        try:
+            import numpy as np
+            n_subjects = len(np.unique(assembly[alpha_coord].values))
+            if n_subjects > 1:
+                n_targets = int(np.ceil(n_targets / n_subjects))
+        except Exception:
+            pass  # fall back to full n_targets
+
+    return n_targets
 
 
 def _get_n_stimuli(benchmark) -> int:
