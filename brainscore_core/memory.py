@@ -399,7 +399,12 @@ def check_memory(
     #       + extraction_overhead (measured by probe)
     #       + metric memory (computed)
     #       + ceiling memory (computed — runs same metric on neural data)
-    total_estimated = baseline + extraction_overhead + estimated_metric_memory + estimated_ceiling_memory
+    #       × 1.2 pipeline overhead multiplier on scoring components
+    #         (covers CV sortby copies, xarray metadata, Python GC lag —
+    #          empirically validated at 1.06-1.30x across alexnet benchmarks)
+    PIPELINE_OVERHEAD = 1.2
+    scoring_memory = (extraction_overhead + estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
+    total_estimated = baseline + scoring_memory
 
     total_system = available + baseline
     if total_estimated > total_system:
