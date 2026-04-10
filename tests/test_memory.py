@@ -98,11 +98,19 @@ class FakeBenchmark:
             self._assembly = assembly
 
 
-def _mock_memory(baseline_rss, rss_after_probe):
-    """Mock psutil.Process().memory_info().rss for check_memory.
+from contextlib import contextmanager
 
-    Returns baseline_rss on first call, rss_after_probe on second call.
+@contextmanager
+def _mock_memory(baseline_rss, rss_after_probe, peak_rss=None):
+    """Mock psutil RSS and resource peak RSS for check_memory.
+
+    Args:
+        baseline_rss: RSS before probe
+        rss_after_probe: RSS after probe (sustained)
+        peak_rss: peak RSS during probe (transient). If None, equals rss_after_probe.
     """
+    if peak_rss is None:
+        peak_rss = rss_after_probe
     call_count = [0]
 
     def mock_process(*args, **kwargs):
@@ -112,7 +120,16 @@ def _mock_memory(baseline_rss, rss_after_probe):
         call_count[0] += 1
         return mock
 
-    return patch('psutil.Process', side_effect=mock_process)
+    peak_count = [0]
+    def mock_peak():
+        peak_count[0] += 1
+        if peak_count[0] <= 1:
+            return baseline_rss  # before probe
+        return peak_rss  # after probe
+
+    with patch('psutil.Process', side_effect=mock_process), \
+         patch('brainscore_core.memory._get_peak_rss', side_effect=mock_peak):
+        yield
 
 
 # ── get_available_memory ─────────────────────────────────────────────
@@ -293,7 +310,7 @@ class TestCheckMemory:
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
         with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000, 700_000_000):
-            with pytest.raises(MemoryError, match="Estimated memory"):
+            with pytest.raises(MemoryError, match="Estimated peak"):
                 check_memory(model, bench)
 
     def test_warns_at_high_utilization(self):
@@ -344,6 +361,23 @@ class TestCheckMemory:
         with patch('brainscore_core.memory.get_available_memory', return_value=30_000_000_000), \
              _mock_memory(2_000_000_000, 2_500_000_000):
             check_memory(model, bench)  # should pass — dual Gram is tiny
+
+    def test_extraction_peak_detected(self):
+        # Extraction peaks at 3 GB (transient) but settles to 1.5 GB.
+        # Metric adds 0.1 GB on top of settled RSS.
+        # Peak = max(3 GB extraction, 1.5 + 0.1 GB metric) = 3 GB.
+        # System = 4 GB. Should pass (3 < 4).
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-pls', n_stimuli=10)
+        with patch('brainscore_core.memory.get_available_memory', return_value=3_500_000_000), \
+             _mock_memory(500_000_000, 1_500_000_000, peak_rss=3_000_000_000):
+            check_memory(model, bench)  # passes — peak 3 GB < system 4 GB
+
+        # Same but system only 2.4 GB. Peak 3 GB > system 2.9 GB. Fail.
+        with patch('brainscore_core.memory.get_available_memory', return_value=2_400_000_000), \
+             _mock_memory(500_000_000, 1_500_000_000, peak_rss=3_000_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
 
     def test_ridgecv_metric_dominates(self):
         """RidgeCV with many alphas produces large metric estimate."""

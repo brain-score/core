@@ -77,6 +77,21 @@ def reset_peak_memory() -> None:
         pass
 
 
+def _get_peak_rss() -> int:
+    """Cross-platform peak RSS (high-water mark) in bytes.
+
+    Uses resource.getrusage which tracks the maximum RSS since process start.
+    This captures transient spikes that psutil.Process().memory_info().rss misses
+    (RSS is point-in-time, peak RSS is the all-time max).
+
+    Linux: ru_maxrss is in KB. macOS: ru_maxrss is in bytes.
+    """
+    maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == 'linux':
+        return maxrss * 1024
+    return maxrss
+
+
 def _get_hwm_bytes() -> int:
     """Get the OS-level high-water mark RSS in bytes.
 
@@ -351,12 +366,12 @@ def check_memory(
         model.start_recording(region, time_bins=timebins)
 
     import psutil
-    baseline = psutil.Process().memory_info().rss
+    baseline_rss = psutil.Process().memory_info().rss
+    baseline_peak = _get_peak_rss()
 
     # Run the full extraction as a probe. We use the complete stimulus set
     # (not a subset) because:
-    # 1. The RSS delta measures the REAL extraction cost (image I/O, forward
-    #    pass, xarray packaging, @store_xarray caching)
+    # 1. The RSS delta measures the REAL extraction cost
     # 2. The result gives us the actual feature dimension (n_features)
     # 3. The extraction is cached, so the actual scoring run benefits
     # 4. Stimulus subsets can fail due to metadata assertion mismatches
@@ -367,7 +382,11 @@ def check_memory(
         return
 
     rss_after_probe = psutil.Process().memory_info().rss
-    extraction_overhead = max(rss_after_probe - baseline, 0)
+    peak_after_probe = _get_peak_rss()
+
+    # Extraction costs: sustained (what stays in memory) and transient (peak spike)
+    extraction_sustained = max(rss_after_probe - baseline_rss, 0)
+    extraction_peak = max(peak_after_probe - baseline_rss, 0)
 
     # Read the actual feature dimension from the probe result.
     # Critical: models with region_layer_map skip PCA entirely, so features
@@ -395,25 +414,24 @@ def check_memory(
     else:
         estimated_ceiling_memory = 0
 
-    # Total = baseline (already consumed)
-    #       + extraction_overhead (measured by probe)
-    #       + metric memory (computed)
-    #       + ceiling memory (computed — runs same metric on neural data)
-    #       × 1.2 pipeline overhead multiplier on scoring components
-    #         (covers CV sortby copies, xarray metadata, Python GC lag —
-    #          empirically validated at 1.06-1.30x across alexnet benchmarks)
+    # Predicted peak RSS during scoring. Two possible peaks:
+    # 1. Extraction peak (transient — image loading, forward pass, PCA calibration)
+    # 2. Post-extraction RSS + metric workspace (sustained + transient metric peak)
+    # The OOM killer cares about whichever is higher.
     PIPELINE_OVERHEAD = 1.2
-    scoring_memory = (extraction_overhead + estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
-    total_estimated = baseline + scoring_memory
+    metric_total = (estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
+    peak_from_extraction = baseline_rss + extraction_peak
+    peak_from_metric = rss_after_probe + metric_total
+    total_estimated = max(peak_from_extraction, peak_from_metric)
 
-    total_system = available + baseline
+    total_system = available + baseline_rss
     if total_estimated > total_system:
         raise MemoryError(
-            f"Estimated memory for '{model.identifier}' on "
+            f"Estimated peak for '{model.identifier}' on "
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
             f"{total_estimated / 1e9:.1f} GB "
-            f"(baseline: {baseline / 1e9:.1f} GB, "
-            f"extraction: {extraction_overhead / 1e9:.1f} GB, "
+            f"(extraction peak: {peak_from_extraction / 1e9:.1f} GB, "
+            f"metric peak: {peak_from_metric / 1e9:.1f} GB, "
             f"metric [{category}]: {estimated_metric_memory / 1e9:.1f} GB, "
             f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB, "
             f"n_features: {n_features}, n_stimuli: {n_stimuli}). "
@@ -422,14 +440,16 @@ def check_memory(
         )
 
     utilization = total_estimated / total_system if total_system > 0 else 0
+    peak_source = "extraction" if peak_from_extraction >= peak_from_metric else "metric"
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
-        f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB "
-        f"(baseline: {baseline / 1e9:.1f} GB, "
-        f"extraction: {extraction_overhead / 1e9:.1f} GB, "
+        f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB peak "
+        f"(extraction: {extraction_sustained / 1e9:.1f} GB sustained, "
+        f"{extraction_peak / 1e9:.1f} GB peak; "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
-        f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB) — "
+        f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB; "
+        f"bottleneck: {peak_source}) — "
         f"{total_system / 1e9:.1f} GB total system "
         f"({utilization:.0%} utilization)"
     )
