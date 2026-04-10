@@ -379,15 +379,27 @@ def check_memory(
             n_features = shape[-1]
 
     n_stimuli = len(stimulus_set)
+    n_targets = _get_n_targets(benchmark)
 
     # Metric memory: computed from benchmark metadata + measured n_features.
     # Uses float64 (8 bytes) because sklearn converts internally.
     estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
 
+    # Ceiling memory: the ceiling runs the same metric type but on neural data
+    # (neural-to-neural split-half reliability). For PLS/Ridge, the "features"
+    # are the neuroids from one half, predicting the other half's neuroids.
+    # This is typically much smaller than the model metric since n_targets << n_features,
+    # but for fMRI benchmarks with 50K+ voxels it can be significant.
+    if category not in ('behavioral',):
+        estimated_ceiling_memory = estimate_metric_memory(benchmark, n_features=n_targets)
+    else:
+        estimated_ceiling_memory = 0
+
     # Total = baseline (already consumed)
-    #       + extraction_overhead (measured by probe — constant, not per-stimulus)
-    #       + metric memory (computed from formula)
-    total_estimated = baseline + extraction_overhead + estimated_metric_memory
+    #       + extraction_overhead (measured by probe)
+    #       + metric memory (computed)
+    #       + ceiling memory (computed — runs same metric on neural data)
+    total_estimated = baseline + extraction_overhead + estimated_metric_memory + estimated_ceiling_memory
 
     total_system = available + baseline
     if total_estimated > total_system:
@@ -398,6 +410,7 @@ def check_memory(
             f"(baseline: {baseline / 1e9:.1f} GB, "
             f"extraction: {extraction_overhead / 1e9:.1f} GB, "
             f"metric [{category}]: {estimated_metric_memory / 1e9:.1f} GB, "
+            f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB, "
             f"n_features: {n_features}, n_stimuli: {n_stimuli}). "
             f"Available: {total_system / 1e9:.1f} GB total. "
             f"Set check_mem=False to skip this check."
@@ -410,7 +423,8 @@ def check_memory(
         f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB "
         f"(baseline: {baseline / 1e9:.1f} GB, "
         f"extraction: {extraction_overhead / 1e9:.1f} GB, "
-        f"metric: {estimated_metric_memory / 1e9:.1f} GB) — "
+        f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
+        f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB) — "
         f"{total_system / 1e9:.1f} GB total system "
         f"({utilization:.0%} utilization)"
     )
