@@ -283,24 +283,25 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_raises_when_insufficient_memory(self):
-        # Ridge with n_features=10000, n_stimuli=1000
-        # baseline=500MB, rss_after=700MB → overhead=200MB
-        # per_stim=100KB, stored+cache=200MB
-        # metric(ridge, F=10K, S=1000): ~48MB
-        # total = 500 + (200+200+48)*2.0 = 1396MB. system=500+800=1300MB. Fail.
+        # Ridge: baseline=500MB, extraction=200MB (probe delta)
+        # metric(ridge, F=10K, S=1000, T=100):
+        #   gram=min(1000,10000)^2*8=8MB, design=1000*10000*8=80MB,
+        #   target=1000*100*8=0.8MB, centered=80MB, coef=10000*100*8=8MB
+        #   total metric ≈ 177MB
+        # total = 500 + 200 + 177 = 877MB. system=500+300=800MB. Fail.
         model = FakeModel(activation_nbytes=100_000, n_features=10000)
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
-        with patch('brainscore_core.memory.get_available_memory', return_value=800_000_000), \
+        with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000, 700_000_000):
             with pytest.raises(MemoryError, match="Estimated memory"):
                 check_memory(model, bench)
 
     def test_warns_at_high_utilization(self):
-        # PLS: baseline=200MB, rss_after=900MB → overhead=700MB
-        # total = 200 + (700 + tiny) * 1.5 ≈ 1250MB. system=1400MB. 89%. Warn.
+        # PLS: baseline=200MB, extraction=700MB, metric=small
+        # total ≈ 900MB. system=200+900=1100MB. 82%. Warn.
         model = FakeModel(activation_nbytes=1000)
         bench = FakeBenchmark(identifier='test-pls', n_stimuli=10)
-        with patch('brainscore_core.memory.get_available_memory', return_value=1_200_000_000), \
+        with patch('brainscore_core.memory.get_available_memory', return_value=900_000_000), \
              _mock_memory(200_000_000, 900_000_000):
             with pytest.warns(ResourceWarning, match="OOM risk"):
                 check_memory(model, bench)
@@ -322,25 +323,12 @@ class TestCheckMemory:
         bench = FakeBenchmark(n_stimuli=0)
         check_memory(model, bench)  # should not raise
 
-    def test_custom_safety_factor(self):
-        # baseline=100MB, rss_after=200MB → overhead=100MB
-        # safety=1.0: total = 100 + 100*1.0 = 200MB. system=250MB. Pass.
-        # safety=2.0: total = 100 + 100*2.0 = 300MB. system=250MB. Fail.
-        model = FakeModel(activation_nbytes=1000)
-        bench = FakeBenchmark(n_stimuli=10)
-        with patch('brainscore_core.memory.get_available_memory', return_value=150_000_000), \
-             _mock_memory(100_000_000, 200_000_000):
-            check_memory(model, bench, safety_factor=1.0)  # passes
-
-        with patch('brainscore_core.memory.get_available_memory', return_value=150_000_000), \
-             _mock_memory(100_000_000, 200_000_000):
-            with pytest.raises(MemoryError):
-                check_memory(model, bench, safety_factor=2.0)
-
     def test_error_message_includes_identifiers(self):
+        # Ridge: baseline=500MB, extraction=200MB, metric≈177MB
+        # total=877MB > system=800MB. Fail.
         model = FakeModel(identifier='big-vit', activation_nbytes=100_000, n_features=10000)
         bench = FakeBenchmark(identifier='MajajHong2015-ridge', n_stimuli=1000)
-        with patch('brainscore_core.memory.get_available_memory', return_value=800_000_000), \
+        with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000, 700_000_000):
             with pytest.raises(MemoryError, match="big-vit") as exc_info:
                 check_memory(model, bench)
@@ -348,27 +336,36 @@ class TestCheckMemory:
 
     def test_large_features_use_dual_gram(self):
         # Model with 100K features but only 500 stimuli.
-        # Ridge dual Gram: min(500, 100K)^2 * 4 = 500^2 * 4 = 1 MB (not 40 GB!)
-        # Should NOT trigger OOM on a 32GB system.
+        # Ridge dual Gram: min(500, 100K)^2 * 8 = 2 MB (not 80 GB!)
+        # coef: 100K * 100 * 8 = 80 MB. Total metric ≈ 882 MB.
+        # total = 2GB + 500MB + 882MB = 3.4 GB < 32 GB. Pass.
         model = FakeModel(activation_nbytes=400_000, n_features=100_000)
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=500)
         with patch('brainscore_core.memory.get_available_memory', return_value=30_000_000_000), \
              _mock_memory(2_000_000_000, 2_500_000_000):
             check_memory(model, bench)  # should pass — dual Gram is tiny
 
-    def test_auto_safety_factor_by_category(self):
-        """Default safety_factor is chosen by metric category."""
+    def test_ridgecv_metric_dominates(self):
+        """RidgeCV with many alphas produces large metric estimate."""
         model = FakeModel(activation_nbytes=1000)
-        bench_pls = FakeBenchmark(identifier='test-pls', n_stimuli=10)
-        bench_cv = FakeBenchmark(identifier='test-ridgecv', n_stimuli=10)
-        # baseline=100MB, rss_after=500MB → overhead=400MB.
-        # PLS: 100 + (400 + tiny)*1.5 = 700MB < 1GB system. Pass.
-        # RidgeCV: 100 + (400 + metric)*3.0 > 1GB system. Fail.
+        bench_pls = FakeBenchmark(identifier='test-pls', n_stimuli=100)
+        bench_cv = FakeBenchmark(identifier='test-ridgecv', n_stimuli=100)
+        # Same extraction overhead (400MB), but RidgeCV metric >> PLS metric.
+        # PLS metric ≈ small. RidgeCV metric with 115 alphas ≈ large.
+        # baseline=100MB, extraction=400MB
+        # PLS total ≈ 500 + small = fits in 1GB system. Pass.
+        # RidgeCV total ≈ 500 + LOO(100*100*115*8=92MB) + design + ... > 1GB?
+        # Actually with default n_targets=100: LOO = 92MB. Still fits.
+        # Use n_targets=5000 to make it fail:
+        bench_cv_big = FakeBenchmark(identifier='test-ridgecv', n_stimuli=100,
+                                     assembly=FakeAssembly(n_neuroids=5000))
+        # LOO = 100 * 5000 * 115 * 8 = 460 MB. + design + centered + gram = ~500MB
+        # total = 100 + 400 + 960 = 1460 MB > system 1000MB. Fail.
         with patch('brainscore_core.memory.get_available_memory', return_value=900_000_000), \
              _mock_memory(100_000_000, 500_000_000):
-            check_memory(model, bench_pls)  # passes at 1.5x
+            check_memory(model, bench_pls)  # passes — PLS metric is small
 
-        with patch('brainscore_core.memory.get_available_memory', return_value=900_000_000), \
+        with patch('brainscore_core.memory.get_available_memory', return_value=400_000_000), \
              _mock_memory(100_000_000, 500_000_000):
             with pytest.raises(MemoryError):
-                check_memory(model, bench_cv)  # fails at 3.0x
+                check_memory(model, bench_cv_big)  # fails — RidgeCV metric is huge

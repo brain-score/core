@@ -235,36 +235,42 @@ def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
         rdm_size = n_stimuli * n_stimuli * 8
         return rdm_size * 2  # neural RDM + model RDM
 
+    # sklearn converts float32 inputs to float64 internally.
+    # All metric arrays use 8 bytes per element.
+    bytes_per_element = 8
+
     # Shared: design and target matrices
-    # Design: (S, F) float32;  Target: (S, T) float32
-    design = n_stimuli * n_features * 4
-    target = n_stimuli * n_targets * 4
+    design = n_stimuli * n_features * bytes_per_element
+    target = n_stimuli * n_targets * bytes_per_element
 
     if category == 'pls':
-        # PLS: design + target + centered/deflated copies + components
-        # Cross-validation (10-fold): train split (~90% of design) + test split
+        # PLS.fit: centered copy of X + deflated copy + loadings/components
+        # Cross-validation (10-fold): sortby creates a copy of train split
         n_components = 25
-        components = n_features * n_components * 4
-        cv_copy = int(n_stimuli * 0.9) * n_features * 4  # train split copy
-        cv_target_copy = int(n_stimuli * 0.9) * n_targets * 4
-        return design + target + design * 2 + components + cv_copy + cv_target_copy
+        centered = design  # centered copy of X
+        components = n_features * n_components * bytes_per_element
+        coef = n_features * n_targets * bytes_per_element  # coefficient matrix
+        cv_sortby = int(n_stimuli * 0.9) * n_features * bytes_per_element  # sortby copy
+        return design + target + centered + components + coef + cv_sortby
 
     if category == 'ridge':
         # Ridge: sklearn uses dual formulation when n_samples < n_features,
-        # so the Gram matrix is min(S, F)^2, not F^2.
+        # so Gram is min(S, F)², not F².
+        # coef_dual = (S, T_per_subject), coef = X.T @ coef_dual = (F, T_per_subject)
         gram_dim = min(n_stimuli, n_features)
-        gram = gram_dim * gram_dim * 4
-        solution = n_features * n_targets * 4  # (F, T) weight matrix
-        return gram + design + target + solution
+        gram = gram_dim * gram_dim * bytes_per_element
+        centered = design  # centered copy of X
+        coef = n_features * n_targets * bytes_per_element
+        return gram + design + target + centered + coef
 
     if category == 'ridgecv':
-        # RidgeCV: sklearn uses dual when n_samples < n_features.
-        # LOO predictions: (S, T, A) for leave-one-out cross-validation.
+        # RidgeCV: dual Gram + LOO predictions across A alphas
         n_alphas = _get_n_alphas(benchmark)
         gram_dim = min(n_stimuli, n_features)
-        gram = gram_dim * gram_dim * 4
-        loo_predictions = n_stimuli * n_targets * n_alphas * 4
-        return gram + design + target + loo_predictions
+        gram = gram_dim * gram_dim * bytes_per_element
+        centered = design
+        loo_predictions = n_stimuli * n_targets * n_alphas * bytes_per_element
+        return gram + design + target + centered + loo_predictions
 
     # Fallback
     return design + target + design * 3
@@ -274,21 +280,22 @@ def check_memory(
     model: 'UnifiedModel',
     benchmark,
     safety_factor: Optional[float] = None,
-    max_probe_stimuli: int = 1,
 ) -> None:
     """
-    Run a single-stimulus probe through the model and extrapolate
-    whether the full benchmark will fit in memory.
+    Run a probe extraction through the model and estimate whether the
+    full benchmark will fit in memory.
 
-    Raises MemoryError if estimated peak exceeds available memory.
-    Logs a warning if estimated peak exceeds 80% of available memory.
+    The probe runs the full stimulus set through the model to measure
+    extraction overhead and discover the feature dimension. The metric
+    cost is computed from benchmark metadata.
+
+    Raises MemoryError if estimated total exceeds available memory.
+    Logs a warning if utilization exceeds 80%.
 
     :param model: the model to check
     :param benchmark: the benchmark to check against
-    :param safety_factor: multiplier for memory estimate. If None (default),
-        auto-selects based on benchmark metric type: PLS=1.5, ridge=2.0,
-        ridgecv=3.0, RSA=2.0, behavioral=1.2.
-    :param max_probe_stimuli: number of stimuli in probe (default 1)
+    :param safety_factor: no longer used (kept for API compatibility).
+        Estimation is now based on measured extraction + computed metric.
     """
     available = get_available_memory()
 
@@ -314,8 +321,6 @@ def check_memory(
         logger.info("Memory check skipped: benchmark has no stimulus_set")
         return  # can't probe without stimuli
 
-    probe = stimulus_set.iloc[:max_probe_stimuli]
-
     # Configure model for recording if the benchmark specifies a region.
     # Benchmarks normally call start_recording() before running the model;
     # we replicate that here so the probe produces real activations.
@@ -327,82 +332,64 @@ def check_memory(
     import psutil
     baseline = psutil.Process().memory_info().rss
 
-    # Single-stimulus probe: discovers the actual feature dimension
-    # (which can be 9K-150K+ depending on the model layer) and measures
-    # the persistent memory cost (model overhead + PCA components + cache).
-    #
-    # We measure RSS AFTER the probe (not peak DURING) because:
-    # - The transient peak includes PCA calibration (~1000 ImageNet images)
-    #   which is cached to disk and freed. It won't recur during scoring.
-    # - The persistent delta captures what actually stays in memory:
-    #   PCA components, cached activations, model state.
+    # Run the full extraction as a probe. We use the complete stimulus set
+    # (not a subset) because:
+    # 1. The RSS delta measures the REAL extraction cost (image I/O, forward
+    #    pass, xarray packaging, @store_xarray caching)
+    # 2. The result gives us the actual feature dimension (n_features)
+    # 3. The extraction is cached, so the actual scoring run benefits
+    # 4. Stimulus subsets can fail due to metadata assertion mismatches
     try:
-        result = model.process(probe)
+        result = model.process(stimulus_set)
     except Exception as e:
         logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
         return
 
     rss_after_probe = psutil.Process().memory_info().rss
-    forward_pass_overhead = max(rss_after_probe - baseline, 0)
+    extraction_overhead = max(rss_after_probe - baseline, 0)
 
     # Read the actual feature dimension from the probe result.
-    # This is critical: models with region_layer_map skip PCA entirely,
-    # so features can be 9K (alexnet) to 148K+ (ViT-L). The metric
-    # formulas scale with n_features^2, so getting this right is essential.
+    # Critical: models with region_layer_map skip PCA entirely, so features
+    # can be 9K (alexnet) to 148K+ (ViT-L). Metric formulas depend on this.
     n_features = 1000  # fallback
     if result is not None:
         shape = getattr(result, 'shape', None)
         if shape is not None and len(shape) >= 2:
             n_features = shape[-1]
-    activation_bytes = getattr(result, 'nbytes', 0) if result is not None else 0
-    per_stimulus_cost = max(activation_bytes // max(max_probe_stimuli, 1), 0)
 
     n_stimuli = len(stimulus_set)
 
-    # Activation storage: the extraction result is stored AND cached in memory
-    # by @store_xarray. The cache holds a second copy. For TrainTest benchmarks,
-    # both train and test extractions are cached separately.
-    n_extraction_calls = 2 if hasattr(benchmark, 'train_assembly') else 1
-    stored_activations = per_stimulus_cost * n_stimuli * n_extraction_calls
-    cache_copy = stored_activations  # @store_xarray keeps a cache copy in memory
-
-    estimated_scoring_memory = forward_pass_overhead + stored_activations + cache_copy
+    # Metric memory: computed from benchmark metadata + measured n_features.
+    # Uses float64 (8 bytes) because sklearn converts internally.
     estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
 
-    # Include the pre-scoring baseline (Python runtime + loaded model + libraries).
-    # This memory is already consumed and must be counted toward OOM risk.
-    total_estimated = baseline + (estimated_scoring_memory + estimated_metric_memory) * safety_factor
+    # Total = baseline (already consumed)
+    #       + extraction_overhead (measured by probe — constant, not per-stimulus)
+    #       + metric memory (computed from formula)
+    total_estimated = baseline + extraction_overhead + estimated_metric_memory
 
-    if total_estimated > available + baseline:
-        # Compare against total system memory (available + what we already hold)
+    total_system = available + baseline
+    if total_estimated > total_system:
         raise MemoryError(
             f"Estimated memory for '{model.identifier}' on "
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
             f"{total_estimated / 1e9:.1f} GB "
             f"(baseline: {baseline / 1e9:.1f} GB, "
-            f"model overhead: {forward_pass_overhead / 1e9:.1f} GB, "
-            f"activations: {stored_activations / 1e9:.1f} GB "
-            f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli}], "
-            f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
-            f"safety: {safety_factor}x). "
-            f"Available: {(available + baseline) / 1e9:.1f} GB total. "
-            f"Options: use a larger instance or "
-            f"set check_mem=False to skip this check."
+            f"extraction: {extraction_overhead / 1e9:.1f} GB, "
+            f"metric [{category}]: {estimated_metric_memory / 1e9:.1f} GB, "
+            f"n_features: {n_features}, n_stimuli: {n_stimuli}). "
+            f"Available: {total_system / 1e9:.1f} GB total. "
+            f"Set check_mem=False to skip this check."
         )
 
-    # Utilization against total system memory
-    total_system = available + baseline
     utilization = total_estimated / total_system if total_system > 0 else 0
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
         f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB "
         f"(baseline: {baseline / 1e9:.1f} GB, "
-        f"model overhead: {forward_pass_overhead / 1e9:.1f} GB, "
-        f"activations+cache: {(stored_activations + cache_copy) / 1e9:.1f} GB "
-        f"[{per_stimulus_cost / 1e6:.1f} MB/stim x {n_stimuli} x {n_extraction_calls}calls x 2], "
-        f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
-        f"safety: {safety_factor}x) — "
+        f"extraction: {extraction_overhead / 1e9:.1f} GB, "
+        f"metric: {estimated_metric_memory / 1e9:.1f} GB) — "
         f"{total_system / 1e9:.1f} GB total system "
         f"({utilization:.0%} utilization)"
     )
