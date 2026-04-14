@@ -4,14 +4,12 @@ Unified model interface for Brain-Score.
 Defines the core abstractions for model evaluation:
 - TaskContext: benchmark-to-model communication
 - UnifiedModel: the single evaluation interface (ABC)
-- ModalityProcessor: per-modality processing strategy (ABC)
-- ModalityIntegrator: cross-modal fusion (ABC)
-- BrainScoreModel: compositional implementation with three-case dispatch
+- BrainScoreModel: compositional implementation with preprocessors + shared activations_model
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -74,51 +72,22 @@ class UnifiedModel(ABC):
         pass
 
 
-class ModalityProcessor(ABC):
-    """
-    Handles input preprocessing, model invocation, and output extraction
-    for one modality. Processors are stateless -- BrainScoreModel manages
-    recording targets, task context, and other state.
-    """
-
-    @property
-    @abstractmethod
-    def modality(self) -> str:
-        ...
-
-    @abstractmethod
-    def __call__(self, model, stimuli, *,
-                 recording_layer: Optional[str] = None,
-                 task_context: Optional[TaskContext] = None,
-                 **kwargs) -> Any:
-        ...
-
-
-class ModalityIntegrator(ABC):
-    """
-    Combines features extracted by multiple ModalityProcessors into a
-    single output. Used by models with explicit cross-modal fusion
-    (e.g., a cross-attention module that takes vision + text features).
-    """
-
-    @abstractmethod
-    def integrate(self, modality_features: Dict[str, Any], *,
-                  recording_layer: Optional[str] = None,
-                  task_context: Optional[TaskContext] = None) -> Any:
-        ...
-
-
 class BrainScoreModel(UnifiedModel):
     """
     Compositional implementation of UnifiedModel.
 
-    Accepts modality processors that handle input/output for common model
-    types. process() dispatches to the appropriate processor(s) based on
-    stimulus content via three cases:
+    Composes preprocessors (simple callables, one per modality) with a
+    shared activations_model (e.g. PytorchWrapper) that handles forward
+    pass, hook-based layer extraction, caching, and NeuroidAssembly
+    packaging. Preprocessing is the only modality-specific part; the
+    activations_model is shared across all modalities.
 
-    Case 1: Single modality -- dispatch to that processor.
-    Case 2: Multiple modalities + integrator -- extract per-modality, then fuse.
-    Case 3: Multiple modalities + primary_processor (VLMs) -- dispatch to primary.
+    process() follows a single path:
+    1. Detect modality from stimulus columns
+    2. Route to the activations_model for vision extraction, or to the
+       preprocessor callable for other modalities (temporary until
+       TextWrapper provides symmetric extraction)
+    3. Return NeuroidAssembly
     """
 
     COLUMN_TO_MODALITY: Dict[str, str] = {
@@ -136,34 +105,18 @@ class BrainScoreModel(UnifiedModel):
         identifier: str,
         model: Any,
         region_layer_map: Dict[str, str],
-        processors: List[ModalityProcessor],
-        integrator: Optional[ModalityIntegrator] = None,
-        primary_processor: Optional[str] = None,
+        preprocessors: Dict[str, Callable],
+        activations_model: Any = None,
+        visual_degrees: int = 8,
     ) -> None:
         self._identifier_str = identifier
         self._model = model
         self._region_layer_map_dict = region_layer_map
-        self._processors: Dict[str, ModalityProcessor] = {
-            p.modality: p for p in processors
-        }
-        self._integrator = integrator
-        self._primary_processor = primary_processor
+        self._preprocessors = preprocessors
+        self._activations_model = activations_model
+        self._visual_degrees_val = visual_degrees
         self._recording_layer: Optional[str] = None
         self._task_context: Optional[TaskContext] = None
-
-        if primary_processor and primary_processor not in self._processors:
-            raise ValueError(
-                f"primary_processor '{primary_processor}' does not match any "
-                f"registered processor modality. Available: "
-                f"{set(self._processors.keys())}"
-            )
-        if primary_processor and integrator:
-            raise ValueError(
-                "Cannot specify both primary_processor and integrator. "
-                "Use primary_processor for VLMs that handle multimodal input "
-                "in a single forward pass. Use integrator for models with an "
-                "explicit cross-modal fusion stage."
-            )
 
     @property
     def identifier(self) -> str:
@@ -175,13 +128,13 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def supported_modalities(self) -> Set[str]:
-        return set(self._processors.keys())
+        return set(self._preprocessors.keys())
 
     def _detect_modalities(self, stimuli) -> Set[str]:
         detected: Set[str] = set()
         for col in stimuli.columns:
             modality = self.COLUMN_TO_MODALITY.get(col)
-            if modality and modality in self._processors:
+            if modality and modality in self._preprocessors:
                 detected.add(modality)
         return detected
 
@@ -196,46 +149,21 @@ class BrainScoreModel(UnifiedModel):
                 f"Model supports: {self.supported_modalities}."
             )
 
-        # Case 1: Single modality
-        if len(detected) == 1:
-            modality = next(iter(detected))
-            return self._processors[modality](
-                self._model, stimuli,
-                recording_layer=self._recording_layer,
-                task_context=self._task_context,
-            )
+        modality = next(iter(detected))
 
-        # Case 2: Multiple modalities + integrator
-        if self._integrator is not None:
-            modality_features: Dict[str, Any] = {}
-            for modality in detected:
-                modality_features[modality] = self._processors[modality](
-                    self._model, stimuli,
-                    recording_layer=None,
-                    task_context=self._task_context,
-                )
-            return self._integrator.integrate(
-                modality_features,
-                recording_layer=self._recording_layer,
-                task_context=self._task_context,
-            )
+        # Vision path: delegate to activations_model (PytorchWrapper handles
+        # preprocessing, forward pass, hooks, caching, and assembly packaging)
+        if modality == 'vision' and self._activations_model is not None:
+            layers = [self._recording_layer] if self._recording_layer else []
+            return self._activations_model(stimuli, layers=layers)
 
-        # Case 3: Multiple modalities, no integrator (VLM)
-        if self._primary_processor is not None:
-            return self._processors[self._primary_processor](
-                self._model, stimuli,
-                recording_layer=self._recording_layer,
-                task_context=self._task_context,
-            )
-
-        raise ValueError(
-            f"Multiple modalities detected in stimuli ({detected}) but "
-            f"model has neither an integrator nor a primary_processor "
-            f"designated. For VLMs that handle multimodal input in a "
-            f"single forward pass, set primary_processor to the modality "
-            f"of the processor that should receive the full stimulus set. "
-            f"For models with explicit cross-modal fusion, provide an "
-            f"integrator."
+        # Other modalities (text, audio, video): the preprocessor callable
+        # handles full extraction. This is temporary until dedicated wrappers
+        # (TextWrapper, AudioWrapper) provide symmetric extraction.
+        preprocessor = self._preprocessors[modality]
+        return preprocessor(
+            self._model, stimuli,
+            recording_layer=self._recording_layer,
         )
 
     def start_recording(self, recording_target: str,
@@ -246,9 +174,54 @@ class BrainScoreModel(UnifiedModel):
         )
         self._time_bins = time_bins
 
-    def start_task(self, task_context: TaskContext) -> None:
-        self._task_context = task_context
+    def start_task(self, task_context_or_task, fitting_stimuli=None,
+                   **kwargs) -> None:
+        if isinstance(task_context_or_task, TaskContext):
+            self._task_context = task_context_or_task
+        else:
+            self._task_context = TaskContext(
+                task_type=task_context_or_task,
+                fitting_stimuli=fitting_stimuli,
+            )
 
     def reset(self) -> None:
         self._recording_layer = None
         self._task_context = None
+
+    # -- Legacy compatibility methods --
+    # These allow BrainScoreModel to be used by existing vision and language
+    # benchmarks that call look_at(), digest_text(), etc. They are NOT part
+    # of the UnifiedModel ABC -- they exist only on BrainScoreModel to bridge
+    # the gap until benchmarks migrate to process().
+
+    def look_at(self, stimuli, number_of_trials=1, **kwargs):
+        """Vision benchmark compatibility. Delegates to process()."""
+        return self.process(stimuli)
+
+    def visual_degrees(self) -> int:
+        """Vision benchmark compatibility."""
+        return self._visual_degrees_val
+
+    def digest_text(self, text) -> Dict[str, Any]:
+        """Language benchmark compatibility. Wraps process() result in
+        the expected {'neural': ..., 'behavior': ...} dict."""
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+
+        if isinstance(text, (str, list)):
+            if isinstance(text, str):
+                text = [text]
+            stimuli = StimulusSet(pd.DataFrame({
+                'sentence': text,
+                'stimulus_id': list(range(len(text))),
+            }))
+            stimuli.identifier = 'text_stimuli'
+        else:
+            stimuli = text
+
+        result = self.process(stimuli)
+        return {'neural': result}
+
+    def start_neural_recording(self, recording_target, recording_type='fMRI'):
+        """Language benchmark compatibility."""
+        self.start_recording(recording_target, recording_type=recording_type)

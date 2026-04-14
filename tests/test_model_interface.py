@@ -5,50 +5,36 @@ from typing import Any, Dict, Optional, Set
 from brainscore_core.model_interface import (
     TaskContext,
     UnifiedModel,
-    ModalityProcessor,
-    ModalityIntegrator,
     BrainScoreModel,
 )
 
 
-# ── Helpers ──────────────────────────────────────────────────────────
+# -- Helpers ------------------------------------------------------------------
 
-class StubProcessor(ModalityProcessor):
-    """Minimal processor for testing dispatch logic."""
-
-    def __init__(self, modality_name: str, return_value: Any = 'default_output'):
-        self._modality_name = modality_name
-        self._return_value = return_value
-        self.call_args = None
-
-    @property
-    def modality(self) -> str:
-        return self._modality_name
-
-    def __call__(self, model, stimuli, *, recording_layer=None,
-                 task_context=None, **kwargs):
-        self.call_args = {
+def make_stub_preprocessor(return_value='default_output'):
+    """Create a stub preprocessor callable that records its call args."""
+    def preprocessor(model, stimuli, *, recording_layer=None, **kwargs):
+        preprocessor.call_args = {
             'model': model,
             'stimuli': stimuli,
             'recording_layer': recording_layer,
-            'task_context': task_context,
         }
-        return self._return_value
+        return return_value
+    preprocessor.call_args = None
+    return preprocessor
 
 
-class StubIntegrator(ModalityIntegrator):
-    """Minimal integrator for testing dispatch logic."""
+class StubActivationsModel:
+    """Stub activations_model that records calls and returns a fixed value."""
 
-    def __init__(self, return_value: Any = 'integrated_output'):
+    def __init__(self, return_value='activations_output'):
         self._return_value = return_value
         self.call_args = None
 
-    def integrate(self, modality_features, *, recording_layer=None,
-                  task_context=None):
+    def __call__(self, stimuli, layers=None, **kwargs):
         self.call_args = {
-            'modality_features': modality_features,
-            'recording_layer': recording_layer,
-            'task_context': task_context,
+            'stimuli': stimuli,
+            'layers': layers,
         }
         return self._return_value
 
@@ -60,7 +46,7 @@ class StubStimulusSet:
         self.columns = columns
 
 
-# ── TaskContext tests ────────────────────────────────────────────────
+# -- TaskContext tests --------------------------------------------------------
 
 class TestTaskContext:
 
@@ -97,7 +83,7 @@ class TestTaskContext:
         assert 'key' not in ctx2.metadata
 
 
-# ── UnifiedModel tests ──────────────────────────────────────────────
+# -- UnifiedModel tests ------------------------------------------------------
 
 class ConcreteModel(UnifiedModel):
     """Minimal concrete subclass for testing the ABC."""
@@ -152,50 +138,16 @@ class TestUnifiedModel:
         m.reset()  # should not raise
 
 
-# ── ModalityProcessor tests ─────────────────────────────────────────
-
-class TestModalityProcessor:
-
-    def test_cannot_instantiate_abc(self):
-        with pytest.raises(TypeError):
-            ModalityProcessor()
-
-    def test_stub_processor(self):
-        p = StubProcessor('vision', return_value='vis_out')
-        assert p.modality == 'vision'
-        result = p(model='m', stimuli='s', recording_layer='l1')
-        assert result == 'vis_out'
-        assert p.call_args['model'] == 'm'
-        assert p.call_args['recording_layer'] == 'l1'
-
-
-# ── ModalityIntegrator tests ────────────────────────────────────────
-
-class TestModalityIntegrator:
-
-    def test_cannot_instantiate_abc(self):
-        with pytest.raises(TypeError):
-            ModalityIntegrator()
-
-    def test_stub_integrator(self):
-        i = StubIntegrator(return_value='fused')
-        result = i.integrate({'vision': 'v', 'text': 't'}, recording_layer='l5')
-        assert result == 'fused'
-        assert i.call_args['modality_features'] == {'vision': 'v', 'text': 't'}
-        assert i.call_args['recording_layer'] == 'l5'
-
-
-# ── BrainScoreModel tests ───────────────────────────────────────────
+# -- BrainScoreModel construction tests ---------------------------------------
 
 class TestBrainScoreModelConstruction:
 
     def test_basic_construction(self):
-        p = StubProcessor('vision')
         m = BrainScoreModel(
             identifier='resnet-50',
             model='fake_model',
             region_layer_map={'V1': 'layer1', 'IT': 'layer4'},
-            processors=[p],
+            preprocessors={'vision': lambda m, s, **kw: None},
         )
         assert m.identifier == 'resnet-50'
         assert m.region_layer_map == {'V1': 'layer1', 'IT': 'layer4'}
@@ -206,181 +158,159 @@ class TestBrainScoreModelConstruction:
             identifier='test',
             model=None,
             region_layer_map={'V1': 'layer1'},
-            processors=[StubProcessor('vision')],
+            preprocessors={'vision': lambda m, s, **kw: None},
         )
         rlm = m.region_layer_map
         rlm['V1'] = 'hacked'
         assert m.region_layer_map['V1'] == 'layer1'
 
-    def test_multiple_processors(self):
+    def test_multiple_modalities(self):
         m = BrainScoreModel(
             identifier='vlm',
             model=None,
             region_layer_map={},
-            processors=[StubProcessor('vision'), StubProcessor('text')],
-            primary_processor='vision',
+            preprocessors={
+                'vision': lambda m, s, **kw: None,
+                'text': lambda m, s, **kw: None,
+            },
         )
         assert m.supported_modalities == {'vision', 'text'}
 
-    def test_invalid_primary_processor_raises(self):
-        with pytest.raises(ValueError, match="primary_processor 'audio'"):
-            BrainScoreModel(
-                identifier='bad',
-                model=None,
-                region_layer_map={},
-                processors=[StubProcessor('vision')],
-                primary_processor='audio',
-            )
+    def test_with_activations_model(self):
+        act_model = StubActivationsModel()
+        m = BrainScoreModel(
+            identifier='resnet',
+            model=None,
+            region_layer_map={'IT': 'layer4'},
+            preprocessors={'vision': lambda m, s, **kw: None},
+            activations_model=act_model,
+        )
+        assert m._activations_model is act_model
 
-    def test_primary_and_integrator_raises(self):
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            BrainScoreModel(
-                identifier='bad',
-                model=None,
-                region_layer_map={},
-                processors=[StubProcessor('vision'), StubProcessor('text')],
-                integrator=StubIntegrator(),
-                primary_processor='vision',
-            )
+    def test_visual_degrees_default(self):
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        assert m.visual_degrees() == 8
 
+    def test_visual_degrees_custom(self):
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': lambda m, s, **kw: None},
+            visual_degrees=12,
+        )
+        assert m.visual_degrees() == 12
+
+
+# -- BrainScoreModel dispatch tests ------------------------------------------
 
 class TestBrainScoreModelDispatch:
 
-    def test_case1_single_modality_vision(self):
-        """Case 1: single modality dispatches to the one processor."""
-        proc = StubProcessor('vision', return_value='vision_assembly')
+    def test_vision_with_activations_model(self):
+        """Vision stimuli route through activations_model when available."""
+        act_model = StubActivationsModel(return_value='vision_assembly')
         m = BrainScoreModel(
             identifier='resnet',
             model='torch_model',
             region_layer_map={'IT': 'layer4'},
-            processors=[proc],
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act_model,
         )
+        m.start_recording('IT')
         stimuli = StubStimulusSet(columns=['image_file_name', 'stimulus_id'])
         result = m.process(stimuli)
         assert result == 'vision_assembly'
-        assert proc.call_args['model'] == 'torch_model'
-        assert proc.call_args['stimuli'] is stimuli
+        assert act_model.call_args['stimuli'] is stimuli
+        assert act_model.call_args['layers'] == ['layer4']
 
-    def test_case1_single_modality_text(self):
-        proc = StubProcessor('text', return_value='text_assembly')
+    def test_vision_without_activations_model_falls_to_preprocessor(self):
+        """Vision stimuli fall through to preprocessor if no activations_model."""
+        proc = make_stub_preprocessor(return_value='vision_via_preprocessor')
         m = BrainScoreModel(
-            identifier='gpt2',
-            model='hf_model',
-            region_layer_map={},
-            processors=[proc],
+            identifier='test',
+            model='torch_model',
+            region_layer_map={'IT': 'layer4'},
+            preprocessors={'vision': proc},
         )
+        m.start_recording('IT')
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        result = m.process(stimuli)
+        assert result == 'vision_via_preprocessor'
+        assert proc.call_args['model'] == 'torch_model'
+        assert proc.call_args['recording_layer'] == 'layer4'
+
+    def test_text_routes_to_preprocessor(self):
+        """Text stimuli always route to the text preprocessor callable."""
+        text_proc = make_stub_preprocessor(return_value='text_assembly')
+        m = BrainScoreModel(
+            identifier='clip',
+            model='clip_model',
+            region_layer_map={'language_system': 'text_model.encoder.layers.10'},
+            preprocessors={
+                'vision': make_stub_preprocessor(),
+                'text': text_proc,
+            },
+            activations_model=StubActivationsModel(),
+        )
+        m.start_recording('language_system')
         stimuli = StubStimulusSet(columns=['sentence', 'stimulus_id'])
         result = m.process(stimuli)
         assert result == 'text_assembly'
+        assert text_proc.call_args['model'] == 'clip_model'
+        assert text_proc.call_args['recording_layer'] == 'text_model.encoder.layers.10'
 
-    def test_case1_passes_recording_layer(self):
-        proc = StubProcessor('vision')
+    def test_recording_layer_resolved_from_region_map(self):
+        """start_recording resolves brain region to model layer."""
+        act_model = StubActivationsModel()
         m = BrainScoreModel(
             identifier='resnet',
             model='m',
             region_layer_map={'IT': 'layer4'},
-            processors=[proc],
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act_model,
         )
         m.start_recording('IT')
         stimuli = StubStimulusSet(columns=['image_file_name'])
         m.process(stimuli)
-        assert proc.call_args['recording_layer'] == 'layer4'
-
-    def test_case1_passes_task_context(self):
-        proc = StubProcessor('vision')
-        m = BrainScoreModel(
-            identifier='resnet',
-            model='m',
-            region_layer_map={},
-            processors=[proc],
-        )
-        ctx = TaskContext(task_type='classification', label_set=['a', 'b'])
-        m.start_task(ctx)
-        stimuli = StubStimulusSet(columns=['image_file_name'])
-        m.process(stimuli)
-        assert proc.call_args['task_context'] is ctx
-
-    def test_case2_integrator(self):
-        """Case 2: multiple modalities + integrator -> extract then fuse."""
-        vis_proc = StubProcessor('vision', return_value='vis_features')
-        txt_proc = StubProcessor('text', return_value='txt_features')
-        integrator = StubIntegrator(return_value='integrated')
-        m = BrainScoreModel(
-            identifier='tribev2',
-            model='backbone',
-            region_layer_map={'IT': 'integration.layer4'},
-            processors=[vis_proc, txt_proc],
-            integrator=integrator,
-        )
-        m.start_recording('IT')
-        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
-        result = m.process(stimuli)
-        assert result == 'integrated'
-        # Processors should NOT get recording_layer (they use backbone defaults)
-        assert vis_proc.call_args['recording_layer'] is None
-        assert txt_proc.call_args['recording_layer'] is None
-        # Integrator SHOULD get recording_layer
-        assert integrator.call_args['recording_layer'] == 'integration.layer4'
-        assert set(integrator.call_args['modality_features'].keys()) == {'vision', 'text'}
-
-    def test_case3_primary_processor_vlm(self):
-        """Case 3: multiple modalities + primary_processor -> dispatch to primary."""
-        vis_proc = StubProcessor('vision', return_value='vlm_output')
-        txt_proc = StubProcessor('text', return_value='unused')
-        m = BrainScoreModel(
-            identifier='qwen-vl',
-            model='vlm_model',
-            region_layer_map={'IT': 'visual.blocks.26'},
-            processors=[vis_proc, txt_proc],
-            primary_processor='vision',
-        )
-        m.start_recording('IT')
-        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
-        result = m.process(stimuli)
-        assert result == 'vlm_output'
-        # Primary processor gets recording_layer
-        assert vis_proc.call_args['recording_layer'] == 'visual.blocks.26'
-        # Text processor should NOT have been called
-        assert txt_proc.call_args is None
+        assert act_model.call_args['layers'] == ['layer4']
 
     def test_no_modality_columns_raises(self):
         m = BrainScoreModel(
             identifier='test',
             model=None,
             region_layer_map={},
-            processors=[StubProcessor('vision')],
+            preprocessors={'vision': make_stub_preprocessor()},
         )
         stimuli = StubStimulusSet(columns=['unknown_column'])
         with pytest.raises(ValueError, match="No recognized modality columns"):
             m.process(stimuli)
 
-    def test_multi_modality_no_integrator_no_primary_raises(self):
-        m = BrainScoreModel(
-            identifier='test',
-            model=None,
-            region_layer_map={},
-            processors=[StubProcessor('vision'), StubProcessor('text')],
-        )
-        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
-        with pytest.raises(ValueError, match="neither an integrator nor a primary_processor"):
-            m.process(stimuli)
-
-    def test_single_modality_detected_from_multi_processor_model(self):
-        """If only one modality is in the stimuli, use Case 1 even with multiple processors."""
-        vis_proc = StubProcessor('vision', return_value='vis_only')
-        txt_proc = StubProcessor('text')
+    def test_single_modality_detected_from_multi_preprocessor_model(self):
+        """If only one modality is in the stimuli, route to that modality."""
+        act_model = StubActivationsModel(return_value='vis_only')
+        text_proc = make_stub_preprocessor()
         m = BrainScoreModel(
             identifier='vlm',
             model=None,
             region_layer_map={},
-            processors=[vis_proc, txt_proc],
-            primary_processor='vision',
+            preprocessors={
+                'vision': make_stub_preprocessor(),
+                'text': text_proc,
+            },
+            activations_model=act_model,
         )
         stimuli = StubStimulusSet(columns=['image_file_name'])
         result = m.process(stimuli)
         assert result == 'vis_only'
-        assert txt_proc.call_args is None
+        assert text_proc.call_args is None
 
+
+# -- BrainScoreModel state tests ---------------------------------------------
 
 class TestBrainScoreModelState:
 
@@ -389,7 +319,7 @@ class TestBrainScoreModelState:
             identifier='test',
             model=None,
             region_layer_map={'V1': 'layer1', 'IT': 'layer4'},
-            processors=[StubProcessor('vision')],
+            preprocessors={'vision': make_stub_preprocessor()},
         )
         m.start_recording('IT')
         assert m._recording_layer == 'layer4'
@@ -399,7 +329,7 @@ class TestBrainScoreModelState:
             identifier='test',
             model=None,
             region_layer_map={'V1': 'layer1'},
-            processors=[StubProcessor('vision')],
+            preprocessors={'vision': make_stub_preprocessor()},
         )
         m.start_recording('layer3.2')
         assert m._recording_layer == 'layer3.2'
@@ -409,7 +339,7 @@ class TestBrainScoreModelState:
             identifier='test',
             model=None,
             region_layer_map={'IT': 'layer4'},
-            processors=[StubProcessor('vision')],
+            preprocessors={'vision': make_stub_preprocessor()},
         )
         m.start_recording('IT')
         m.start_task(TaskContext(task_type='classification'))
@@ -418,16 +348,17 @@ class TestBrainScoreModelState:
         assert m._task_context is None
 
 
+# -- BrainScoreModel column detection tests -----------------------------------
+
 class TestBrainScoreModelColumnDetection:
 
     def _make_model(self, *modalities):
-        procs = [StubProcessor(m, return_value=f'{m}_out') for m in modalities]
+        preprocessors = {m: make_stub_preprocessor(f'{m}_out') for m in modalities}
         return BrainScoreModel(
             identifier='test',
             model=None,
             region_layer_map={},
-            processors=procs,
-            primary_processor=modalities[0] if len(modalities) > 1 else None,
+            preprocessors=preprocessors,
         )
 
     def test_image_file_name(self):
@@ -458,7 +389,7 @@ class TestBrainScoreModelColumnDetection:
         m = self._make_model('video')
         assert m._detect_modalities(StubStimulusSet(['video_path'])) == {'video'}
 
-    def test_ignores_columns_without_matching_processor(self):
+    def test_ignores_columns_without_matching_preprocessor(self):
         m = self._make_model('vision')
         detected = m._detect_modalities(StubStimulusSet(['image_file_name', 'sentence']))
         assert detected == {'vision'}
