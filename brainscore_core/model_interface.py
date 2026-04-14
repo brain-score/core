@@ -208,6 +208,9 @@ class BrainScoreModel(UnifiedModel):
         import pandas as pd
         from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
+        import numpy as np
+        if isinstance(text, np.ndarray):
+            text = text.tolist()
         if isinstance(text, (str, list)):
             if isinstance(text, str):
                 text = [text]
