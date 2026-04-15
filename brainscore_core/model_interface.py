@@ -157,10 +157,14 @@ class BrainScoreModel(UnifiedModel):
             layers = [self._recording_layer] if self._recording_layer else []
             return self._activations_model(stimuli, layers=layers)
 
-        # Other modalities (text, audio, video): the preprocessor callable
-        # handles full extraction. This is temporary until dedicated wrappers
-        # (TextWrapper, AudioWrapper) provide symmetric extraction.
+        # Other modalities: check if the preprocessor is a full extractor
+        # (like TextWrapper — accepts (stimuli, layers=[])) or a legacy
+        # callable (accepts (model, stimuli, recording_layer=...)).
+        # Duck-type: extractors have an `identifier` attribute.
         preprocessor = self._preprocessors[modality]
+        layers = [self._recording_layer] if self._recording_layer else []
+        if hasattr(preprocessor, 'identifier'):
+            return preprocessor(stimuli, layers=layers)
         return preprocessor(
             self._model, stimuli,
             recording_layer=self._recording_layer,
