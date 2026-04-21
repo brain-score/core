@@ -175,6 +175,7 @@ class BrainScoreModel(UnifiedModel):
         preprocessors: Dict[str, Callable],
         activations_model: Any = None,
         visual_degrees: int = 8,
+        behavioral_readout_layer: Optional[str] = None,
     ) -> None:
         self._identifier_str = identifier
         self._model = model
@@ -182,8 +183,11 @@ class BrainScoreModel(UnifiedModel):
         self._preprocessors = preprocessors
         self._activations_model = activations_model
         self._visual_degrees_val = visual_degrees
+        self._behavioral_readout_layer = behavioral_readout_layer
         self._recording_layer: Optional[str] = None
         self._task_context: Optional[TaskContext] = None
+        # Lazily instantiated the first time a behavioral task is started.
+        self._readout_classifier = None  # type: ignore[assignment]
 
     @property
     def identifier(self) -> str:
@@ -223,8 +227,17 @@ class BrainScoreModel(UnifiedModel):
                 f"{input_event.step_num})."
             )
 
-        # Perceptual input (StimulusSet) — run the existing modality dispatch
+        # Perceptual input (StimulusSet).
         stimuli = input_event
+
+        # Behavioral mode: if a readout classifier has been fitted and the
+        # current task expects probabilities, return a BehavioralAssembly
+        # instead of neural activations.
+        if (self._readout_classifier is not None
+                and self._task_context is not None
+                and self._requires_behavioral_readout(self._task_context.task_type)):
+            return self._predict_probabilities(stimuli)
+
         detected = self._detect_modalities(stimuli)
 
         if not detected:
@@ -274,9 +287,92 @@ class BrainScoreModel(UnifiedModel):
                 fitting_stimuli=fitting_stimuli,
             )
 
+        # If this is a behavioral task that needs a readout (probabilities,
+        # classification, label), fit the classifier on the fitting_stimuli.
+        task_type = self._task_context.task_type
+        fitting = self._task_context.fitting_stimuli
+        if self._requires_behavioral_readout(task_type) and fitting is not None:
+            self._fit_behavioral_readout(fitting)
+
     def reset(self) -> None:
         self._recording_layer = None
         self._task_context = None
+        self._readout_classifier = None
+
+    # ── Behavioral readout ────────────────────────────────────
+
+    BEHAVIORAL_TASK_TYPES = frozenset({
+        'probabilities', 'classification', 'label',
+    })
+
+    @classmethod
+    def _requires_behavioral_readout(cls, task_type: str) -> bool:
+        return task_type in cls.BEHAVIORAL_TASK_TYPES
+
+    def _fit_behavioral_readout(self, fitting_stimuli) -> None:
+        """Extract features at behavioral_readout_layer and fit a probabilities
+        classifier.
+
+        fitting_stimuli must carry labels. Convention (matches vision's
+        ProbabilitiesMapping):
+        - 'image_label' column for vision benchmarks
+        - 'label' column as a generic fallback
+        """
+        from brainscore_core.behavior import ProbabilitiesClassifier
+
+        if self._behavioral_readout_layer is None:
+            raise ValueError(
+                f"Model '{self.identifier}' was asked to perform a behavioral "
+                f"task (task_type={self._task_context.task_type!r}) but no "
+                f"behavioral_readout_layer is set. Register the model with "
+                f"BrainScoreModel(..., behavioral_readout_layer='<layer name>')."
+            )
+
+        labels = self._extract_labels(fitting_stimuli)
+        features = self._extract_behavioral_features(fitting_stimuli)
+
+        self._readout_classifier = ProbabilitiesClassifier()
+        self._readout_classifier.fit(features, labels)
+
+    @staticmethod
+    def _extract_labels(stimuli):
+        for col in ('image_label', 'label'):
+            if col in stimuli.columns:
+                return list(stimuli[col].values)
+        raise ValueError(
+            f"Cannot find labels in fitting_stimuli. Expected one of "
+            f"'image_label' or 'label' columns; got: {list(stimuli.columns)}."
+        )
+
+    def _extract_behavioral_features(self, stimuli):
+        """Run the model once at the behavioral readout layer and return a
+        2-D (presentation, neuroid) features assembly.
+
+        Temporarily swaps _recording_layer so the existing process() path
+        handles extraction unchanged.
+        """
+        saved_layer = self._recording_layer
+        saved_classifier = self._readout_classifier
+        self._recording_layer = self._behavioral_readout_layer
+        # Bypass the behavioral predict path while fitting so we get features
+        # not probabilities (matters when this helper is called from
+        # _predict_probabilities for test stimuli too).
+        self._readout_classifier = None
+        try:
+            features = self.process(stimuli)
+        finally:
+            self._recording_layer = saved_layer
+            self._readout_classifier = saved_classifier
+
+        # Ensure (presentation, neuroid) order
+        if 'presentation' in features.dims and 'neuroid' in features.dims:
+            features = features.transpose('presentation', 'neuroid')
+        return features
+
+    def _predict_probabilities(self, stimuli):
+        """Return a BehavioralAssembly of per-label probabilities."""
+        features = self._extract_behavioral_features(stimuli)
+        return self._readout_classifier.predict_proba(features)
 
     # -- Legacy compatibility methods --
     # These allow BrainScoreModel to be used by existing vision and language
