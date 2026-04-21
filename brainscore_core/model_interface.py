@@ -3,13 +3,29 @@ Unified model interface for Brain-Score.
 
 Defines the core abstractions for model evaluation:
 - TaskContext: benchmark-to-model communication
+- StateChange, EnvironmentStep: future-proof input event types
 - UnifiedModel: the single evaluation interface (ABC)
 - BrainScoreModel: compositional implementation with preprocessors + shared activations_model
+
+## Input generalization (Martin Schrimpf feedback, April 2026)
+
+`process()` takes an *input event*, not just stimuli. Today the only
+implemented input type is `StimulusSet` (perceptual input). Two other input
+types are declared as stubs for future work:
+
+- **`StateChange`** — induce a dysfunction/lesion/perturbation
+  (e.g., dyslexia, prosopagnosia, pharmacological effects).
+- **`EnvironmentStep`** — one tick of an environment for agent scenarios.
+
+Reserving these types now means benchmarks studying neural dysfunction,
+drug effects, or embodied agents can be added later without changing the
+interface — only new adapters/handlers inside concrete models. See
+[[Unified Model Interface - Vision and Goals]] §Input Generalization.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 
 @dataclass
@@ -28,6 +44,57 @@ class TaskContext:
     fitting_stimuli: Optional[Any] = None
     instruction: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StateChange:
+    """Induce a state change in the model (dysfunction, lesion, perturbation).
+
+    Used to simulate conditions like dyslexia, prosopagnosia, or pharmacological
+    effects. Passed to model.process() the same way stimuli are — the interface
+    is generic over input event type so benchmarks studying neural dysfunction
+    or drug effects do not need a separate model method.
+
+    NOT YET IMPLEMENTED in BrainScoreModel (reserved for future work). Concrete
+    models that support state changes override process() or subclass
+    BrainScoreModel to dispatch on input type.
+
+    Examples (conceptual — not yet functional):
+        StateChange('dyslexia')
+        StateChange('lesion', {'region': 'V4'})
+        StateChange('pharmacological', {'drug': 'propofol', 'dose': 0.5})
+    """
+    kind: str
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EnvironmentStep:
+    """Single step of an environment for agent scenarios.
+
+    Used for embodied/interactive evaluation where the model observes, acts,
+    and receives the environment's response over multiple ticks. Passed to
+    process() like a stimulus — the interface generalizes over input type
+    rather than adding a separate agent method.
+
+    NOT YET IMPLEMENTED in BrainScoreModel (reserved for Phase 3).
+
+    Examples (conceptual — not yet functional):
+        EnvironmentStep(observation=current_image, step_num=0)
+        EnvironmentStep(observation=stim_set, step_num=5,
+                        context={'previous_action': 'left_turn'})
+    """
+    observation: Any
+    step_num: int = 0
+    context: Dict[str, Any] = field(default_factory=dict)
+
+
+# Input event type for process().
+# The interface is generic over input event type. StimulusSet is imported
+# lazily to avoid a hard dependency on the BrainIO types from core. In type
+# hints this is represented by Any; the actual type check happens at
+# dispatch time inside BrainScoreModel.process().
+InputEvent = Union['StimulusSet', StateChange, EnvironmentStep]  # type: ignore[name-defined]
 
 
 class UnifiedModel(ABC):
@@ -138,7 +205,26 @@ class BrainScoreModel(UnifiedModel):
                 detected.add(modality)
         return detected
 
-    def process(self, stimuli) -> Any:
+    def process(self, input_event) -> Any:
+        # Dispatch on input event type. Only StimulusSet (perceptual input)
+        # is implemented today. StateChange and EnvironmentStep are reserved
+        # for future work — see docstrings on those classes.
+        if isinstance(input_event, StateChange):
+            raise NotImplementedError(
+                f"State changes are not yet implemented on BrainScoreModel. "
+                f"Received: StateChange(kind={input_event.kind!r}). "
+                f"Concrete models that support dysfunction/lesion/perturbation "
+                f"should subclass BrainScoreModel and override process()."
+            )
+        if isinstance(input_event, EnvironmentStep):
+            raise NotImplementedError(
+                f"Environment steps (agent scenarios) are not yet implemented "
+                f"on BrainScoreModel. Received: EnvironmentStep(step_num="
+                f"{input_event.step_num})."
+            )
+
+        # Perceptual input (StimulusSet) — run the existing modality dispatch
+        stimuli = input_event
         detected = self._detect_modalities(stimuli)
 
         if not detected:
