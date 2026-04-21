@@ -208,7 +208,13 @@ class BrainScoreModel(UnifiedModel):
 
     def digest_text(self, text) -> Dict[str, Any]:
         """Language benchmark compatibility. Wraps process() result in
-        the expected {'neural': ..., 'behavior': ...} dict."""
+        the expected {'neural': ..., 'behavior': ...} dict.
+
+        Stimulus identifier includes a hash of the text content so repeated
+        calls with different sentences do not collide in the @store_xarray
+        cache on the activations_model.
+        """
+        import hashlib
         import pandas as pd
         from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
@@ -222,7 +228,9 @@ class BrainScoreModel(UnifiedModel):
                 'sentence': text,
                 'stimulus_id': list(range(len(text))),
             }))
-            stimuli.identifier = 'text_stimuli'
+            content_hash = hashlib.md5(
+                '|'.join(text).encode('utf-8')).hexdigest()[:12]
+            stimuli.identifier = f'text_stimuli_{len(text)}_{content_hash}'
         else:
             stimuli = text
 
