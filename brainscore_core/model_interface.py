@@ -217,6 +217,12 @@ class BrainScoreModel(UnifiedModel):
     def supported_modalities(self) -> Set[str]:
         return set(self._preprocessors.keys())
 
+    # When a stimulus set carries columns for multiple modalities (e.g. a
+    # word image *and* the word's text string), pick one deterministically.
+    # Vision wins over text — it's the richer signal and matches the
+    # paradigm of benchmarks that were designed image-first.
+    MODALITY_PRIORITY: Tuple[str, ...] = ('vision', 'text', 'audio', 'video')
+
     def _detect_modalities(self, stimuli) -> Set[str]:
         detected: Set[str] = set()
         for col in stimuli.columns:
@@ -224,6 +230,15 @@ class BrainScoreModel(UnifiedModel):
             if modality and modality in self._preprocessors:
                 detected.add(modality)
         return detected
+
+    def _pick_modality(self, detected: Set[str]) -> str:
+        """Return a deterministic modality from the detected set, using
+        MODALITY_PRIORITY as a tiebreaker. Models that only support one
+        modality end up with a single-element set and this is a no-op."""
+        for m in self.MODALITY_PRIORITY:
+            if m in detected:
+                return m
+        return next(iter(detected))
 
     def process(self, input_event) -> Any:
         # Dispatch on input event type. Only StimulusSet (perceptual input)
@@ -270,7 +285,7 @@ class BrainScoreModel(UnifiedModel):
                 f"Model supports: {self.supported_modalities}."
             )
 
-        modality = next(iter(detected))
+        modality = self._pick_modality(detected)
 
         # Vision path: delegate to activations_model (PytorchWrapper handles
         # preprocessing, forward pass, hooks, caching, and assembly packaging)
