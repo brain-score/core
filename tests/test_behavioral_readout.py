@@ -233,3 +233,113 @@ class TestBrainScoreModelBehavioral:
         # 'passive' is neural-style, no readout needed
         model.start_task(TaskContext(task_type='passive'))
         assert model._readout_classifier is None
+
+
+class TestBrainScoreModelGenerationPath:
+    """Validate the alternative instruction+generation dispatch path."""
+
+    @pytest.fixture
+    def test_stimuli(self):
+        return _make_image_stimulus_set(
+            ['cat'] * 3 + ['dog'] * 3, identifier='gen_test')
+
+    def test_generation_path_routes_correctly(self, test_stimuli):
+        """Model with generation_fn and TaskContext(instruction, label_set)
+        should dispatch to generation, not readout."""
+        calls = []
+
+        def fake_generate(stimulus_row, instruction, label_set):
+            calls.append((stimulus_row['stimulus_id'], instruction, tuple(label_set)))
+            # Pretend the generation returns the stimulus label (e.g., VLM
+            # reads 'cat' vs 'dog' correctly for even-indexed stimuli).
+            sid = stimulus_row['stimulus_id']
+            return 'cat' if sid in {'s0', 's1', 's2'} else 'dog'
+
+        model = BrainScoreModel(
+            identifier='test-vlm',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': lambda *a, **kw: None},
+            generation_fn=fake_generate,
+        )
+        model.start_task(TaskContext(
+            task_type='probabilities',
+            label_set=['cat', 'dog'],
+            instruction='What animal is this?',
+        ))
+        assert model._use_generation_for_task is True
+        assert model._readout_classifier is None
+
+        result = model.process(test_stimuli)
+        assert result.dims == ('presentation', 'choice')
+        assert result.shape == (6, 2)
+        # Each row should be a one-hot
+        assert np.allclose(result.values.sum(axis=1), 1.0)
+        # generation_fn should be called once per stimulus
+        assert len(calls) == 6
+        # Instruction should be forwarded verbatim
+        assert all(c[1] == 'What animal is this?' for c in calls)
+
+    def test_readout_path_still_works_when_no_instruction(self, test_stimuli):
+        """If TaskContext has fitting_stimuli but no instruction, dispatch
+        to the readout path even when model has a generation_fn."""
+        features = np.random.default_rng(0).normal(size=(6, 8))
+        extractor = _fake_preprocessor_returning(features)
+        model = BrainScoreModel(
+            identifier='test-model',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': extractor},
+            behavioral_readout_layer='some_layer',
+            generation_fn=lambda **kw: 'cat',  # shouldn't be called
+        )
+        fitting = _make_image_stimulus_set(['cat'] * 3 + ['dog'] * 3,
+                                            identifier='gen_fit')
+        model.start_task(TaskContext(
+            task_type='probabilities',
+            fitting_stimuli=fitting,
+            label_set=['cat', 'dog'],
+            # no instruction
+        ))
+        assert model._use_generation_for_task is False
+        assert model._readout_classifier is not None
+
+    def test_generation_path_prefers_generation_when_both_available(
+            self, test_stimuli):
+        """If both fitting_stimuli AND (instruction + label_set) are
+        present, prefer generation path (the paper's preferred method
+        for instruction-following VLMs)."""
+        fitting = _make_image_stimulus_set(['cat'] * 3 + ['dog'] * 3,
+                                            identifier='gen_fit2')
+        model = BrainScoreModel(
+            identifier='test-vlm',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': lambda *a, **kw: None},
+            behavioral_readout_layer='some_layer',
+            generation_fn=lambda **kw: 'cat',
+        )
+        model.start_task(TaskContext(
+            task_type='probabilities',
+            fitting_stimuli=fitting,
+            label_set=['cat', 'dog'],
+            instruction='What animal is this?',
+        ))
+        assert model._use_generation_for_task is True
+        assert model._readout_classifier is None
+
+    def test_error_when_no_path_viable(self, test_stimuli):
+        """TaskContext with no fitting_stimuli, no generation_fn, no
+        instruction+label_set combo → clear error."""
+        model = BrainScoreModel(
+            identifier='test-model',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': lambda *a, **kw: None},
+        )
+        with pytest.raises(ValueError, match="neither fitting_stimuli"):
+            model.start_task(TaskContext(
+                task_type='probabilities',
+                label_set=['cat', 'dog'],
+                # no fitting_stimuli and no generation_fn
+            ))

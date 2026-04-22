@@ -176,7 +176,19 @@ class BrainScoreModel(UnifiedModel):
         activations_model: Any = None,
         visual_degrees: int = 8,
         behavioral_readout_layer: Optional[str] = None,
+        generation_fn: Optional[Callable] = None,
     ) -> None:
+        """
+        :param generation_fn: Optional callable for instruction-following
+            behavioral tasks. Signature:
+                generation_fn(stimulus_row, instruction, label_set) -> str
+            Must return one of the strings in ``label_set``. When provided,
+            a TaskContext that carries both `instruction` and `label_set`
+            will route behavioral evaluation through this function instead
+            of the logistic readout. This lets instruction-following VLMs
+            (Qwen-VL, BLIP-2 decoder, etc.) answer via generation+parsing
+            while feature models (CLIP, ResNet) stay on the readout path.
+        """
         self._identifier_str = identifier
         self._model = model
         self._region_layer_map_dict = region_layer_map
@@ -184,10 +196,14 @@ class BrainScoreModel(UnifiedModel):
         self._activations_model = activations_model
         self._visual_degrees_val = visual_degrees
         self._behavioral_readout_layer = behavioral_readout_layer
+        self._generation_fn = generation_fn
         self._recording_layer: Optional[str] = None
         self._task_context: Optional[TaskContext] = None
         # Lazily instantiated the first time a behavioral task is started.
         self._readout_classifier = None  # type: ignore[assignment]
+        # When True, process() returns generated predictions from generation_fn
+        # rather than feature-based probabilities or activations.
+        self._use_generation_for_task: bool = False
 
     @property
     def identifier(self) -> str:
@@ -230,9 +246,15 @@ class BrainScoreModel(UnifiedModel):
         # Perceptual input (StimulusSet).
         stimuli = input_event
 
-        # Behavioral mode: if a readout classifier has been fitted and the
-        # current task expects probabilities, return a BehavioralAssembly
-        # instead of neural activations.
+        # Behavioral mode (generation path): model generates a label for
+        # each stimulus via instruction + generation_fn.
+        if (self._use_generation_for_task
+                and self._task_context is not None
+                and self._requires_behavioral_readout(self._task_context.task_type)):
+            return self._generate_predictions(stimuli)
+
+        # Behavioral mode (readout path): logistic classifier returns
+        # probabilities over the label_set.
         if (self._readout_classifier is not None
                 and self._task_context is not None
                 and self._requires_behavioral_readout(self._task_context.task_type)):
@@ -287,17 +309,50 @@ class BrainScoreModel(UnifiedModel):
                 fitting_stimuli=fitting_stimuli,
             )
 
-        # If this is a behavioral task that needs a readout (probabilities,
-        # classification, label), fit the classifier on the fitting_stimuli.
         task_type = self._task_context.task_type
+        if not self._requires_behavioral_readout(task_type):
+            # Passive / neural task — nothing to configure here
+            self._use_generation_for_task = False
+            self._readout_classifier = None
+            return
+
+        # Two possible behavioral paths depending on model capability and
+        # what the TaskContext provides:
+        #
+        #   1. Instruction + generation_fn  → generation path (VLMs that
+        #      natively do instruction-following lexical decision etc.)
+        #   2. fitting_stimuli (no/either)  → readout path (feature models
+        #      that need a trained logistic classifier)
+        #
+        # Both paths can be simultaneously supported; preference goes to
+        # generation when both the model and TaskContext support it.
+        instruction = self._task_context.instruction
+        label_set = self._task_context.label_set
         fitting = self._task_context.fitting_stimuli
-        if self._requires_behavioral_readout(task_type) and fitting is not None:
+
+        if self._generation_fn is not None and instruction and label_set:
+            self._use_generation_for_task = True
+            self._readout_classifier = None
+            return
+
+        self._use_generation_for_task = False
+        if fitting is not None:
             self._fit_behavioral_readout(fitting)
+        else:
+            # No viable path — emit a clear error so the benchmark knows
+            # this model cannot run the task.
+            raise ValueError(
+                f"Model '{self.identifier}' cannot run behavioral task "
+                f"'{task_type}': TaskContext provides neither fitting_stimuli "
+                f"(needed for readout path) nor (instruction + label_set "
+                f"+ model.generation_fn) (needed for generation path)."
+            )
 
     def reset(self) -> None:
         self._recording_layer = None
         self._task_context = None
         self._readout_classifier = None
+        self._use_generation_for_task = False
 
     # ── Behavioral readout ────────────────────────────────────
 
@@ -373,6 +428,69 @@ class BrainScoreModel(UnifiedModel):
         """Return a BehavioralAssembly of per-label probabilities."""
         features = self._extract_behavioral_features(stimuli)
         return self._readout_classifier.predict_proba(features)
+
+    def _generate_predictions(self, stimuli):
+        """Call generation_fn per-stimulus, return one-hot BehavioralAssembly.
+
+        Produces a (n_stimuli, n_labels) assembly where each row has a 1.0
+        at the predicted label's position (and 0.0 elsewhere). This lets
+        downstream argmax recover the predicted label the same way readout
+        does, and it lets metrics that expect probability distributions
+        still work (they just see a degenerate one-hot distribution).
+
+        Invalid / unparseable responses default to the first label in
+        label_set with a warning; the generation_fn is expected to enforce
+        its own label discipline.
+        """
+        import numpy as np
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.assemblies import (
+            BehavioralAssembly, walk_coords, array_is_element,
+        )
+
+        label_set = list(self._task_context.label_set)
+        instruction = self._task_context.instruction
+        label_to_idx = {lbl: i for i, lbl in enumerate(label_set)}
+
+        n_stimuli = len(stimuli)
+        n_labels = len(label_set)
+        proba = np.zeros((n_stimuli, n_labels), dtype=np.float32)
+
+        for i, (_, row) in enumerate(stimuli.iterrows()):
+            predicted = self._generation_fn(
+                stimulus_row=row,
+                instruction=instruction,
+                label_set=label_set,
+            )
+            if predicted not in label_to_idx:
+                # Fall back to first label — generation_fn should handle
+                # its own parsing robustness.
+                import warnings
+                warnings.warn(
+                    f"generation_fn returned {predicted!r}, not in "
+                    f"label_set={label_set}. Defaulting to {label_set[0]!r}."
+                )
+                predicted = label_set[0]
+            proba[i, label_to_idx[predicted]] = 1.0
+
+        # Build presentation coords from the stimulus set
+        stimulus_ids = list(stimuli['stimulus_id'].values)
+        presentation_coords = {
+            'stimulus_id': ('presentation', stimulus_ids),
+        }
+        for column in stimuli.columns:
+            if column == 'stimulus_id':
+                continue
+            presentation_coords[column] = ('presentation', list(stimuli[column].values))
+
+        return BehavioralAssembly(
+            proba,
+            coords={
+                **presentation_coords,
+                'choice': label_set,
+            },
+            dims=['presentation', 'choice'],
+        )
 
     # -- Legacy compatibility methods --
     # These allow BrainScoreModel to be used by existing vision and language
