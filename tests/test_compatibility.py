@@ -14,10 +14,12 @@ from brainscore_core.model_interface import UnifiedModel
 
 class FakeModel(UnifiedModel):
 
-    def __init__(self, identifier='test-model', modalities=None, region_layer_map=None):
+    def __init__(self, identifier='test-model', modalities=None,
+                 region_layer_map=None, required_modalities=None):
         self._id = identifier
         self._modalities = modalities or set()
         self._rlm = region_layer_map or {}
+        self._required = required_modalities or set()
 
     @property
     def identifier(self) -> str:
@@ -30,6 +32,10 @@ class FakeModel(UnifiedModel):
     @property
     def supported_modalities(self) -> Set[str]:
         return self._modalities
+
+    @property
+    def required_modalities(self) -> Set[str]:
+        return set(self._required)
 
     def process(self, stimuli):
         return None
@@ -180,3 +186,94 @@ class TestCombinedScenarios:
         with pytest.raises(CompatibilityError, match="gpt-2") as exc_info:
             check_compatibility(model, bench)
         assert "MajajHong2015" in str(exc_info.value)
+
+
+# ── Model-side required modalities (hard gate) ──────────────────────
+
+class TestModelRequiredModalities:
+    """Symmetric to benchmark-side required: a model can declare modalities
+    it hard-requires the benchmark to provide (e.g. a locked-fusion model
+    that needs vision+audio+text together, or a unimodal backbone that
+    cannot produce a prediction without its one modality)."""
+
+    def test_unimodal_model_requirement_satisfied(self):
+        # GPT-2 style: requires text, benchmark provides text
+        model = FakeModel(modalities={'text'}, required_modalities={'text'})
+        bench = FakeBenchmark(required_modalities={'text'})
+        check_compatibility(model, bench)  # no raise
+
+    def test_unimodal_model_requirement_unmet_raises(self):
+        # Benchmark is vision-only, model requires text (e.g. GPT-2 on V4)
+        model = FakeModel(modalities={'text'}, required_modalities={'text'})
+        bench = FakeBenchmark(required_modalities={'vision'})
+        # Fails at check 1 first (benchmark.required={'vision'} not in
+        # model.available={'text'}); message differs but it's a hard error.
+        with pytest.raises(CompatibilityError):
+            check_compatibility(model, bench)
+
+    def test_locked_fusion_model_full_provision(self):
+        # TRIBEv2-style locked fusion: requires all three streams
+        model = FakeModel(
+            modalities={'vision', 'audio', 'text'},
+            required_modalities={'vision', 'audio', 'text'},
+        )
+        bench = FakeBenchmark(
+            required_modalities={'vision'},
+            available_modalities={'audio', 'text'},
+        )
+        check_compatibility(model, bench)  # all three provided somewhere
+
+    def test_locked_fusion_missing_audio_raises(self):
+        model = FakeModel(
+            modalities={'vision', 'audio', 'text'},
+            required_modalities={'vision', 'audio', 'text'},
+        )
+        # Benchmark provides vision + text but no audio
+        bench = FakeBenchmark(
+            required_modalities={'vision'},
+            available_modalities={'text'},
+        )
+        with pytest.raises(CompatibilityError, match="hard-requires"):
+            check_compatibility(model, bench)
+
+    def test_model_available_but_not_required_can_degrade(self):
+        # CLIP-style: available={vision, text}, required={}
+        # Benchmark provides only vision; model can run with just vision.
+        model = FakeModel(
+            modalities={'vision', 'text'},
+            required_modalities=set(),
+        )
+        bench = FakeBenchmark(required_modalities={'vision'})
+        check_compatibility(model, bench)  # no raise, no warn needed
+
+    def test_error_message_identifies_missing_modality(self):
+        model = FakeModel(
+            identifier='tribev2',
+            modalities={'vision', 'audio', 'text'},
+            required_modalities={'vision', 'audio', 'text'},
+        )
+        bench = FakeBenchmark(
+            identifier='movie-watching-vision-only',
+            required_modalities={'vision'},
+        )
+        with pytest.raises(CompatibilityError) as exc_info:
+            check_compatibility(model, bench)
+        msg = str(exc_info.value)
+        assert 'tribev2' in msg and 'movie-watching-vision-only' in msg
+        assert 'audio' in msg and 'text' in msg
+
+
+# ── Available-modalities API on UnifiedModel ────────────────────────
+
+class TestAvailableModalitiesDefault:
+    """Models that only override supported_modalities should still get a
+    working available_modalities via the concrete default on the ABC."""
+
+    def test_legacy_model_available_defaults_to_supported(self):
+        model = FakeModel(modalities={'vision', 'text'})
+        assert model.available_modalities == {'vision', 'text'}
+        assert model.supported_modalities == {'vision', 'text'}
+
+    def test_legacy_model_required_defaults_to_empty(self):
+        model = FakeModel(modalities={'vision'})
+        assert model.required_modalities == set()

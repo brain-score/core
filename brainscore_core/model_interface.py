@@ -106,6 +106,27 @@ class UnifiedModel(ABC):
     perceives is determined by the stimulus content. What the model
     produces is determined by the measurement configuration (start_task
     for behavioral, start_recording for neural).
+
+    ## Two-tier modality declaration
+
+    Models declare modality support at two tiers, mirroring the benchmark-side
+    contract (`required_modalities` / `available_modalities`):
+
+    - ``required_modalities``: HARD requirement. The stimulus set MUST contain
+      columns covering every modality in this set, or the compatibility check
+      rejects the pairing before any compute runs. Use this for models that
+      cannot produce a prediction at all without a particular input modality
+      (pure language models, pure video models, and models whose forward pass
+      requires all of vision+audio+text fused together, e.g. TRIBEv2-locked).
+    - ``available_modalities``: SOFT capability. Modalities the model CAN
+      consume if provided, but does not hard-require. A benchmark that
+      provides additional available modalities will surface a
+      ``CompatibilityWarning`` for modalities present in the stimuli that the
+      model cannot consume.
+
+    The invariant ``required_modalities ⊆ available_modalities`` always holds.
+    The legacy ``supported_modalities`` property is kept as an alias for
+    ``available_modalities`` so older benchmarks continue to work.
     """
 
     @property
@@ -121,7 +142,28 @@ class UnifiedModel(ABC):
     @property
     @abstractmethod
     def supported_modalities(self) -> Set[str]:
+        """All modalities the model can consume. Concrete subclasses MUST
+        implement this. :py:attr:`available_modalities` defaults to this
+        value so code written for the two-tier contract works unchanged on
+        pre-two-tier subclasses."""
         ...
+
+    @property
+    def available_modalities(self) -> Set[str]:
+        """All modalities the model can consume. Defaults to
+        :py:attr:`supported_modalities`. Concrete subclasses may override
+        this directly (preferred new API) or rely on the default."""
+        return self.supported_modalities
+
+    @property
+    def required_modalities(self) -> Set[str]:
+        """Modalities the model HARD-requires in stimuli. Empty by default —
+        most models can run on whichever modality the benchmark provides, as
+        long as the intersection with :py:attr:`available_modalities` is
+        non-empty. Override for models that must receive a specific modality
+        (single-modality text/video backbones, multimodal-fusion models that
+        cannot degrade, etc.)."""
+        return set()
 
     @abstractmethod
     def process(self, stimuli) -> Any:
@@ -177,6 +219,7 @@ class BrainScoreModel(UnifiedModel):
         visual_degrees: int = 8,
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
+        required_modalities: Optional[Set[str]] = None,
     ) -> None:
         """
         :param generation_fn: Optional callable for instruction-following
@@ -188,6 +231,11 @@ class BrainScoreModel(UnifiedModel):
             of the logistic readout. This lets instruction-following VLMs
             (Qwen-VL, BLIP-2 decoder, etc.) answer via generation+parsing
             while feature models (CLIP, ResNet) stay on the readout path.
+        :param required_modalities: Optional set of modalities this model
+            HARD-requires the benchmark to provide. Must be a subset of
+            ``preprocessors.keys()``. Defaults to empty (soft capability for
+            all modalities). Set for single-modality backbones (text, video)
+            and multimodal-fusion models that cannot degrade to a subset.
         """
         self._identifier_str = identifier
         self._model = model
@@ -205,6 +253,16 @@ class BrainScoreModel(UnifiedModel):
         # rather than feature-based probabilities or activations.
         self._use_generation_for_task: bool = False
 
+        required = set(required_modalities) if required_modalities else set()
+        available = set(preprocessors.keys())
+        if not required.issubset(available):
+            raise ValueError(
+                f"required_modalities {required} must be a subset of the "
+                f"available preprocessors {available}. A model cannot require "
+                f"a modality for which it has no preprocessor."
+            )
+        self._required_modalities = required
+
     @property
     def identifier(self) -> str:
         return self._identifier_str
@@ -216,6 +274,17 @@ class BrainScoreModel(UnifiedModel):
     @property
     def supported_modalities(self) -> Set[str]:
         return set(self._preprocessors.keys())
+
+    @property
+    def available_modalities(self) -> Set[str]:
+        # Explicit override (identical to supported_modalities) so the
+        # two-tier API is anchored on BrainScoreModel rather than inherited
+        # from the legacy alias.
+        return set(self._preprocessors.keys())
+
+    @property
+    def required_modalities(self) -> Set[str]:
+        return set(self._required_modalities)
 
     # When a stimulus set carries columns for multiple modalities (e.g. a
     # word image *and* the word's text string), pick one deterministically.
