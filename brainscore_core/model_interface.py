@@ -220,6 +220,7 @@ class BrainScoreModel(UnifiedModel):
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
         required_modalities: Optional[Set[str]] = None,
+        backbone_id: Optional[str] = None,
     ) -> None:
         """
         :param generation_fn: Optional callable for instruction-following
@@ -236,6 +237,13 @@ class BrainScoreModel(UnifiedModel):
             ``preprocessors.keys()``. Defaults to empty (soft capability for
             all modalities). Set for single-modality backbones (text, video)
             and multimodal-fusion models that cannot degrade to a subset.
+        :param backbone_id: Optional cache-key identifier, propagated to
+            preprocessors/activations_model that expose a ``backbone_id``
+            attribute. When two registrations share underlying backbone
+            weights (e.g. BLIP-2 and a future InstructBLIP both using the
+            same ViT-G), passing the same ``backbone_id`` lets the
+            ``@store_xarray`` cache entries be reused across registrations.
+            Defaults to ``identifier`` for backwards compatibility.
         """
         self._identifier_str = identifier
         self._model = model
@@ -262,6 +270,7 @@ class BrainScoreModel(UnifiedModel):
                 f"a modality for which it has no preprocessor."
             )
         self._required_modalities = required
+        self._backbone_id = backbone_id or identifier
 
     @property
     def identifier(self) -> str:
@@ -285,6 +294,13 @@ class BrainScoreModel(UnifiedModel):
     @property
     def required_modalities(self) -> Set[str]:
         return set(self._required_modalities)
+
+    @property
+    def backbone_id(self) -> str:
+        """Cache-key identifier. Two registrations that share backbone
+        weights can opt into shared @store_xarray cache by constructing
+        with the same ``backbone_id``. Defaults to ``identifier``."""
+        return self._backbone_id
 
     # When a stimulus set carries columns for multiple modalities (e.g. a
     # word image *and* the word's text string), pick one deterministically.
