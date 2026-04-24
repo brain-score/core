@@ -207,6 +207,8 @@ class BrainScoreModel(UnifiedModel):
         'text': 'text',
         'video_path': 'video',
         'audio_path': 'audio',
+        'audio_file_name': 'audio',
+        'audio_file': 'audio',
     }
 
     def __init__(
