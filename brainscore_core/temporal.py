@@ -251,3 +251,203 @@ def expand_clip_to_frames(
     new_set.identifier = f'{clip_stimulus_set.identifier}-frames'
     new_set.stimulus_paths = stimulus_paths
     return new_set
+
+
+# ═════════════════════════════════════════════════════════════════
+# Time-series CV + HRF correction for naturalistic fMRI benchmarks.
+# ═════════════════════════════════════════════════════════════════
+#
+# For benchmarks that score model features against a *continuous* fMRI
+# time series (movie-watching, naturalistic speech), two pieces must
+# differ from the image-benchmark default:
+#
+# 1. Cross-validation folds must be contiguous blocks of time, not
+#    random stripes. Adjacent TRs in a BOLD time series are temporally
+#    correlated by autocorrelation and share stimulus-driven shared
+#    variance; random KFold leaks information from train to test and
+#    produces inflated scores. EPFL's V-JEPA paper uses 15 s contiguous
+#    blocks; Bonner et al. (2021), Toneva & Wehbe (2019), and TRIBEv2
+#    use the same block-CV pattern.
+#
+# 2. Model features must be convolved with a hemodynamic response
+#    function (HRF) before regressing against BOLD. The canonical SPM
+#    double-gamma HRF peaks at ~5 s with an undershoot around 15 s.
+#    Failing to HRF-convolve forces the regressor to learn an implicit
+#    delay which conflates model and BOLD timing.
+#
+# Lahner2024 in its current form does NOT need either: the packaged
+# assembly is pre-computed GLM betas (one value per clip, already
+# HRF-deconvolved at packaging time). These utilities are for the
+# future naturalistic time-series benchmarks (IBC, Courtois NeuroMod,
+# Algonauts 2023) that M8/M12 target.
+
+
+def contiguous_block_cv(
+    n_samples: int,
+    block_size_samples: int,
+    n_splits: Optional[int] = None,
+):
+    """Yield (train_idx, test_idx) splits where each test set is a
+    contiguous block of consecutive indices.
+
+    For time-series data where adjacent samples share variance (BOLD
+    autocorrelation, naturalistic stimulus structure), random KFold
+    leaks information and inflates scores. Contiguous blocks preserve
+    the temporal structure of held-out data.
+
+    The default partition is sequential, non-overlapping: fold ``i``
+    holds out samples ``[i*block_size, (i+1)*block_size)``. Samples that
+    don't fit evenly (``n_samples % block_size != 0``) fall into the
+    last fold's train set on all but the final split, and vice versa
+    on the final split — every sample appears in exactly one test set.
+
+    Args:
+        n_samples: Total number of time points.
+        block_size_samples: Length of each held-out block, in samples.
+        n_splits: Number of folds. Defaults to
+            ``ceil(n_samples / block_size_samples)`` so every sample is
+            held out in exactly one fold.
+
+    Yields:
+        ``(train_idx, test_idx)`` pairs of ``np.ndarray[int]``.
+    """
+    if n_samples <= 0:
+        raise ValueError(f"n_samples must be positive, got {n_samples}")
+    if block_size_samples <= 0:
+        raise ValueError(
+            f"block_size_samples must be positive, got {block_size_samples}")
+    if block_size_samples > n_samples:
+        raise ValueError(
+            f"block_size_samples ({block_size_samples}) must not exceed "
+            f"n_samples ({n_samples})")
+
+    # Default: cover every sample exactly once by ceiling-dividing.
+    default_n_splits = (n_samples + block_size_samples - 1) // block_size_samples
+    n_splits = n_splits or default_n_splits
+
+    if n_splits <= 0:
+        raise ValueError(f"n_splits must be positive, got {n_splits}")
+
+    for fold in range(n_splits):
+        test_start = fold * block_size_samples
+        test_end = min(test_start + block_size_samples, n_samples)
+        if test_end <= test_start:
+            # Happens if the user asked for more folds than blocks fit —
+            # skip rather than emit an empty test set.
+            continue
+        test_idx = np.arange(test_start, test_end)
+        train_idx = np.concatenate([
+            np.arange(0, test_start),
+            np.arange(test_end, n_samples),
+        ])
+        yield train_idx, test_idx
+
+
+def double_gamma_hrf(
+    duration_sec: float,
+    sampling_rate_hz: float,
+    peak_delay: float = 6.0,
+    peak_dispersion: float = 1.0,
+    undershoot_delay: float = 16.0,
+    undershoot_dispersion: float = 1.0,
+    peak_undershoot_ratio: float = 1 / 6.0,
+) -> np.ndarray:
+    """Sample the canonical SPM double-gamma HRF.
+
+    ``h(t) = peak(t) - (1/6) * undershoot(t)``, where each component is
+    a gamma density with shape/scale parameters. Defaults reproduce the
+    SPM canonical (peak ≈ 5 s, undershoot ≈ 15 s, peak:undershoot = 6:1).
+
+    The returned kernel is normalized to unit sum so convolution
+    preserves the feature scale.
+
+    Args:
+        duration_sec: Length of the sampled kernel. 32 s covers the
+            canonical peak + undershoot; longer is fine but wasteful.
+        sampling_rate_hz: Sample rate of the output (typically equal to
+            the fMRI TR, e.g. 1 / 1.5 s ≈ 0.667 Hz, or the model's
+            feature sample rate).
+        peak_delay/peak_dispersion: Gamma parameters for the positive
+            peak component. SPM default: delay=6, dispersion=1.
+        undershoot_delay/undershoot_dispersion: Gamma parameters for the
+            undershoot. SPM default: delay=16, dispersion=1.
+        peak_undershoot_ratio: Scale factor on the undershoot relative
+            to the peak. SPM default: 1/6.
+
+    Returns:
+        1-D ``np.ndarray`` of length ``round(duration_sec * sampling_rate_hz)``,
+        normalized to sum to 1.
+    """
+    from scipy.special import gamma as gamma_fn
+
+    n = int(round(duration_sec * sampling_rate_hz))
+    if n <= 0:
+        raise ValueError(
+            f"HRF duration × sample rate must be > 0; got {duration_sec}s "
+            f"at {sampling_rate_hz} Hz.")
+
+    t = np.arange(n, dtype=np.float64) / sampling_rate_hz
+    # Gamma PDF with shape=delay, scale=1/dispersion. Equivalent to
+    # scipy.stats.gamma(a=delay, scale=1/dispersion).pdf(t).
+    peak = (t ** (peak_delay - 1) * (peak_dispersion ** peak_delay)
+            * np.exp(-peak_dispersion * t)) / gamma_fn(peak_delay)
+    undershoot = (t ** (undershoot_delay - 1)
+                  * (undershoot_dispersion ** undershoot_delay)
+                  * np.exp(-undershoot_dispersion * t)) / gamma_fn(undershoot_delay)
+    h = peak - peak_undershoot_ratio * undershoot
+    total = h.sum()
+    if total == 0:
+        raise ValueError(
+            "HRF summed to zero — check duration/sampling parameters.")
+    return h / total
+
+
+def hrf_convolve(
+    features: np.ndarray,
+    sampling_rate_hz: float,
+    hrf: Optional[np.ndarray] = None,
+    hrf_duration_sec: float = 32.0,
+) -> np.ndarray:
+    """Convolve model features with an HRF along the time axis.
+
+    Aligns the timing of model features to BOLD responses for regression
+    against fMRI time series. The returned array has the same shape as
+    the input — only the past influences the present (causal truncation
+    of the ``np.convolve`` full mode).
+
+    Args:
+        features: ``(n_time, n_features)`` array. Rows are time points
+            sampled at ``sampling_rate_hz``.
+        sampling_rate_hz: Sample rate of the feature time series.
+        hrf: Optional pre-computed 1-D HRF kernel. Must be sampled at
+            the same rate as ``features``. If None, the canonical SPM
+            double-gamma is used.
+        hrf_duration_sec: Duration of the default HRF kernel when
+            ``hrf`` is None. 32 s is standard (covers peak + undershoot).
+
+    Returns:
+        ``(n_time, n_features)`` convolved features, same dtype as input.
+    """
+    if features.ndim != 2:
+        raise ValueError(
+            f"hrf_convolve expects 2-D (time, features) input; got shape "
+            f"{features.shape}")
+
+    n_time, n_features = features.shape
+    if n_time == 0:
+        return features.copy()
+
+    if hrf is None:
+        hrf = double_gamma_hrf(hrf_duration_sec, sampling_rate_hz)
+
+    if hrf.ndim != 1:
+        raise ValueError(f"hrf must be 1-D; got shape {hrf.shape}")
+
+    # Causal convolution: truncate 'full' result to the length of the
+    # original time axis. Equivalent to 'same' mode for power-of-2 lengths
+    # but explicit so behavior is unambiguous for any n.
+    out = np.zeros_like(features)
+    for j in range(n_features):
+        conv = np.convolve(features[:, j], hrf, mode='full')[:n_time]
+        out[:, j] = conv
+    return out

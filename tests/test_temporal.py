@@ -11,7 +11,12 @@ import pytest
 from brainscore_core.supported_data_standards.brainio.assemblies import (
     NeuroidAssembly,
 )
-from brainscore_core.temporal import temporal_bin
+from brainscore_core.temporal import (
+    contiguous_block_cv,
+    double_gamma_hrf,
+    hrf_convolve,
+    temporal_bin,
+)
 
 
 def _make_frame_assembly(clip_specs):
@@ -219,3 +224,189 @@ class TestCustomCoordNames:
         assert result.shape == (2, 1, 1)
         np.testing.assert_allclose(result.values[0, 0], [1.5])  # (1+2)/2
         np.testing.assert_allclose(result.values[1, 0], [3.5])  # (3+4)/2
+
+
+# ═════════════════════════════════════════════════════════════════
+# Time-series CV + HRF correction
+# ═════════════════════════════════════════════════════════════════
+
+
+class TestContiguousBlockCV:
+
+    def test_every_sample_held_out_exactly_once(self):
+        n, block = 100, 10
+        test_samples = []
+        for train_idx, test_idx in contiguous_block_cv(n, block):
+            assert len(set(train_idx) & set(test_idx)) == 0
+            assert len(train_idx) + len(test_idx) == n
+            test_samples.extend(test_idx.tolist())
+        # Every sample appears in exactly one test set
+        assert sorted(test_samples) == list(range(n))
+        assert len(test_samples) == n
+
+    def test_test_sets_are_contiguous(self):
+        """Each test fold must be a contiguous slice (not striped)."""
+        for train_idx, test_idx in contiguous_block_cv(50, 5):
+            # Contiguous ⇔ max-min+1 == length and values sorted
+            assert list(test_idx) == list(range(test_idx.min(), test_idx.max() + 1))
+
+    def test_uneven_division_covers_all_samples(self):
+        """13 samples / block=5 → folds of sizes 5, 5, 3."""
+        folds = list(contiguous_block_cv(13, 5))
+        assert len(folds) == 3
+        sizes = [len(t) for _, t in folds]
+        assert sizes == [5, 5, 3]
+        # And all 13 appear exactly once
+        all_test = sorted(np.concatenate([t for _, t in folds]).tolist())
+        assert all_test == list(range(13))
+
+    def test_explicit_n_splits(self):
+        """n_splits=2 on 20 samples with block=5 → just the first two blocks."""
+        folds = list(contiguous_block_cv(20, 5, n_splits=2))
+        assert len(folds) == 2
+        assert list(folds[0][1]) == [0, 1, 2, 3, 4]
+        assert list(folds[1][1]) == [5, 6, 7, 8, 9]
+
+    def test_block_larger_than_n_raises(self):
+        with pytest.raises(ValueError, match="must not exceed"):
+            list(contiguous_block_cv(10, 20))
+
+    def test_zero_or_negative_raises(self):
+        with pytest.raises(ValueError):
+            list(contiguous_block_cv(0, 5))
+        with pytest.raises(ValueError):
+            list(contiguous_block_cv(100, 0))
+        with pytest.raises(ValueError):
+            list(contiguous_block_cv(100, -5))
+
+    def test_beats_random_on_autocorrelated_series(self):
+        """Demonstration: on a perfectly-autocorrelated series, contiguous
+        CV correctly scores 0 (no predictive signal) while random KFold
+        would leak adjacency and score > 0. Sanity-check test."""
+        from sklearn.model_selection import KFold
+        from sklearn.linear_model import Ridge
+
+        rng = np.random.default_rng(0)
+        n = 200
+        # X is just a counter — 1-D feature
+        X = np.arange(n).reshape(-1, 1).astype(float)
+        # y is smoothed noise — adjacent samples share variance
+        noise = rng.standard_normal(n)
+        y = np.convolve(noise, np.ones(10) / 10, mode='same')
+
+        # Random KFold — adjacency leaks; predictions look plausible
+        random_preds = np.zeros(n)
+        for train_idx, test_idx in KFold(5, shuffle=True,
+                                         random_state=0).split(X):
+            random_preds[test_idx] = Ridge().fit(
+                X[train_idx], y[train_idx]).predict(X[test_idx])
+        random_r = np.corrcoef(y, random_preds)[0, 1]
+
+        # Contiguous blocks — no leakage; predictions should be chance
+        contig_preds = np.zeros(n)
+        for train_idx, test_idx in contiguous_block_cv(n, 40):
+            contig_preds[test_idx] = Ridge().fit(
+                X[train_idx], y[train_idx]).predict(X[test_idx])
+        contig_r = np.corrcoef(y, contig_preds)[0, 1]
+
+        # Contiguous score should be ≤ random score on a smooth series
+        # (we're not asserting magnitude — only that the ordering is
+        # correct on a canonical leakage example).
+        assert contig_r <= random_r + 1e-6
+
+
+class TestDoubleGammaHRF:
+
+    def test_unit_sum_normalization(self):
+        h = double_gamma_hrf(duration_sec=32, sampling_rate_hz=10)
+        np.testing.assert_allclose(h.sum(), 1.0, rtol=1e-6)
+
+    def test_peak_around_5_seconds(self):
+        """Canonical SPM HRF peaks near t≈5s with default parameters."""
+        sr = 100
+        h = double_gamma_hrf(duration_sec=32, sampling_rate_hz=sr)
+        peak_idx = int(np.argmax(h))
+        peak_time_s = peak_idx / sr
+        assert 4.0 <= peak_time_s <= 6.0, (
+            f"Expected peak in [4s, 6s], got {peak_time_s}s")
+
+    def test_undershoot_negative_after_peak(self):
+        sr = 100
+        h = double_gamma_hrf(duration_sec=32, sampling_rate_hz=sr)
+        # Samples around 14-18 s should be negative (undershoot)
+        late_idx = slice(int(14 * sr), int(18 * sr))
+        assert h[late_idx].min() < 0
+
+    def test_shape_matches_requested_length(self):
+        h = double_gamma_hrf(duration_sec=10.5, sampling_rate_hz=4)
+        assert h.shape == (42,)  # round(10.5 * 4) = 42
+
+    def test_custom_parameters_shift_peak(self):
+        """A later peak_delay should push the peak further in time."""
+        sr = 100
+        h_early = double_gamma_hrf(32, sr, peak_delay=3)
+        h_late = double_gamma_hrf(32, sr, peak_delay=10)
+        assert np.argmax(h_early) < np.argmax(h_late)
+
+    def test_zero_duration_raises(self):
+        with pytest.raises(ValueError, match="must be > 0"):
+            double_gamma_hrf(duration_sec=0, sampling_rate_hz=1)
+
+
+class TestHRFConvolve:
+
+    def test_shape_preserved(self):
+        rng = np.random.default_rng(0)
+        features = rng.standard_normal((100, 3))
+        out = hrf_convolve(features, sampling_rate_hz=1.0)
+        assert out.shape == features.shape
+        assert out.dtype == features.dtype
+
+    def test_delta_input_reproduces_hrf(self):
+        """A unit impulse at t=0 convolved with the HRF should match the
+        HRF itself (truncated to the input length)."""
+        sr = 10.0
+        hrf = double_gamma_hrf(32, sr)
+        n = len(hrf)
+        impulse = np.zeros((n, 1))
+        impulse[0, 0] = 1.0
+        out = hrf_convolve(impulse, sampling_rate_hz=sr)
+        np.testing.assert_allclose(out[:, 0], hrf, atol=1e-10)
+
+    def test_causal_no_future_leakage(self):
+        """Output at time t must not depend on features at times > t."""
+        sr = 5.0
+        # Build two features that agree up to t=50 and diverge after.
+        base = np.random.default_rng(0).standard_normal(100)
+        f1 = np.stack([base], axis=1)
+        f2 = f1.copy()
+        f2[50:, 0] += 1000.0
+        out1 = hrf_convolve(f1, sampling_rate_hz=sr)
+        out2 = hrf_convolve(f2, sampling_rate_hz=sr)
+        # Outputs should match exactly for the first 50 time points.
+        np.testing.assert_allclose(out1[:50], out2[:50], atol=1e-10)
+
+    def test_custom_hrf_passed_through(self):
+        """Convolving with a box-car HRF should produce a running mean."""
+        box = np.array([1/3, 1/3, 1/3])
+        features = np.array([[1.0], [2.0], [3.0], [4.0], [5.0]])
+        out = hrf_convolve(features, sampling_rate_hz=1.0, hrf=box)
+        # out[0] = 1/3, out[1] = (1+2)/3, out[2] = (1+2+3)/3, ...
+        expected = np.array([[1/3], [1.0], [2.0], [3.0], [4.0]])
+        np.testing.assert_allclose(out, expected, atol=1e-10)
+
+    def test_empty_features(self):
+        out = hrf_convolve(np.zeros((0, 5)), sampling_rate_hz=1.0)
+        assert out.shape == (0, 5)
+
+    def test_rank_validation(self):
+        with pytest.raises(ValueError, match="2-D"):
+            hrf_convolve(np.zeros(10), sampling_rate_hz=1.0)
+        with pytest.raises(ValueError, match="2-D"):
+            hrf_convolve(np.zeros((2, 3, 4)), sampling_rate_hz=1.0)
+
+    def test_hrf_shape_validation(self):
+        features = np.zeros((10, 1))
+        bad_hrf = np.zeros((3, 3))
+        with pytest.raises(ValueError, match="hrf must be 1-D"):
+            hrf_convolve(features, sampling_rate_hz=1.0, hrf=bad_hrf)
