@@ -38,11 +38,21 @@ class TaskContext:
     - Feature models use fitting_stimuli + label_set to train a readout
     - Instruction-following models use instruction + label_set to build a prompt
     - Models that support both can choose their preferred approach
+
+    ``prefer_path`` lets a benchmark (or an experimenting user) pin which
+    behavioral dispatch path is selected when a model supports more than
+    one. Accepts ``'auto'`` (default — generation if available, else
+    readout), ``'generation'`` (force generation, error if generation_fn
+    is missing or instruction is empty), or ``'readout'`` (force readout,
+    error if behavioral_readout_layer is missing or fitting_stimuli is
+    empty). This is the public API replacement for the legacy monkey-patch
+    pattern of setting ``model._generation_fn = None`` to force readout.
     """
     task_type: str
     label_set: Optional[List[str]] = None
     fitting_stimuli: Optional[Any] = None
     instruction: Optional[str] = None
+    prefer_path: Optional[str] = None  # 'auto' | 'generation' | 'readout'
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -426,19 +436,57 @@ class BrainScoreModel(UnifiedModel):
         #   2. fitting_stimuli (no/either)  → readout path (feature models
         #      that need a trained logistic classifier)
         #
-        # Both paths can be simultaneously supported; preference goes to
-        # generation when both the model and TaskContext support it.
+        # Both paths can be simultaneously supported. When the TaskContext
+        # provides a ``prefer_path`` directive, that wins. When it does
+        # not (or sets ``'auto'``), preference goes to generation when both
+        # the model and TaskContext support it.
         instruction = self._task_context.instruction
         label_set = self._task_context.label_set
         fitting = self._task_context.fitting_stimuli
+        prefer = self._task_context.prefer_path or 'auto'
+        if prefer not in ('auto', 'generation', 'readout'):
+            raise ValueError(
+                f"TaskContext.prefer_path must be one of "
+                f"('auto', 'generation', 'readout'); got {prefer!r}."
+            )
 
-        if self._generation_fn is not None and instruction and label_set:
+        gen_viable = (self._generation_fn is not None
+                      and instruction and label_set)
+        readout_viable = fitting is not None
+
+        if prefer == 'generation':
+            if not gen_viable:
+                raise ValueError(
+                    f"Model '{self.identifier}' cannot run task "
+                    f"'{task_type}' via generation path "
+                    f"(prefer_path='generation'): "
+                    f"requires model.generation_fn AND TaskContext.instruction "
+                    f"AND TaskContext.label_set to be set."
+                )
+            self._use_generation_for_task = True
+            self._readout_classifier = None
+            return
+
+        if prefer == 'readout':
+            if not readout_viable:
+                raise ValueError(
+                    f"Model '{self.identifier}' cannot run task "
+                    f"'{task_type}' via readout path "
+                    f"(prefer_path='readout'): "
+                    f"requires TaskContext.fitting_stimuli to be set."
+                )
+            self._use_generation_for_task = False
+            self._fit_behavioral_readout(fitting)
+            return
+
+        # prefer == 'auto' — original dispatch precedence
+        if gen_viable:
             self._use_generation_for_task = True
             self._readout_classifier = None
             return
 
         self._use_generation_for_task = False
-        if fitting is not None:
+        if readout_viable:
             self._fit_behavioral_readout(fitting)
         else:
             # No viable path — emit a clear error so the benchmark knows
