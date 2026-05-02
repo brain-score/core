@@ -3,24 +3,32 @@ Unified model interface for Brain-Score.
 
 Defines the core abstractions for model evaluation:
 - TaskContext: benchmark-to-model communication
-- StateChange, EnvironmentStep: future-proof input event types
+- StateChange: future-proof input event type for dysfunction/lesion/perturbation
+- EnvironmentStep / EnvironmentResponse / CameraFrame / Proprioception:
+  embodied-agent input event types (DROID-shaped schema)
 - UnifiedModel: the single evaluation interface (ABC)
-- BrainScoreModel: compositional implementation with preprocessors + shared activations_model
+- BrainScoreModel: compositional implementation with preprocessors + shared
+  activations_model + optional generation_fn / action_fn dispatch slots
 
 ## Input generalization (Martin Schrimpf feedback, April 2026)
 
-`process()` takes an *input event*, not just stimuli. Today the only
-implemented input type is `StimulusSet` (perceptual input). Two other input
-types are declared as stubs for future work:
+`process()` takes an *input event*, not just stimuli. Implemented input types:
+
+- **`StimulusSet`** — perceptual input (vision/text/audio/video). Primary path.
+- **`EnvironmentStep`** — one tick of an embodied environment. DROID-shaped
+  schema (multi-camera RGB + proprioception + instruction). Dispatches to the
+  model's `action_fn` when registered. Spec follows
+  https://droid-dataset.github.io/ for arm manipulation; mobile-manipulation
+  extensions live on `Proprioception.base_*`.
+
+Reserved (raises `NotImplementedError`):
 
 - **`StateChange`** — induce a dysfunction/lesion/perturbation
   (e.g., dyslexia, prosopagnosia, pharmacological effects).
-- **`EnvironmentStep`** — one tick of an environment for agent scenarios.
 
-Reserving these types now means benchmarks studying neural dysfunction,
-drug effects, or embodied agents can be added later without changing the
-interface — only new adapters/handlers inside concrete models. See
-[[Unified Model Interface - Vision and Goals]] §Input Generalization.
+See [[Unified Model Interface - Vision and Goals]] §Input Generalization
+and [[Unified Model Interface - Embodied I/O Reference]] for the DROID
+schema citations and the mobile-manipulation roadmap.
 """
 
 from abc import ABC, abstractmethod
@@ -79,24 +87,108 @@ class StateChange:
 
 
 @dataclass
-class EnvironmentStep:
-    """Single step of an environment for agent scenarios.
+class CameraFrame:
+    """A single camera view at one timestep.
 
-    Used for embodied/interactive evaluation where the model observes, acts,
-    and receives the environment's response over multiple ticks. Passed to
-    process() like a stimulus — the interface generalizes over input type
-    rather than adding a separate agent method.
-
-    NOT YET IMPLEMENTED in BrainScoreModel (reserved for Phase 3).
-
-    Examples (conceptual — not yet functional):
-        EnvironmentStep(observation=current_image, step_num=0)
-        EnvironmentStep(observation=stim_set, step_num=5,
-                        context={'previous_action': 'left_turn'})
+    Schema follows the DROID dataset convention (180×320 RGB stereo + wrist);
+    extensible via optional depth and intrinsics for richer setups. Cameras are
+    keyed by name on :class:`EnvironmentStep` (e.g., ``'exterior_1'``,
+    ``'exterior_2'``, ``'wrist'``).
     """
-    observation: Any
+    rgb: Any  # numpy.ndarray (H, W, 3) uint8 — required
+    depth: Optional[Any] = None  # numpy.ndarray (H, W) float32, in meters
+    intrinsics: Optional[Any] = None  # numpy.ndarray (3, 3) float64
+    extrinsics: Optional[Any] = None  # numpy.ndarray (4, 4) float64, world ← camera
+
+
+@dataclass
+class Proprioception:
+    """Robot proprioceptive state.
+
+    Field names and shapes mirror the DROID schema (Franka 7-DOF arm + parallel
+    gripper) so existing DROID-format checkpoints can be evaluated without a
+    coordinate transform. The ``base_*`` fields are unused for arm-only setups;
+    populate them for mobile-manipulation robots.
+    """
+    joint_position: Any  # (n_joints,) float64 — 7 for Franka
+    cartesian_position: Any  # (6,) float64 — xyz + euler/rpy
+    gripper_position: Any  # (1,) float64 — 0 (open) ↔ 1 (closed)
+    joint_velocity: Optional[Any] = None  # (n_joints,) float64
+    cartesian_velocity: Optional[Any] = None  # (6,) float64
+    gripper_velocity: Optional[Any] = None  # (1,) float64
+    # Mobile-manipulation extensions (None for arm-only platforms):
+    base_position: Optional[Any] = None  # (3,) float64 — x, y, theta in odom frame
+    base_velocity: Optional[Any] = None  # (3,) float64 — linear x, linear y, angular z
+
+
+@dataclass
+class EnvironmentStep:
+    """Single step of an embodied environment.
+
+    Used for interactive evaluation where the model observes, acts, and receives
+    the environment's response over multiple ticks. Passed to ``process()`` like
+    a stimulus — the interface generalizes over input type rather than adding
+    a separate agent method.
+
+    Schema follows DROID (https://droid-dataset.github.io/) for arm
+    manipulation. Mobile-manipulation extensions are additive: populate
+    ``proprioception.base_*`` and any base-mounted cameras under ``cameras``.
+
+    Episode control signals (``is_first``, ``is_last``, ``is_terminal``,
+    ``reward``, ``discount``) follow the RLDS convention so existing
+    DROID-format demonstration data can be replayed through ``process()``
+    one step at a time.
+
+    Examples::
+
+        # Single arm manipulation step (DROID-shaped):
+        EnvironmentStep(
+            cameras={'exterior_1': CameraFrame(rgb=img1),
+                     'exterior_2': CameraFrame(rgb=img2),
+                     'wrist': CameraFrame(rgb=wrist_img)},
+            proprioception=Proprioception(
+                joint_position=q, cartesian_position=ee_pose,
+                gripper_position=g),
+            instruction="put the red block in the bowl",
+            step_num=0, is_first=True,
+        )
+
+        # Mobile manipulation step (adds base state + a base-mounted camera):
+        EnvironmentStep(
+            cameras={'wrist': ..., 'exterior_1': ..., 'base_front': ...},
+            proprioception=Proprioception(..., base_position=[x, y, theta]),
+            instruction="pick up the cup from the table by the door",
+            step_num=42,
+        )
+    """
+    cameras: Dict[str, 'CameraFrame']
+    proprioception: 'Proprioception'
+    instruction: Optional[str] = None
     step_num: int = 0
+    # RLDS / DROID episode control signals (optional for non-episodic eval):
+    is_first: bool = False
+    is_last: bool = False
+    is_terminal: bool = False
+    reward: Optional[float] = None
+    discount: Optional[float] = None
+    # Free-form context — benchmarks that need to thread custom state (previous
+    # actions, object IDs, scene graph, etc.) without growing the schema.
     context: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EnvironmentResponse:
+    """The model's response to one :class:`EnvironmentStep`.
+
+    Mirrors DROID's compact ``action`` (default 7-D: 6 joint velocities + 1
+    gripper position) plus an optional structured ``action_dict`` for richer
+    control modes (Cartesian deltas, base velocity, etc.). ``metadata`` lets
+    models report telemetry (value estimate, attention maps, predicted reward)
+    without growing the action schema.
+    """
+    action: Any  # numpy.ndarray (action_dim,) float64
+    action_dict: Optional[Dict[str, Any]] = None  # DROID-style structured action
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 # Input event type for process().
@@ -231,6 +323,7 @@ class BrainScoreModel(UnifiedModel):
         visual_degrees: int = 8,
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
+        action_fn: Optional[Callable] = None,
         required_modalities: Optional[Set[str]] = None,
         backbone_id: Optional[str] = None,
     ) -> None:
@@ -244,6 +337,17 @@ class BrainScoreModel(UnifiedModel):
             of the logistic readout. This lets instruction-following VLMs
             (Qwen-VL, BLIP-2 decoder, etc.) answer via generation+parsing
             while feature models (CLIP, ResNet) stay on the readout path.
+        :param action_fn: Optional callable for embodied evaluation.
+            Signature:
+                action_fn(env_step: EnvironmentStep) -> EnvironmentResponse
+            When provided, ``process(EnvironmentStep)`` dispatches to this
+            function. The model is responsible for selecting an action given
+            the observation; the benchmark is responsible for stepping the
+            environment with the returned action and constructing the next
+            ``EnvironmentStep``. Use this for DROID-shaped manipulation
+            policies, mobile-manipulation policies, or any closed-loop
+            agent. See the ``EnvironmentStep`` / ``EnvironmentResponse``
+            dataclasses for the I/O schema.
         :param required_modalities: Optional set of modalities this model
             HARD-requires the benchmark to provide. Must be a subset of
             ``preprocessors.keys()``. Defaults to empty (soft capability for
@@ -265,6 +369,7 @@ class BrainScoreModel(UnifiedModel):
         self._visual_degrees_val = visual_degrees
         self._behavioral_readout_layer = behavioral_readout_layer
         self._generation_fn = generation_fn
+        self._action_fn = action_fn
         self._recording_layer: Optional[str] = None
         self._task_context: Optional[TaskContext] = None
         # Lazily instantiated the first time a behavioral task is started.
@@ -338,9 +443,10 @@ class BrainScoreModel(UnifiedModel):
         return next(iter(detected))
 
     def process(self, input_event) -> Any:
-        # Dispatch on input event type. Only StimulusSet (perceptual input)
-        # is implemented today. StateChange and EnvironmentStep are reserved
-        # for future work — see docstrings on those classes.
+        # Dispatch on input event type. StimulusSet (perceptual input) is the
+        # primary path; EnvironmentStep dispatches to the registered action_fn
+        # for embodied evaluation. StateChange remains reserved for future
+        # work — see the docstring on that class.
         if isinstance(input_event, StateChange):
             raise NotImplementedError(
                 f"State changes are not yet implemented on BrainScoreModel. "
@@ -349,11 +455,23 @@ class BrainScoreModel(UnifiedModel):
                 f"should subclass BrainScoreModel and override process()."
             )
         if isinstance(input_event, EnvironmentStep):
-            raise NotImplementedError(
-                f"Environment steps (agent scenarios) are not yet implemented "
-                f"on BrainScoreModel. Received: EnvironmentStep(step_num="
-                f"{input_event.step_num})."
-            )
+            if self._action_fn is None:
+                raise NotImplementedError(
+                    f"Model '{self.identifier}' has no action_fn registered. "
+                    f"Embodied evaluation requires the model to declare an "
+                    f"action_fn(env_step) -> EnvironmentResponse callable at "
+                    f"BrainScoreModel construction time. Received: "
+                    f"EnvironmentStep(step_num={input_event.step_num})."
+                )
+            response = self._action_fn(input_event)
+            if not isinstance(response, EnvironmentResponse):
+                raise TypeError(
+                    f"Model '{self.identifier}' action_fn returned "
+                    f"{type(response).__name__}; expected EnvironmentResponse. "
+                    f"Wrap the action in EnvironmentResponse(action=...) so "
+                    f"benchmarks see a consistent shape across models."
+                )
+            return response
 
         # Perceptual input (StimulusSet).
         stimuli = input_event
