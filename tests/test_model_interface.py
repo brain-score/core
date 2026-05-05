@@ -749,6 +749,121 @@ class TestMultiModalityDispatch:
         assert multi.sizes['neuroid'] == 2
 
 
+# -- Cross-tower layer routing tests -----------------------------------------
+
+
+class TestCrossTowerRouting:
+    """region_modality_map filters layers per wrapper so each tower
+    extracts only its own regions' layers in multi-modality dispatch."""
+
+    def _make_cross_tower_model(self, region_modality_map=None):
+        """Two wrappers + region_layer_map across both towers."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        return BrainScoreModel(
+            identifier='cross-tower',
+            model=None,
+            region_layer_map={
+                'IT': 'vision_model.layer.10',
+                'language_network': 'text_model.layer.20',
+            },
+            preprocessors={
+                'vision': make_stub_preprocessor(),
+                'text': text_proc,
+            },
+            activations_model=act,
+            region_modality_map=region_modality_map,
+        ), act, text_proc
+
+    def test_unknown_region_in_modality_map_raises(self):
+        with pytest.raises(ValueError, match="not in region_layer_map"):
+            BrainScoreModel(
+                identifier='test',
+                model=None,
+                region_layer_map={'IT': 'layer.10'},
+                preprocessors={'vision': make_stub_preprocessor()},
+                region_modality_map={'IT': 'vision', 'NotAReg': 'vision'},
+            )
+
+    def test_unknown_modality_in_modality_map_raises(self):
+        with pytest.raises(ValueError, match="no preprocessor"):
+            BrainScoreModel(
+                identifier='test',
+                model=None,
+                region_layer_map={'IT': 'layer.10'},
+                preprocessors={'vision': make_stub_preprocessor()},
+                region_modality_map={'IT': 'no_such_modality'},
+            )
+
+    def test_cross_tower_routing_filters_per_wrapper(self):
+        """With region_modality_map set, each wrapper gets only its own
+        modality's layer."""
+        m, act, text_proc = self._make_cross_tower_model(
+            region_modality_map={'IT': 'vision',
+                                 'language_network': 'text'})
+        m.start_recording(['IT', 'language_network'])
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        m.process(stimuli, multi_modality=True)
+        # Vision wrapper only saw IT's layer
+        assert act.call_args['layers'] == ['vision_model.layer.10']
+        # Text wrapper only saw language_network's layer
+        assert text_proc.call_args['layers'] == ['text_model.layer.20']
+
+    def test_cross_tower_assembly_carries_modality_coord(self):
+        m, act, text_proc = self._make_cross_tower_model(
+            region_modality_map={'IT': 'vision',
+                                 'language_network': 'text'})
+        m.start_recording(['IT', 'language_network'])
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        assembly = m.process(stimuli, multi_modality=True)
+        modalities = set(assembly['modality'].values.tolist())
+        assert modalities == {'vision', 'text'}
+
+    def test_without_region_modality_map_legacy_behavior(self):
+        """No region_modality_map → every wrapper sees every layer
+        (legacy behavior, fine when both towers can resolve the path)."""
+        m, act, text_proc = self._make_cross_tower_model(
+            region_modality_map=None)
+        m.start_recording(['IT', 'language_network'])
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        m.process(stimuli, multi_modality=True)
+        # Both layers go to both wrappers
+        assert act.call_args['layers'] == [
+            'vision_model.layer.10', 'text_model.layer.20']
+        assert text_proc.call_args['layers'] == [
+            'vision_model.layer.10', 'text_model.layer.20']
+
+    def test_cross_tower_skips_wrapper_with_no_layers(self):
+        """If recording is single-region but multi_modality=True, the
+        non-matching wrapper should be skipped entirely (filtered
+        layers = empty)."""
+        m, act, text_proc = self._make_cross_tower_model(
+            region_modality_map={'IT': 'vision',
+                                 'language_network': 'text'})
+        m.start_recording('IT')  # only vision tower
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        assembly = m.process(stimuli, multi_modality=True)
+        # Text wrapper not invoked
+        assert text_proc.call_args is None
+        # Output has only 'vision' modality entries
+        modalities = set(assembly['modality'].values.tolist())
+        assert modalities == {'vision'}
+
+    def test_cross_tower_single_modality_path_unchanged(self):
+        """Single-modality dispatch ignores region_modality_map (used
+        only by multi_modality fan-out)."""
+        m, act, text_proc = self._make_cross_tower_model(
+            region_modality_map={'IT': 'vision',
+                                 'language_network': 'text'})
+        m.start_recording('IT')
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        assembly = m.process(stimuli)
+        # Vision tower only — single-modality always uses pick_modality
+        assert act.call_args is not None
+        assert text_proc.call_args is None
+        assert 'modality' not in assembly.coords
+
+
 # -- BrainScoreModel column detection tests -----------------------------------
 
 class TestBrainScoreModelColumnDetection:

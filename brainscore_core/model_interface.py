@@ -407,6 +407,7 @@ class BrainScoreModel(UnifiedModel):
         state_change_fn: Optional[Callable] = None,
         required_modalities: Optional[Set[str]] = None,
         backbone_id: Optional[str] = None,
+        region_modality_map: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         :param generation_fn: Optional callable for instruction-following
@@ -453,10 +454,42 @@ class BrainScoreModel(UnifiedModel):
             same ViT-G), passing the same ``backbone_id`` lets the
             ``@store_xarray`` cache entries be reused across registrations.
             Defaults to ``identifier`` for backwards compatibility.
+        :param region_modality_map: Optional mapping from region name to
+            the modality whose wrapper holds that region's layer. Required
+            for cross-tower multi-modality + multi-region scoring on models
+            with multiple distinct backbones (e.g., a VLM scored on V4 in
+            the vision tower AND language_network in the text tower in
+            ONE process() call). When set, ``process(stim,
+            multi_modality=True)`` filters layers per wrapper so each
+            tower extracts only its own regions' layers; wrappers whose
+            filtered layer list is empty are skipped. When unset, every
+            detected wrapper receives every active layer (current
+            behavior, fine for single-tower models).
         """
         self._identifier_str = identifier
         self._model = model
         self._region_layer_map_dict = region_layer_map
+        # Optional map: region name → modality whose wrapper holds that
+        # region's layer. Used for cross-tower routing in multi-modality
+        # dispatch. Validate every entry resolves to a known modality.
+        self._region_modality_map: Dict[str, str] = dict(
+            region_modality_map or {})
+        if self._region_modality_map:
+            unknown_regions = (set(self._region_modality_map.keys())
+                               - set(region_layer_map.keys()))
+            if unknown_regions:
+                raise ValueError(
+                    f"region_modality_map references regions not in "
+                    f"region_layer_map: {sorted(unknown_regions)}."
+                )
+            unknown_modalities = (set(self._region_modality_map.values())
+                                  - set(preprocessors.keys()))
+            if unknown_modalities:
+                raise ValueError(
+                    f"region_modality_map references modalities with no "
+                    f"preprocessor: {sorted(unknown_modalities)}. Available "
+                    f"modalities: {sorted(preprocessors.keys())}."
+                )
         self._preprocessors = preprocessors
         self._activations_model = activations_model
         self._visual_degrees_val = visual_degrees
@@ -631,6 +664,38 @@ class BrainScoreModel(UnifiedModel):
             assembly = self._tag_neuroids_with_regions(assembly)
         return assembly
 
+    def _filter_layers_for_modality(self, layers: List[str],
+                                    modality: str) -> List[str]:
+        """Return the subset of ``layers`` that belong to ``modality``
+        according to ``region_modality_map``.
+
+        When ``region_modality_map`` is empty (default), no filtering —
+        every wrapper sees every layer (legacy single-tower behavior).
+        When set, build a layer→modality lookup from the region map and
+        keep only layers whose mapped modality matches. Layers NOT in
+        the recording context (i.e., the model's free-form passthrough
+        case where a string like ``layer3.2`` is treated as a raw layer
+        path) pass through to every wrapper — those calls predate the
+        cross-tower API and should keep working.
+        """
+        if not self._region_modality_map:
+            return list(layers)
+        # Build layer_path → modality from region_modality_map and
+        # region_layer_map. A layer reachable from multiple regions
+        # collapses to the modality of the FIRST region encountered;
+        # callers concerned about this should disambiguate by giving
+        # each tower its own layer paths.
+        layer_to_modality: Dict[str, str] = {}
+        for region, m in self._region_modality_map.items():
+            layer_path = self._region_layer_map_dict[region]
+            layer_to_modality.setdefault(layer_path, m)
+        return [
+            layer for layer in layers
+            # Unknown layers (raw passthrough) keep going to every
+            # wrapper to preserve legacy behavior.
+            if layer_to_modality.get(layer, modality) == modality
+        ]
+
     def _supports_layer_extraction(self, modality: str) -> bool:
         """True if this modality routes through a layer-aware extractor
         (PytorchWrapper / TextWrapper / etc.). Legacy preprocessor callables
@@ -668,6 +733,14 @@ class BrainScoreModel(UnifiedModel):
 
         Order is deterministic via MODALITY_PRIORITY so output coord
         layout is stable across runs.
+
+        Cross-tower routing: when ``region_modality_map`` is set,
+        ``layers`` is filtered per modality so each wrapper sees only
+        the layers belonging to regions registered for that modality.
+        Wrappers whose filtered layer list is empty are skipped — that
+        modality's tower has no recording target this call. When
+        ``region_modality_map`` is unset, every wrapper receives every
+        active layer (legacy behavior — fine for single-tower models).
         """
         import numpy as np
         import xarray as xr
@@ -684,7 +757,15 @@ class BrainScoreModel(UnifiedModel):
         for modality in ordered:
             if modality not in self._preprocessors:
                 continue
-            sub = self._extract_for_modality(stimuli, modality, layers)
+            modality_layers = self._filter_layers_for_modality(
+                layers, modality)
+            if (self._region_modality_map
+                    and not modality_layers
+                    and self._recording_regions):
+                # Cross-tower routing is active and this modality has no
+                # registered layer this call — skip its wrapper.
+                continue
+            sub = self._extract_for_modality(stimuli, modality, modality_layers)
             if not hasattr(sub, 'dims') or 'neuroid' not in sub.dims:
                 # Legacy callable preprocessor returned a non-xarray
                 # value — can't merge into a multi-modality assembly.
