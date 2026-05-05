@@ -12,6 +12,7 @@ from brainscore_core.supported_data_standards.brainio.assemblies import (
     NeuroidAssembly,
 )
 from brainscore_core.temporal import (
+    add_time_bin_axis,
     contiguous_block_cv,
     double_gamma_hrf,
     hrf_convolve,
@@ -410,3 +411,50 @@ class TestHRFConvolve:
         bad_hrf = np.zeros((3, 3))
         with pytest.raises(ValueError, match="hrf must be 1-D"):
             hrf_convolve(features, sampling_rate_hz=1.0, hrf=bad_hrf)
+
+
+class TestAddTimeBinAxis:
+    """add_time_bin_axis promotes 2D image-wrapper outputs into the
+    canonical 3D (presentation, time_bin, neuroid) shape so benchmarks
+    can consume image and video/audio wrappers uniformly."""
+
+    def _assy_2d(self):
+        return NeuroidAssembly(
+            np.arange(6, dtype=np.float32).reshape(2, 3),
+            coords={
+                'stimulus_id': ('presentation', ['s0', 's1']),
+                'neuroid_id': ('neuroid', ['n0', 'n1', 'n2']),
+                'neuroid_num': ('neuroid', [0, 1, 2]),
+            },
+            dims=['presentation', 'neuroid'],
+        )
+
+    def test_promotes_2d_to_3d(self):
+        out = add_time_bin_axis(self._assy_2d())
+        assert out.dims == ('presentation', 'time_bin', 'neuroid')
+        assert out.sizes['time_bin'] == 1
+        # Values unchanged — squeeze recovers the original
+        np.testing.assert_array_equal(
+            out.values.squeeze(axis=1), self._assy_2d().values)
+
+    def test_no_op_when_already_3d(self):
+        # Already promoted: passing through must not double-add the dim
+        once = add_time_bin_axis(self._assy_2d())
+        twice = add_time_bin_axis(once)
+        assert twice.dims == once.dims
+        assert twice.sizes['time_bin'] == 1
+
+    def test_optional_ms_coords_attached(self):
+        out = add_time_bin_axis(
+            self._assy_2d(),
+            time_bin_start_ms=70.0, time_bin_end_ms=170.0,
+        )
+        assert 'time_bin_start_ms' in out.coords
+        assert 'time_bin_end_ms' in out.coords
+        np.testing.assert_allclose(out['time_bin_start_ms'].values, [70.0])
+        np.testing.assert_allclose(out['time_bin_end_ms'].values, [170.0])
+
+    def test_no_ms_coords_when_unspecified(self):
+        out = add_time_bin_axis(self._assy_2d())
+        assert 'time_bin_start_ms' not in out.coords
+        assert 'time_bin_end_ms' not in out.coords

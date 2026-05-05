@@ -39,6 +39,37 @@ TimeBin = Tuple[float, float]
 # double-count frames on the boundary.
 
 
+def add_time_bin_axis(
+    assembly: NeuroidAssembly,
+    time_bin_start_ms: Optional[float] = None,
+    time_bin_end_ms: Optional[float] = None,
+) -> NeuroidAssembly:
+    """Promote a 2D ``(presentation, neuroid)`` assembly into a 3D
+    ``(presentation, time_bin, neuroid)`` assembly with ``time_bin=1``.
+
+    Lets benchmark code consume image-wrapper output (PytorchWrapper,
+    VLMVisionWrapper) the same way it consumes video/audio/per-token-text
+    wrappers. The axis is purely structural — no aggregation happens —
+    so the values are unchanged and the cost is one ``expand_dims`` call.
+
+    Optional ``time_bin_start_ms`` / ``time_bin_end_ms`` attach absolute
+    ms coords on the new axis. Useful when a still-image stimulus has a
+    known on-screen window (e.g., 100 ms presentation onset → offset).
+
+    No-op when the assembly already carries a ``time_bin`` dim.
+    """
+    if 'time_bin' in assembly.dims:
+        return assembly
+    promoted = assembly.expand_dims('time_bin', axis=1)
+    if time_bin_start_ms is not None:
+        promoted = promoted.assign_coords(
+            time_bin_start_ms=('time_bin', [float(time_bin_start_ms)]))
+    if time_bin_end_ms is not None:
+        promoted = promoted.assign_coords(
+            time_bin_end_ms=('time_bin', [float(time_bin_end_ms)]))
+    return promoted
+
+
 def temporal_bin(
     assembly: NeuroidAssembly,
     time_bins: Sequence[TimeBin],
