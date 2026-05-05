@@ -65,25 +65,104 @@ class TaskContext:
 
 
 @dataclass
+class Selection:
+    """Identifies which units inside a model to perturb.
+
+    The simplest case is a layer name + optional unit indices. Future
+    extensions (functional localizers, contrast-based selection, mask arrays)
+    add more fields without changing the dataclass shape.
+
+    :param layer: Dotted module path within the model, e.g.
+        ``'language_model.layers.20'`` or ``'visual.transformer.blocks.10'``.
+        Resolved by the registered ``state_change_fn`` against the concrete
+        model object.
+    :param indices: Optional list of unit indices within the layer to
+        perturb. ``None`` means ALL units at the layer.
+    :param metadata: Free-form bag for selection criteria the
+        ``state_change_fn`` can interpret (e.g., a localizer mask, a
+        functional contrast specification).
+    """
+    layer: str
+    indices: Optional[List[int]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Perturbation:
+    """How to modify the activations at the selected units.
+
+    :param kind: One of ``'zero'`` (zero out), ``'scale'`` (multiply by
+        ``scale``), ``'replace'`` (replace with ``replacement`` tensor),
+        or model-specific kinds (e.g., ``'noise'``) that the registered
+        ``state_change_fn`` knows how to interpret.
+    :param scale: Multiplier for ``kind='scale'``. Ignored otherwise.
+    :param replacement: Tensor or array to substitute in for ``kind='replace'``.
+        Shape must match the selected units' activations.
+    """
+    kind: str
+    scale: float = 0.0
+    replacement: Optional[Any] = None
+
+
+@dataclass
 class StateChange:
     """Induce a state change in the model (dysfunction, lesion, perturbation).
 
     Used to simulate conditions like dyslexia, prosopagnosia, or pharmacological
-    effects. Passed to model.process() the same way stimuli are — the interface
-    is generic over input event type so benchmarks studying neural dysfunction
-    or drug effects do not need a separate model method.
+    effects. Passed to ``model.process()`` the same way stimuli are — the
+    interface is generic over input event type so benchmarks studying neural
+    dysfunction or drug effects do not need a separate model method.
 
-    NOT YET IMPLEMENTED in BrainScoreModel (reserved for future work). Concrete
-    models that support state changes override process() or subclass
-    BrainScoreModel to dispatch on input type.
+    Two roles, distinguished by ``kind``:
 
-    Examples (conceptual — not yet functional):
-        StateChange('dyslexia')
-        StateChange('lesion', {'region': 'V4'})
-        StateChange('pharmacological', {'drug': 'propofol', 'dose': 0.5})
+    1. **Apply** a perturbation: ``kind`` names a perturbation class
+       (``'ablation'``, ``'lesion'``, ``'pharmacological'``, ...). The
+       ``state_change_fn`` registered on the model installs the perturbation
+       (e.g., a forward hook), and ``process(StateChange)`` returns a
+       :class:`PerturbationApplied` confirmation containing a ``handle_id``.
+    2. **Remove** a previously-applied perturbation: ``kind='reset'`` and
+       ``handle_id`` set to a previous PerturbationApplied's id. Removes
+       just that perturbation; ``model.reset()`` removes ALL active ones.
+
+    Examples::
+
+        # Apply: zero out 100 units at a specific layer
+        sc = StateChange(
+            kind='ablation',
+            target=Selection(layer='language_model.layers.20',
+                             indices=list(range(100))),
+            perturbation=Perturbation(kind='zero'),
+        )
+        applied = model.process(sc)
+        # ... later:
+        model.reset()  # clears all active perturbations
+        # ... OR remove just this one:
+        model.process(StateChange(kind='reset', handle_id=applied.handle_id))
     """
     kind: str
-    params: Dict[str, Any] = field(default_factory=dict)
+    target: Optional['Selection'] = None
+    perturbation: Optional['Perturbation'] = None
+    handle_id: Optional[str] = None  # for kind='reset', identifies what to undo
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PerturbationApplied:
+    """Returned from ``process(StateChange)`` after a perturbation is installed.
+
+    :param handle_id: Opaque identifier; pass to a future
+        ``StateChange(kind='reset', handle_id=...)`` to undo just this
+        perturbation, or call ``model.reset()`` to clear all active ones.
+    :param target: The Selection that was perturbed.
+    :param perturbation: The Perturbation that was applied.
+    :param applied_at: Step counter or wall-clock timestamp when applied.
+        Useful for benchmarks that want to log perturbation timelines.
+    """
+    handle_id: str
+    target: 'Selection'
+    perturbation: 'Perturbation'
+    applied_at: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -324,6 +403,7 @@ class BrainScoreModel(UnifiedModel):
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
         action_fn: Optional[Callable] = None,
+        state_change_fn: Optional[Callable] = None,
         required_modalities: Optional[Set[str]] = None,
         backbone_id: Optional[str] = None,
     ) -> None:
@@ -348,6 +428,18 @@ class BrainScoreModel(UnifiedModel):
             policies, mobile-manipulation policies, or any closed-loop
             agent. See the ``EnvironmentStep`` / ``EnvironmentResponse``
             dataclasses for the I/O schema.
+        :param state_change_fn: Optional callable for perturbation evaluation
+            (lesions, ablations, pharmacological effects). Signature:
+                state_change_fn(state_change: StateChange) ->
+                    Tuple[PerturbationApplied, Callable[[], None]]
+            The callable installs the perturbation (typically via a
+            forward-hook on the underlying model) and returns the
+            ``PerturbationApplied`` confirmation paired with a cleanup
+            closure. ``BrainScoreModel`` retains the cleanup keyed by
+            ``handle_id`` and invokes it on ``model.reset()`` or on
+            ``process(StateChange(kind='reset', handle_id=...))``. When
+            ``state_change_fn`` is ``None``, ``process(StateChange)``
+            raises ``NotImplementedError``.
         :param required_modalities: Optional set of modalities this model
             HARD-requires the benchmark to provide. Must be a subset of
             ``preprocessors.keys()``. Defaults to empty (soft capability for
@@ -370,6 +462,11 @@ class BrainScoreModel(UnifiedModel):
         self._behavioral_readout_layer = behavioral_readout_layer
         self._generation_fn = generation_fn
         self._action_fn = action_fn
+        self._state_change_fn = state_change_fn
+        # handle_id -> cleanup callable. Populated when process(StateChange)
+        # successfully installs a perturbation; drained by model.reset() or
+        # by process(StateChange(kind='reset', handle_id=...)).
+        self._active_perturbations: Dict[str, Callable[[], None]] = {}
         self._recording_layer: Optional[str] = None
         self._task_context: Optional[TaskContext] = None
         # Lazily instantiated the first time a behavioral task is started.
@@ -445,15 +542,10 @@ class BrainScoreModel(UnifiedModel):
     def process(self, input_event) -> Any:
         # Dispatch on input event type. StimulusSet (perceptual input) is the
         # primary path; EnvironmentStep dispatches to the registered action_fn
-        # for embodied evaluation. StateChange remains reserved for future
-        # work — see the docstring on that class.
+        # for embodied evaluation; StateChange dispatches to the registered
+        # state_change_fn for perturbation/lesion/ablation evaluation.
         if isinstance(input_event, StateChange):
-            raise NotImplementedError(
-                f"State changes are not yet implemented on BrainScoreModel. "
-                f"Received: StateChange(kind={input_event.kind!r}). "
-                f"Concrete models that support dysfunction/lesion/perturbation "
-                f"should subclass BrainScoreModel and override process()."
-            )
+            return self._dispatch_state_change(input_event)
         if isinstance(input_event, EnvironmentStep):
             if self._action_fn is None:
                 raise NotImplementedError(
@@ -621,6 +713,74 @@ class BrainScoreModel(UnifiedModel):
         self._task_context = None
         self._readout_classifier = None
         self._use_generation_for_task = False
+        # Remove any active perturbations installed via process(StateChange).
+        # Cleanup callables are tolerated to fail individually — we still
+        # try to clear all of them so the model is left in a consistent state.
+        for handle_id, cleanup in list(self._active_perturbations.items()):
+            try:
+                cleanup()
+            except Exception:
+                pass
+        self._active_perturbations.clear()
+
+    # ── Perturbation / state-change dispatch ──────────────────
+
+    def _dispatch_state_change(self, state_change: 'StateChange') -> Any:
+        """Route a StateChange event to the registered ``state_change_fn``,
+        track the resulting cleanup callable, and return the
+        ``PerturbationApplied`` confirmation.
+
+        Two kinds of StateChange are handled here directly:
+
+        - ``kind='reset'`` with a ``handle_id``: undo a single previously-
+          applied perturbation. Useful when a benchmark wants to compose
+          multiple perturbations independently.
+        - Anything else: dispatch to ``state_change_fn``, which is expected
+          to return ``(PerturbationApplied, cleanup_callable)``.
+        """
+        if state_change.kind == 'reset':
+            handle_id = state_change.handle_id
+            if handle_id is None:
+                raise ValueError(
+                    f"StateChange(kind='reset') requires handle_id to identify "
+                    f"which perturbation to undo. Use model.reset() to clear all."
+                )
+            cleanup = self._active_perturbations.pop(handle_id, None)
+            if cleanup is None:
+                raise KeyError(
+                    f"No active perturbation with handle_id={handle_id!r}. "
+                    f"Active: {list(self._active_perturbations.keys())}."
+                )
+            cleanup()
+            return None
+
+        if self._state_change_fn is None:
+            raise NotImplementedError(
+                f"Model '{self.identifier}' has no state_change_fn registered. "
+                f"Perturbation evaluation requires the model to declare a "
+                f"state_change_fn(state_change) -> (PerturbationApplied, "
+                f"cleanup) callable at BrainScoreModel construction time. "
+                f"Received: StateChange(kind={state_change.kind!r})."
+            )
+
+        result = self._state_change_fn(state_change)
+        if (not isinstance(result, tuple) or len(result) != 2
+                or not isinstance(result[0], PerturbationApplied)
+                or not callable(result[1])):
+            raise TypeError(
+                f"Model '{self.identifier}' state_change_fn must return a "
+                f"(PerturbationApplied, cleanup_callable) tuple. Got "
+                f"{type(result).__name__}."
+            )
+        applied, cleanup = result
+        if applied.handle_id in self._active_perturbations:
+            # Defensive: collision means state_change_fn issued a duplicate id
+            raise ValueError(
+                f"Duplicate handle_id {applied.handle_id!r} from state_change_fn. "
+                f"state_change_fn must produce unique handle_ids per call."
+            )
+        self._active_perturbations[applied.handle_id] = cleanup
+        return applied
 
     # ── Behavioral readout ────────────────────────────────────
 
