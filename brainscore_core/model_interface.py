@@ -353,7 +353,8 @@ class UnifiedModel(ABC):
     def start_task(self, task_context: TaskContext) -> None:
         self._task_context: Optional[TaskContext] = task_context
 
-    def start_recording(self, recording_target: str,
+    def start_recording(self,
+                        recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
                         recording_type: Optional[str] = None) -> None:
         pass
@@ -468,6 +469,14 @@ class BrainScoreModel(UnifiedModel):
         # by process(StateChange(kind='reset', handle_id=...)).
         self._active_perturbations: Dict[str, Callable[[], None]] = {}
         self._recording_layer: Optional[str] = None
+        # Multi-region recording state. Populated by start_recording when
+        # called with a list of regions; left empty for single-region calls.
+        # _is_multi_region gates whether process() tags neuroids with a
+        # 'region' coord — keeping single-region output bit-for-bit identical
+        # to pre-multi-region behavior.
+        self._recording_regions: List[str] = []
+        self._recording_layers: List[str] = []
+        self._is_multi_region: bool = False
         self._task_context: Optional[TaskContext] = None
         # Lazily instantiated the first time a behavioral task is started.
         self._readout_classifier = None  # type: ignore[assignment]
@@ -594,31 +603,106 @@ class BrainScoreModel(UnifiedModel):
 
         modality = self._pick_modality(detected)
 
+        # Resolve which layers to extract. Prefer the multi-region list if
+        # populated (set by start_recording with a list); otherwise fall
+        # back to the singular _recording_layer for the backward-compatible
+        # single-region path.
+        if self._recording_layers:
+            layers = list(self._recording_layers)
+        elif self._recording_layer:
+            layers = [self._recording_layer]
+        else:
+            layers = []
+
         # Vision path: delegate to activations_model (PytorchWrapper handles
         # preprocessing, forward pass, hooks, caching, and assembly packaging)
         if modality == 'vision' and self._activations_model is not None:
-            layers = [self._recording_layer] if self._recording_layer else []
-            return self._activations_model(stimuli, layers=layers)
+            assembly = self._activations_model(stimuli, layers=layers)
+            if self._is_multi_region:
+                assembly = self._tag_neuroids_with_regions(assembly)
+            return assembly
 
         # Other modalities: check if the preprocessor is a full extractor
         # (like TextWrapper — accepts (stimuli, layers=[])) or a legacy
         # callable (accepts (model, stimuli, recording_layer=...)).
         # Duck-type: extractors have an `identifier` attribute.
         preprocessor = self._preprocessors[modality]
-        layers = [self._recording_layer] if self._recording_layer else []
         if hasattr(preprocessor, 'identifier'):
-            return preprocessor(stimuli, layers=layers)
+            assembly = preprocessor(stimuli, layers=layers)
+            if self._is_multi_region:
+                assembly = self._tag_neuroids_with_regions(assembly)
+            return assembly
         return preprocessor(
             self._model, stimuli,
             recording_layer=self._recording_layer,
         )
 
-    def start_recording(self, recording_target: str,
+    def _tag_neuroids_with_regions(self, assembly):
+        """Add a 'region' coord to the neuroid axis of a multi-layer assembly.
+
+        For each layer in the assembly's neuroid coord, look up which
+        region(s) the active recording_regions mapped that layer to.
+        Multiple regions sharing a layer get joined with '|' (xarray
+        coords don't natively support per-element lists in the 2022.3
+        pin we hold).
+        """
+        import numpy as np
+        if 'layer' not in assembly.coords:
+            return assembly
+        layer_to_regions: Dict[str, List[str]] = {}
+        for region in self._recording_regions:
+            layer = self._region_layer_map_dict[region]
+            layer_to_regions.setdefault(layer, []).append(region)
+
+        neuroid_layers = assembly['layer'].values
+        neuroid_regions = np.array([
+            '|'.join(layer_to_regions.get(layer, []))
+            for layer in neuroid_layers
+        ])
+        return assembly.assign_coords(region=('neuroid', neuroid_regions))
+
+    def start_recording(self,
+                        recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
                         recording_type: Optional[str] = None) -> None:
-        self._recording_layer = self._region_layer_map_dict.get(
-            recording_target, recording_target
-        )
+        if isinstance(recording_target, str):
+            # Backward-compatible single-region path. Unknown strings pass
+            # through as raw layer paths (preserves existing behavior where
+            # `start_recording('layer3.2')` works without a region map entry).
+            self._recording_layer = self._region_layer_map_dict.get(
+                recording_target, recording_target
+            )
+            self._recording_regions = (
+                [recording_target]
+                if recording_target in self._region_layer_map_dict
+                else []
+            )
+            self._recording_layers = [self._recording_layer]
+            self._is_multi_region = False
+        else:
+            regions = list(recording_target)
+            unknown = [r for r in regions
+                       if r not in self._region_layer_map_dict]
+            if unknown:
+                raise ValueError(
+                    f"Region(s) {unknown} not in region_layer_map "
+                    f"(known regions: "
+                    f"{list(self._region_layer_map_dict.keys())})"
+                )
+            self._recording_regions = regions
+            # Deduplicate while preserving order — two regions can map to
+            # the same layer; we extract that layer once and tag both.
+            self._recording_layers = list(dict.fromkeys(
+                self._region_layer_map_dict[r] for r in regions
+            ))
+            # Keep _recording_layer populated for code paths that still
+            # read the singular attribute (e.g., legacy callable
+            # preprocessors that take recording_layer=).
+            self._recording_layer = (
+                self._recording_layers[0]
+                if len(self._recording_layers) == 1 else None
+            )
+            self._is_multi_region = len(regions) > 1
         self._time_bins = time_bins
 
     def start_task(self, task_context_or_task, fitting_stimuli=None,
@@ -710,6 +794,9 @@ class BrainScoreModel(UnifiedModel):
 
     def reset(self) -> None:
         self._recording_layer = None
+        self._recording_layers = []
+        self._recording_regions = []
+        self._is_multi_region = False
         self._task_context = None
         self._readout_classifier = None
         self._use_generation_for_task = False
@@ -835,8 +922,17 @@ class BrainScoreModel(UnifiedModel):
         handles extraction unchanged.
         """
         saved_layer = self._recording_layer
+        saved_layers = self._recording_layers
+        saved_regions = self._recording_regions
+        saved_multi = self._is_multi_region
         saved_classifier = self._readout_classifier
         self._recording_layer = self._behavioral_readout_layer
+        self._recording_layers = (
+            [self._behavioral_readout_layer]
+            if self._behavioral_readout_layer else []
+        )
+        self._recording_regions = []
+        self._is_multi_region = False
         # Bypass the behavioral predict path while fitting so we get features
         # not probabilities (matters when this helper is called from
         # _predict_probabilities for test stimuli too).
@@ -845,6 +941,9 @@ class BrainScoreModel(UnifiedModel):
             features = self.process(stimuli)
         finally:
             self._recording_layer = saved_layer
+            self._recording_layers = saved_layers
+            self._recording_regions = saved_regions
+            self._is_multi_region = saved_multi
             self._readout_classifier = saved_classifier
 
         # Ensure (presentation, neuroid) order

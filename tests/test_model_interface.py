@@ -488,6 +488,126 @@ class TestBrainScoreModelState:
         assert m._task_context is None
 
 
+# -- Multi-region start_recording tests (#36) --------------------------------
+
+class _XArrayActivationsModel:
+    """Activations stub returning an xarray DataArray keyed by layer.
+
+    Returns one neuroid per layer in `layers`, with the layer name on the
+    neuroid coord. Lets multi-region dispatch tests inspect the resulting
+    'region' coord that BrainScoreModel adds.
+    """
+
+    def __init__(self):
+        self.call_args = None
+
+    def __call__(self, stimuli, layers=None, **kwargs):
+        import xarray as xr
+        import numpy as np
+        self.call_args = {'stimuli': stimuli, 'layers': layers}
+        layers = list(layers or [])
+        n_neuroid = len(layers)
+        n_pres = 2
+        data = np.zeros((n_pres, n_neuroid))
+        return xr.DataArray(
+            data,
+            dims=('presentation', 'neuroid'),
+            coords={
+                'layer': ('neuroid', np.array(layers)),
+                'neuroid_id': ('neuroid', np.arange(n_neuroid)),
+            },
+        )
+
+
+class TestMultiRegionStartRecording:
+
+    def test_single_region_string_backward_compat(self):
+        """String target keeps old behavior; no 'region' coord added."""
+        act = _XArrayActivationsModel()
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'V4': 'layer.8', 'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act,
+        )
+        m.start_recording('IT')
+        assert m._recording_layer == 'layer.10'
+        assert m._is_multi_region is False
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        assembly = m.process(stimuli)
+        assert 'region' not in assembly.coords
+        assert act.call_args['layers'] == ['layer.10']
+
+    def test_multi_region_list_adds_region_coord(self):
+        """List target produces a 'region' coord on neuroids and extracts both layers."""
+        act = _XArrayActivationsModel()
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'V4': 'layer.8', 'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act,
+        )
+        m.start_recording(['V4', 'IT'])
+        assert m._is_multi_region is True
+        assert m._recording_regions == ['V4', 'IT']
+        assert m._recording_layers == ['layer.8', 'layer.10']
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        assembly = m.process(stimuli)
+        assert 'region' in assembly.coords
+        assert set(assembly['region'].values.tolist()) == {'V4', 'IT'}
+        # Single forward pass for both layers
+        assert act.call_args['layers'] == ['layer.8', 'layer.10']
+
+    def test_overlapping_regions_share_layer(self):
+        """Two regions mapping to the same layer extract once; both tagged."""
+        act = _XArrayActivationsModel()
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'V4': 'layer.8', 'IT': 'layer.8'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act,
+        )
+        m.start_recording(['V4', 'IT'])
+        # Deduplicated layer extraction
+        assert m._recording_layers == ['layer.8']
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        assembly = m.process(stimuli)
+        # Single layer present once; region coord joins both regions
+        assert act.call_args['layers'] == ['layer.8']
+        assert 'V4|IT' in assembly['region'].values.tolist()
+
+    def test_unknown_region_in_list_raises(self):
+        """Unknown region in a list-form call raises clearly before any compute."""
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'V4': 'layer.8'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=_XArrayActivationsModel(),
+        )
+        with pytest.raises(ValueError, match="not in region_layer_map"):
+            m.start_recording(['V4', 'NotARegion'])
+
+    def test_reset_clears_multi_region_state(self):
+        """reset() clears the multi-region attributes alongside the singular one."""
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'V4': 'layer.8', 'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=_XArrayActivationsModel(),
+        )
+        m.start_recording(['V4', 'IT'])
+        m.reset()
+        assert m._recording_layer is None
+        assert m._recording_layers == []
+        assert m._recording_regions == []
+        assert m._is_multi_region is False
+
+
 # -- BrainScoreModel column detection tests -----------------------------------
 
 class TestBrainScoreModelColumnDetection:
