@@ -505,7 +505,9 @@ class _XArrayActivationsModel:
         import xarray as xr
         import numpy as np
         self.call_args = {'stimuli': stimuli, 'layers': layers}
-        layers = list(layers or [])
+        # Default to one neuroid even when caller passes empty layers,
+        # mimicking real wrappers that extract at a default location.
+        layers = list(layers) if layers else ['default_layer']
         n_neuroid = len(layers)
         n_pres = 2
         data = np.zeros((n_pres, n_neuroid))
@@ -606,6 +608,145 @@ class TestMultiRegionStartRecording:
         assert m._recording_layers == []
         assert m._recording_regions == []
         assert m._is_multi_region is False
+
+
+# -- Multi-modality dispatch tests -------------------------------------------
+
+class _XArrayPreprocessor:
+    """Layer-aware text/audio preprocessor stub (mimics TextWrapper).
+
+    Returns an xarray DataArray keyed by layer with one neuroid per layer,
+    so multi-modality dispatch can concat assemblies from this stub with
+    activations-model output.
+    """
+
+    identifier = 'stub_extractor'
+
+    def __init__(self, label='text'):
+        self.label = label
+        self.call_args = None
+
+    def __call__(self, stimuli, layers=None, **kwargs):
+        import xarray as xr
+        import numpy as np
+        self.call_args = {'stimuli': stimuli, 'layers': layers}
+        layers = list(layers or [f'{self.label}_layer'])
+        n_neuroid = len(layers)
+        n_pres = 2
+        data = np.zeros((n_pres, n_neuroid))
+        return xr.DataArray(
+            data,
+            dims=('presentation', 'neuroid'),
+            coords={
+                'layer': ('neuroid', np.array(layers)),
+                'neuroid_id': (
+                    'neuroid',
+                    np.array([f'{self.label}_n{i}' for i in range(n_neuroid)]),
+                ),
+            },
+        )
+
+
+class TestMultiModalityDispatch:
+
+    def test_default_single_modality_backward_compat(self):
+        """Without multi_modality=True, multimodal stim still picks one
+        modality via MODALITY_PRIORITY (vision wins)."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        m.start_recording('IT')
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        assembly = m.process(stimuli)
+        # Vision wins; text wrapper not invoked
+        assert text_proc.call_args is None
+        assert 'modality' not in assembly.coords
+
+    def test_multi_modality_invokes_all_wrappers(self):
+        """multi_modality=True extracts from every wrapper whose modality
+        is present in the stimulus set."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        assembly = m.process(stimuli, multi_modality=True)
+        # Both wrappers fired
+        assert act.call_args is not None
+        assert text_proc.call_args is not None
+        # Output carries a modality coord
+        assert 'modality' in assembly.coords
+        assert set(assembly['modality'].values.tolist()) == {'vision', 'text'}
+
+    def test_multi_modality_falls_back_to_single_when_one_modality(self):
+        """multi_modality=True is a no-op when only one modality is
+        actually detected — leaves the assembly without a modality coord."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        m.start_recording('IT')
+        # Only image column — text wrapper should NOT fire even with multi_modality
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        assembly = m.process(stimuli, multi_modality=True)
+        assert text_proc.call_args is None
+        assert 'modality' not in assembly.coords
+
+    def test_multi_modality_skips_unsupported_modalities(self):
+        """When stim has a modality the model has no preprocessor for, the
+        single-modality detector already filters it. multi_modality fans
+        out only over supported-and-detected modalities."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={},
+            # Model has no audio preprocessor
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        # audio_path is in COLUMN_TO_MODALITY → 'audio' but unsupported here
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence', 'audio_path'])
+        assembly = m.process(stimuli, multi_modality=True)
+        modalities = set(assembly['modality'].values.tolist())
+        assert modalities == {'vision', 'text'}  # audio dropped silently
+
+    def test_multi_modality_concat_neuroid_count(self):
+        """Output neuroid count is the sum across modalities."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        m.start_recording('IT')
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        single = m.process(stimuli)  # vision only — 1 neuroid (1 layer)
+        multi = m.process(stimuli, multi_modality=True)
+        # vision_assembly has 1 neuroid (1 layer in start_recording),
+        # text_assembly has 1 neuroid (default layer). Multi = 1 + 1 = 2.
+        assert single.sizes['neuroid'] == 1
+        assert multi.sizes['neuroid'] == 2
 
 
 # -- BrainScoreModel column detection tests -----------------------------------

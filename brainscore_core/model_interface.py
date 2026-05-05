@@ -548,11 +548,17 @@ class BrainScoreModel(UnifiedModel):
                 return m
         return next(iter(detected))
 
-    def process(self, input_event) -> Any:
+    def process(self, input_event, multi_modality: bool = False) -> Any:
         # Dispatch on input event type. StimulusSet (perceptual input) is the
         # primary path; EnvironmentStep dispatches to the registered action_fn
         # for embodied evaluation; StateChange dispatches to the registered
         # state_change_fn for perturbation/lesion/ablation evaluation.
+        #
+        # multi_modality (default False): when True AND the stimulus set
+        # carries columns for multiple supported modalities, process invokes
+        # EVERY matching wrapper and concatenates their assemblies along the
+        # neuroid axis with a ``modality`` coord. The default keeps the
+        # legacy single-modality dispatch (vision wins via MODALITY_PRIORITY).
         if isinstance(input_event, StateChange):
             return self._dispatch_state_change(input_event)
         if isinstance(input_event, EnvironmentStep):
@@ -601,8 +607,6 @@ class BrainScoreModel(UnifiedModel):
                 f"Model supports: {self.supported_modalities}."
             )
 
-        modality = self._pick_modality(detected)
-
         # Resolve which layers to extract. Prefer the multi-region list if
         # populated (set by start_recording with a list); otherwise fall
         # back to the singular _recording_layer for the backward-compatible
@@ -614,13 +618,36 @@ class BrainScoreModel(UnifiedModel):
         else:
             layers = []
 
+        # Multi-modality fan-out: invoke every matching wrapper when the
+        # stimulus set carries columns for more than one supported modality.
+        # Falls back to single-modality dispatch if only one modality is
+        # actually present (no overhead for the common case).
+        if multi_modality and len(detected) > 1:
+            return self._process_multi_modality(stimuli, detected, layers)
+
+        modality = self._pick_modality(detected)
+        assembly = self._extract_for_modality(stimuli, modality, layers)
+        if self._is_multi_region and self._supports_layer_extraction(modality):
+            assembly = self._tag_neuroids_with_regions(assembly)
+        return assembly
+
+    def _supports_layer_extraction(self, modality: str) -> bool:
+        """True if this modality routes through a layer-aware extractor
+        (PytorchWrapper / TextWrapper / etc.). Legacy preprocessor callables
+        return non-xarray outputs and don't support neuroid coord tagging."""
+        if modality == 'vision' and self._activations_model is not None:
+            return True
+        preprocessor = self._preprocessors.get(modality)
+        return preprocessor is not None and hasattr(preprocessor, 'identifier')
+
+    def _extract_for_modality(self, stimuli, modality: str, layers: List[str]):
+        """Run extraction for a single modality. Single source of truth for
+        the per-modality dispatch — used by both single-modality and
+        multi-modality paths."""
         # Vision path: delegate to activations_model (PytorchWrapper handles
         # preprocessing, forward pass, hooks, caching, and assembly packaging)
         if modality == 'vision' and self._activations_model is not None:
-            assembly = self._activations_model(stimuli, layers=layers)
-            if self._is_multi_region:
-                assembly = self._tag_neuroids_with_regions(assembly)
-            return assembly
+            return self._activations_model(stimuli, layers=layers)
 
         # Other modalities: check if the preprocessor is a full extractor
         # (like TextWrapper — accepts (stimuli, layers=[])) or a legacy
@@ -628,14 +655,62 @@ class BrainScoreModel(UnifiedModel):
         # Duck-type: extractors have an `identifier` attribute.
         preprocessor = self._preprocessors[modality]
         if hasattr(preprocessor, 'identifier'):
-            assembly = preprocessor(stimuli, layers=layers)
-            if self._is_multi_region:
-                assembly = self._tag_neuroids_with_regions(assembly)
-            return assembly
+            return preprocessor(stimuli, layers=layers)
         return preprocessor(
             self._model, stimuli,
             recording_layer=self._recording_layer,
         )
+
+    def _process_multi_modality(self, stimuli, detected: Set[str],
+                                layers: List[str]):
+        """Invoke every detected-and-supported wrapper, concat along
+        neuroid with a 'modality' coord per neuroid.
+
+        Order is deterministic via MODALITY_PRIORITY so output coord
+        layout is stable across runs.
+        """
+        import numpy as np
+        import xarray as xr
+
+        ordered = sorted(
+            detected,
+            key=lambda m: (
+                self.MODALITY_PRIORITY.index(m)
+                if m in self.MODALITY_PRIORITY else len(self.MODALITY_PRIORITY)
+            ),
+        )
+
+        sub_assemblies = []
+        for modality in ordered:
+            if modality not in self._preprocessors:
+                continue
+            sub = self._extract_for_modality(stimuli, modality, layers)
+            if not hasattr(sub, 'dims') or 'neuroid' not in sub.dims:
+                # Legacy callable preprocessor returned a non-xarray
+                # value — can't merge into a multi-modality assembly.
+                raise TypeError(
+                    f"multi_modality dispatch requires every preprocessor "
+                    f"to return an xarray-shaped assembly with a 'neuroid' "
+                    f"dim; modality '{modality}' returned "
+                    f"{type(sub).__name__}. Upgrade the preprocessor to a "
+                    f"layer-aware extractor (TextWrapper / VLMVisionWrapper)."
+                )
+            if self._is_multi_region:
+                sub = self._tag_neuroids_with_regions(sub)
+            n_neuroid = sub.sizes['neuroid']
+            sub = sub.assign_coords(
+                modality=('neuroid', np.array([modality] * n_neuroid))
+            )
+            sub_assemblies.append(sub)
+
+        if not sub_assemblies:
+            raise ValueError(
+                f"multi_modality=True but no detected modalities had a "
+                f"matching preprocessor. detected={detected}, "
+                f"available={set(self._preprocessors.keys())}."
+            )
+
+        return xr.concat(sub_assemblies, dim='neuroid')
 
     def _tag_neuroids_with_regions(self, assembly):
         """Add a 'region' coord to the neuroid axis of a multi-layer assembly.
