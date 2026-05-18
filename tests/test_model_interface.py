@@ -6,6 +6,8 @@ from brainscore_core.model_interface import (
     TaskContext,
     UnifiedModel,
     BrainScoreModel,
+    UnitSelector,
+    LayerSelector,
 )
 
 
@@ -210,6 +212,88 @@ class TestBrainScoreModelConstruction:
             visual_degrees=12,
         )
         assert m.visual_degrees() == 12
+
+
+# -- region_layer_map: Union[str, UnitSelector] forward-compat ----------------
+
+class TestRegionLayerMapSelectors:
+    """The value type on ``region_layer_map`` is ``Union[str, UnitSelector]``.
+
+    Bare strings are auto-promoted to ``LayerSelector(name=str)``. Future
+    selector subclasses (multi-layer, indexed) are additive."""
+
+    def test_bare_string_is_promoted_to_layer_selector(self):
+        m = BrainScoreModel(
+            identifier='m', model=None,
+            region_layer_map={'IT': 'encoder.layers.10'},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        sel = m.region_layer_selectors['IT']
+        assert isinstance(sel, LayerSelector)
+        assert sel.name == 'encoder.layers.10'
+        assert sel.layer_path == 'encoder.layers.10'
+
+    def test_explicit_layer_selector_is_accepted(self):
+        m = BrainScoreModel(
+            identifier='m', model=None,
+            region_layer_map={'IT': LayerSelector(name='encoder.layers.10')},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        assert m.region_layer_map == {'IT': 'encoder.layers.10'}
+        assert m.region_layer_selectors['IT'] == LayerSelector('encoder.layers.10')
+
+    def test_string_and_selector_are_equivalent(self):
+        a = BrainScoreModel(
+            identifier='a', model=None,
+            region_layer_map={'IT': 'x.y.z'},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        b = BrainScoreModel(
+            identifier='b', model=None,
+            region_layer_map={'IT': LayerSelector('x.y.z')},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        assert a.region_layer_map == b.region_layer_map
+        assert a.region_layer_selectors == b.region_layer_selectors
+
+    def test_invalid_value_type_raises(self):
+        with pytest.raises(TypeError, match='str or UnitSelector'):
+            BrainScoreModel(
+                identifier='m', model=None,
+                region_layer_map={'IT': 123},  # noqa
+                preprocessors={'vision': lambda m, s, **kw: None},
+            )
+
+    def test_region_layer_selectors_returns_copy(self):
+        m = BrainScoreModel(
+            identifier='m', model=None,
+            region_layer_map={'IT': 'layer.10'},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        view = m.region_layer_selectors
+        view['IT'] = LayerSelector('hacked')
+        assert m.region_layer_selectors['IT'].name == 'layer.10'
+
+    def test_unit_selector_is_abstract(self):
+        with pytest.raises(TypeError):
+            UnitSelector()  # noqa
+
+    def test_custom_selector_subclass_resolves_layer_path(self):
+        """Future subclasses just need a ``layer_path`` property."""
+        class FakeMultiLayer(UnitSelector):
+            def __init__(self, names):
+                self._names = names
+            @property
+            def layer_path(self) -> str:
+                return self._names[0]  # canonical / default layer
+        sel = FakeMultiLayer(['l.2', 'l.3', 'l.4'])
+        m = BrainScoreModel(
+            identifier='m', model=None,
+            region_layer_map={'V1': sel},
+            preprocessors={'vision': lambda m, s, **kw: None},
+        )
+        assert m.region_layer_map['V1'] == 'l.2'
+        assert m.region_layer_selectors['V1'] is sel
 
 
 # -- BrainScoreModel dispatch tests ------------------------------------------

@@ -36,6 +36,53 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 
+class UnitSelector(ABC):
+    """Forward-compat ABC for ``region_layer_map`` values.
+
+    Today every submitter declares one layer per region with a bare string.
+    The interface accepts ``Union[str, UnitSelector]`` so future selectors
+    (multi-layer regions, indexed sub-populations, spike-level alignment)
+    are additive subclasses, not an interface change. Bare strings are
+    auto-promoted to ``LayerSelector(name=str)`` at registration time.
+
+    Subclasses must expose a ``layer_path`` property returning the dotted
+    module path the wrapper extracts from. Future selectors that span
+    multiple layers will return the canonical or default one and supply
+    additional metadata for the wrapper to consume.
+    """
+
+    @property
+    @abstractmethod
+    def layer_path(self) -> str:
+        ...
+
+
+@dataclass(frozen=True)
+class LayerSelector(UnitSelector):
+    """The single concrete ``UnitSelector`` for the initial release.
+
+    One dotted module path per region — the value every existing
+    registration uses.
+    """
+    name: str
+
+    @property
+    def layer_path(self) -> str:
+        return self.name
+
+
+def _promote_to_selector(value: Union[str, UnitSelector]) -> UnitSelector:
+    """Normalize a ``region_layer_map`` value to a ``UnitSelector``."""
+    if isinstance(value, UnitSelector):
+        return value
+    if isinstance(value, str):
+        return LayerSelector(name=value)
+    raise TypeError(
+        f"region_layer_map values must be str or UnitSelector, "
+        f"got {type(value).__name__}"
+    )
+
+
 @dataclass
 class TaskContext:
     """
@@ -397,7 +444,7 @@ class BrainScoreModel(UnifiedModel):
         self,
         identifier: str,
         model: Any,
-        region_layer_map: Dict[str, str],
+        region_layer_map: Dict[str, Union[str, "UnitSelector"]],
         preprocessors: Dict[str, Callable],
         activations_model: Any = None,
         visual_degrees: int = 8,
@@ -468,7 +515,18 @@ class BrainScoreModel(UnifiedModel):
         """
         self._identifier_str = identifier
         self._model = model
-        self._region_layer_map_dict = region_layer_map
+        # Normalize region_layer_map values to UnitSelector. Bare strings are
+        # auto-promoted to LayerSelector. _region_layer_selectors is the typed
+        # form; _region_layer_map_dict is the layer-path form every internal
+        # call site has always consumed (kept Dict[str, str] for BC).
+        self._region_layer_selectors: Dict[str, UnitSelector] = {
+            region: _promote_to_selector(value)
+            for region, value in region_layer_map.items()
+        }
+        self._region_layer_map_dict: Dict[str, str] = {
+            region: selector.layer_path
+            for region, selector in self._region_layer_selectors.items()
+        }
         # Optional map: region name → modality whose wrapper holds that
         # region's layer. Used for cross-tower routing in multi-modality
         # dispatch. Validate every entry resolves to a known modality.
@@ -535,6 +593,17 @@ class BrainScoreModel(UnifiedModel):
     @property
     def region_layer_map(self) -> Dict[str, str]:
         return dict(self._region_layer_map_dict)
+
+    @property
+    def region_layer_selectors(self) -> Dict[str, "UnitSelector"]:
+        """Typed view of ``region_layer_map``.
+
+        Returns ``{region: UnitSelector}``. Forward-compatible with
+        multi-layer / indexed selectors that subclass ``UnitSelector``.
+        Existing code that reads layer-path strings should keep using
+        ``region_layer_map``.
+        """
+        return dict(self._region_layer_selectors)
 
     @property
     def supported_modalities(self) -> Set[str]:
