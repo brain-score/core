@@ -693,6 +693,42 @@ class TestMultiRegionStartRecording:
         assert m._recording_regions == []
         assert m._is_multi_region is False
 
+    def test_start_recording_all_expands_to_every_region(self):
+        """'all' is sugar for list(region_layer_map.keys()).
+
+        Underlying mechanism is the existing multi-region list path —
+        same extraction, same neuroid-region tagging, no new code path.
+        This is the documented entry point for whole-brain / layer-banded
+        scoring (per Martin's 'predict the entire brain' framing)."""
+        act = _XArrayActivationsModel()
+        m = BrainScoreModel(
+            identifier='test', model=None,
+            region_layer_map={
+                'V1': 'layer.2', 'V4': 'layer.8',
+                'IT': 'layer.10', 'language_network': 'layer.20',
+            },
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act,
+        )
+        m.start_recording('all')
+        assert m._is_multi_region is True
+        assert m._recording_regions == ['V1', 'V4', 'IT', 'language_network']
+        assert m._recording_layers == [
+            'layer.2', 'layer.8', 'layer.10', 'layer.20',
+        ]
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        assembly = m.process(stimuli)
+        assert 'region' in assembly.coords
+
+    def test_start_recording_all_on_empty_map_raises(self):
+        m = BrainScoreModel(
+            identifier='test', model=None,
+            region_layer_map={},
+            preprocessors={'vision': make_stub_preprocessor()},
+        )
+        with pytest.raises(ValueError, match='non-empty region_layer_map'):
+            m.start_recording('all')
+
 
 # -- Multi-modality dispatch tests -------------------------------------------
 

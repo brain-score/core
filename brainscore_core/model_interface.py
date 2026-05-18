@@ -890,6 +890,33 @@ class BrainScoreModel(UnifiedModel):
                         recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
                         recording_type: Optional[str] = None) -> None:
+        """Configure which model layers to extract.
+
+        :param recording_target: One of:
+            - a single region name (e.g., ``'IT'``) — single-region path,
+              output assembly has no ``region`` coord (legacy behavior)
+            - a list of region names (e.g., ``['V4', 'IT']``) — multi-region
+              path, output assembly tags neuroids with ``region``
+            - the string ``'all'`` — expands to every region in
+              ``region_layer_map``. Documented entry point for
+              whole-brain / layer-banded ridge scoring. The output
+              assembly carries both ``layer`` and ``region`` coords so
+              the benchmark can run banded ridge over layers / regions
+              / whole-cortex voxels as it sees fit.
+            - a raw layer path that isn't in ``region_layer_map`` —
+              passes through as the recording layer (legacy escape hatch).
+        """
+        # Sugar: 'all' expands to every region in region_layer_map. Lets a
+        # whole-brain / layer-banded benchmark request every declared region
+        # without enumerating keys. The underlying mechanism is the existing
+        # multi-region list path — no new extraction code.
+        if recording_target == 'all':
+            recording_target = list(self._region_layer_map_dict.keys())
+            if not recording_target:
+                raise ValueError(
+                    "start_recording('all') requires a non-empty "
+                    "region_layer_map."
+                )
         if isinstance(recording_target, str):
             # Backward-compatible single-region path. Unknown strings pass
             # through as raw layer paths (preserves existing behavior where
