@@ -25,6 +25,26 @@ echo "$PLUGIN_NAME ($PLUGIN_PATH)"
 ### DEPENDENCIES
 echo "Setting up conda environment..."
 eval "$(command conda 'shell.bash' 'hook' 2>/dev/null)"
+
+# Drop the per-plugin conda env + pip/conda caches on any exit path so CI hosts
+# don't fill up after many plugin runs. Set BRAINSCORE_KEEP_PLUGIN_ENV=1 to skip
+# (useful when debugging a failed plugin locally).
+cleanup() {
+    local rc=$?
+    if [ -n "$BRAINSCORE_KEEP_PLUGIN_ENV" ]; then
+        echo "=== cleanup skipped (BRAINSCORE_KEEP_PLUGIN_ENV set) ==="
+        exit $rc
+    fi
+    echo "=== cleanup: removing $PLUGIN_NAME env + caches ==="
+    conda deactivate 2>/dev/null || true
+    conda env remove -n "$PLUGIN_NAME" -y 2>/dev/null || true
+    pip cache purge 2>/dev/null || true
+    conda clean -y --packages --tarballs --index-cache 2>/dev/null || true
+    rm -rf /tmp/pip-* 2>/dev/null || true
+    exit $rc
+}
+trap cleanup EXIT
+
 conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y || exit 3
 conda activate $PLUGIN_NAME || exit 3
 conda install pip || exit 3
