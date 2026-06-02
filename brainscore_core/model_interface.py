@@ -6,7 +6,8 @@ Defines the core abstractions for model evaluation:
 - StateChange: future-proof input event type for dysfunction/lesion/perturbation
 - EnvironmentStep / EnvironmentResponse / CameraFrame / Proprioception:
   embodied-agent input event types (DROID-shaped schema)
-- UnifiedModel: the single evaluation interface (ABC)
+- Subject: the single evaluation interface (ABC). UnifiedModel is a
+  deprecated alias kept for one release.
 - BrainScoreModel: compositional implementation with preprocessors + shared
   activations_model + optional generation_fn / action_fn dispatch slots
 
@@ -325,9 +326,15 @@ class EnvironmentResponse:
 InputEvent = Union['StimulusSet', StateChange, EnvironmentStep]  # type: ignore[name-defined]
 
 
-class UnifiedModel(ABC):
+class Subject(ABC):
     """
-    Base interface for all Brain-Score models.
+    Base interface for all Brain-Score subjects.
+
+    Renamed from ``UnifiedModel`` in v1.5. The interface describes a *subject*,
+    not specifically a model: every event and measurement is something you could
+    present to, or read from, a biological subject through a human harness, not
+    only a model. ``UnifiedModel`` remains a deprecated alias (defined below the
+    class) for one release so existing imports keep working unchanged.
 
     Defines identity, lifecycle, and a single processing method.
     Benchmarks call process(stimuli) for all evaluation. What the model
@@ -410,9 +417,17 @@ class UnifiedModel(ABC):
         pass
 
 
-class BrainScoreModel(UnifiedModel):
+# Deprecated alias. ``UnifiedModel`` was the v1 name for the subject contract.
+# Renamed to ``Subject`` in v1.5 to make the interface subject-agnostic: a model
+# or a future human harness satisfies the same contract. Kept as an alias for one
+# release so existing imports (``from brainscore_core import UnifiedModel``) keep
+# working. New code should use ``Subject``.
+UnifiedModel = Subject
+
+
+class BrainScoreModel(Subject):
     """
-    Compositional implementation of UnifiedModel.
+    Compositional implementation of Subject (formerly UnifiedModel).
 
     Composes preprocessors (simple callables, one per modality) with a
     shared activations_model (e.g. PytorchWrapper) that handles forward
@@ -1274,7 +1289,7 @@ class BrainScoreModel(UnifiedModel):
     # -- Legacy compatibility methods --
     # These allow BrainScoreModel to be used by existing vision and language
     # benchmarks that call look_at(), digest_text(), etc. They are NOT part
-    # of the UnifiedModel ABC -- they exist only on BrainScoreModel to bridge
+    # of the Subject ABC -- they exist only on BrainScoreModel to bridge
     # the gap until benchmarks migrate to process().
 
     def look_at(self, stimuli, number_of_trials=1, **kwargs):
