@@ -39,7 +39,8 @@ Benchmarks that still set ``available_modalities`` emit a
 import warnings
 from typing import Optional, Set
 
-from .model_interface import UnifiedModel
+from . import io_catalog
+from .model_interface import Subject
 
 
 class CompatibilityError(Exception):
@@ -52,7 +53,7 @@ class CompatibilityWarning(UserWarning):
     pass
 
 
-def check_compatibility(model: UnifiedModel, benchmark) -> None:
+def check_compatibility(model: Subject, benchmark) -> None:
     """Fast pre-flight check (see module docstring for the full contract).
 
     Raises :class:`CompatibilityError` for hard mismatches.
@@ -111,4 +112,40 @@ def check_compatibility(model: UnifiedModel, benchmark) -> None:
             f"Model '{model.identifier}' has no layer mapping for region "
             f"'{required_region}'. Mapped regions: {set(model.region_layer_map.keys())}. "
             f"Use the Arena tool to explore and commit layer mappings."
+        )
+
+    # Check 4 (v1.5): Input/Output Catalog documentation conformance. Warn-only;
+    # never changes pass/fail. Surfaces inputs or outputs that are not documented
+    # in the catalog so undocumented channels are flagged at pre-flight.
+    check_io_catalog(model, benchmark)
+
+
+def check_io_catalog(model: Subject, benchmark) -> None:
+    """Optional documentation-conformance check against the Input/Output Catalog.
+
+    Warn-only: emits a :class:`CompatibilityWarning` for any input the benchmark
+    declares, or any neural output the benchmark targets, that is not documented
+    in the catalog. It never raises and does not change the pass/fail result of
+    :func:`check_compatibility`; it only makes undocumented channels visible at
+    pre-flight rather than discovered later.
+    """
+    bench_required: Set[str] = set(getattr(benchmark, 'required_modalities', set()))
+    for modality in bench_required:
+        if not io_catalog.has(modality):
+            warnings.warn(
+                f"Benchmark '{getattr(benchmark, 'identifier', '?')}' declares input "
+                f"modality '{modality}' which is not in the Input/Output Catalog. "
+                f"Documented inputs: {sorted(e.name for e in io_catalog.inputs())}.",
+                CompatibilityWarning,
+                stacklevel=2,
+            )
+
+    region: Optional[str] = getattr(benchmark, 'region', None)
+    if region is not None and not io_catalog.has(f'neural:{region}'):
+        warnings.warn(
+            f"Benchmark '{getattr(benchmark, 'identifier', '?')}' targets neural "
+            f"region '{region}' but 'neural' is not documented in the Input/Output "
+            f"Catalog.",
+            CompatibilityWarning,
+            stacklevel=2,
         )
