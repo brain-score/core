@@ -217,10 +217,15 @@ class PerturbationApplied:
 class CameraFrame:
     """A single camera view at one timestep.
 
-    Schema follows the DROID dataset convention (180×320 RGB stereo + wrist);
+    Schema follows the DROID dataset convention (180x320 RGB stereo + wrist);
     extensible via optional depth and intrinsics for richer setups. Cameras are
     keyed by name on :class:`EnvironmentStep` (e.g., ``'exterior_1'``,
     ``'exterior_2'``, ``'wrist'``).
+
+    v1.5 deprecation: this is a robotics-specific type. New code should import it
+    from the robotics environment harness in the ``brainscore`` package and pack
+    it into ``EnvironmentStep.observation``. It is kept in ``core`` for one
+    release so existing embodied registrations keep working.
     """
     rgb: Any  # numpy.ndarray (H, W, 3) uint8 — required
     depth: Optional[Any] = None  # numpy.ndarray (H, W) float32, in meters
@@ -236,6 +241,11 @@ class Proprioception:
     gripper) so existing DROID-format checkpoints can be evaluated without a
     coordinate transform. The ``base_*`` fields are unused for arm-only setups;
     populate them for mobile-manipulation robots.
+
+    v1.5 deprecation: this is a robotics-specific type. New code should import it
+    from the robotics environment harness in the ``brainscore`` package and pack
+    it into ``EnvironmentStep.observation``. It is kept in ``core`` for one
+    release so existing embodied registrations keep working.
     """
     joint_position: Any  # (n_joints,) float64 — 7 for Franka
     cartesian_position: Any  # (6,) float64 — xyz + euler/rpy
@@ -256,6 +266,13 @@ class EnvironmentStep:
     the environment's response over multiple ticks. Passed to ``process()`` like
     a stimulus — the interface generalizes over input type rather than adding
     a separate agent method.
+
+    v1.5: this is a device-agnostic envelope. The preferred field is
+    ``observation`` (a harness-defined payload). The ``cameras`` and
+    ``proprioception`` fields are the deprecated DROID-shaped instantiation,
+    kept for one release; the robotics environment harness in the ``brainscore``
+    package is their going-forward home. ``core`` commits only to the
+    observation-in / action-out envelope, not to any device's field layout.
 
     Schema follows DROID (https://droid-dataset.github.io/) for arm
     manipulation. Mobile-manipulation extensions are additive: populate
@@ -288,8 +305,11 @@ class EnvironmentStep:
             step_num=42,
         )
     """
-    cameras: Dict[str, 'CameraFrame']
-    proprioception: 'Proprioception'
+    # Deprecated DROID-shaped fields, now optional and kept for one release.
+    # New code uses the generic ``observation`` field plus the robotics harness;
+    # these remain so existing embodied registrations keep working unchanged.
+    cameras: Optional[Dict[str, 'CameraFrame']] = None
+    proprioception: Optional['Proprioception'] = None
     instruction: Optional[str] = None
     step_num: int = 0
     # RLDS / DROID episode control signals (optional for non-episodic eval):
@@ -301,17 +321,34 @@ class EnvironmentStep:
     # Free-form context — benchmarks that need to thread custom state (previous
     # actions, object IDs, scene graph, etc.) without growing the schema.
     context: Dict[str, Any] = field(default_factory=dict)
+    # v1.5 device-agnostic envelope: the observation payload is harness-defined.
+    # The environment harness (robotics, Atari, browser, ...) documents its own
+    # structure; core commits only to "an observation in, an action out".
+    observation: Any = None
+
+    def __post_init__(self):
+        # Bridge the deprecated DROID fields onto the generic observation so the
+        # dispatch path is uniform: if no observation was given but the DROID
+        # fields were, expose them as the observation.
+        if self.observation is None and (
+            self.cameras is not None or self.proprioception is not None
+        ):
+            self.observation = {
+                "cameras": self.cameras,
+                "proprioception": self.proprioception,
+            }
 
 
 @dataclass
 class EnvironmentResponse:
     """The model's response to one :class:`EnvironmentStep`.
 
-    Mirrors DROID's compact ``action`` (default 7-D: 6 joint velocities + 1
-    gripper position) plus an optional structured ``action_dict`` for richer
-    control modes (Cartesian deltas, base velocity, etc.). ``metadata`` lets
-    models report telemetry (value estimate, attention maps, predicted reward)
-    without growing the action schema.
+    v1.5: ``action`` is a harness-defined payload, not pinned to any device. The
+    environment harness decides its shape. The DROID instantiation uses a compact
+    7-D action (6 joint velocities + 1 gripper position); other environments use
+    their own. ``action_dict`` carries an optional structured form and
+    ``metadata`` carries telemetry (value estimate, attention maps, predicted
+    reward) without growing the schema.
     """
     action: Any  # numpy.ndarray (action_dim,) float64
     action_dict: Optional[Dict[str, Any]] = None  # DROID-style structured action
