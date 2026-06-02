@@ -8,3 +8,5 @@ from .model_interface import (
 )
 from .compatibility import CompatibilityError, CompatibilityWarning, check_compatibility
 from .memory import MemoryError, check_memory, get_available_memory
+from . import io_catalog
+from .io_catalog import CatalogEntry
