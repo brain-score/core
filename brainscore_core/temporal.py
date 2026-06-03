@@ -213,6 +213,132 @@ def temporal_bin(
     )
 
 
+def synchronize_modalities(
+    streams,
+    target_time_bins: Sequence[TimeBin],
+    *,
+    concat_modality: bool = True,
+    modality_coord: str = 'modality',
+) -> Union[NeuroidAssembly, dict]:
+    """Resample several per-modality feature streams onto one shared time grid.
+
+    Each modality's wrapper returns features at its own native temporal
+    resolution — a video tower might emit one vector per 1/30 s frame, an
+    audio tower one per 20 ms, a text tower one per word. To regress them
+    jointly against TR-resolved brain data they must first live on a
+    *single* common time axis. This is the cross-modal alignment step
+    (step 4 of the temporal pipeline), after each wrapper has produced its
+    own ``(presentation, time_bin, neuroid)`` assembly carrying
+    ``time_bin_start_ms`` / ``time_bin_end_ms`` on the ``time_bin`` axis::
+
+        per-modality native-rate streams ──► one common ``target_time_bins`` grid
+
+    For every target bin ``[start, end)`` the source bins whose *center*
+    falls inside it are averaged (same half-open convention as
+    :func:`temporal_bin`). A target bin with no source frames is ``NaN``.
+
+    Args:
+        streams: Mapping ``modality_name -> NeuroidAssembly``. Every
+            assembly must have dims ``('presentation', 'time_bin',
+            'neuroid')``, the same presentation ordering, and enough time
+            coords to locate its source bins (``time_bin_center_ms``, or
+            both ``time_bin_start_ms`` and ``time_bin_end_ms``).
+        target_time_bins: The shared grid as ``(start_ms, end_ms)`` tuples,
+            e.g. one per fMRI TR.
+        concat_modality: When ``True`` (default), the resampled streams are
+            concatenated along the neuroid axis into one assembly, each
+            neuroid tagged with a ``modality`` coord so a benchmark can
+            filter or band-regress per modality. When ``False``, a dict of
+            resampled assemblies (one per modality) is returned.
+        modality_coord: Name of the per-neuroid coord recording the source
+            modality (only used when ``concat_modality``).
+
+    Returns:
+        A single concatenated ``NeuroidAssembly`` (when ``concat_modality``)
+        or a ``dict`` of per-modality assemblies, all sharing the
+        ``target_time_bins`` time axis.
+
+    Raises:
+        ValueError: If ``streams`` is empty, an assembly lacks the
+            ``time_bin`` dim or the time coords needed to place its bins,
+            or the streams disagree on presentation count.
+    """
+    import xarray as xr
+
+    if not streams:
+        raise ValueError("synchronize_modalities requires at least one stream.")
+
+    target_centers = [0.5 * (s + e) for (s, e) in target_time_bins]
+    n_target = len(target_time_bins)
+
+    resampled = {}
+    n_pres_seen: Optional[int] = None
+    for modality, assembly in streams.items():
+        if 'time_bin' not in assembly.dims:
+            raise ValueError(
+                f"stream '{modality}' has no 'time_bin' dim; wrap still-image "
+                f"output with add_time_bin_axis first. Dims: {assembly.dims}.")
+        coord_names = [name for name, _, _ in walk_coords(assembly)]
+        # Locate each source bin's center on the absolute ms timeline.
+        if 'time_bin_center_ms' in coord_names:
+            src_centers = np.asarray(
+                assembly['time_bin_center_ms'].values, dtype=float)
+        elif ('time_bin_start_ms' in coord_names
+              and 'time_bin_end_ms' in coord_names):
+            src_centers = 0.5 * (
+                np.asarray(assembly['time_bin_start_ms'].values, dtype=float)
+                + np.asarray(assembly['time_bin_end_ms'].values, dtype=float))
+        else:
+            raise ValueError(
+                f"stream '{modality}' needs 'time_bin_center_ms' or both "
+                f"'time_bin_start_ms' and 'time_bin_end_ms' on its time_bin "
+                f"axis to be resampled. Coords: {coord_names}.")
+
+        ordered = assembly.transpose('presentation', 'time_bin', 'neuroid')
+        data = np.asarray(ordered.values, dtype=float)
+        n_pres, _, n_neuroid = data.shape
+        if n_pres_seen is None:
+            n_pres_seen = n_pres
+        elif n_pres != n_pres_seen:
+            raise ValueError(
+                f"stream '{modality}' has {n_pres} presentations but a prior "
+                f"stream had {n_pres_seen}; all streams must align.")
+
+        out = np.full((n_pres, n_target, n_neuroid), np.nan, dtype=float)
+        for bi, (start, end) in enumerate(target_time_bins):
+            mask = (src_centers >= start) & (src_centers < end)
+            if mask.any():
+                out[:, bi, :] = np.nanmean(data[:, mask, :], axis=1)
+
+        # Carry over presentation + neuroid coords; reset time_bin to target.
+        pres_coords = {name: ('presentation', np.asarray(values))
+                       for name, dims, values in walk_coords(ordered)
+                       if set(dims) == {'presentation'}}
+        neuroid_coords = {name: ('neuroid', np.asarray(values))
+                          for name, dims, values in walk_coords(ordered)
+                          if set(dims) == {'neuroid'}}
+        coords = {
+            **pres_coords,
+            'time_bin_center_ms': ('time_bin', target_centers),
+            'time_bin_start_ms': ('time_bin', [s for (s, _) in target_time_bins]),
+            'time_bin_end_ms': ('time_bin', [e for (_, e) in target_time_bins]),
+            **neuroid_coords,
+        }
+        resampled[modality] = NeuroidAssembly(
+            out, coords=coords, dims=['presentation', 'time_bin', 'neuroid'])
+
+    if not concat_modality:
+        return resampled
+
+    # Concatenate along neuroid, tagging each neuroid with its modality.
+    tagged = []
+    for modality, assembly in resampled.items():
+        n_neuroid = assembly.sizes['neuroid']
+        tagged.append(assembly.assign_coords(
+            **{modality_coord: ('neuroid', [modality] * n_neuroid)}))
+    return xr.concat(tagged, dim='neuroid')
+
+
 def expand_clip_to_frames(
     clip_stimulus_set,
     sample_times_ms: Sequence[float],
