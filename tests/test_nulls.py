@@ -128,3 +128,31 @@ class TestDescribe:
     def test_unknown_raises(self):
         with pytest.raises(ValueError, match="unknown capability"):
             nulls.describe('telepathy')
+
+
+class TestResolve:
+    def test_every_capability_null_is_classified(self):
+        # No orphan names: every null in every capability must be callable here,
+        # model-level, or perturbation-level. (Catches the phantom-null bug.)
+        known = nulls.CALLABLE_NULLS | nulls.MODEL_LEVEL_NULLS | nulls.PERTURBATION_NULLS
+        for cap in nulls.NULLS_BY_CAPABILITY:
+            for name in nulls.describe(cap):
+                assert name in known, f"{name} in {cap} is unclassified"
+
+    def test_callable_nulls_resolve_to_functions(self):
+        for name in nulls.CALLABLE_NULLS:
+            fn = nulls.resolve(name)
+            assert callable(fn)
+
+    def test_model_level_null_raises_clear_error(self):
+        with pytest.raises(ValueError, match="MODEL-level null"):
+            nulls.resolve('random_init_model')
+
+    def test_perturbation_null_raises_clear_error(self):
+        with pytest.raises(ValueError, match="PERTURBATION-level null"):
+            nulls.resolve('opposite_sign')
+
+    def test_callable_nulls_filter(self):
+        cn = nulls.callable_nulls('behavioral')
+        assert 'shuffle_labels' in cn
+        assert 'chance_baseline' not in cn          # model-level, filtered out

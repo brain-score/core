@@ -41,7 +41,26 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # Capability -> applicable nulls. A lookup so an experiment driver can assert
 # it ran every null that its capability demands.
+#
+# IMPORTANT: nulls come in three flavours and live in different places. Names
+# in NULLS_BY_CAPABILITY are deliberately NOT all functions in this module:
+#   - CALLABLE_NULLS: implemented here as functions, applied to arrays/policies.
+#   - MODEL_LEVEL_NULLS: realized by loading a registered null *model* (e.g.
+#     'random-vit-b-32', 'chance-baseline') — there is nothing to call here.
+#   - PERTURBATION_NULLS: realized by constructing a Perturbation variant (e.g.
+#     an opposite-sign scale) and dispatching it through process(StateChange).
+# Use :func:`resolve` to get the callable for a CALLABLE_NULL; it raises a clear
+# error (not AttributeError) for the other two flavours, pointing to where they
+# live. :func:`callable_nulls` filters a capability's list to just the ones this
+# module implements.
 # ---------------------------------------------------------------------------
+CALLABLE_NULLS = {
+    'shuffle_rows', 'shift_features', 'shuffle_labels', 'random_unit_subset',
+    'random_action', 'temporal_shift_curve',
+}
+MODEL_LEVEL_NULLS = {'random_init_model', 'chance_baseline'}
+PERTURBATION_NULLS = {'opposite_sign'}
+
 NULLS_BY_CAPABILITY: Dict[str, List[str]] = {
     'neural_encoding': ['shuffle_rows', 'shift_features', 'random_init_model'],
     'behavioral': ['shuffle_labels', 'chance_baseline', 'random_init_model'],
@@ -149,3 +168,28 @@ def describe(capability: str) -> List[str]:
             f"unknown capability {capability!r}; known: "
             f"{sorted(NULLS_BY_CAPABILITY)}.")
     return list(NULLS_BY_CAPABILITY[capability])
+
+
+def callable_nulls(capability: str) -> List[str]:
+    """The subset of a capability's nulls implemented as functions here."""
+    return [n for n in describe(capability) if n in CALLABLE_NULLS]
+
+
+def resolve(name: str) -> Callable:
+    """Return the function implementing a CALLABLE_NULL.
+
+    Raises a clear, actionable error for model-level or perturbation-level nulls
+    (which are not functions in this module) instead of an opaque AttributeError.
+    """
+    if name in CALLABLE_NULLS:
+        return globals()[name]
+    if name in MODEL_LEVEL_NULLS:
+        raise ValueError(
+            f"{name!r} is a MODEL-level null: realize it by loading a registered "
+            f"null model (e.g. 'random-vit-b-32' or 'chance-baseline'), not by "
+            f"calling a function here.")
+    if name in PERTURBATION_NULLS:
+        raise ValueError(
+            f"{name!r} is a PERTURBATION-level null: realize it by constructing a "
+            f"Perturbation variant and dispatching process(StateChange(...)).")
+    raise ValueError(f"unknown null {name!r}; callable nulls: {sorted(CALLABLE_NULLS)}.")
