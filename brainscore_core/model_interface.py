@@ -72,6 +72,33 @@ class LayerSelector(UnitSelector):
         return self.name
 
 
+@dataclass(frozen=True)
+class CompositeSelector(UnitSelector):
+    """Select units across multiple layers as one region.
+
+    A composite region's neuroids are gathered from several layers, each
+    optionally restricted to a subset of unit positions. Used when a brain
+    region is best modeled by units drawn from more than one model layer
+    (for example a whole-brain parcel that pools early and late features).
+
+    :param layers: ordered tuple of ``(layer_path, indices)`` pairs, where
+        ``indices`` is a tuple of unit positions to take from that layer
+        (counted within that layer's own neuroids), or ``None`` to take every
+        unit of the layer.
+    """
+    layers: Tuple[Tuple[str, Optional[Tuple[int, ...]]], ...]
+
+    @property
+    def layer_path(self) -> str:
+        # Canonical (first) layer; the full set is in `layers`.
+        return self.layers[0][0]
+
+    @property
+    def layer_paths(self) -> Tuple[str, ...]:
+        """Every layer this selector draws from, in order."""
+        return tuple(lp for lp, _ in self.layers)
+
+
 def _promote_to_selector(value: Union[str, UnitSelector]) -> UnitSelector:
     """Normalize a ``region_layer_map`` value to a ``UnitSelector``."""
     if isinstance(value, UnitSelector):
@@ -620,6 +647,9 @@ class BrainScoreModel(Subject):
         self._recording_regions: List[str] = []
         self._recording_layers: List[str] = []
         self._is_multi_region: bool = False
+        # True when any active recording region uses a CompositeSelector; routes
+        # process() through the per-region composite extraction path.
+        self._composite_recording: bool = False
         self._task_context: Optional[TaskContext] = None
         # Lazily instantiated the first time a behavioral task is started.
         self._readout_classifier = None  # type: ignore[assignment]
@@ -780,6 +810,8 @@ class BrainScoreModel(Subject):
             return self._process_multi_modality(stimuli, detected, layers)
 
         modality = self._pick_modality(detected)
+        if self._composite_recording and self._supports_layer_extraction(modality):
+            return self._process_composite_regions(stimuli, modality)
         assembly = self._extract_for_modality(stimuli, modality, layers)
         if self._is_multi_region and self._supports_layer_extraction(modality):
             assembly = self._tag_neuroids_with_regions(assembly)
@@ -938,6 +970,48 @@ class BrainScoreModel(Subject):
         ])
         return assembly.assign_coords(region=('neuroid', neuroid_regions))
 
+    def _process_composite_regions(self, stimuli, modality):
+        """Extraction for recording targets that include a CompositeSelector.
+
+        For each recording region, extract its layer(s), gather the selected
+        units (every unit for a LayerSelector; the per-layer indexed units for a
+        CompositeSelector), tag the block with the region, and concat across
+        regions along the neuroid axis. Repeated layer extraction is served from
+        the activations cache, so re-extracting a shared layer is cheap.
+        """
+        import numpy as np
+        import xarray as xr
+        blocks = []
+        for region in self._recording_regions:
+            selector = self._region_layer_selectors[region]
+            layer_paths = (list(selector.layer_paths)
+                           if isinstance(selector, CompositeSelector)
+                           else [selector.layer_path])
+            assembly = self._extract_for_modality(stimuli, modality, layer_paths)
+            block = self._gather_composite_units(assembly, selector)
+            n = block.sizes['neuroid']
+            block = block.assign_coords(
+                region=('neuroid', np.array([region] * n)))
+            blocks.append(block)
+        return xr.concat(blocks, dim='neuroid')
+
+    def _gather_composite_units(self, assembly, selector):
+        """Keep the units a selector selects from a (possibly multi-layer)
+        assembly. A LayerSelector keeps every unit of its single layer; a
+        CompositeSelector keeps the per-layer indexed units, in layer order."""
+        import numpy as np
+        if not isinstance(selector, CompositeSelector):
+            return assembly
+        layer_coord = assembly['layer'].values
+        keep_positions: List[int] = []
+        for layer_path, indices in selector.layers:
+            layer_positions = np.where(layer_coord == layer_path)[0]
+            if indices is None:
+                keep_positions.extend(layer_positions.tolist())
+            else:
+                keep_positions.extend(layer_positions[list(indices)].tolist())
+        return assembly.isel(neuroid=keep_positions)
+
     def start_recording(self,
                         recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
@@ -969,6 +1043,13 @@ class BrainScoreModel(Subject):
                     "start_recording('all') requires a non-empty "
                     "region_layer_map."
                 )
+        # A single composite region routes through the multi-region path so all
+        # of its layers are extracted and its units gathered.
+        if (isinstance(recording_target, str)
+                and recording_target in self._region_layer_selectors
+                and isinstance(self._region_layer_selectors[recording_target],
+                               CompositeSelector)):
+            recording_target = [recording_target]
         if isinstance(recording_target, str):
             # Backward-compatible single-region path. Unknown strings pass
             # through as raw layer paths (preserves existing behavior where
@@ -983,6 +1064,7 @@ class BrainScoreModel(Subject):
             )
             self._recording_layers = [self._recording_layer]
             self._is_multi_region = False
+            self._composite_recording = False
         else:
             regions = list(recording_target)
             unknown = [r for r in regions
@@ -994,17 +1076,27 @@ class BrainScoreModel(Subject):
                     f"{list(self._region_layer_map_dict.keys())})"
                 )
             self._recording_regions = regions
-            # Deduplicate while preserving order — two regions can map to
-            # the same layer; we extract that layer once and tag both.
-            self._recording_layers = list(dict.fromkeys(
-                self._region_layer_map_dict[r] for r in regions
-            ))
+            # Gather every layer needed across regions. Composite regions span
+            # several layers; standard regions contribute one. Deduplicated,
+            # order-preserving (a shared layer is extracted once).
+            all_layers: List[str] = []
+            for r in regions:
+                sel = self._region_layer_selectors[r]
+                if isinstance(sel, CompositeSelector):
+                    all_layers.extend(sel.layer_paths)
+                else:
+                    all_layers.append(sel.layer_path)
+            self._recording_layers = list(dict.fromkeys(all_layers))
             # Keep _recording_layer populated for code paths that still
             # read the singular attribute (e.g., legacy callable
             # preprocessors that take recording_layer=).
             self._recording_layer = (
                 self._recording_layers[0]
                 if len(self._recording_layers) == 1 else None
+            )
+            self._composite_recording = any(
+                isinstance(self._region_layer_selectors[r], CompositeSelector)
+                for r in regions
             )
             self._is_multi_region = len(regions) > 1
         self._time_bins = time_bins
