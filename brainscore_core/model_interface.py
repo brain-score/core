@@ -10,6 +10,9 @@ Defines the core abstractions for model evaluation:
   deprecated alias kept for one release.
 - BrainScoreModel: compositional implementation with preprocessors + shared
   activations_model + optional generation_fn / action_fn dispatch slots
+- InputEvent / OutputEvent: the symmetric type unions ``process()`` maps
+  between. Both grow by adding a member when a benchmark needs one — never by
+  changing the Subject ABC.
 
 ## Input generalization (Martin Schrimpf feedback, April 2026)
 
@@ -34,7 +37,10 @@ schema citations and the mobile-manipulation roadmap.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
+if TYPE_CHECKING:  # annotation-only; keeps core free of a hard BrainIO import
+    from brainio.assemblies import NeuroidAssembly, BehavioralAssembly
 
 
 class UnitSelector(ABC):
@@ -389,6 +395,24 @@ class EnvironmentResponse:
 # dispatch time inside BrainScoreModel.process().
 InputEvent = Union['StimulusSet', StateChange, EnvironmentStep]  # type: ignore[name-defined]
 
+# Output event type for process(). Symmetric with InputEvent: every process()
+# call returns one of these members, and the union grows by ADDING a member when
+# a benchmark needs a new output shape — never by changing the Subject ABC. This
+# is the output-side answer to the same extensibility argument that motivated
+# InputEvent (Addressing Stakeholder Comments §2.3, Martin Schrimpf).
+#
+# Three of the four members exist concretely today:
+#   - NeuroidAssembly    — neural recording (sensory-stimulus path); forward ref
+#                          so core stays free of a hard BrainIO import
+#   - BehavioralAssembly — behavioral readout / generation; forward ref likewise
+#   - EnvironmentResponse — one embodied step (the action/trajectory member)
+#   - PerturbationApplied — state-change acknowledgement + reset handle
+# Future members slot in here when their first benchmark lands, with no ABC
+# change: MotorOutput (continuous motor regression, §2.4) and GeneratedSequence
+# (variable-length tokens + per-token logprobs).
+OutputEvent = Union['NeuroidAssembly', 'BehavioralAssembly',
+                    EnvironmentResponse, PerturbationApplied]  # type: ignore[name-defined]
+
 
 class Subject(ABC):
     """
@@ -465,7 +489,7 @@ class Subject(ABC):
         return set()
 
     @abstractmethod
-    def process(self, stimuli) -> Any:
+    def process(self, input_event: InputEvent) -> OutputEvent:
         ...
 
     def start_task(self, task_context: TaskContext) -> None:
@@ -732,7 +756,8 @@ class BrainScoreModel(Subject):
                 return m
         return next(iter(detected))
 
-    def process(self, input_event, multi_modality: bool = False) -> Any:
+    def process(self, input_event: InputEvent,
+                multi_modality: bool = False) -> OutputEvent:
         # Dispatch on input event type. StimulusSet (perceptual input) is the
         # primary path; EnvironmentStep dispatches to the registered action_fn
         # for embodied evaluation; StateChange dispatches to the registered
