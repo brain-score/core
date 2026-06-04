@@ -8,6 +8,14 @@ from .model_interface import (
     UnitSelector,
     LayerSelector,
     CompositeSelector,
+    Selection,
+    Perturbation,
+    StateChange,
+    PerturbationApplied,
+    UnitSelection,
+    FunctionalSelection,
+    RandomSelection,
+    IndexSelection,
 )
 from .compatibility import CompatibilityError, CompatibilityWarning, check_compatibility, check_io_catalog
 from .memory import MemoryError, check_memory, get_available_memory

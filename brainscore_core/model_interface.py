@@ -36,7 +36,7 @@ schema citations and the mobile-manipulation roadmap.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:  # annotation-only; keeps core free of a hard BrainIO import
@@ -221,7 +221,7 @@ class StateChange:
         model.process(StateChange(kind='reset', handle_id=applied.handle_id))
     """
     kind: str
-    target: Optional['Selection'] = None
+    target: Optional[Union['Selection', 'UnitSelection']] = None
     perturbation: Optional['Perturbation'] = None
     handle_id: Optional[str] = None  # for kind='reset', identifies what to undo
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -244,6 +244,155 @@ class PerturbationApplied:
     perturbation: 'Perturbation'
     applied_at: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+# ── Unit selection for perturbation (UnitSelection family) ────────────
+#
+# Distinct from the UnitSelector family above: UnitSelector configures
+# *recording* (region_layer_map values); UnitSelection configures *perturbation*
+# (which units a StateChange lesions). A UnitSelection resolves — against any
+# Subject, through the public interface — to a plain Selection(layer, indices).
+# This keeps the which-units decision OFF the model: it lives in a portable,
+# testable object instead of being re-implemented inside each model's
+# state_change_fn closure.
+
+class UnitSelection(ABC):
+    """Resolves to a concrete :class:`Selection` by inspecting a model.
+
+    ``resolve(model)`` uses only the public ``start_recording`` + ``process``
+    interface, so the same selection runs against any :class:`Subject`. A
+    :class:`StateChange` ``target`` may be either an already-resolved
+    ``Selection`` or an unresolved ``UnitSelection``; ``process(StateChange)``
+    resolves the latter (snapshotting and restoring the model's recording
+    state) before handing off to ``state_change_fn``.
+    """
+
+    @abstractmethod
+    def resolve(self, model) -> 'Selection':
+        ...
+
+
+@dataclass
+class IndexSelection(UnitSelection):
+    """Explicit unit indices — the trivial selection. ``resolve`` ignores the model."""
+    layer: str
+    indices: List[int]
+
+    def resolve(self, model) -> 'Selection':
+        return Selection(layer=self.layer, indices=list(self.indices),
+                         metadata={'selector': 'index'})
+
+
+@dataclass
+class RandomSelection(UnitSelection):
+    """``n_units`` units drawn uniformly at random from ``[0, n_total)`` — the
+    causal control for any functional selection.
+
+    Deterministic given ``seed``; needs no forward pass (``resolve`` ignores the
+    model). Match ``layer`` / ``n_units`` / ``n_total`` to a
+    :class:`FunctionalSelection` to get a same-size random lesion at the same
+    layer — the standard "is the effect specific, or just damage?" control.
+    ``n_total`` is the layer's unit count, available as
+    ``FunctionalSelection`` result ``metadata['n_recorded']``.
+    """
+    layer: str
+    n_units: int
+    n_total: int
+    seed: int = 0
+
+    def resolve(self, model) -> 'Selection':
+        import numpy as np
+        k = min(self.n_units, self.n_total)
+        rng = np.random.RandomState(self.seed)
+        idx = sorted(int(i) for i in rng.choice(self.n_total, size=k, replace=False))
+        return Selection(layer=self.layer, indices=idx,
+                         metadata={'selector': 'random', 'seed': self.seed,
+                                   'n_total': self.n_total})
+
+
+@dataclass
+class FunctionalSelection(UnitSelection):
+    """Select units by a functional contrast — the fMRI-localizer analogue.
+
+    Records the model's responses to ``localizer_stimuli`` at
+    ``recording_target``, splits presentations into a positive and a negative
+    group by their ``contrast_column`` label, scores each unit by the Cohen's d
+    of positive vs negative, and keeps the top ``n_units`` (or every unit whose
+    score clears ``threshold`` when ``n_units`` is ``None``). This is the
+    word-vs-non-word VWFA localizer from the induced-dyslexia experiment, lifted
+    out of the sweep scripts into a reusable, model-agnostic object.
+
+    :param recording_target: region to record (a key in the model's
+        ``region_layer_map``). The resolved ``Selection.layer`` is taken from
+        the recorded neuroids' ``layer`` coord so it matches what the
+        ``state_change_fn`` will hook.
+    :param contrast: ``(positive_labels, negative_labels)`` matched against
+        ``contrast_column`` on the assembly's presentation coords.
+    :param sign: ``'positive'`` keeps units that respond MORE to the positive
+        group (d > 0), ``'negative'`` the opposite, ``'abs'`` the most
+        discriminating either way.
+    """
+    recording_target: str
+    localizer_stimuli: Any
+    contrast: Tuple[List[str], List[str]]
+    contrast_column: str = 'label'
+    n_units: Optional[int] = None
+    threshold: float = 2.0
+    sign: str = 'positive'
+
+    def resolve(self, model) -> 'Selection':
+        import numpy as np
+        if self.sign not in ('positive', 'negative', 'abs'):
+            raise ValueError(
+                f"sign must be 'positive'|'negative'|'abs', got {self.sign!r}")
+        model.start_recording(self.recording_target)
+        asm = model.process(self.localizer_stimuli)
+        if 'neuroid' not in asm.dims or 'presentation' not in asm.dims:
+            raise ValueError(
+                f"FunctionalSelection needs a (presentation, neuroid) assembly "
+                f"from process(); got dims {tuple(asm.dims)}.")
+        # collapse any extra dims (e.g. time_bin) to per-(presentation, neuroid)
+        extra = [d for d in asm.dims if d not in ('presentation', 'neuroid')]
+        if extra:
+            asm = asm.mean(extra)
+        labels = np.asarray(asm[self.contrast_column].values)
+        pos_mask = np.isin(labels, list(self.contrast[0]))
+        neg_mask = np.isin(labels, list(self.contrast[1]))
+        if pos_mask.sum() == 0 or neg_mask.sum() == 0:
+            raise ValueError(
+                f"contrast {self.contrast} matched {int(pos_mask.sum())} positive "
+                f"/ {int(neg_mask.sum())} negative presentations in column "
+                f"{self.contrast_column!r}; both groups must be non-empty.")
+        vals = asm.transpose('presentation', 'neuroid').values
+        pos, neg = vals[pos_mask], vals[neg_mask]
+        mp, mn = pos.mean(0), neg.mean(0)
+        sp, sn = pos.std(0, ddof=1), neg.std(0, ddof=1)
+        pooled = np.sqrt((sp ** 2 + sn ** 2) / 2.0)
+        d = np.divide(mp - mn, pooled, out=np.zeros_like(mp, dtype=float),
+                      where=pooled > 0)
+        score = {'positive': d, 'negative': -d, 'abs': np.abs(d)}[self.sign]
+        if self.n_units is not None:
+            order = np.argsort(score)[::-1][:self.n_units]
+        else:
+            order = np.where(score >= self.threshold)[0]
+        idx = sorted(int(i) for i in order)
+        # the layer path the state_change_fn hooks — from the recorded coord
+        layer_path = self.recording_target
+        if 'layer' in asm.coords:
+            uniq = list(dict.fromkeys(
+                str(x) for x in np.asarray(asm['layer'].values).ravel()))
+            if len(uniq) == 1:
+                layer_path = uniq[0]
+            elif len(uniq) > 1:
+                raise ValueError(
+                    f"recording {self.recording_target!r} spans {len(uniq)} layers "
+                    f"{uniq}; functional localization across a composite region "
+                    f"isn't supported yet — record a single-layer region.")
+        return Selection(layer=layer_path, indices=idx,
+                         metadata={'selector': 'functional', 'sign': self.sign,
+                                   'contrast': self.contrast,
+                                   'n_recorded': int(vals.shape[1]),
+                                   'n_selected': len(idx)})
 
 
 @dataclass
@@ -1233,6 +1382,28 @@ class BrainScoreModel(Subject):
 
     # ── Perturbation / state-change dispatch ──────────────────
 
+    def _resolve_selection(self, state_change: 'StateChange') -> 'StateChange':
+        """Resolve a ``UnitSelection`` target to a concrete ``Selection``.
+
+        A functional localizer runs the model against its localizer stimuli,
+        which mutates recording state — so snapshot the current recording target
+        and restore it afterward, making the localizer pass invisible to the
+        benchmark. Returns a new StateChange (the caller's object is untouched);
+        a plain ``Selection`` target passes through unchanged.
+        """
+        target = state_change.target
+        if not isinstance(target, UnitSelection):
+            return state_change
+        saved_regions = list(getattr(self, '_recording_regions', []) or [])
+        saved_time_bins = getattr(self, '_recording_time_bins', None)
+        try:
+            resolved = target.resolve(self)
+        finally:
+            if saved_regions:
+                tgt = saved_regions if len(saved_regions) > 1 else saved_regions[0]
+                self.start_recording(tgt, time_bins=saved_time_bins)
+        return replace(state_change, target=resolved)
+
     def _dispatch_state_change(self, state_change: 'StateChange') -> Any:
         """Route a StateChange event to the registered ``state_change_fn``,
         track the resulting cleanup callable, and return the
@@ -1270,6 +1441,12 @@ class BrainScoreModel(Subject):
                 f"cleanup) callable at BrainScoreModel construction time. "
                 f"Received: StateChange(kind={state_change.kind!r})."
             )
+
+        # If the target is an unresolved UnitSelection (e.g. a functional
+        # localizer), resolve it to a concrete Selection now. state_change_fn
+        # always receives a plain Selection(layer, indices) — the which-units
+        # logic stays in the portable UnitSelection, not the model's closure.
+        state_change = self._resolve_selection(state_change)
 
         result = self._state_change_fn(state_change)
         if (not isinstance(result, tuple) or len(result) != 2
