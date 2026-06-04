@@ -39,8 +39,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-if TYPE_CHECKING:  # annotation-only; keeps core free of a hard BrainIO import
-    from brainio.assemblies import NeuroidAssembly, BehavioralAssembly
+if TYPE_CHECKING:  # annotation-only; resolved against the vendored brainio
+    from brainscore_core.supported_data_standards.brainio.assemblies import (
+        NeuroidAssembly, BehavioralAssembly)
+    from .multimodal import MultimodalStimulusSet
 
 
 class UnitSelector(ABC):
@@ -503,10 +505,13 @@ class EnvironmentStep:
     # Free-form context — benchmarks that need to thread custom state (previous
     # actions, object IDs, scene graph, etc.) without growing the schema.
     context: Dict[str, Any] = field(default_factory=dict)
-    # v1.5 device-agnostic envelope: the observation payload is harness-defined.
-    # The environment harness (robotics, Atari, browser, ...) documents its own
-    # structure; core commits only to "an observation in, an action out".
-    observation: Any = None
+    # The perceptual content of this tick: what the agent observes. Canonically
+    # a (Multimodal)StimulusSet — an EnvironmentStep PRESENTS a stimulus, it does
+    # not sit *beside* StimulusSet in the input taxonomy; it wraps one plus the
+    # closed-loop/episode context. The Dict[str, Any] member is the harness-
+    # defined envelope (robotics, Atari, browser, grid game) used today, kept
+    # permissive so core commits only to "an observation in, an action out".
+    observation: Optional[Union['MultimodalStimulusSet', Dict[str, Any]]] = None
 
     def __post_init__(self):
         # Bridge the deprecated DROID fields onto the generic observation so the
@@ -538,10 +543,21 @@ class EnvironmentResponse:
 
 
 # Input event type for process().
-# The interface is generic over input event type. StimulusSet is imported
-# lazily to avoid a hard dependency on the BrainIO types from core. In type
-# hints this is represented by Any; the actual type check happens at
-# dispatch time inside BrainScoreModel.process().
+#
+# The union spans two orthogonal axes, flattened here for single-dispatch:
+#   - PAYLOAD axis (what is presented): StimulusSet / MultimodalStimulusSet.
+#   - PROTOCOL axis (mode of engagement): perceive (open-loop batch readout),
+#     interact (closed-loop, EnvironmentStep), perturb (intervention, StateChange).
+# Read this union as "modes of engagement": a bare StimulusSet is the degenerate
+# *perceive* case (passed directly for ergonomics — the 99% path); StateChange is
+# a pure intervention that carries no stimulus; EnvironmentStep *contains* a
+# stimulus (its `observation` is a MultimodalStimulusSet plus episode context),
+# so it WRAPS a payload rather than being a sibling of one. A fully symmetric
+# spec would wrap the perceive case too (Perceive(stimulus)) and pair each input
+# mode with an OutputEvent member; that refactor is deferred (see the design docs)
+# until a second interactive modality makes the flattening costly.
+# StimulusSet is a forward ref to avoid a hard BrainIO dependency in core; the
+# runtime type check happens at dispatch time inside BrainScoreModel.process().
 InputEvent = Union['StimulusSet', StateChange, EnvironmentStep]  # type: ignore[name-defined]
 
 # Output event type for process(). Symmetric with InputEvent: every process()

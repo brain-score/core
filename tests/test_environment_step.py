@@ -267,3 +267,36 @@ class TestMultiStepRollout:
                 break
         assert len(responses) == max_steps
         assert all(isinstance(r, EnvironmentResponse) for r in responses)
+
+
+# ── observation typing (minimal input fix): an EnvironmentStep PRESENTS a
+#    stimulus — its observation is canonically a MultimodalStimulusSet, with the
+#    dict envelope kept for the harness-defined path. Non-breaking. ──────────
+class TestObservationTyping:
+
+    def test_accepts_multimodal_stimulus_set(self):
+        import pandas as pd
+        from brainscore_core.multimodal import MultimodalStimulusSet
+        mm = MultimodalStimulusSet(pd.DataFrame({
+            'stimulus_id': ['c0'], 'video_path': ['c0.mp4'], 'audio_path': ['c0.wav']}))
+        step = EnvironmentStep(observation=mm, instruction='go')
+        assert step.observation is mm
+
+    def test_accepts_dict_envelope_backward_compat(self):
+        step = EnvironmentStep(observation={'frame': np.zeros((4, 4, 3), np.uint8),
+                                            'instruction': 'go'})
+        assert isinstance(step.observation, dict)
+
+    def test_droid_bridge_still_populates_observation(self):
+        cameras = {'wrist': CameraFrame(rgb=np.zeros((8, 8, 3), np.uint8))}
+        prop = Proprioception(joint_position=np.zeros(7), cartesian_position=np.zeros(6),
+                              gripper_position=np.zeros(1))
+        step = EnvironmentStep(cameras=cameras, proprioception=prop)
+        assert step.observation is not None and 'cameras' in step.observation
+
+    def test_observation_annotation_names_multimodal_stimulus_set(self):
+        from typing import ForwardRef, get_args
+        args = get_args(EnvironmentStep.__annotations__['observation'])
+        names = {a.__forward_arg__ if isinstance(a, ForwardRef)
+                 else getattr(a, '__name__', str(a)) for a in args}
+        assert 'MultimodalStimulusSet' in names      # the canonical perceptual payload
