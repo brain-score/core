@@ -542,6 +542,71 @@ class EnvironmentResponse:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class Message:
+    """A communicative event that is valid as BOTH an output and an input.
+
+    ``Message`` is the symmetry-closing member of the I/O unions: the first type
+    a model can *emit* (``OutputEvent``) that another model can directly
+    *consume* (``InputEvent``). That dual membership is exactly what
+    first-class multi-agent social interaction needs — one agent's utterance is
+    the next agent's stimulus, with no bespoke routing protocol and no ABC
+    change (the design's named multi-agent enabler; see Developer Reference
+    §6.1 item 3).
+
+    ``process(Message)`` routes to the model's ``action_fn`` (an agent
+    *responds* to a message), and a responder may return either a ``Message`` or
+    an :class:`EnvironmentResponse`. ``content`` is the payload (text, an action,
+    a structured proposal); ``sender`` / ``recipient`` carry addressing for
+    multi-party settings; ``metadata`` carries telemetry without growing the
+    schema.
+    """
+    content: Any
+    sender: Optional[str] = None
+    recipient: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def output_event_kind(output: 'OutputEvent') -> str:
+    """Classify an ``OutputEvent`` member so metrics can dispatch on output type
+    instead of the benchmark hard-selecting one (Developer Reference §6.1 item 4).
+
+    Returns one of ``'neural'`` (NeuroidAssembly), ``'behavioral'``
+    (BehavioralAssembly), ``'environment'`` (EnvironmentResponse), ``'message'``
+    (Message), ``'perturbation'`` (PerturbationApplied), or ``'unknown'``. Uses
+    duck typing for the two forward-ref assembly types (whose concrete classes
+    aren't imported in core) so it never requires a hard BrainIO import.
+    """
+    if isinstance(output, EnvironmentResponse):
+        return 'environment'
+    if isinstance(output, Message):
+        return 'message'
+    if isinstance(output, PerturbationApplied):
+        return 'perturbation'
+    cls_names = {c.__name__ for c in type(output).__mro__}
+    if 'NeuroidAssembly' in cls_names:
+        return 'neural'
+    if 'BehavioralAssembly' in cls_names:
+        return 'behavioral'
+    return 'unknown'
+
+
+def dispatch_metric(output: 'OutputEvent', metric_map: Dict[str, Any]):
+    """Pick a metric for an output by its :func:`output_event_kind`.
+
+    ``metric_map`` maps a kind (``'neural'`` / ``'behavioral'`` / ``'message'`` /
+    …) to a metric callable. Raises ``KeyError`` with the available kinds when an
+    output's kind isn't registered — so a benchmark declares the metrics it
+    supports by output type and the dispatch is data-driven, not hard-coded.
+    """
+    kind = output_event_kind(output)
+    if kind not in metric_map:
+        raise KeyError(
+            f"no metric registered for output kind {kind!r}; "
+            f"metric_map has {sorted(metric_map)}")
+    return metric_map[kind]
+
+
 # Input event type for process().
 #
 # The union spans two orthogonal axes, flattened here for single-dispatch:
@@ -558,7 +623,7 @@ class EnvironmentResponse:
 # until a second interactive modality makes the flattening costly.
 # StimulusSet is a forward ref to avoid a hard BrainIO dependency in core; the
 # runtime type check happens at dispatch time inside BrainScoreModel.process().
-InputEvent = Union['StimulusSet', StateChange, EnvironmentStep]  # type: ignore[name-defined]
+InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message]  # type: ignore[name-defined]
 
 # Output event type for process(). Symmetric with InputEvent: every process()
 # call returns one of these members, and the union grows by ADDING a member when
@@ -576,7 +641,7 @@ InputEvent = Union['StimulusSet', StateChange, EnvironmentStep]  # type: ignore[
 # change: MotorOutput (continuous motor regression, §2.4) and GeneratedSequence
 # (variable-length tokens + per-token logprobs).
 OutputEvent = Union['NeuroidAssembly', 'BehavioralAssembly',
-                    EnvironmentResponse, PerturbationApplied]  # type: ignore[name-defined]
+                    EnvironmentResponse, PerturbationApplied, Message]  # type: ignore[name-defined]
 
 
 class Subject(ABC):
@@ -951,6 +1016,25 @@ class BrainScoreModel(Subject):
                     f"{type(response).__name__}; expected EnvironmentResponse. "
                     f"Wrap the action in EnvironmentResponse(action=...) so "
                     f"benchmarks see a consistent shape across models."
+                )
+            return response
+        if isinstance(input_event, Message):
+            # A Message is consumed by *responding* to it: route to the agent's
+            # action_fn (the symmetric companion to emitting a Message). The
+            # responder may return a Message (dialogue) or an EnvironmentResponse.
+            if self._action_fn is None:
+                raise NotImplementedError(
+                    f"Model '{self.identifier}' has no action_fn registered; "
+                    f"process(Message) routes to the agent's responder. Declare "
+                    f"action_fn(env_step) -> EnvironmentResponse|Message at "
+                    f"BrainScoreModel construction time."
+                )
+            response = self._action_fn(EnvironmentStep(observation=input_event))
+            if not isinstance(response, (Message, EnvironmentResponse)):
+                raise TypeError(
+                    f"Model '{self.identifier}' action_fn returned "
+                    f"{type(response).__name__}; a Message responder must return "
+                    f"a Message or EnvironmentResponse."
                 )
             return response
 

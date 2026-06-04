@@ -29,13 +29,14 @@ def _member_names(union):
     return names
 
 
-def test_output_event_has_the_four_current_members():
+def test_output_event_has_the_current_members():
     names = _member_names(OutputEvent)
     assert names == [
         'NeuroidAssembly',       # neural recording
         'BehavioralAssembly',    # behavioral readout / generation
         'EnvironmentResponse',   # embodied step
         'PerturbationApplied',   # state-change acknowledgement
+        'Message',               # communicative event (also an InputEvent member)
     ]
 
 

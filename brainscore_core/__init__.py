@@ -16,6 +16,13 @@ from .model_interface import (
     FunctionalSelection,
     RandomSelection,
     IndexSelection,
+    EnvironmentStep,
+    EnvironmentResponse,
+    Message,
+    InputEvent,
+    OutputEvent,
+    output_event_kind,
+    dispatch_metric,
 )
 from .compatibility import CompatibilityError, CompatibilityWarning, check_compatibility, check_io_catalog
 from .memory import MemoryError, check_memory, get_available_memory
