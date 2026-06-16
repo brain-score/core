@@ -84,6 +84,22 @@ class Benchmark(ABC):
         """
         raise NotImplementedError()
 
+    def preallocate_memory(self, candidate) -> None:
+        """
+        Optional pre-flight memory check run before :meth:`__call__`.
+
+        Domain-specific subclasses (e.g. ``NeuralBenchmark`` in brainscore_vision)
+        can override this to probe the candidate model with a single stimulus and
+        raise :exc:`MemoryError` early if the full benchmark run is estimated to
+        exceed available RAM — rather than discovering the OOM 6+ hours in.
+
+        The default implementation is a no-op so that existing benchmarks that do
+        not override this method are unaffected.
+
+        :param candidate: the candidate model that will be passed to :meth:`__call__`.
+        """
+        pass  # no-op by default; domain subclasses override
+
 
 class BenchmarkBase(Benchmark):
     """
@@ -116,6 +132,23 @@ class BenchmarkBase(Benchmark):
     @property
     def ceiling(self):
         return self._ceiling
+
+
+def score_benchmark(benchmark: Benchmark, candidate) -> Score:
+    """
+    Score *candidate* on *benchmark*, running a pre-flight memory check first.
+
+    This is the recommended call site instead of calling ``benchmark(candidate)``
+    directly.  It calls :meth:`~Benchmark.preallocate_memory` before the actual
+    scoring so that domain-specific subclasses can raise :exc:`MemoryError` early
+    when the run is estimated to exceed available RAM.
+
+    :param benchmark: a :class:`Benchmark` instance to evaluate the candidate on.
+    :param candidate: the candidate model implementing the domain's BrainModel interface.
+    :return: the :class:`~brainscore_core.metrics.Score` returned by the benchmark.
+    """
+    benchmark.preallocate_memory(candidate)
+    return benchmark(candidate)
 
 
 def ceil_score(score, ceiling):
