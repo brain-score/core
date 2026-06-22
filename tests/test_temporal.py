@@ -458,3 +458,46 @@ class TestAddTimeBinAxis:
         out = add_time_bin_axis(self._assy_2d())
         assert 'time_bin_start_ms' not in out.coords
         assert 'time_bin_end_ms' not in out.coords
+
+
+# ---- window_plan (long-clip temporal-context tiling) ----
+from brainscore_core.temporal import window_plan, Window  # noqa: E402
+
+
+def test_window_plan_block_tiling_nonoverlapping():
+    w = window_plan(10000, 4000)  # stride defaults to 4000
+    assert [(x.start_ms, x.end_ms) for x in w] == [(0, 4000), (4000, 8000), (8000, 12000)]
+    assert all(not x.is_causal for x in w)
+    assert w[-1].end_ms > 10000  # last window overhangs → padded
+
+
+def test_window_plan_block_overlap_when_stride_smaller():
+    w = window_plan(10000, 4000, stride_ms=2000)
+    assert [x.start_ms for x in w] == [0, 2000, 4000, 6000, 8000]
+
+
+def test_window_plan_single_window_when_duration_le_context():
+    assert window_plan(3000, 4000) == [Window(0.0, 4000, False)]
+
+
+def test_window_plan_causal_trailing_context():
+    w = window_plan(10000, 4000, stride_ms=4000, strategy='causal')
+    # output times at end_ms = 4000, 8000, then final at duration 10000
+    assert [x.end_ms for x in w] == [4000, 8000, 10000]
+    assert w[0].start_ms == 0 and w[-1].start_ms == 6000  # [t-context, t]
+    assert all(x.is_causal for x in w)
+
+
+def test_window_plan_causal_early_underhang_padded():
+    w = window_plan(3000, 4000, strategy='causal')
+    assert w[-1].end_ms == 3000 and w[-1].start_ms == -1000  # underhang → padded
+
+
+def test_window_plan_bad_params_raise():
+    for bad in [dict(duration_ms=0, context_window_ms=4000),
+                dict(duration_ms=1000, context_window_ms=0),
+                dict(duration_ms=1000, context_window_ms=400, stride_ms=0)]:
+        with pytest.raises(ValueError):
+            window_plan(**bad)
+    with pytest.raises(ValueError):
+        window_plan(1000, 400, strategy='bogus')

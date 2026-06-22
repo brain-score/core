@@ -24,6 +24,7 @@ are carried by the StimulusSet (via its DataFrame columns), which is
 already the conventional metadata channel. No "sidecar" dataclass.
 """
 
+from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -37,6 +38,65 @@ TimeBin = Tuple[float, float]
 # Time bins are represented as (start_ms, end_ms) tuples. Open at the top
 # (end is exclusive) so adjacent bins like (0, 500) and (500, 1000) don't
 # double-count frames on the boundary.
+
+
+@dataclass
+class Window:
+    """A temporal context window for processing a clip longer than a model's
+    native temporal window. ``is_causal`` windows reduce to one feature at
+    ``end_ms`` (trailing context); block windows keep their full time-resolved
+    output. A window whose ``[start_ms, end_ms]`` falls outside ``[0, duration]``
+    is padded (the wrapper's ``out_of_bound`` strategy)."""
+    start_ms: float
+    end_ms: float
+    is_causal: bool = False
+
+
+def window_plan(duration_ms: float, context_window_ms: float, *,
+                stride_ms: Optional[float] = None,
+                strategy: str = 'block') -> List[Window]:
+    """Tile ``[0, duration_ms]`` into windows for a model whose native temporal
+    context is ``context_window_ms``. Pure function of numbers (no model).
+
+    - ``'block'``: windows start at 0, stride, 2*stride, … while start < duration
+      (stride defaults to context_window_ms → non-overlapping). The last window
+      may extend past ``duration`` (overhang → padded). Each window's full
+      time-resolved output is used.
+    - ``'causal'``: stride-spaced output times t; each window is ``[t-context, t]``
+      (context precedes the output), one feature per stride at time t. Early
+      windows start before 0 (underhang → padded). A final window ending exactly
+      at ``duration`` is always included.
+    """
+    if context_window_ms <= 0:
+        raise ValueError(f"context_window_ms must be > 0, got {context_window_ms}")
+    if duration_ms <= 0:
+        raise ValueError(f"duration_ms must be > 0, got {duration_ms}")
+    stride = context_window_ms if stride_ms is None else stride_ms
+    if stride <= 0:
+        raise ValueError(f"stride_ms must be > 0, got {stride}")
+    eps = 1e-9
+
+    if strategy == 'block':
+        windows = []
+        start = 0.0
+        while start < duration_ms - eps:
+            windows.append(Window(start, start + context_window_ms, False))
+            start += stride
+        if not windows:  # duration smaller than a step; still one window
+            windows.append(Window(0.0, context_window_ms, False))
+        return windows
+
+    if strategy == 'causal':
+        windows = []
+        t = stride
+        while t < duration_ms - eps:
+            windows.append(Window(t - context_window_ms, t, True))
+            t += stride
+        if not windows or windows[-1].end_ms < duration_ms - eps:
+            windows.append(Window(duration_ms - context_window_ms, duration_ms, True))
+        return windows
+
+    raise ValueError(f"unknown strategy {strategy!r}; use 'block' or 'causal'")
 
 
 def add_time_bin_axis(
