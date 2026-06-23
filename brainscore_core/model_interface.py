@@ -901,6 +901,9 @@ class BrainScoreModel(Subject):
         self._recording_regions: List[str] = []
         self._recording_layers: List[str] = []
         self._is_multi_region: bool = False
+        # Recording time bins (set by start_recording); snapshotted + restored
+        # across a functional-localizer pass in _resolve_selection.
+        self._time_bins: Optional[List[Tuple[int, int]]] = None
         # True when any active recording region uses a CompositeSelector; routes
         # process() through the per-region composite extraction path.
         self._composite_recording: bool = False
@@ -1495,7 +1498,7 @@ class BrainScoreModel(Subject):
         if not isinstance(target, UnitSelection):
             return state_change
         saved_regions = list(getattr(self, '_recording_regions', []) or [])
-        saved_time_bins = getattr(self, '_recording_time_bins', None)
+        saved_time_bins = self._time_bins   # was the never-written '_recording_time_bins'
         try:
             resolved = target.resolve(self)
         finally:

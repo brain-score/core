@@ -228,3 +228,20 @@ def test_dispatch_restores_recording_after_localizer():
     model.process(sc)
     assert captured['target'].indices == [0]
     assert model._recording_regions == ['IT']        # restored to the pre-localizer target
+
+
+def test_dispatch_restores_time_bins_after_localizer():
+    """Regression: _resolve_selection must snapshot+restore the recording
+    time_bins. It used to read a never-written '_recording_time_bins' (masked
+    by getattr(...,None)), so a localizer pass silently dropped time_bins."""
+    class _SwitchSelection(UnitSelection):
+        def resolve(self, model):
+            model.start_recording('OTHER')           # mutates time_bins -> None
+            return Selection(layer='enc.2', indices=[0])
+
+    model = _make_model(state_change_fn=_capturing_state_change_fn({}),
+                        region_layer_map={'IT': 'enc.1', 'OTHER': 'enc.2'})
+    model.start_recording('IT', time_bins=[(0, 100)])
+    model.process(StateChange(kind='ablation', target=_SwitchSelection(),
+                              perturbation=Perturbation(kind='zero')))
+    assert model._time_bins == [(0, 100)]            # restored, not None
