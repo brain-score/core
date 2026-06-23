@@ -12,8 +12,13 @@ Single-direction modality validation (post April 30, 2026 design decision):
 
 A pairing is valid when:
 
-- ``benchmark.required ⊆ model.available`` — model can process the
-  benchmark's input format.
+- ``benchmark.required ⊆ model.available`` — model can process ALL of the
+  benchmark's required modalities (all-of).
+- ``benchmark.accepted ∩ model.available ≠ ∅`` (if ``accepted_modalities`` is
+  set) — the model provides AT LEAST ONE accepted input format (any-of). This
+  is for benchmarks that adapt to the candidate, e.g. a naturalistic video
+  benchmark that runs native-video models and falls back to frame-aggregation
+  for still-image (vision) models, so it accepts ``{video, vision}``.
 - ``benchmark.region ∈ model.region_layer_map`` (if the benchmark targets a
   neural region).
 
@@ -94,15 +99,30 @@ def check_compatibility(model: Subject, benchmark) -> None:
             f"Model available modalities: {model_available}."
         )
 
-    # Check 2: Hard gate — model's required modalities must be a subset of
-    # the benchmark's single input format (its required set). A locked-fusion
-    # model that needs modalities the benchmark doesn't provide cannot run.
-    model_missing = model_required - bench_required
+    # Check 1b: Any-of gate — some benchmarks accept ANY ONE of several input
+    # formats (e.g. a naturalistic benchmark that runs native-video models AND
+    # falls back to frame-aggregation for still-image models). Declared as
+    # `accepted_modalities`; the model must provide at least one. Distinct from
+    # `required_modalities` (all-of); empty/absent means no any-of constraint.
+    bench_accepted: Set[str] = set(getattr(benchmark, 'accepted_modalities', set()))
+    if bench_accepted and not (bench_accepted & model_available):
+        raise CompatibilityError(
+            f"Model '{model.identifier}' provides none of the input formats "
+            f"benchmark '{benchmark.identifier}' accepts; needs at least one of "
+            f"{bench_accepted}, model available: {model_available}."
+        )
+
+    # Check 2: Hard gate — model's required modalities must be a subset of the
+    # modalities the benchmark can provide (its required set plus any any-of
+    # accepted formats). A locked-fusion model that needs modalities the
+    # benchmark never provides cannot run.
+    model_missing = model_required - (bench_required | bench_accepted)
     if model_missing:
         raise CompatibilityError(
             f"Model '{model.identifier}' hard-requires modalities "
             f"{model_missing} but benchmark '{benchmark.identifier}' does not "
-            f"provide them. Benchmark provides: {bench_required or '{}'}."
+            f"provide them. Benchmark provides: "
+            f"{(bench_required | bench_accepted) or '{}'}."
         )
 
     # Check 3: Region mapping.

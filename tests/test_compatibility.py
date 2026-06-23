@@ -44,12 +44,14 @@ class FakeModel(UnifiedModel):
 class FakeBenchmark:
 
     def __init__(self, identifier='test-bench', required_modalities=None,
-                 available_modalities=None, region=None):
+                 available_modalities=None, accepted_modalities=None, region=None):
         self.identifier = identifier
         if required_modalities is not None:
             self.required_modalities = required_modalities
         if available_modalities is not None:
             self.available_modalities = available_modalities
+        if accepted_modalities is not None:
+            self.accepted_modalities = accepted_modalities
         if region is not None:
             self.region = region
 
@@ -83,6 +85,39 @@ class TestRequiredModalities:
     def test_no_required_modalities_on_benchmark(self):
         model = FakeModel(modalities={'vision'})
         bench = FakeBenchmark()  # no required_modalities attribute
+        check_compatibility(model, bench)  # should not raise
+
+
+# ── Accepted modalities (any-of gate) ───────────────────────────────
+
+class TestAcceptedModalities:
+
+    def test_any_one_accepted_passes(self):
+        bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
+        check_compatibility(FakeModel(modalities={'vision', 'text'}), bench)
+        check_compatibility(FakeModel(modalities={'video'}), bench)  # video-only too
+
+    def test_none_accepted_raises(self):
+        bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
+        with pytest.raises(CompatibilityError, match="provides none of the input formats"):
+            check_compatibility(FakeModel(modalities={'text'}), bench)
+
+    def test_required_plus_accepted_combo(self):
+        # multimodal A+V: audio required (all-of) + video|vision accepted (any-of)
+        bench = FakeBenchmark(required_modalities={'audio'},
+                              accepted_modalities={'video', 'vision'})
+        check_compatibility(FakeModel(modalities={'audio', 'video'}), bench)
+        check_compatibility(FakeModel(modalities={'audio', 'vision'}), bench)
+        with pytest.raises(CompatibilityError, match="does not support modalities required"):
+            check_compatibility(FakeModel(modalities={'video'}), bench)   # missing audio
+        with pytest.raises(CompatibilityError, match="provides none of the input formats"):
+            check_compatibility(FakeModel(modalities={'audio'}), bench)   # neither video nor vision
+
+    def test_model_hard_requires_accepted_format_passes(self):
+        # Check-2 fix: a model hard-requiring video isn't rejected when the
+        # benchmark ACCEPTS video (required ∪ accepted).
+        bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
+        model = FakeModel(modalities={'video'}, required_modalities={'video'})
         check_compatibility(model, bench)  # should not raise
 
 
