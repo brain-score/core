@@ -9,6 +9,7 @@ import logging
 import warnings
 
 from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, merge_data_arrays
+from brainscore_core.metrics.numeric import per_unit_pearson  # noqa: F401
 
 _logger = logging.getLogger(__name__)
 
