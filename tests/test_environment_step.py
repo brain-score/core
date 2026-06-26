@@ -300,3 +300,39 @@ class TestObservationTyping:
         names = {a.__forward_arg__ if isinstance(a, ForwardRef)
                  else getattr(a, '__name__', str(a)) for a in args}
         assert 'MultimodalStimulusSet' in names      # the canonical perceptual payload
+
+
+# ── Composed dispatch table (register_input_handler) ──────────────────
+
+class _FakeEvent:
+    """A brand-new input-event type, defined entirely outside core."""
+    pass
+
+
+def test_register_input_handler_routes_new_type():
+    """A new IO type routes to a registered handler WITHOUT editing process();
+    the table is the extension seam. Registration is copy-on-write per class."""
+    class _ModelWithFake(BrainScoreModel):
+        def _handle_fake(self, ev):
+            return f"handled:{type(ev).__name__}"
+    _ModelWithFake.register_input_handler(_FakeEvent, '_handle_fake')
+    sub = _ModelWithFake(identifier='fake', model=None, region_layer_map={},
+                         preprocessors={'vision': lambda x: x})
+    assert sub.process(_FakeEvent()) == 'handled:_FakeEvent'
+    # copy-on-write: the base class table is untouched.
+    assert not any(t is _FakeEvent for t, _ in BrainScoreModel._INPUT_HANDLERS)
+
+
+def test_register_input_handler_before_precedence():
+    """`before=` inserts ahead of an existing entry so it wins dispatch."""
+    class _ModelB(BrainScoreModel):
+        def _handle_specific(self, ev):
+            return 'specific'
+    _ModelB.register_input_handler(EnvironmentStep, '_handle_specific',
+                                   before=EnvironmentStep)
+    sub = _ModelB(identifier='before', model=None, region_layer_map={},
+                  preprocessors={'vision': lambda x: x})
+    assert sub.process(_droid_step()) == 'specific'
+    # base dispatch is still the default for an un-subclassed model.
+    base = _make_model(action_fn=_droid_action_fn)
+    assert isinstance(base.process(_droid_step()), EnvironmentResponse)

@@ -989,61 +989,106 @@ class BrainScoreModel(Subject):
                 return m
         return next(iter(detected))
 
+    # ── Input-event dispatch table ──────────────────────────────────
+    # process() iterates this table and routes each input-event type to its
+    # handler method (called as ``getattr(self, name)(input_event)``). Adding a
+    # NEW capability / IO type means registering a handler here (or via
+    # ``register_input_handler``) rather than editing process(): the dispatch is
+    # data, not a hardcoded isinstance ladder. Order matters only when one event
+    # type subclasses another (list the more specific type first). A StimulusSet
+    # (the perceptual 99% path) is the fallback when nothing matches, so it
+    # needs no entry.
+    _INPUT_HANDLERS: List[Tuple[type, str]] = [
+        (StateChange, '_dispatch_state_change'),
+        (EnvironmentStep, '_handle_environment_step'),
+        (Message, '_handle_message'),
+    ]
+
+    @classmethod
+    def register_input_handler(cls, event_type: type, handler_name: str,
+                               before: Optional[type] = None) -> None:
+        """Register a handler for an input-event type, so process() routes that
+        type to ``getattr(self, handler_name)(input_event)``.
+
+        This is the extension seam for a new capability / IO type: register a
+        handler instead of editing process(). ``before`` inserts the entry ahead
+        of an existing type (for subtype precedence). The table is copied per
+        subclass on first registration, so registering on one model class never
+        leaks into siblings or the base.
+        """
+        if '_INPUT_HANDLERS' not in cls.__dict__:
+            cls._INPUT_HANDLERS = list(cls._INPUT_HANDLERS)
+        entry = (event_type, handler_name)
+        if before is not None:
+            for i, (existing_type, _) in enumerate(cls._INPUT_HANDLERS):
+                if existing_type is before:
+                    cls._INPUT_HANDLERS.insert(i, entry)
+                    return
+        cls._INPUT_HANDLERS.append(entry)
+
     def process(self, input_event: InputEvent,
                 multi_modality: bool = False) -> OutputEvent:
-        # Dispatch on input event type. StimulusSet (perceptual input) is the
-        # primary path; EnvironmentStep dispatches to the registered action_fn
-        # for embodied evaluation; StateChange dispatches to the registered
-        # state_change_fn for perturbation/lesion/ablation evaluation.
-        #
-        # multi_modality (default False): when True AND the stimulus set
-        # carries columns for multiple supported modalities, process invokes
-        # EVERY matching wrapper and concatenates their assemblies along the
-        # neuroid axis with a ``modality`` coord. The default keeps the
-        # legacy single-modality dispatch (vision wins via MODALITY_PRIORITY).
-        if isinstance(input_event, StateChange):
-            return self._dispatch_state_change(input_event)
-        if isinstance(input_event, EnvironmentStep):
-            if self._action_fn is None:
-                raise NotImplementedError(
-                    f"Model '{self.identifier}' has no action_fn registered. "
-                    f"Embodied evaluation requires the model to declare an "
-                    f"action_fn(env_step) -> EnvironmentResponse callable at "
-                    f"BrainScoreModel construction time. Received: "
-                    f"EnvironmentStep(step_num={input_event.step_num})."
-                )
-            response = self._action_fn(input_event)
-            if not isinstance(response, EnvironmentResponse):
-                raise TypeError(
-                    f"Model '{self.identifier}' action_fn returned "
-                    f"{type(response).__name__}; expected EnvironmentResponse. "
-                    f"Wrap the action in EnvironmentResponse(action=...) so "
-                    f"benchmarks see a consistent shape across models."
-                )
-            return response
-        if isinstance(input_event, Message):
-            # A Message is consumed by *responding* to it: route to the agent's
-            # action_fn (the symmetric companion to emitting a Message). The
-            # responder may return a Message (dialogue) or an EnvironmentResponse.
-            if self._action_fn is None:
-                raise NotImplementedError(
-                    f"Model '{self.identifier}' has no action_fn registered; "
-                    f"process(Message) routes to the agent's responder. Declare "
-                    f"action_fn(env_step) -> EnvironmentResponse|Message at "
-                    f"BrainScoreModel construction time."
-                )
-            response = self._action_fn(EnvironmentStep(observation=input_event))
-            if not isinstance(response, (Message, EnvironmentResponse)):
-                raise TypeError(
-                    f"Model '{self.identifier}' action_fn returned "
-                    f"{type(response).__name__}; a Message responder must return "
-                    f"a Message or EnvironmentResponse."
-                )
-            return response
+        """Evaluate one input event. Dispatch is table-driven (``_INPUT_HANDLERS``):
+        each registered ``(type, handler)`` routes its event type; a StimulusSet
+        (the perceptual primary path) is the fallback. ``multi_modality`` only
+        affects the perceptual path: when True AND the stimulus set carries
+        columns for multiple supported modalities, every matching wrapper runs
+        and their assemblies concat along the neuroid axis with a ``modality``
+        coord (default keeps single-modality dispatch; vision wins via
+        MODALITY_PRIORITY).
+        """
+        for event_type, handler_name in self._INPUT_HANDLERS:
+            if isinstance(input_event, event_type):
+                return getattr(self, handler_name)(input_event)
+        # Fallback: perceptual input (StimulusSet / MultimodalStimulusSet).
+        return self._handle_stimulus_set(input_event, multi_modality)
 
-        # Perceptual input (StimulusSet).
-        stimuli = input_event
+    def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
+        """Embodied evaluation: route one environment tick to the model's
+        ``action_fn`` (declared at construction); raise if absent."""
+        if self._action_fn is None:
+            raise NotImplementedError(
+                f"Model '{self.identifier}' has no action_fn registered. "
+                f"Embodied evaluation requires the model to declare an "
+                f"action_fn(env_step) -> EnvironmentResponse callable at "
+                f"BrainScoreModel construction time. Received: "
+                f"EnvironmentStep(step_num={input_event.step_num})."
+            )
+        response = self._action_fn(input_event)
+        if not isinstance(response, EnvironmentResponse):
+            raise TypeError(
+                f"Model '{self.identifier}' action_fn returned "
+                f"{type(response).__name__}; expected EnvironmentResponse. "
+                f"Wrap the action in EnvironmentResponse(action=...) so "
+                f"benchmarks see a consistent shape across models."
+            )
+        return response
 
+    def _handle_message(self, input_event: 'Message') -> OutputEvent:
+        """A Message is consumed by *responding* to it: route to the agent's
+        ``action_fn`` (the symmetric companion to emitting a Message). The
+        responder may return a Message (dialogue) or an EnvironmentResponse."""
+        if self._action_fn is None:
+            raise NotImplementedError(
+                f"Model '{self.identifier}' has no action_fn registered; "
+                f"process(Message) routes to the agent's responder. Declare "
+                f"action_fn(env_step) -> EnvironmentResponse|Message at "
+                f"BrainScoreModel construction time."
+            )
+        response = self._action_fn(EnvironmentStep(observation=input_event))
+        if not isinstance(response, (Message, EnvironmentResponse)):
+            raise TypeError(
+                f"Model '{self.identifier}' action_fn returned "
+                f"{type(response).__name__}; a Message responder must return "
+                f"a Message or EnvironmentResponse."
+            )
+        return response
+
+    def _handle_stimulus_set(self, stimuli,
+                             multi_modality: bool = False) -> OutputEvent:
+        """Perceptual path (the 99% case, and the fallback when no table handler
+        matches): behavioral generation, behavioral readout, or neural extraction.
+        """
         # Behavioral mode (generation path): model generates a label for
         # each stimulus via instruction + generation_fn.
         if (self._use_generation_for_task
