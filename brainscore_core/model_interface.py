@@ -38,6 +38,7 @@ schema citations and the mobile-manipulation roadmap.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
+import warnings
 
 if TYPE_CHECKING:  # annotation-only; resolved against the vendored brainio
     from brainscore_core.supported_data_standards.brainio.assemblies import (
@@ -1132,6 +1133,17 @@ class BrainScoreModel(Subject):
             return self._process_multi_modality(stimuli, detected, layers)
 
         modality = self._pick_modality(detected)
+        if not multi_modality and len(detected) > 1:
+            warnings.warn(
+                f"Stimulus set contains multiple supported modalities "
+                f"{sorted(detected)} for model '{self.identifier}'. "
+                f"Default process(..., multi_modality=False) will use "
+                f"'{modality}' via MODALITY_PRIORITY. Pass "
+                f"multi_modality=True to extract all supported modalities, "
+                f"or provide stimulus columns for only the modality you want.",
+                UserWarning,
+                stacklevel=2,
+            )
         if self._composite_recording and self._supports_layer_extraction(modality):
             return self._process_composite_regions(stimuli, modality)
         assembly = self._extract_for_modality(stimuli, modality, layers)

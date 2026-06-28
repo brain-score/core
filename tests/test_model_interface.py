@@ -1,4 +1,5 @@
 import pytest
+import warnings
 from unittest.mock import MagicMock
 from typing import Any, Dict, Optional, Set
 
@@ -770,8 +771,8 @@ class _XArrayPreprocessor:
 class TestMultiModalityDispatch:
 
     def test_default_single_modality_backward_compat(self):
-        """Without multi_modality=True, multimodal stim still picks one
-        modality via MODALITY_PRIORITY (vision wins)."""
+        """Without multi_modality=True, multimodal stim warns and then picks
+        one modality via MODALITY_PRIORITY (vision wins)."""
         act = _XArrayActivationsModel()
         text_proc = _XArrayPreprocessor(label='text')
         m = BrainScoreModel(
@@ -783,8 +784,32 @@ class TestMultiModalityDispatch:
         )
         m.start_recording('IT')
         stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
-        assembly = m.process(stimuli)
+        with pytest.warns(UserWarning, match="multiple supported modalities"):
+            assembly = m.process(stimuli)
         # Vision wins; text wrapper not invoked
+        assert text_proc.call_args is None
+        assert 'modality' not in assembly.coords
+
+    def test_single_modality_default_does_not_warn(self):
+        """Single-modality stimuli keep the exact default dispatch path."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={'IT': 'layer.10'},
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        m.start_recording('IT')
+        stimuli = StubStimulusSet(columns=['image_file_name'])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            assembly = m.process(stimuli)
+        assert not [
+            warning for warning in caught
+            if "multiple supported modalities" in str(warning.message)
+        ]
         assert text_proc.call_args is None
         assert 'modality' not in assembly.coords
 
@@ -808,6 +833,27 @@ class TestMultiModalityDispatch:
         # Output carries a modality coord
         assert 'modality' in assembly.coords
         assert set(assembly['modality'].values.tolist()) == {'vision', 'text'}
+
+    def test_explicit_multi_modality_does_not_warn(self):
+        """multi_modality=True is an explicit choice, not an ambiguous fallback."""
+        act = _XArrayActivationsModel()
+        text_proc = _XArrayPreprocessor(label='text')
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={},
+            preprocessors={'vision': make_stub_preprocessor(), 'text': text_proc},
+            activations_model=act,
+        )
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            assembly = m.process(stimuli, multi_modality=True)
+        assert not [
+            warning for warning in caught
+            if "multiple supported modalities" in str(warning.message)
+        ]
+        assert 'modality' in assembly.coords
 
     def test_multi_modality_falls_back_to_single_when_one_modality(self):
         """multi_modality=True is a no-op when only one modality is
