@@ -171,6 +171,7 @@ def _get_n_targets(benchmark) -> int:
     count (total / n_subjects) since subjects are fitted sequentially.
     """
     n_targets = None
+    assembly = None
     for attr in ('_assembly', 'train_assembly', 'test_assembly'):
         assembly = getattr(benchmark, attr, None)
         if assembly is not None:
@@ -180,6 +181,9 @@ def _get_n_targets(benchmark) -> int:
                 break
     if n_targets is None:
         n_targets = getattr(benchmark, 'n_targets', 100)
+        if n_targets is None:
+            n_targets = 100
+    n_targets = int(n_targets)
 
     # If benchmark fits per-subject, the metric only processes one subject's
     # neuroids at a time. Approximate per-subject count by dividing total.
@@ -193,7 +197,7 @@ def _get_n_targets(benchmark) -> int:
         except Exception:
             pass  # fall back to full n_targets
 
-    return n_targets
+    return int(n_targets)
 
 
 def _get_n_stimuli(benchmark) -> int:
