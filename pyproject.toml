@@ -47,6 +47,27 @@ build-backend = "setuptools.build_meta"
 #### mypy type-checking config ####
 ################################################################
 
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = true
+files = [
+    "brainscore_core/model_interface.py",
+    "brainscore_core/compatibility.py",
+    "brainscore_core/memory.py",
+    "brainscore_core/capabilities",
+    "brainscore_core/dispatch.py",
+    "brainscore_core/brainscore_model.py",
+    "brainscore_core/events.py",
+    "brainscore_core/selection.py",
+    "brainscore_core/recording.py",
+    "brainscore_core/perturbation.py",
+    "brainscore_core/behavioral.py",
+    "brainscore_core/contract.py",
+    "brainscore_core/capability_config.py",
+]
+
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests as integration tests (slow, requires real components)",

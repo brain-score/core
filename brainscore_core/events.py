@@ -357,4 +357,4 @@ InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message]  # type
 # change: MotorOutput (continuous motor regression, §2.4) and GeneratedSequence
 # (variable-length tokens + per-token logprobs).
 OutputEvent = Union['NeuroidAssembly', 'BehavioralAssembly',
-                    EnvironmentResponse, PerturbationApplied, Message]  # type: ignore[name-defined]
+                    EnvironmentResponse, PerturbationApplied, Message]

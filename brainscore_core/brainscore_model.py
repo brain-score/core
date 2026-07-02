@@ -334,7 +334,7 @@ class BrainScoreModel(Subject):
     def digest_text(self, text) -> Dict[str, Any]:
         """Language benchmark compatibility."""
         import hashlib
-        import pandas as pd  # type: ignore[import-untyped]
+        import pandas as pd
         from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
         import numpy as np
