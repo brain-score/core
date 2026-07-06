@@ -8,6 +8,7 @@ import numpy as np
 
 from .io_catalog import modalities_to_input_channels
 from .streaming import InMemorySession, StreamEvent, parse_channel
+from .events import PerturbationApplied, StateChange
 from .supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
     NeuroidAssembly,
@@ -85,12 +86,42 @@ class BehavioralSession(InMemorySession):
         return _collect_behavior_events(matching)
 
 
+class StateChangeSession(InMemorySession):
+    """Buffered session for perturbation apply/reset interactions."""
+
+    def __init__(self, state_change: StateChange):
+        self.state_change = state_change
+        super().__init__([_state_change_event(state_change)])
+
+    @classmethod
+    def from_state_change(cls, state_change: StateChange):
+        return cls(state_change)
+
+    def collect(self, channel: str = "perturbation"):
+        matching = [event for event in self.emitted if event.channel == channel]
+        if not matching:
+            raise ValueError(f"No emitted events for channel {channel!r}.")
+        if len(matching) != 1:
+            raise ValueError(
+                f"Expected one emitted event for channel {channel!r}; "
+                f"got {len(matching)}."
+            )
+        payload = matching[0].payload
+        if payload is None:
+            return matching[0].meta.get("handle_id")
+        return payload
+
+
 def stimulus_session(stimulus_set, record: str = "IT") -> StimulusSetSession:
     return StimulusSetSession.from_stimulus_set(stimulus_set, record=record)
 
 
 def behavior_session(task_context) -> BehavioralSession:
     return BehavioralSession.from_task_context(task_context)
+
+
+def state_change_session(state_change: StateChange) -> StateChangeSession:
+    return StateChangeSession.from_state_change(state_change)
 
 
 def score_stimuli(subject, stimulus_set, record: str = "IT") -> NeuroidAssembly:
@@ -105,6 +136,12 @@ def score_behavior(subject, task_context) -> BehavioralAssembly:
     return session.collect("behavior")
 
 
+def apply_state_change(subject, state_change: StateChange):
+    session = state_change_session(state_change)
+    _drive_state_change_via_process(subject, session, state_change)
+    return session.collect("perturbation")
+
+
 def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
                        record: str = "IT") -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
@@ -115,6 +152,23 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
         payload=output,
         t_ms=0.0,
         meta={"driver": "process", "record": record},
+    ))
+
+
+def _drive_state_change_via_process(subject, session: StateChangeSession,
+                                    state_change: StateChange) -> None:
+    """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    result = subject.process(state_change)
+    handle_id = _state_change_handle_id(state_change, result)
+    session.emit(StreamEvent(
+        channel="perturbation",
+        payload=result,
+        t_ms=0.0,
+        meta={
+            "driver": "process",
+            "kind": state_change.kind,
+            "handle_id": handle_id,
+        },
     ))
 
 
@@ -211,6 +265,58 @@ def _behavior_stimuli_to_score(task_context):
         if key in task_context.metadata:
             return task_context.metadata[key]
     return task_context.fitting_stimuli
+
+
+def _state_change_event(state_change: StateChange) -> StreamEvent:
+    channel = _state_change_channel(state_change)
+    meta = {"kind": state_change.kind}
+    if state_change.handle_id is not None:
+        meta["reset"] = state_change.handle_id
+    return StreamEvent(
+        channel=channel,
+        payload=state_change,
+        t_ms=0.0,
+        meta=meta,
+    )
+
+
+def _state_change_channel(state_change: StateChange) -> str:
+    family = _state_change_family(state_change)
+    address = _state_change_address(state_change)
+    return f"{family}:{address}" if address else family
+
+
+def _state_change_family(state_change: StateChange) -> str:
+    if state_change.kind == "stimulation":
+        return "stimulation"
+    return "lesion"
+
+
+def _state_change_address(state_change: StateChange) -> Optional[str]:
+    target = state_change.target
+    if target is not None:
+        layer = getattr(target, "layer", None)
+        if layer:
+            indices = getattr(target, "indices", None)
+            if indices:
+                start = indices[0]
+                stop = indices[-1] + 1
+                return f"{layer}[{start}:{stop}]"
+            return str(layer)
+
+    if state_change.metadata.get("address"):
+        return str(state_change.metadata["address"])
+
+    if state_change.handle_id:
+        return str(state_change.handle_id)
+
+    return None
+
+
+def _state_change_handle_id(state_change: StateChange, result) -> Optional[str]:
+    if isinstance(result, PerturbationApplied):
+        return result.handle_id
+    return state_change.handle_id
 
 
 def _channel_for_stimulus_column(column: str) -> Optional[str]:

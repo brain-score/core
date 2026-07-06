@@ -3,12 +3,22 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from brainscore_core.model_interface import BrainScoreModel, Subject, TaskContext
+from brainscore_core.model_interface import (
+    BrainScoreModel,
+    Perturbation,
+    PerturbationApplied,
+    Selection,
+    StateChange,
+    Subject,
+    TaskContext,
+)
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
+    apply_state_change,
     behavior_session,
     score_behavior,
     score_stimuli,
+    state_change_session,
     stimulus_session,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import (
@@ -19,6 +29,10 @@ from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 from tests.test_behavioral_readout import (
     _fake_preprocessor_returning,
     _make_image_stimulus_set,
+)
+from tests.test_state_change import (
+    _counting_state_change_fn,
+    _make_model as _make_state_change_model,
 )
 
 
@@ -322,3 +336,87 @@ def test_behavior_collect_rejects_missing_channel():
 
     with pytest.raises(ValueError, match="No emitted events"):
         session.collect("behavior")
+
+
+def _ablation_state_change():
+    return StateChange(
+        kind="ablation",
+        target=Selection(layer="blocks.10", indices=[1, 2, 3]),
+        perturbation=Perturbation(kind="zero"),
+    )
+
+
+def test_state_change_session_emits_lesion_event_with_address():
+    session = state_change_session(_ablation_state_change())
+    event = session.next_input()
+
+    assert event.channel == "lesion:blocks.10[1:4]"
+    assert isinstance(event.payload, StateChange)
+    assert event.meta == {"kind": "ablation"}
+    assert session.next_input() is None
+
+
+def test_apply_state_change_produces_handle_and_ack_event():
+    fn, state = _counting_state_change_fn()
+    model = _make_state_change_model(state_change_fn=fn)
+    state_change = _ablation_state_change()
+
+    session = state_change_session(state_change)
+    _ = session.next_input()
+    from brainscore_core.streaming_helpers import _drive_state_change_via_process
+    _drive_state_change_via_process(model, session, state_change)
+
+    applied = session.collect("perturbation")
+
+    assert isinstance(applied, PerturbationApplied)
+    assert applied.handle_id in state["installed"]
+    assert session.emitted[0].meta["handle_id"] == applied.handle_id
+    assert session.emitted[0].payload is applied
+
+
+def test_apply_state_change_matches_legacy_process_result():
+    fn_legacy, _ = _counting_state_change_fn()
+    legacy = _make_state_change_model(state_change_fn=fn_legacy)
+    legacy_result = legacy.process(_ablation_state_change())
+
+    fn_helper, _ = _counting_state_change_fn()
+    helper_model = _make_state_change_model(state_change_fn=fn_helper)
+    helper_result = apply_state_change(helper_model, _ablation_state_change())
+
+    assert isinstance(helper_result, PerturbationApplied)
+    assert helper_result.handle_id == legacy_result.handle_id
+    assert helper_result.target == legacy_result.target
+    assert helper_result.perturbation == legacy_result.perturbation
+    assert helper_result.applied_at == legacy_result.applied_at
+
+
+def test_state_change_reset_event_restores_baseline():
+    model_state = {"output": 1.0}
+
+    def state_change_fn(state_change):
+        saved = model_state["output"]
+        model_state["output"] = 0.0
+        applied = PerturbationApplied(
+            handle_id="ablation-handle",
+            target=state_change.target,
+            perturbation=state_change.perturbation,
+        )
+
+        def cleanup():
+            model_state["output"] = saved
+
+        return applied, cleanup
+
+    model = _make_state_change_model(state_change_fn=state_change_fn)
+    applied = apply_state_change(model, _ablation_state_change())
+    assert model_state["output"] == 0.0
+
+    reset = StateChange(kind="reset", handle_id=applied.handle_id)
+    reset_session = state_change_session(reset)
+    reset_event = reset_session.next_input()
+    reset_result = apply_state_change(model, reset)
+
+    assert reset_event.channel == "lesion:ablation-handle"
+    assert reset_event.meta["reset"] == applied.handle_id
+    assert reset_result == applied.handle_id
+    assert model_state["output"] == 1.0
