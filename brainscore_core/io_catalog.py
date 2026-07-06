@@ -29,6 +29,12 @@ INPUT = "input"
 OUTPUT = "output"
 BOTH = "both"
 REGISTRY_VERSION = "2.0"
+MODALITY_TO_INPUT_CHANNEL = {
+    "vision": "vision",
+    "text": "text",
+    "audio": "audio",
+    "video": "video",
+}
 
 _DIRECTIONS = (INPUT, OUTPUT, BOTH)
 ShapeValidator = Callable[[Any], object]
@@ -84,6 +90,14 @@ def _check_direction(direction: str) -> None:
 
 def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
     return entry.direction in (direction, BOTH)
+
+
+def modalities_to_input_channels(modalities) -> set[str]:
+    """Map v1.5 modality names onto v2 input channel families."""
+    return {
+        MODALITY_TO_INPUT_CHANNEL.get(modality, modality)
+        for modality in set(modalities)
+    }
 
 
 def get(label: str) -> CatalogEntry:

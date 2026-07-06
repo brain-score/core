@@ -45,16 +45,9 @@ import warnings
 from typing import Optional, Set
 
 from . import io_catalog
+from .io_catalog import modalities_to_input_channels
 from .model_interface import Subject
 from .streaming import parse_channel
-
-
-_MODALITY_TO_INPUT_CHANNEL = {
-    "vision": "vision",
-    "text": "text",
-    "audio": "audio",
-    "video": "video",
-}
 
 
 class CompatibilityError(Exception):
@@ -131,7 +124,7 @@ def benchmark_required_input_channels(benchmark) -> Set[str]:
     if declared is not None:
         return set(declared)
     modalities = set(getattr(benchmark, "required_modalities", set()))
-    return _modalities_to_input_channels(modalities)
+    return modalities_to_input_channels(modalities)
 
 
 def benchmark_requested_output_channels(benchmark) -> Set[str]:
@@ -143,13 +136,6 @@ def benchmark_requested_output_channels(benchmark) -> Set[str]:
     if region is None:
         return set()
     return {f"neural:{region}"}
-
-
-def _modalities_to_input_channels(modalities) -> Set[str]:
-    return {
-        _MODALITY_TO_INPUT_CHANNEL.get(modality, modality)
-        for modality in set(modalities)
-    }
 
 
 def _validate_channel_set(channels: Set[str], direction: str, owner: str) -> None:

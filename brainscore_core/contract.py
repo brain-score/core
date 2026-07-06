@@ -5,14 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
-
-
-_MODALITY_TO_INPUT_CHANNEL = {
-    "vision": "vision",
-    "text": "text",
-    "audio": "audio",
-    "video": "video",
-}
+from .io_catalog import modalities_to_input_channels
 
 
 @dataclass
@@ -184,10 +177,7 @@ class Subject(ABC):
 
     @staticmethod
     def _modalities_to_input_channels(modalities) -> Set[str]:
-        return {
-            _MODALITY_TO_INPUT_CHANNEL.get(modality, modality)
-            for modality in set(modalities)
-        }
+        return modalities_to_input_channels(modalities)
 
     def _has_behavioral_output_path(self) -> bool:
         for attr in (
