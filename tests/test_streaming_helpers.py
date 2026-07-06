@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from brainscore_core import io_catalog
 from brainscore_core.model_interface import (
     BrainScoreModel,
     Perturbation,
@@ -354,6 +355,49 @@ def test_state_change_session_emits_lesion_event_with_address():
     assert isinstance(event.payload, StateChange)
     assert event.meta == {"kind": "ablation"}
     assert session.next_input() is None
+
+
+def test_state_change_session_routes_pharmacological_event_to_registry_channel():
+    state_change = StateChange(
+        kind="pharmacological",
+        metadata={"address": "ketamine"},
+        perturbation=Perturbation(kind="dose", scale=0.1),
+    )
+    session = state_change_session(state_change)
+    event = session.next_input()
+
+    assert event.channel == "pharmacological:ketamine"
+    assert io_catalog.validate(
+        event.channel, event.payload, direction=io_catalog.INPUT
+    ) == []
+
+
+def test_state_change_session_routes_lesion_kind_to_lesion_channel():
+    state_change = StateChange(
+        kind="lesion",
+        target=Selection(layer="blocks.10"),
+        perturbation=Perturbation(kind="zero"),
+    )
+    session = state_change_session(state_change)
+    event = session.next_input()
+
+    assert event.channel == "lesion:blocks.10"
+
+
+def test_state_change_reset_uses_metadata_family_and_address_when_present():
+    reset = StateChange(
+        kind="reset",
+        handle_id="stimulation-handle",
+        metadata={
+            "family": "stimulation",
+            "address": "blocks.10",
+        },
+    )
+    session = state_change_session(reset)
+    event = session.next_input()
+
+    assert event.channel == "stimulation:blocks.10"
+    assert event.meta["reset"] == "stimulation-handle"
 
 
 def test_apply_state_change_produces_handle_and_ack_event():

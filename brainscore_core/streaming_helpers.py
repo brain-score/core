@@ -31,6 +31,13 @@ STIMULUS_COLUMN_TO_MODALITY = {
     "video_path": "video",
 }
 
+_STATE_CHANGE_KIND_TO_CHANNEL_FAMILY = {
+    "ablation": "lesion",
+    "lesion": "lesion",
+    "stimulation": "stimulation",
+    "pharmacological": "pharmacological",
+}
+
 
 class StimulusSetSession(InMemorySession):
     """Buffered open-loop session built from a StimulusSet-like table."""
@@ -287,8 +294,21 @@ def _state_change_channel(state_change: StateChange) -> str:
 
 
 def _state_change_family(state_change: StateChange) -> str:
-    if state_change.kind == "stimulation":
-        return "stimulation"
+    if state_change.kind == "reset":
+        family = (
+            state_change.metadata.get("family")
+            or state_change.metadata.get("channel_family")
+        )
+        if family:
+            return str(family)
+        # Handle-id-only resets do not retain the original perturbation channel.
+        return "lesion"
+
+    family = _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY.get(state_change.kind)
+    if family is not None:
+        return family
+
+    # Unknown apply kinds use lesion as the generic perturbation fallback.
     return "lesion"
 
 
@@ -304,8 +324,9 @@ def _state_change_address(state_change: StateChange) -> Optional[str]:
                 return f"{layer}[{start}:{stop}]"
             return str(layer)
 
-    if state_change.metadata.get("address"):
-        return str(state_change.metadata["address"])
+    for key in ("address", "channel_address"):
+        if state_change.metadata.get(key):
+            return str(state_change.metadata[key])
 
     if state_change.handle_id:
         return str(state_change.handle_id)

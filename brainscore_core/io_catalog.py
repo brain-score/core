@@ -293,6 +293,12 @@ _SEED = [
                  "the model's state_change_fn",
                  addressing="address is a unit selector (layer path, optional indices)",
                  materializers=("StateChange",)),
+    CatalogEntry("pharmacological", INPUT, "StateChange",
+                 "a pharmacological perturbation spec applied to an agent or selected units",
+                 "the model's state_change_fn",
+                 addressing="address is a unit selector or agent",
+                 owner="core",
+                 materializers=("StateChange",)),
     # --- inputs: embodied (carried by EnvironmentStep, harness-defined payload) ---
     # Retained legacy v1.5 channel; not a canonical v2 seed family.
     CatalogEntry("observation", INPUT, "EnvironmentStep.observation",
