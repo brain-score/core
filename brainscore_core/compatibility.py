@@ -46,6 +46,15 @@ from typing import Optional, Set
 
 from . import io_catalog
 from .model_interface import Subject
+from .streaming import parse_channel
+
+
+_MODALITY_TO_INPUT_CHANNEL = {
+    "vision": "vision",
+    "text": "text",
+    "audio": "audio",
+    "video": "video",
+}
 
 
 class CompatibilityError(Exception):
@@ -56,6 +65,132 @@ class CompatibilityError(Exception):
 class CompatibilityWarning(UserWarning):
     """Issued when a model can run but will not use all available modalities."""
     pass
+
+
+def check_channel_compatibility(subject: Subject, benchmark) -> None:
+    """Check the UMI v2.0 channel compatibility contract.
+
+    Raises :class:`CompatibilityError` before compute when any of the three
+    channel-set conditions fail:
+
+    1. ``benchmark.required_input_channels <= subject.in_channels``
+    2. ``benchmark.requested_output_channels <= subject.out_channels``
+    3. ``subject.required_channels <= benchmark.required_input_channels``
+    """
+    subject_in = set(subject.in_channels)
+    subject_out = set(subject.out_channels)
+    subject_required = set(subject.required_channels)
+    bench_required = benchmark_required_input_channels(benchmark)
+    bench_requested = benchmark_requested_output_channels(benchmark)
+
+    _validate_channel_set(
+        subject_in, io_catalog.INPUT, f"subject '{subject.identifier}' in_channels")
+    _validate_channel_set(
+        subject_out, io_catalog.OUTPUT, f"subject '{subject.identifier}' out_channels")
+    _validate_channel_set(
+        subject_required, io_catalog.INPUT,
+        f"subject '{subject.identifier}' required_channels")
+    _validate_channel_set(
+        bench_required, io_catalog.INPUT,
+        f"benchmark '{_benchmark_identifier(benchmark)}' required_input_channels")
+    _validate_channel_set(
+        bench_requested, io_catalog.OUTPUT,
+        f"benchmark '{_benchmark_identifier(benchmark)}' requested_output_channels")
+
+    missing_inputs = bench_required - subject_in
+    if missing_inputs:
+        raise CompatibilityError(
+            f"Subject '{subject.identifier}' is missing required input "
+            f"channels for benchmark '{_benchmark_identifier(benchmark)}': "
+            f"{_format_channels(missing_inputs)}. Subject in_channels: "
+            f"{_format_channels(subject_in)}."
+        )
+
+    missing_outputs = bench_requested - subject_out
+    if missing_outputs:
+        raise CompatibilityError(
+            f"Subject '{subject.identifier}' cannot emit requested output "
+            f"channels for benchmark '{_benchmark_identifier(benchmark)}': "
+            f"{_format_channels(missing_outputs)}. Subject out_channels: "
+            f"{_format_channels(subject_out)}."
+        )
+
+    unmet_requirements = subject_required - bench_required
+    if unmet_requirements:
+        raise CompatibilityError(
+            f"Subject '{subject.identifier}' hard-requires input channels "
+            f"{_format_channels(unmet_requirements)} but benchmark "
+            f"'{_benchmark_identifier(benchmark)}' provides "
+            f"{_format_channels(bench_required)}."
+        )
+
+
+def benchmark_required_input_channels(benchmark) -> Set[str]:
+    """Return v2 required input channels, deriving from v1.5 modalities."""
+    declared = getattr(benchmark, "required_input_channels", None)
+    if declared is not None:
+        return set(declared)
+    modalities = set(getattr(benchmark, "required_modalities", set()))
+    return _modalities_to_input_channels(modalities)
+
+
+def benchmark_requested_output_channels(benchmark) -> Set[str]:
+    """Return v2 requested output channels, with a v1.5 region fallback."""
+    declared = getattr(benchmark, "requested_output_channels", None)
+    if declared is not None:
+        return set(declared)
+    region = getattr(benchmark, "region", None)
+    if region is None:
+        return set()
+    return {f"neural:{region}"}
+
+
+def _modalities_to_input_channels(modalities) -> Set[str]:
+    return {
+        _MODALITY_TO_INPUT_CHANNEL.get(modality, modality)
+        for modality in set(modalities)
+    }
+
+
+def _validate_channel_set(channels: Set[str], direction: str, owner: str) -> None:
+    for channel in sorted(channels, key=repr):
+        try:
+            family, address = parse_channel(channel)
+        except (TypeError, ValueError) as error:
+            raise CompatibilityError(
+                f"{owner} declares invalid channel '{channel}': {error}."
+            ) from error
+
+        try:
+            entry = io_catalog.get(family)
+        except KeyError as error:
+            raise CompatibilityError(
+                f"{owner} declares unknown channel '{channel}'."
+            ) from error
+
+        if entry.direction not in (direction, io_catalog.BOTH):
+            raise CompatibilityError(
+                f"{owner} declares channel '{channel}' as {direction}, but "
+                f"the registry marks family '{family}' as {entry.direction}."
+            )
+
+        if address is not None and entry.addressing is None:
+            raise CompatibilityError(
+                f"{owner} declares addressed channel '{channel}', but family "
+                f"'{family}' is not addressable."
+            )
+
+
+def _format_channels(channels: Set[str]) -> str:
+    return (
+        "{"
+        + ", ".join(repr(channel) for channel in sorted(channels, key=repr))
+        + "}"
+    )
+
+
+def _benchmark_identifier(benchmark) -> str:
+    return getattr(benchmark, "identifier", "?")
 
 
 def check_compatibility(model: Subject, benchmark) -> None:
