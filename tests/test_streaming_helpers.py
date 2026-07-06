@@ -227,6 +227,50 @@ def test_score_behavior_matches_legacy_start_task_process_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
+def _generation_model(calls):
+    def fake_generate(stimulus_row, instruction, label_set):
+        calls.append((stimulus_row["stimulus_id"], instruction, tuple(label_set)))
+        return "cat" if stimulus_row["stimulus_id"] in {"s0", "s1", "s2"} else "dog"
+
+    return BrainScoreModel(
+        identifier="test-vlm",
+        model=None,
+        region_layer_map={},
+        preprocessors={"vision": lambda *args, **kwargs: None},
+        generation_fn=fake_generate,
+    )
+
+
+def _generation_context(scoring_stimuli):
+    return TaskContext(
+        task_type="probabilities",
+        label_set=["cat", "dog"],
+        instruction="What animal is this?",
+        metadata={"stimulus_set": scoring_stimuli},
+    )
+
+
+def test_score_behavior_matches_legacy_generation_path_exactly():
+    scoring = _make_image_stimulus_set(
+        ["cat"] * 3 + ["dog"] * 3, identifier="gen_test"
+    )
+
+    legacy_calls = []
+    legacy = _generation_model(legacy_calls)
+    legacy_context = _generation_context(scoring)
+    legacy.start_task(legacy_context)
+    expected = legacy.process(scoring)
+
+    helper_calls = []
+    helper_subject = _generation_model(helper_calls)
+    helper_context = _generation_context(scoring)
+    scored = score_behavior(helper_subject, helper_context)
+
+    assert isinstance(scored, BehavioralAssembly)
+    xr.testing.assert_identical(scored, expected)
+    assert helper_calls == legacy_calls
+
+
 def test_behavior_collect_packages_raw_label_events():
     session = behavior_session(TaskContext(task_type="probabilities"))
     session.emit(StreamEvent(
