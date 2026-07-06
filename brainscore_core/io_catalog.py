@@ -20,17 +20,25 @@ documentation-backed pre-flight check. It is deliberately loose (duck-typed on
 replaces the type system, it only flags obvious payload mismatches early.
 """
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from .streaming import parse_channel
 
 INPUT = "input"
 OUTPUT = "output"
+BOTH = "both"
+REGISTRY_VERSION = "2.0"
+
+_DIRECTIONS = (INPUT, OUTPUT, BOTH)
+ShapeValidator = Callable[[Any], object]
 
 
 @dataclass(frozen=True)
 class CatalogEntry:
     """One allowable input or output and its payload contract."""
     name: str                          # channel-style label, e.g. 'vision', 'neural:IT'
-    kind: str                          # INPUT or OUTPUT
+    kind: str                          # INPUT, OUTPUT, or BOTH
     carried_by: str                    # the typed envelope or method that carries it
     payload_contract: str              # human-readable dtype / shape / units
     handled_by: str                    # which harness or wrapper interprets the payload
@@ -38,6 +46,23 @@ class CatalogEntry:
     addressing: Optional[str] = None    # how the ':address' suffix is interpreted, if any
     expected_ndim: Tuple[int, ...] = ()  # allowed array ndims; empty means unchecked
     expected_dtype: Optional[str] = None  # e.g. 'uint8'; None means unchecked
+    direction: Optional[str] = None     # v2 registry alias for kind
+    shape_validator: Optional[ShapeValidator] = None
+    owner: str = "core"
+    materializers: Tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.kind not in _DIRECTIONS:
+            raise ValueError(f"CatalogEntry.kind must be one of {_DIRECTIONS}")
+        direction = self.kind if self.direction is None else self.direction
+        if direction not in _DIRECTIONS:
+            raise ValueError(f"CatalogEntry.direction must be one of {_DIRECTIONS}")
+        if direction != self.kind:
+            raise ValueError("CatalogEntry.direction must match kind")
+        object.__setattr__(self, "direction", direction)
+        object.__setattr__(self, "meta_keys", tuple(self.meta_keys))
+        object.__setattr__(self, "expected_ndim", tuple(self.expected_ndim))
+        object.__setattr__(self, "materializers", tuple(self.materializers))
 
 
 _CATALOG: Dict[str, CatalogEntry] = {}
@@ -50,6 +75,15 @@ def register(entry: CatalogEntry) -> None:
 
 def _family(label: str) -> str:
     return label.split(":", 1)[0]
+
+
+def _check_direction(direction: str) -> None:
+    if direction not in _DIRECTIONS:
+        raise ValueError(f"direction must be one of {_DIRECTIONS}")
+
+
+def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
+    return entry.direction in (direction, BOTH)
 
 
 def get(label: str) -> CatalogEntry:
@@ -80,14 +114,26 @@ def all_entries() -> List[CatalogEntry]:
     return [_CATALOG[k] for k in sorted(_CATALOG)]
 
 
+def by_direction(direction: str) -> List[CatalogEntry]:
+    """Every registry entry usable in the requested direction."""
+    _check_direction(direction)
+    return [e for e in all_entries() if _matches_direction(e, direction)]
+
+
+def channels(direction: Optional[str] = None) -> List[str]:
+    """Registered channel family names, optionally filtered by direction."""
+    entries = all_entries() if direction is None else by_direction(direction)
+    return [e.name for e in entries]
+
+
 def inputs() -> List[CatalogEntry]:
     """Every input entry."""
-    return [e for e in all_entries() if e.kind == INPUT]
+    return by_direction(INPUT)
 
 
 def outputs() -> List[CatalogEntry]:
     """Every output entry."""
-    return [e for e in all_entries() if e.kind == OUTPUT]
+    return by_direction(OUTPUT)
 
 
 def describe(label: str) -> str:
@@ -133,6 +179,63 @@ def check_payload(label: str, payload) -> List[str]:
     return warnings
 
 
+def _normalise_shape_validator_result(label: str, result: object) -> List[str]:
+    if result is None or result is True:
+        return []
+    if result is False:
+        return [f"{label}: payload failed shape_validator"]
+    if isinstance(result, str):
+        return [f"{label}: {result}"]
+    if isinstance(result, Iterable):
+        return [f"{label}: {warning}" for warning in result]
+    return [f"{label}: shape_validator returned unsupported result {result!r}"]
+
+
+def validate(
+    channel: str,
+    payload,
+    direction: Optional[str] = None,
+) -> List[str]:
+    """Validate a channel payload against the runtime-queryable registry.
+
+    Returns human-readable validation failures. An empty list means the channel
+    is known, its address is syntactically valid, the optional direction matches,
+    and no documented payload-shape mismatch was found.
+    """
+    warnings: List[str] = []
+    try:
+        family, address = parse_channel(channel)
+    except (TypeError, ValueError) as error:
+        return [f"{channel!r}: invalid channel name ({error})"]
+
+    try:
+        entry = get(family)
+    except KeyError as error:
+        return [str(error)]
+
+    if address is not None and entry.addressing is None:
+        warnings.append(f"{channel}: channel family '{family}' is not addressable")
+
+    if direction is not None:
+        _check_direction(direction)
+        if not _matches_direction(entry, direction):
+            warnings.append(
+                f"{channel}: registry direction is {entry.direction!r}, "
+                f"not requested {direction!r}"
+            )
+
+    warnings.extend(check_payload(channel, payload))
+
+    if entry.shape_validator is not None:
+        warnings.extend(
+            _normalise_shape_validator_result(
+                channel, entry.shape_validator(payload)
+            )
+        )
+
+    return warnings
+
+
 # ----------------------------------------------------------------------------
 # Seed catalog: the allowable inputs and outputs the initial release documents.
 # Device-specific payloads (an environment observation, a motor action) are
@@ -145,53 +248,64 @@ _SEED = [
     CatalogEntry("vision", INPUT, "StimulusSet column",
                  "(H, W, 3) uint8 image, or a path to one",
                  "image preprocessor + a vision model harness (wrapper)",
-                 meta_keys=("stimulus_id",), expected_ndim=(3,), expected_dtype="uint8"),
+                 meta_keys=("stimulus_id",), expected_ndim=(3,), expected_dtype="uint8",
+                 materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
                  "a Python str",
                  "tokenizer + a text model harness (TextWrapper)",
-                 meta_keys=("stimulus_id",)),
+                 meta_keys=("stimulus_id",), materializers=("StimulusSet",)),
     CatalogEntry("audio", INPUT, "StimulusSet column",
                  "(samples,) float32 waveform, or a path; sample rate read from the file header",
                  "an audio model harness (AudioWrapper)",
-                 meta_keys=("stimulus_id", "sample_rate_hz"), expected_ndim=(1,)),
+                 meta_keys=("stimulus_id", "sample_rate_hz"), expected_ndim=(1,),
+                 materializers=("StimulusSet",)),
     CatalogEntry("video", INPUT, "StimulusSet column",
                  "(T, H, W, 3) uint8 clip, or a path",
                  "a video model harness (VideoWrapper)",
-                 meta_keys=("stimulus_id",), expected_ndim=(4,)),
+                 meta_keys=("stimulus_id",), expected_ndim=(4,),
+                 materializers=("StimulusSet",)),
     CatalogEntry("instruction", INPUT, "TaskContext.instruction or EnvironmentStep.instruction",
                  "a Python str framing the task",
-                 "the model's generation or policy path"),
+                 "the model's generation or policy path",
+                 materializers=("TaskContext", "EnvironmentStep")),
     # --- inputs: direct neural (carried by StateChange) ---
     CatalogEntry("stimulation", INPUT, "StateChange",
                  "a perturbation spec (kind, scale, replacement) applied to selected units",
                  "the model's state_change_fn",
-                 addressing="address is a unit selector (layer path, optional indices)"),
+                 addressing="address is a unit selector (layer path, optional indices)",
+                 materializers=("StateChange",)),
     CatalogEntry("lesion", INPUT, "StateChange",
                  "an ablation spec applied to selected units",
                  "the model's state_change_fn",
-                 addressing="address is a unit selector (layer path, optional indices)"),
+                 addressing="address is a unit selector (layer path, optional indices)",
+                 materializers=("StateChange",)),
     # --- inputs: embodied (carried by EnvironmentStep, harness-defined payload) ---
     CatalogEntry("observation", INPUT, "EnvironmentStep.observation",
                  "harness-defined; the environment harness documents its own structure",
-                 "the environment harness (e.g. robotics, Atari, browser)"),
+                 "the environment harness (e.g. robotics, Atari, browser)",
+                 materializers=("EnvironmentStep",)),
     CatalogEntry("proprioception", INPUT, "EnvironmentStep (robot body state)",
                  "harness-defined robot state (joint position, end-effector pose, gripper)",
-                 "the robotics environment harness"),
+                 "the robotics environment harness",
+                 materializers=("EnvironmentStep",)),
     # --- outputs: neural measurement (carried by start_recording + process) ---
     CatalogEntry("neural", OUTPUT, "start_recording(target) + process(stimuli)",
                  "(units,) or (units, time) activations packaged into a NeuroidAssembly",
                  "the wrapper at region_layer_map[region]",
                  meta_keys=("signal_type", "layer"), expected_ndim=(1, 2),
-                 addressing="address is a brain region present in region_layer_map"),
+                 addressing="address is a brain region present in region_layer_map",
+                 materializers=("start_recording", "NeuroidAssembly")),
     # --- outputs: behavior (carried by start_task + process) ---
     CatalogEntry("behavior", OUTPUT, "start_task(task_context) + process(stimuli)",
                  "a label, a probability vector, or generated text",
                  "a fitted readout or the model's generation path",
-                 meta_keys=("label_set",)),
+                 meta_keys=("label_set",),
+                 materializers=("start_task", "BehavioralAssembly")),
     # --- outputs: motor (carried by EnvironmentResponse, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",
                  "harness-defined continuous action / control vector",
-                 "the model's action_fn, decoded by the environment harness"),
+                 "the model's action_fn, decoded by the environment harness",
+                 materializers=("EnvironmentResponse",)),
 ]
 
 for _entry in _SEED:
