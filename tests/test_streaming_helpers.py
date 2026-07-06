@@ -70,6 +70,72 @@ def _assembly():
     )
 
 
+def _metadata_stimulus_set():
+    stimuli = StimulusSet(pd.DataFrame({
+        "stimulus_id": ["s0", "s1"],
+        "image_path": ["s0.png", "s1.png"],
+        "object_name": ["cat", "dog"],
+        "difficulty": [1, 2],
+    }))
+    stimuli.identifier = "metadata-synthetic"
+    return stimuli
+
+
+class _MetadataPreservingExtractor:
+    identifier = "metadata-preserving-extractor"
+
+    def __init__(self):
+        self.last_stimuli = None
+
+    def __call__(self, stimuli, layers=None, **kwargs):
+        del kwargs
+        self.last_stimuli = stimuli
+        layer = (layers or ["layer4"])[0]
+        data = np.array([[1.0, 2.0], [3.0, 4.0]])[:len(stimuli)]
+        return NeuroidAssembly(
+            data,
+            coords={
+                "stimulus_id": (
+                    "presentation", list(stimuli["stimulus_id"].values)
+                ),
+                "object_name": (
+                    "presentation", list(stimuli["object_name"].values)
+                ),
+                "difficulty": (
+                    "presentation", list(stimuli["difficulty"].values)
+                ),
+                "neuroid_id": (
+                    "neuroid", [f"{layer}.{index}" for index in range(data.shape[1])]
+                ),
+                "layer": ("neuroid", [layer] * data.shape[1]),
+            },
+            dims=["presentation", "neuroid"],
+        )
+
+
+class _InteractTrackingBrainScoreModel(BrainScoreModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.interact_called = False
+        self.interact_requested_output_channels = None
+
+    def interact(self, session):
+        self.interact_called = True
+        self.interact_requested_output_channels = tuple(
+            session.requested_output_channels
+        )
+        return super().interact(session)
+
+
+def _native_neural_model(extractor, model_cls=BrainScoreModel):
+    return model_cls(
+        identifier="native-neural",
+        model=None,
+        region_layer_map={"IT": "layer4"},
+        preprocessors={"vision": extractor},
+    )
+
+
 class _SyntheticSubject(Subject):
     def __init__(self, output):
         self.output = output
@@ -94,9 +160,6 @@ class _SyntheticSubject(Subject):
     def process(self, input_event):
         self.process_input = input_event
         return self.output
-
-    def interact(self, session):
-        raise AssertionError("Phase 2 score_stimuli must use _drive_via_process")
 
 
 def test_stimulus_session_emits_input_events_per_stimulus_column():
@@ -152,10 +215,31 @@ def test_score_stimuli_matches_process_assembly_exactly():
     subject = _SyntheticSubject(expected)
     stimuli = _stimulus_set()
 
+    assert type(subject).interact is Subject.interact
     scored = score_stimuli(subject, stimuli, record="IT")
 
     assert subject.recording_target == "IT"
     assert subject.process_input is stimuli
+    xr.testing.assert_identical(scored, expected)
+
+
+def test_score_stimuli_uses_native_interact_and_preserves_metadata_exactly():
+    stimuli = _metadata_stimulus_set()
+
+    legacy_extractor = _MetadataPreservingExtractor()
+    legacy = _native_neural_model(legacy_extractor)
+    legacy.start_recording("IT")
+    expected = legacy.process(stimuli)
+
+    native_extractor = _MetadataPreservingExtractor()
+    subject = _native_neural_model(
+        native_extractor, model_cls=_InteractTrackingBrainScoreModel
+    )
+    scored = score_stimuli(subject, stimuli, record="IT")
+
+    assert subject.interact_called is True
+    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert native_extractor.last_stimuli is stimuli
     xr.testing.assert_identical(scored, expected)
 
 

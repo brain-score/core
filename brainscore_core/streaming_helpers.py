@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .contract import Subject
 from .io_catalog import modalities_to_input_channels
 from .streaming import InMemorySession, Session, StreamEvent, parse_channel
 from .events import (
@@ -50,6 +51,7 @@ class StimulusSetSession(InMemorySession):
     def __init__(self, stimulus_set, record: str = "IT"):
         self.stimulus_set = stimulus_set
         self.record = record
+        self.requested_output_channels = (f"neural:{record}",)
         super().__init__(_stimulus_events(stimulus_set))
 
     @classmethod
@@ -199,7 +201,10 @@ def environment_session(environment) -> EnvironmentSession:
 
 def score_stimuli(subject, stimulus_set, record: str = "IT") -> NeuroidAssembly:
     session = stimulus_session(stimulus_set, record=record)
-    _drive_via_process(subject, session, stimulus_set, record=record)
+    if _has_native_interact(subject):
+        subject.interact(session)
+    else:
+        _drive_via_process(subject, session, stimulus_set, record=record)
     return session.collect(f"neural:{record}")
 
 
@@ -232,6 +237,10 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
         t_ms=0.0,
         meta={"driver": "process", "record": record},
     ))
+
+
+def _has_native_interact(subject) -> bool:
+    return getattr(type(subject), "interact", None) is not Subject.interact
 
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
