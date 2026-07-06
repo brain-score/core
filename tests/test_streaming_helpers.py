@@ -3,13 +3,23 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from brainscore_core.model_interface import Subject
+from brainscore_core.model_interface import BrainScoreModel, Subject, TaskContext
 from brainscore_core.streaming import StreamEvent
-from brainscore_core.streaming_helpers import score_stimuli, stimulus_session
+from brainscore_core.streaming_helpers import (
+    behavior_session,
+    score_behavior,
+    score_stimuli,
+    stimulus_session,
+)
 from brainscore_core.supported_data_standards.brainio.assemblies import (
+    BehavioralAssembly,
     NeuroidAssembly,
 )
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+from tests.test_behavioral_readout import (
+    _fake_preprocessor_returning,
+    _make_image_stimulus_set,
+)
 
 
 def _stimulus_set():
@@ -145,3 +155,126 @@ def test_collect_rejects_missing_channel():
 
     with pytest.raises(ValueError, match="No emitted events"):
         session.collect("neural:IT")
+
+
+def _behavior_model(features):
+    return BrainScoreModel(
+        identifier="test-model",
+        model=None,
+        region_layer_map={},
+        preprocessors={"vision": _fake_preprocessor_returning(features)},
+        behavioral_readout_layer="some_layer",
+    )
+
+
+def _behavior_context(fitting_stimuli, scoring_stimuli):
+    return TaskContext(
+        task_type="probabilities",
+        fitting_stimuli=fitting_stimuli,
+        label_set=["cat", "dog"],
+        instruction="Choose the animal",
+        metadata={"stimulus_set": scoring_stimuli},
+    )
+
+
+def test_behavior_session_emits_instruction_fitting_and_scoring_events():
+    fitting = _make_image_stimulus_set(["cat", "dog"], identifier="fit")
+    scoring = _make_image_stimulus_set(["cat", "dog"], identifier="score")
+    session = behavior_session(_behavior_context(fitting, scoring))
+
+    events = []
+    while True:
+        event = session.next_input()
+        if event is None:
+            break
+        events.append(event)
+
+    assert events[0].channel == "instruction"
+    assert events[0].payload == "Choose the animal"
+    assert events[0].meta["role"] == "instruction"
+
+    stimulus_events = events[1:]
+    assert [event.channel for event in stimulus_events] == [
+        "vision", "vision", "vision", "vision",
+    ]
+    assert [event.meta["role"] for event in stimulus_events] == [
+        "fitting", "fitting", "scoring", "scoring",
+    ]
+    assert [event.meta["stimulus_id"] for event in stimulus_events] == [
+        "s0", "s1", "s0", "s1",
+    ]
+
+
+def test_score_behavior_matches_legacy_start_task_process_exactly():
+    fitting = _make_image_stimulus_set(["cat"] * 6 + ["dog"] * 6)
+    scoring = _make_image_stimulus_set(
+        ["cat"] * 3 + ["dog"] * 3, identifier="behavior_score"
+    )
+    features = np.random.default_rng(42).normal(size=(12, 8))
+    features[:6, 0] += 3.0
+    features[6:, 0] -= 3.0
+
+    legacy = _behavior_model(features)
+    legacy_context = _behavior_context(fitting, scoring)
+    legacy.start_task(legacy_context)
+    expected = legacy.process(scoring)
+
+    helper_subject = _behavior_model(features)
+    helper_context = _behavior_context(fitting, scoring)
+    scored = score_behavior(helper_subject, helper_context)
+
+    assert isinstance(scored, BehavioralAssembly)
+    xr.testing.assert_identical(scored, expected)
+
+
+def test_behavior_collect_packages_raw_label_events():
+    session = behavior_session(TaskContext(task_type="probabilities"))
+    session.emit(StreamEvent(
+        channel="behavior",
+        payload="cat",
+        t_ms=0.0,
+        meta={"stimulus_id": "s0", "label_set": ["cat", "dog"]},
+    ))
+    session.emit(StreamEvent(
+        channel="behavior",
+        payload="dog",
+        t_ms=1.0,
+        meta={"stimulus_id": "s1", "label_set": ["cat", "dog"]},
+    ))
+
+    collected = session.collect("behavior")
+
+    assert isinstance(collected, BehavioralAssembly)
+    assert collected.dims == ("presentation", "choice")
+    np.testing.assert_array_equal(collected.values, np.array([[1.0, 0.0], [0.0, 1.0]]))
+    assert list(collected["choice"].values) == ["cat", "dog"]
+    assert list(collected["stimulus_id"].values) == ["s0", "s1"]
+
+
+def test_behavior_collect_packages_raw_probability_events():
+    session = behavior_session(TaskContext(task_type="probabilities"))
+    session.emit(StreamEvent(
+        channel="behavior",
+        payload=np.array([0.25, 0.75]),
+        t_ms=0.0,
+        meta={"stimulus_id": "s0", "label_set": ["cat", "dog"]},
+    ))
+    session.emit(StreamEvent(
+        channel="behavior",
+        payload=np.array([0.8, 0.2]),
+        t_ms=1.0,
+        meta={"stimulus_id": "s1", "label_set": ["cat", "dog"]},
+    ))
+
+    collected = session.collect("behavior")
+
+    assert isinstance(collected, BehavioralAssembly)
+    np.testing.assert_array_equal(collected.values, np.array([[0.25, 0.75], [0.8, 0.2]]))
+    assert list(collected["choice"].values) == ["cat", "dog"]
+
+
+def test_behavior_collect_rejects_missing_channel():
+    session = behavior_session(TaskContext(task_type="probabilities"))
+
+    with pytest.raises(ValueError, match="No emitted events"):
+        session.collect("behavior")
