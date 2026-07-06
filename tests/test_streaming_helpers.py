@@ -17,10 +17,12 @@ from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     apply_state_change,
     behavior_session,
+    environment_session,
     score_behavior,
     score_stimuli,
     state_change_session,
     stimulus_session,
+    run_environment,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
@@ -30,6 +32,11 @@ from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 from tests.test_behavioral_readout import (
     _fake_preprocessor_returning,
     _make_image_stimulus_set,
+)
+from tests.test_environment_step import (
+    _droid_action_fn,
+    _droid_step,
+    _make_model as _make_environment_model,
 )
 from tests.test_state_change import (
     _counting_state_change_fn,
@@ -337,6 +344,120 @@ def test_behavior_collect_rejects_missing_channel():
 
     with pytest.raises(ValueError, match="No emitted events"):
         session.collect("behavior")
+
+
+class _SyntheticEnvironment:
+    def __init__(self, steps):
+        self.steps = list(steps)
+        self.actions = []
+        self.reset_calls = 0
+
+    def reset(self):
+        self.reset_calls += 1
+        if not self.steps:
+            return None
+        return self.steps[0]
+
+    def step(self, action):
+        self.actions.append(action)
+        next_index = len(self.actions)
+        if next_index >= len(self.steps):
+            return None
+        return self.steps[next_index]
+
+
+def _environment_steps(count):
+    steps = []
+    for step_num in range(count):
+        step = _droid_step(step_num=step_num, instruction="reach the goal")
+        step.is_last = step_num == count - 1
+        step.is_terminal = step.is_last
+        steps.append(step)
+    return steps
+
+
+def _legacy_environment_rollout(subject, environment):
+    trajectory = []
+    step = environment.reset()
+    while step is not None:
+        response = subject.process(step)
+        trajectory.append(response)
+        if step.is_last or step.is_terminal:
+            break
+        step = environment.step(response.action)
+    return trajectory
+
+
+def test_environment_session_advances_after_motor_emit():
+    session = environment_session(_SyntheticEnvironment(_environment_steps(2)))
+
+    first_step = session.next_input()
+    assert first_step.step_num == 0
+    assert session.input_events[0].channel == "observation"
+    assert session.next_input() is None
+
+    session.emit(StreamEvent(
+        channel="motor",
+        payload=np.zeros(7, dtype=np.float64),
+        t_ms=0.0,
+    ))
+    second_step = session.next_input()
+
+    assert second_step.step_num == 1
+
+
+def test_environment_session_emits_motor_events_for_multistep_rollout():
+    session = environment_session(_SyntheticEnvironment(_environment_steps(3)))
+    model = _make_environment_model(action_fn=_droid_action_fn)
+
+    from brainscore_core.streaming_helpers import _drive_environment_via_process
+    _drive_environment_via_process(model, session)
+
+    assert [event.channel for event in session.emitted] == [
+        "motor", "motor", "motor",
+    ]
+    assert [
+        event.payload.metadata["step_num_seen"]
+        for event in session.emitted
+    ] == [0, 1, 2]
+    assert [event.meta["step_num"] for event in session.emitted] == [0, 1, 2]
+
+
+def test_run_environment_matches_legacy_process_rollout_exactly():
+    helper_model = _make_environment_model(action_fn=_droid_action_fn)
+    helper_env = _SyntheticEnvironment(_environment_steps(4))
+    helper_trajectory = run_environment(helper_model, helper_env)
+
+    legacy_model = _make_environment_model(action_fn=_droid_action_fn)
+    legacy_env = _SyntheticEnvironment(_environment_steps(4))
+    expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)
+
+    assert len(helper_trajectory) == len(expected_trajectory)
+    for helper_response, expected_response in zip(
+        helper_trajectory, expected_trajectory
+    ):
+        np.testing.assert_array_equal(
+            helper_response.action, expected_response.action
+        )
+        assert helper_response.metadata == expected_response.metadata
+    assert len(helper_env.actions) == len(legacy_env.actions)
+    for helper_action, expected_action in zip(helper_env.actions, legacy_env.actions):
+        np.testing.assert_array_equal(helper_action, expected_action)
+
+
+def test_run_environment_terminates_cleanly_for_zero_and_one_step_envs():
+    model = _make_environment_model(action_fn=_droid_action_fn)
+    zero_env = _SyntheticEnvironment([])
+
+    assert run_environment(model, zero_env) == []
+    assert zero_env.actions == []
+
+    one_env = _SyntheticEnvironment(_environment_steps(1))
+    trajectory = run_environment(model, one_env)
+
+    assert len(trajectory) == 1
+    assert trajectory[0].metadata["step_num_seen"] == 0
+    assert one_env.actions == []
 
 
 def _ablation_state_change():

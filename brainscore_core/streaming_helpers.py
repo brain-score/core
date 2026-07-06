@@ -7,8 +7,13 @@ from typing import Any, Optional
 import numpy as np
 
 from .io_catalog import modalities_to_input_channels
-from .streaming import InMemorySession, StreamEvent, parse_channel
-from .events import PerturbationApplied, StateChange
+from .streaming import InMemorySession, Session, StreamEvent, parse_channel
+from .events import (
+    EnvironmentResponse,
+    EnvironmentStep,
+    PerturbationApplied,
+    StateChange,
+)
 from .supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
     NeuroidAssembly,
@@ -119,6 +124,63 @@ class StateChangeSession(InMemorySession):
         return payload
 
 
+class EnvironmentSession(Session):
+    """Live closed-loop session over an environment reset/step API."""
+
+    def __init__(self, environment):
+        self.environment = environment
+        self.input_events: list[StreamEvent] = []
+        self.emitted: list[StreamEvent] = []
+        self._started = False
+        self._done = False
+        self._awaiting_emit = False
+        self._pending_step: Optional[EnvironmentStep] = None
+        self._last_step: Optional[EnvironmentStep] = None
+
+    def next_input(self) -> Optional[EnvironmentStep]:
+        if self._done or self._awaiting_emit:
+            return None
+        if not self._started:
+            self._started = True
+            self._pending_step = _environment_reset(self.environment)
+        step = self._pending_step
+        self._pending_step = None
+        if step is None:
+            self._done = True
+            return None
+        self._last_step = step
+        self._awaiting_emit = True
+        self.input_events.append(_environment_step_event(step))
+        return step
+
+    def emit(self, event: StreamEvent) -> None:
+        if not isinstance(event, StreamEvent):
+            raise TypeError("event must be a StreamEvent")
+        if event.channel != "motor":
+            raise ValueError(
+                f"EnvironmentSession.emit only supports 'motor'; "
+                f"got {event.channel!r}."
+            )
+        self.emitted.append(event)
+        self._awaiting_emit = False
+        if _environment_step_terminates(self._last_step):
+            self._done = True
+            return
+        self._pending_step = _environment_step(
+            self.environment, _motor_action_payload(event.payload)
+        )
+        if self._pending_step is None:
+            self._done = True
+
+    def collect(self, channel: str = "motor") -> list:
+        if channel != "motor":
+            raise ValueError(
+                f"EnvironmentSession.collect only supports 'motor'; "
+                f"got {channel!r}."
+            )
+        return [event.payload for event in self.emitted if event.channel == channel]
+
+
 def stimulus_session(stimulus_set, record: str = "IT") -> StimulusSetSession:
     return StimulusSetSession.from_stimulus_set(stimulus_set, record=record)
 
@@ -129,6 +191,10 @@ def behavior_session(task_context) -> BehavioralSession:
 
 def state_change_session(state_change: StateChange) -> StateChangeSession:
     return StateChangeSession.from_state_change(state_change)
+
+
+def environment_session(environment) -> EnvironmentSession:
+    return EnvironmentSession(environment)
 
 
 def score_stimuli(subject, stimulus_set, record: str = "IT") -> NeuroidAssembly:
@@ -149,6 +215,12 @@ def apply_state_change(subject, state_change: StateChange):
     return session.collect("perturbation")
 
 
+def run_environment(subject, environment) -> list:
+    session = environment_session(environment)
+    _drive_environment_via_process(subject, session)
+    return session.collect("motor")
+
+
 def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
                        record: str = "IT") -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
@@ -160,6 +232,23 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
         t_ms=0.0,
         meta={"driver": "process", "record": record},
     ))
+
+
+def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
+    """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    step = session.next_input()
+    while step is not None:
+        response = subject.process(step)
+        session.emit(StreamEvent(
+            channel="motor",
+            payload=response,
+            t_ms=float(step.step_num),
+            meta={
+                "driver": "process",
+                "step_num": step.step_num,
+            },
+        ))
+        step = session.next_input()
 
 
 def _drive_state_change_via_process(subject, session: StateChangeSession,
@@ -272,6 +361,53 @@ def _behavior_stimuli_to_score(task_context):
         if key in task_context.metadata:
             return task_context.metadata[key]
     return task_context.fitting_stimuli
+
+
+def _environment_reset(environment) -> Optional[EnvironmentStep]:
+    if not hasattr(environment, "reset"):
+        raise TypeError("run_environment requires an environment.reset() method")
+    return _coerce_environment_step(environment.reset())
+
+
+def _environment_step(environment, action) -> Optional[EnvironmentStep]:
+    if not hasattr(environment, "step"):
+        raise TypeError("run_environment requires an environment.step(action) method")
+    return _coerce_environment_step(environment.step(action))
+
+
+def _coerce_environment_step(result) -> Optional[EnvironmentStep]:
+    if result is None:
+        return None
+    if isinstance(result, EnvironmentStep):
+        return result
+    raise TypeError(
+        "environment reset/step must return an EnvironmentStep or None; "
+        f"got {type(result).__name__}."
+    )
+
+
+def _environment_step_event(step: EnvironmentStep) -> StreamEvent:
+    return StreamEvent(
+        channel="observation",
+        payload=step,
+        t_ms=float(step.step_num),
+        meta={
+            "step_num": step.step_num,
+            "is_first": step.is_first,
+            "is_last": step.is_last,
+            "is_terminal": step.is_terminal,
+        },
+    )
+
+
+def _environment_step_terminates(step: Optional[EnvironmentStep]) -> bool:
+    return step is None or bool(step.is_last or step.is_terminal)
+
+
+def _motor_action_payload(payload):
+    if isinstance(payload, EnvironmentResponse):
+        return payload.action
+    return payload
 
 
 def _state_change_event(state_change: StateChange) -> StreamEvent:
