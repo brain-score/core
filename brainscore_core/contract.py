@@ -7,6 +7,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from .events import InputEvent, OutputEvent
 
 
+_MODALITY_TO_INPUT_CHANNEL = {
+    "vision": "vision",
+    "text": "text",
+    "audio": "audio",
+    "video": "video",
+}
+
+
 @dataclass
 class TaskContext:
     """
@@ -110,9 +118,43 @@ class Subject(ABC):
         cannot degrade, etc.)."""
         return set()
 
+    @property
+    def in_channels(self) -> Set[str]:
+        """Input stream channels this subject can consume.
+
+        Defaults to the v1.5 modality declarations so existing subjects get a
+        conservative v2 channel identity without overriding this property.
+        """
+        return self._modalities_to_input_channels(
+            self._declared_input_modalities()
+        )
+
+    @property
+    def out_channels(self) -> Set[str]:
+        """Output stream channels this subject can emit."""
+        channels = {
+            f"neural:{region}"
+            for region in self.region_layer_map
+        }
+        if self._has_behavioral_output_path():
+            channels.add("behavior")
+        return channels
+
+    @property
+    def required_channels(self) -> Set[str]:
+        """Input stream channels this subject hard-requires."""
+        return self._modalities_to_input_channels(self.required_modalities)
+
     @abstractmethod
     def process(self, input_event: InputEvent) -> OutputEvent:
         ...
+
+    def interact(self, session) -> None:
+        identifier = self._safe_identifier()
+        raise NotImplementedError(
+            f"Subject {identifier} has no v2 interact() path yet; use "
+            f"process()/start_recording()."
+        )
 
     def start_task(self, task_context: TaskContext) -> None:
         self._task_context: Optional[TaskContext] = task_context
@@ -125,6 +167,48 @@ class Subject(ABC):
 
     def reset(self) -> None:
         pass
+
+    def _declared_input_modalities(self) -> Set[str]:
+        for attr in ("available_modalities", "supported_modalities"):
+            try:
+                modalities = getattr(self, attr)
+            except (AttributeError, NotImplementedError):
+                continue
+            if modalities is not None:
+                return set(modalities)
+
+        preprocessors = getattr(self, "_preprocessors", None)
+        if hasattr(preprocessors, "keys"):
+            return set(preprocessors.keys())
+        return set()
+
+    @staticmethod
+    def _modalities_to_input_channels(modalities) -> Set[str]:
+        return {
+            _MODALITY_TO_INPUT_CHANNEL.get(modality, modality)
+            for modality in set(modalities)
+        }
+
+    def _has_behavioral_output_path(self) -> bool:
+        for attr in (
+            "_behavioral_readout_layer",
+            "_generation_fn",
+            "behavioral_readout_layer",
+            "generation_fn",
+        ):
+            try:
+                value = getattr(self, attr)
+            except Exception:
+                continue
+            if value is not None:
+                return True
+        return False
+
+    def _safe_identifier(self) -> str:
+        try:
+            return str(self.identifier)
+        except Exception:
+            return type(self).__name__
 
 
 # Deprecated alias. ``UnifiedModel`` was the v1 name for the subject contract.

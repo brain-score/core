@@ -19,6 +19,13 @@ def test_registry_version_and_seed_entry_fields_are_queryable():
     assert neural.owner == "core"
     assert "NeuroidAssembly" in neural.materializers
 
+    observation = io_catalog.get("observation")
+    proprioception = io_catalog.get("proprioception")
+    motor = io_catalog.get("motor")
+    assert observation.owner == "environment harness"
+    assert proprioception.owner == "environment harness"
+    assert motor.owner == "environment harness"
+
 
 def test_catalog_entry_keeps_v1_constructor_defaults():
     entry = CatalogEntry(

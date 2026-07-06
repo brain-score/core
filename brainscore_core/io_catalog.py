@@ -280,13 +280,16 @@ _SEED = [
                  addressing="address is a unit selector (layer path, optional indices)",
                  materializers=("StateChange",)),
     # --- inputs: embodied (carried by EnvironmentStep, harness-defined payload) ---
+    # Retained legacy v1.5 channel; not a canonical v2 seed family.
     CatalogEntry("observation", INPUT, "EnvironmentStep.observation",
                  "harness-defined; the environment harness documents its own structure",
                  "the environment harness (e.g. robotics, Atari, browser)",
+                 owner="environment harness",
                  materializers=("EnvironmentStep",)),
     CatalogEntry("proprioception", INPUT, "EnvironmentStep (robot body state)",
                  "harness-defined robot state (joint position, end-effector pose, gripper)",
                  "the robotics environment harness",
+                 owner="environment harness",
                  materializers=("EnvironmentStep",)),
     # --- outputs: neural measurement (carried by start_recording + process) ---
     CatalogEntry("neural", OUTPUT, "start_recording(target) + process(stimuli)",
@@ -305,6 +308,7 @@ _SEED = [
     CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",
                  "harness-defined continuous action / control vector",
                  "the model's action_fn, decoded by the environment harness",
+                 owner="environment harness",
                  materializers=("EnvironmentResponse",)),
 ]
 
