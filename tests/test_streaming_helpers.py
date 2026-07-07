@@ -243,6 +243,40 @@ def test_score_stimuli_uses_native_interact_and_preserves_metadata_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
+def test_event_only_reconstruction_is_input_columns_only():
+    events = [
+        StreamEvent(
+            channel="vision",
+            payload="s0.png",
+            t_ms=0.0,
+            meta={
+                "stimulus_id": "s0",
+                "stimulus_index": 0,
+                "column": "image_path",
+                "object_name": "cat",
+            },
+        ),
+        StreamEvent(
+            channel="text",
+            payload="cat sentence",
+            t_ms=0.0,
+            meta={
+                "stimulus_id": "s0",
+                "stimulus_index": 0,
+                "column": "sentence",
+                "object_name": "cat",
+            },
+        ),
+    ]
+
+    reconstructed = BrainScoreModel._reconstruct_stimulus_set_from_events(events)
+
+    assert list(reconstructed["stimulus_id"].values) == ["s0"]
+    assert list(reconstructed["image_path"].values) == ["s0.png"]
+    assert list(reconstructed["sentence"].values) == ["cat sentence"]
+    assert "object_name" not in reconstructed.columns
+
+
 def test_collect_returns_emitted_assembly_without_repackaging():
     expected = _assembly()
     session = stimulus_session(_stimulus_set(), record="IT")

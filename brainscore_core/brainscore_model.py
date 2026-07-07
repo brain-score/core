@@ -349,6 +349,13 @@ class BrainScoreModel(Subject):
 
     @staticmethod
     def _reconstruct_stimulus_set_from_events(events: List[StreamEvent]):
+        """Rebuild a minimal StimulusSet from event-carried input columns.
+
+        This fallback preserves only input-channel payload columns plus
+        ``stimulus_id``. It is not metadata-faithful: metric-critical
+        presentation metadata such as ``object_name`` must come from
+        session.stimulus_set, or from a future event-carried metadata path.
+        """
         if not events:
             raise ValueError(
                 "BrainScoreModel.interact received no input events and no "
@@ -368,6 +375,7 @@ class BrainScoreModel(Subject):
                 rows_by_key[key] = {}
                 row_order.append(key)
             row = rows_by_key[key]
+            # Only the stream input column is reconstructible in this fallback.
             column = event.meta.get("column", event.channel)
             row[column] = event.payload
             if "stimulus_id" in event.meta:
