@@ -106,6 +106,7 @@ class StateChangeSession(InMemorySession):
 
     def __init__(self, state_change: StateChange):
         self.state_change = state_change
+        self.requested_output_channels = ("perturbation",)
         super().__init__([_state_change_event(state_change)])
 
     @classmethod
@@ -220,7 +221,10 @@ def score_behavior(subject, task_context) -> BehavioralAssembly:
 
 def apply_state_change(subject, state_change: StateChange):
     session = state_change_session(state_change)
-    _drive_state_change_via_process(subject, session, state_change)
+    if _has_native_interact(subject):
+        subject.interact(session)
+    else:
+        _drive_state_change_via_process(subject, session, state_change)
     return session.collect("perturbation")
 
 
@@ -335,7 +339,7 @@ def _requested_output_channels(session) -> list[str]:
         return [f"neural:{region}" for region in record]
 
     raise ValueError(
-        "neural interact requires the session to declare "
+        "streaming interact requires the session to declare "
         "requested_output_channels or record."
     )
 
@@ -364,6 +368,36 @@ def _drive_environment_via_process(subject, session: EnvironmentSession) -> None
 def _drive_state_change_via_process(subject, session: StateChangeSession,
                                     state_change: StateChange) -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    _drive_state_change_session_via_process(
+        subject, session, state_change=state_change, driver="process"
+    )
+
+
+def _drive_state_change_session_via_process(
+    subject, session: StateChangeSession, state_change: StateChange = None,
+    driver: str = "interact"
+) -> None:
+    """Drive a perturbation session through existing StateChange dispatch."""
+    if state_change is None:
+        event = session.next_input()
+        if event is not None:
+            if not isinstance(event, StreamEvent):
+                raise TypeError(
+                    "perturbation interact expects StreamEvent inputs; got "
+                    f"{type(event).__name__}."
+                )
+            if not isinstance(event.payload, StateChange):
+                raise TypeError(
+                    "perturbation interact expects StateChange payloads; got "
+                    f"{type(event.payload).__name__}."
+                )
+            state_change = event.payload
+        else:
+            state_change = getattr(session, "state_change", None)
+    if state_change is None:
+        raise ValueError(
+            "perturbation interact requires a StateChange input event."
+        )
     result = subject.process(state_change)
     handle_id = _state_change_handle_id(state_change, result)
     session.emit(StreamEvent(
@@ -371,7 +405,7 @@ def _drive_state_change_via_process(subject, session: StateChangeSession,
         payload=result,
         t_ms=0.0,
         meta={
-            "driver": "process",
+            "driver": driver,
             "kind": state_change.kind,
             "handle_id": handle_id,
         },

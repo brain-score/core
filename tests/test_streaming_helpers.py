@@ -136,6 +136,16 @@ def _native_neural_model(extractor, model_cls=BrainScoreModel):
     )
 
 
+def _native_state_change_model(state_change_fn, model_cls=BrainScoreModel):
+    return model_cls(
+        identifier="native-state-change",
+        model=None,
+        region_layer_map={},
+        preprocessors={"vision": lambda stimuli: stimuli},
+        state_change_fn=state_change_fn,
+    )
+
+
 class _SyntheticSubject(Subject):
     def __init__(self, output):
         self.output = output
@@ -626,6 +636,7 @@ def test_state_change_session_emits_lesion_event_with_address():
     session = state_change_session(_ablation_state_change())
     event = session.next_input()
 
+    assert session.requested_output_channels == ("perturbation",)
     assert event.channel == "lesion:blocks.10[1:4]"
     assert isinstance(event.payload, StateChange)
     assert event.meta == {"kind": "ablation"}
@@ -699,9 +710,13 @@ def test_apply_state_change_matches_legacy_process_result():
     legacy_result = legacy.process(_ablation_state_change())
 
     fn_helper, _ = _counting_state_change_fn()
-    helper_model = _make_state_change_model(state_change_fn=fn_helper)
+    helper_model = _native_state_change_model(
+        fn_helper, model_cls=_InteractTrackingBrainScoreModel
+    )
     helper_result = apply_state_change(helper_model, _ablation_state_change())
 
+    assert helper_model.interact_called is True
+    assert helper_model.interact_requested_output_channels == ("perturbation",)
     assert isinstance(helper_result, PerturbationApplied)
     assert helper_result.handle_id == legacy_result.handle_id
     assert helper_result.target == legacy_result.target
@@ -709,7 +724,7 @@ def test_apply_state_change_matches_legacy_process_result():
     assert helper_result.applied_at == legacy_result.applied_at
 
 
-def test_state_change_reset_event_restores_baseline():
+def test_native_state_change_reset_restores_baseline():
     model_state = {"output": 1.0}
 
     def state_change_fn(state_change):
@@ -726,16 +741,38 @@ def test_state_change_reset_event_restores_baseline():
 
         return applied, cleanup
 
-    model = _make_state_change_model(state_change_fn=state_change_fn)
+    model = _native_state_change_model(
+        state_change_fn, model_cls=_InteractTrackingBrainScoreModel
+    )
     applied = apply_state_change(model, _ablation_state_change())
     assert model_state["output"] == 0.0
+    assert model.interact_requested_output_channels == ("perturbation",)
 
     reset = StateChange(kind="reset", handle_id=applied.handle_id)
     reset_session = state_change_session(reset)
     reset_event = reset_session.next_input()
+    model.interact_called = False
     reset_result = apply_state_change(model, reset)
 
+    assert model.interact_called is True
+    assert model.interact_requested_output_channels == ("perturbation",)
     assert reset_event.channel == "lesion:ablation-handle"
     assert reset_event.meta["reset"] == applied.handle_id
     assert reset_result == applied.handle_id
     assert model_state["output"] == 1.0
+
+
+def test_apply_state_change_falls_back_for_non_native_subject():
+    applied = PerturbationApplied(
+        handle_id="fallback-handle",
+        target=Selection(layer="blocks.10"),
+        perturbation=Perturbation(kind="zero"),
+    )
+    subject = _SyntheticSubject(applied)
+    state_change = _ablation_state_change()
+
+    result = apply_state_change(subject, state_change)
+
+    assert type(subject).interact is Subject.interact
+    assert subject.process_input is state_change
+    assert result is applied
