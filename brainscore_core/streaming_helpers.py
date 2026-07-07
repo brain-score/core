@@ -239,6 +239,103 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
     ))
 
 
+def _drive_neural_session_via_process(
+    subject, session, driver: str = "interact"
+) -> None:
+    input_events = _drain_stream_events(session)
+    stimuli = _stimuli_from_stream_session(session, input_events)
+    output_t_ms = input_events[-1].t_ms if input_events else 0.0
+
+    for channel in _requested_output_channels(session):
+        family, region = parse_channel(channel)
+        if family != "neural" or region is None:
+            raise NotImplementedError(
+                "neural interact currently supports requested "
+                f"neural:<region> output channels; got {channel!r}."
+            )
+        subject.start_recording(region)
+        output = subject.process(stimuli)
+        session.emit(StreamEvent(
+            channel=channel,
+            payload=output,
+            t_ms=output_t_ms,
+            meta={"driver": driver, "record": region},
+        ))
+
+
+def _drain_stream_events(session) -> list[StreamEvent]:
+    events: list[StreamEvent] = []
+    while True:
+        event = session.next_input()
+        if event is None:
+            return events
+        if not isinstance(event, StreamEvent):
+            raise TypeError(
+                "neural interact expects StreamEvent inputs; got "
+                f"{type(event).__name__}."
+            )
+        events.append(event)
+
+
+def _stimuli_from_stream_session(session, events: list[StreamEvent]):
+    if hasattr(session, "stimulus_set"):
+        return session.stimulus_set
+    return _reconstruct_stimulus_set_from_events(events)
+
+
+def _reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
+    """Rebuild a minimal StimulusSet from event-carried input columns.
+
+    This fallback preserves only input-channel payload columns plus
+    ``stimulus_id``. It is not metadata-faithful: metric-critical
+    presentation metadata such as ``object_name`` must come from
+    session.stimulus_set, or from a future event-carried metadata path.
+    """
+    if not events:
+        raise ValueError(
+            "neural interact received no input events and no session.stimulus_set "
+            "context to reconstruct."
+        )
+
+    import pandas as pd
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+
+    rows_by_key: dict[Any, dict[str, Any]] = {}
+    row_order: list[Any] = []
+    for index, event in enumerate(events):
+        key = event.meta.get(
+            "stimulus_index", event.meta.get("stimulus_id", index)
+        )
+        if key not in rows_by_key:
+            rows_by_key[key] = {}
+            row_order.append(key)
+        row = rows_by_key[key]
+        # Only the stream input column is reconstructible in this fallback.
+        column = event.meta.get("column", event.channel)
+        row[column] = event.payload
+        if "stimulus_id" in event.meta:
+            row.setdefault("stimulus_id", event.meta["stimulus_id"])
+
+    return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
+
+
+def _requested_output_channels(session) -> list[str]:
+    requested = getattr(session, "requested_output_channels", None)
+    if requested is not None:
+        return list(requested)
+
+    record = getattr(session, "record", None)
+    if record is not None:
+        if isinstance(record, str):
+            return [f"neural:{record}"]
+        return [f"neural:{region}" for region in record]
+
+    raise ValueError(
+        "neural interact requires the session to declare "
+        "requested_output_channels or record."
+    )
+
+
 def _has_native_interact(subject) -> bool:
     return getattr(type(subject), "interact", None) is not Subject.interact
 

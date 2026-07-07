@@ -16,7 +16,14 @@ from .events import (
 from .perturbation import PerturbationManager
 from .recording import Recorder
 from .selection import UnitSelector, _promote_to_selector
-from .streaming import StreamEvent, parse_channel
+from .streaming import StreamEvent
+from .streaming_helpers import (
+    _drain_stream_events as _drain_neural_stream_events,
+    _drive_neural_session_via_process,
+    _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
+    _requested_output_channels as _neural_requested_output_channels,
+    _stimuli_from_stream_session as _neural_stimuli_from_stream_session,
+)
 
 
 class BrainScoreModel(Subject):
@@ -244,25 +251,7 @@ class BrainScoreModel(Subject):
 
     def interact(self, session) -> None:
         """Drive a v2 streaming session through the existing neural path."""
-        input_events = self._drain_stream_events(session)
-        stimuli = self._stimuli_from_stream_session(session, input_events)
-        output_t_ms = input_events[-1].t_ms if input_events else 0.0
-
-        for channel in self._requested_output_channels(session):
-            family, region = parse_channel(channel)
-            if family != "neural" or region is None:
-                raise NotImplementedError(
-                    "BrainScoreModel.interact currently supports requested "
-                    f"neural:<region> output channels; got {channel!r}."
-                )
-            self.start_recording(region)
-            output = self.process(stimuli)
-            session.emit(StreamEvent(
-                channel=channel,
-                payload=output,
-                t_ms=output_t_ms,
-                meta={"driver": "interact", "record": region},
-            ))
+        _drive_neural_session_via_process(self, session)
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -328,24 +317,11 @@ class BrainScoreModel(Subject):
 
     @staticmethod
     def _drain_stream_events(session) -> List[StreamEvent]:
-        events: List[StreamEvent] = []
-        while True:
-            event = session.next_input()
-            if event is None:
-                return events
-            if not isinstance(event, StreamEvent):
-                raise TypeError(
-                    "BrainScoreModel.interact expects StreamEvent inputs for "
-                    "perceptual neural sessions; got "
-                    f"{type(event).__name__}."
-                )
-            events.append(event)
+        return _drain_neural_stream_events(session)
 
     @staticmethod
     def _stimuli_from_stream_session(session, events: List[StreamEvent]):
-        if hasattr(session, "stimulus_set"):
-            return session.stimulus_set
-        return BrainScoreModel._reconstruct_stimulus_set_from_events(events)
+        return _neural_stimuli_from_stream_session(session, events)
 
     @staticmethod
     def _reconstruct_stimulus_set_from_events(events: List[StreamEvent]):
@@ -356,49 +332,11 @@ class BrainScoreModel(Subject):
         presentation metadata such as ``object_name`` must come from
         session.stimulus_set, or from a future event-carried metadata path.
         """
-        if not events:
-            raise ValueError(
-                "BrainScoreModel.interact received no input events and no "
-                "session.stimulus_set context to reconstruct."
-            )
-
-        import pandas as pd
-        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-
-        rows_by_key: Dict[Any, Dict[str, Any]] = {}
-        row_order: List[Any] = []
-        for index, event in enumerate(events):
-            key = event.meta.get(
-                "stimulus_index", event.meta.get("stimulus_id", index)
-            )
-            if key not in rows_by_key:
-                rows_by_key[key] = {}
-                row_order.append(key)
-            row = rows_by_key[key]
-            # Only the stream input column is reconstructible in this fallback.
-            column = event.meta.get("column", event.channel)
-            row[column] = event.payload
-            if "stimulus_id" in event.meta:
-                row.setdefault("stimulus_id", event.meta["stimulus_id"])
-
-        return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
+        return _reconstruct_neural_stimulus_set(events)
 
     @staticmethod
     def _requested_output_channels(session) -> List[str]:
-        requested = getattr(session, "requested_output_channels", None)
-        if requested is not None:
-            return list(requested)
-
-        record = getattr(session, "record", None)
-        if record is not None:
-            if isinstance(record, str):
-                return [f"neural:{record}"]
-            return [f"neural:{region}" for region in record]
-
-        raise ValueError(
-            "BrainScoreModel.interact requires the session to declare "
-            "requested_output_channels or record."
-        )
+        return _neural_requested_output_channels(session)
 
     @classmethod
     def _requires_behavioral_readout(cls, task_type: str) -> bool:
