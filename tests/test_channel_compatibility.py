@@ -2,6 +2,7 @@ import pytest
 
 from brainscore_core.compatibility import (
     CompatibilityError,
+    benchmark_accepted_input_channels,
     benchmark_required_input_channels,
     check_channel_compatibility,
 )
@@ -57,6 +58,7 @@ class _Benchmark:
         required_input_channels=None,
         requested_output_channels=None,
         required_modalities=None,
+        accepted_modalities=None,
         region=None,
         identifier="benchmark",
     ):
@@ -67,6 +69,8 @@ class _Benchmark:
             self.requested_output_channels = requested_output_channels
         if required_modalities is not None:
             self.required_modalities = required_modalities
+        if accepted_modalities is not None:
+            self.accepted_modalities = accepted_modalities
         if region is not None:
             self.region = region
 
@@ -156,6 +160,36 @@ def test_required_input_channels_derive_from_required_modalities():
 
     assert benchmark_required_input_channels(benchmark) == {"vision"}
     check_channel_compatibility(subject, benchmark)
+
+
+def test_accepted_input_channels_derive_from_accepted_modalities():
+    subject = _Subject(
+        in_channels={"vision"},
+        out_channels={"neural:IT"},
+        required_channels={"vision"},
+    )
+    benchmark = _Benchmark(
+        accepted_modalities={"vision", "video"},
+        region="IT",
+    )
+
+    assert benchmark_required_input_channels(benchmark) == set()
+    assert benchmark_accepted_input_channels(benchmark) == {"vision", "video"}
+    check_channel_compatibility(subject, benchmark)
+
+
+def test_accepted_input_channels_raise_when_subject_has_none():
+    subject = _Subject(
+        in_channels={"text"},
+        out_channels={"neural:IT"},
+    )
+    benchmark = _Benchmark(
+        accepted_modalities={"vision", "video"},
+        region="IT",
+    )
+
+    with pytest.raises(CompatibilityError, match="vision"):
+        check_channel_compatibility(subject, benchmark)
 
 
 def test_unknown_channel_declaration_raises():

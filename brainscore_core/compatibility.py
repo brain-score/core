@@ -74,6 +74,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
     subject_out = set(subject.out_channels)
     subject_required = set(subject.required_channels)
     bench_required = benchmark_required_input_channels(benchmark)
+    bench_accepted = benchmark_accepted_input_channels(benchmark)
     bench_requested = benchmark_requested_output_channels(benchmark)
 
     _validate_channel_set(
@@ -87,6 +88,9 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
         bench_required, io_catalog.INPUT,
         f"benchmark '{_benchmark_identifier(benchmark)}' required_input_channels")
     _validate_channel_set(
+        bench_accepted, io_catalog.INPUT,
+        f"benchmark '{_benchmark_identifier(benchmark)}' accepted_input_channels")
+    _validate_channel_set(
         bench_requested, io_catalog.OUTPUT,
         f"benchmark '{_benchmark_identifier(benchmark)}' requested_output_channels")
 
@@ -99,6 +103,14 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
             f"{_format_channels(subject_in)}."
         )
 
+    if bench_accepted and not (bench_accepted & subject_in):
+        raise CompatibilityError(
+            f"Subject '{subject.identifier}' provides none of the accepted "
+            f"input channels for benchmark '{_benchmark_identifier(benchmark)}': "
+            f"{_format_channels(bench_accepted)}. Subject in_channels: "
+            f"{_format_channels(subject_in)}."
+        )
+
     missing_outputs = bench_requested - subject_out
     if missing_outputs:
         raise CompatibilityError(
@@ -108,13 +120,13 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
             f"{_format_channels(subject_out)}."
         )
 
-    unmet_requirements = subject_required - bench_required
+    unmet_requirements = subject_required - (bench_required | bench_accepted)
     if unmet_requirements:
         raise CompatibilityError(
             f"Subject '{subject.identifier}' hard-requires input channels "
             f"{_format_channels(unmet_requirements)} but benchmark "
             f"'{_benchmark_identifier(benchmark)}' provides "
-            f"{_format_channels(bench_required)}."
+            f"{_format_channels(bench_required | bench_accepted)}."
         )
 
 
@@ -124,6 +136,14 @@ def benchmark_required_input_channels(benchmark) -> Set[str]:
     if declared is not None:
         return set(declared)
     modalities = set(getattr(benchmark, "required_modalities", set()))
+    return modalities_to_input_channels(modalities)
+
+
+def benchmark_accepted_input_channels(benchmark) -> Set[str]:
+    """Return v1.5 any-of input channels from accepted_modalities."""
+    if getattr(benchmark, "required_input_channels", None) is not None:
+        return set()
+    modalities = set(getattr(benchmark, "accepted_modalities", set()))
     return modalities_to_input_channels(modalities)
 
 
