@@ -51,15 +51,17 @@ _STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
 class StimulusSetSession(InMemorySession):
     """Buffered open-loop session built from a StimulusSet-like table."""
 
-    def __init__(self, stimulus_set, record: str = "IT"):
+    def __init__(self, stimulus_set, record: str = "IT", time_bins=None):
         self.stimulus_set = stimulus_set
         self.record = record
+        self.time_bins = time_bins
         self.requested_output_channels = (f"neural:{record}",)
         super().__init__(_stimulus_events(stimulus_set))
 
     @classmethod
-    def from_stimulus_set(cls, stimulus_set, record: str = "IT"):
-        return cls(stimulus_set, record=record)
+    def from_stimulus_set(cls, stimulus_set, record: str = "IT",
+                          time_bins=None):
+        return cls(stimulus_set, record=record, time_bins=time_bins)
 
     def collect(self, channel: str) -> NeuroidAssembly:
         """Collect emitted neural events into a NeuroidAssembly."""
@@ -190,8 +192,11 @@ class EnvironmentSession(Session):
         return [event.payload for event in self.emitted if event.channel == channel]
 
 
-def stimulus_session(stimulus_set, record: str = "IT") -> StimulusSetSession:
-    return StimulusSetSession.from_stimulus_set(stimulus_set, record=record)
+def stimulus_session(stimulus_set, record: str = "IT",
+                     time_bins=None) -> StimulusSetSession:
+    return StimulusSetSession.from_stimulus_set(
+        stimulus_set, record=record, time_bins=time_bins
+    )
 
 
 def behavior_session(task_context) -> BehavioralSession:
@@ -206,12 +211,15 @@ def environment_session(environment) -> EnvironmentSession:
     return EnvironmentSession(environment)
 
 
-def score_stimuli(subject, stimulus_set, record: str = "IT") -> NeuroidAssembly:
-    session = stimulus_session(stimulus_set, record=record)
+def score_stimuli(subject, stimulus_set, record: str = "IT",
+                  time_bins=None) -> NeuroidAssembly:
+    session = stimulus_session(stimulus_set, record=record,
+                               time_bins=time_bins)
     if _has_native_interact(subject):
         subject.interact(session)
     else:
-        _drive_via_process(subject, session, stimulus_set, record=record)
+        _drive_via_process(subject, session, stimulus_set, record=record,
+                           time_bins=time_bins)
     return session.collect(f"neural:{record}")
 
 
@@ -240,9 +248,9 @@ def run_environment(subject, environment) -> list:
 
 
 def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
-                       record: str = "IT") -> None:
+                       record: str = "IT", time_bins=None) -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
-    subject.start_recording(record)
+    _start_recording(subject, record, time_bins=time_bins)
     output = subject.process(stimulus_set)
     session.emit(StreamEvent(
         channel=f"neural:{record}",
@@ -259,6 +267,7 @@ def _drive_neural_session_via_process(
     stimuli = _stimuli_from_stream_session(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0
     use_multi_modality = _should_use_multi_modality(subject, input_events)
+    time_bins = getattr(session, "time_bins", None)
 
     for channel in _requested_output_channels(session):
         family, region = parse_channel(channel)
@@ -267,7 +276,7 @@ def _drive_neural_session_via_process(
                 "neural interact currently supports requested "
                 f"neural:<region> output channels; got {channel!r}."
             )
-        subject.start_recording(region)
+        _start_recording(subject, region, time_bins=time_bins)
         if use_multi_modality:
             output = subject.process(stimuli, multi_modality=True)
         else:
@@ -278,6 +287,13 @@ def _drive_neural_session_via_process(
             t_ms=output_t_ms,
             meta={"driver": driver, "record": region},
         ))
+
+
+def _start_recording(subject, region: str, time_bins=None) -> None:
+    if time_bins is None:
+        subject.start_recording(region)
+    else:
+        subject.start_recording(region, time_bins=time_bins)
 
 
 def _drain_stream_events(session) -> list[StreamEvent]:

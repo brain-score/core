@@ -200,6 +200,64 @@ def _native_cross_tower_model(model_cls=BrainScoreModel):
     return model, activations, text
 
 
+class _TemporalBrainScoreModel(BrainScoreModel):
+    def __init__(self):
+        super().__init__(
+            identifier="native-temporal",
+            model=None,
+            region_layer_map={"IT": "temporal_layer"},
+            preprocessors={"vision": lambda stimuli: stimuli},
+        )
+
+    def process(self, input_event, multi_modality=False):
+        del multi_modality
+        stimulus_ids = list(input_event["stimulus_id"].values)
+        neuroid_ids = ["temporal_layer.0", "temporal_layer.1"]
+        if self._time_bins is None:
+            return NeuroidAssembly(
+                np.array([[1.0, 2.0], [3.0, 4.0]]),
+                coords={
+                    "stimulus_id": ("presentation", stimulus_ids),
+                    "neuroid_id": ("neuroid", neuroid_ids),
+                    "layer": ("neuroid", ["temporal_layer"] * 2),
+                },
+                dims=["presentation", "neuroid"],
+            )
+
+        data = np.arange(
+            len(stimulus_ids) * len(self._time_bins) * 2, dtype=float
+        ).reshape(len(stimulus_ids), len(self._time_bins), 2)
+        return NeuroidAssembly(
+            data,
+            coords={
+                "stimulus_id": ("presentation", stimulus_ids),
+                "time_bin_start_ms": (
+                    "time_bin", [start for start, _ in self._time_bins]
+                ),
+                "time_bin_end_ms": (
+                    "time_bin", [end for _, end in self._time_bins]
+                ),
+                "neuroid_id": ("neuroid", neuroid_ids),
+                "layer": ("neuroid", ["temporal_layer"] * 2),
+            },
+            dims=["presentation", "time_bin", "neuroid"],
+        )
+
+
+class _TrackingTemporalBrainScoreModel(_TemporalBrainScoreModel):
+    def __init__(self):
+        super().__init__()
+        self.interact_called = False
+        self.interact_requested_output_channels = None
+
+    def interact(self, session):
+        self.interact_called = True
+        self.interact_requested_output_channels = tuple(
+            session.requested_output_channels
+        )
+        return super().interact(session)
+
+
 class _SyntheticSubject(Subject):
     def __init__(self, output):
         self.output = output
@@ -248,6 +306,14 @@ def test_stimulus_session_emits_input_events_per_stimulus_column():
     assert [event.meta["column"] for event in events] == [
         "image_path", "sentence", "image_path", "sentence",
     ]
+
+
+def test_stimulus_session_exposes_time_bins():
+    time_bins = [(70, 170), (170, 270)]
+    session = stimulus_session(_stimulus_set(), record="IT",
+                               time_bins=time_bins)
+
+    assert session.time_bins == time_bins
 
 
 def test_collect_packages_raw_neural_events_as_neuroid_assembly():
@@ -345,6 +411,42 @@ def test_score_stimuli_native_interact_matches_cross_tower_process_exactly():
     assert activations.call_args["layers"] == ["vision_model.layer.10"]
     assert text.call_args["layers"] == ["text_model.layer.20"]
     assert set(scored["modality"].values.tolist()) == {"vision", "text"}
+    xr.testing.assert_identical(scored, expected)
+
+
+def test_score_stimuli_native_interact_threads_time_bins_exactly():
+    stimuli = _metadata_stimulus_set()
+    time_bins = [(70, 170), (170, 270)]
+
+    legacy = _TemporalBrainScoreModel()
+    legacy.start_recording("IT", time_bins=time_bins)
+    expected = legacy.process(stimuli)
+
+    subject = _TrackingTemporalBrainScoreModel()
+    scored = score_stimuli(subject, stimuli, record="IT", time_bins=time_bins)
+
+    assert subject.interact_called is True
+    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert scored.dims == ("presentation", "time_bin", "neuroid")
+    assert list(scored["time_bin_start_ms"].values) == [70, 170]
+    assert list(scored["time_bin_end_ms"].values) == [170, 270]
+    xr.testing.assert_identical(scored, expected)
+
+
+def test_score_stimuli_without_time_bins_keeps_2d_output():
+    stimuli = _metadata_stimulus_set()
+
+    legacy = _TemporalBrainScoreModel()
+    legacy.start_recording("IT")
+    expected = legacy.process(stimuli)
+
+    subject = _TrackingTemporalBrainScoreModel()
+    scored = score_stimuli(subject, stimuli, record="IT")
+
+    assert subject.interact_called is True
+    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert scored.dims == ("presentation", "neuroid")
+    assert "time_bin" not in scored.dims
     xr.testing.assert_identical(scored, expected)
 
 
