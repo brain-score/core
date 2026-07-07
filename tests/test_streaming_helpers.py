@@ -161,6 +161,16 @@ def _native_state_change_model(state_change_fn, model_cls=BrainScoreModel):
     )
 
 
+def _native_environment_model(action_fn, model_cls=BrainScoreModel):
+    return model_cls(
+        identifier="native-environment",
+        model=None,
+        region_layer_map={},
+        preprocessors={"vision": lambda stimuli: stimuli},
+        action_fn=action_fn,
+    )
+
+
 def _native_multimodal_model(model_cls=BrainScoreModel):
     activations = _XArrayActivationsModel()
     text = _XArrayPreprocessor(label="text")
@@ -282,6 +292,28 @@ class _SyntheticSubject(Subject):
     def process(self, input_event):
         self.process_input = input_event
         return self.output
+
+
+class _NonNativeEnvironmentSubject(Subject):
+    def __init__(self, action_fn):
+        self.action_fn = action_fn
+        self.processed_steps = []
+
+    @property
+    def identifier(self):
+        return "non-native-environment"
+
+    @property
+    def region_layer_map(self):
+        return {}
+
+    @property
+    def supported_modalities(self):
+        return {"vision", "proprioception"}
+
+    def process(self, input_event):
+        self.processed_steps.append(input_event.step_num)
+        return self.action_fn(input_event)
 
 
 def test_stimulus_session_emits_input_events_per_stimulus_column():
@@ -752,6 +784,8 @@ def _legacy_environment_rollout(subject, environment):
 def test_environment_session_advances_after_motor_emit():
     session = environment_session(_SyntheticEnvironment(_environment_steps(2)))
 
+    assert session.requested_output_channels == ("motor",)
+
     first_step = session.next_input()
     assert first_step.step_num == 0
     assert session.input_events[0].channel == "observation"
@@ -765,6 +799,38 @@ def test_environment_session_advances_after_motor_emit():
     second_step = session.next_input()
 
     assert second_step.step_num == 1
+
+
+def test_native_environment_interact_matches_legacy_rollout_exactly():
+    session = environment_session(_SyntheticEnvironment(_environment_steps(4)))
+    native_model = _native_environment_model(
+        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+    )
+
+    native_model.interact(session)
+    native_trajectory = session.collect("motor")
+
+    legacy_model = _make_environment_model(action_fn=_droid_action_fn)
+    legacy_env = _SyntheticEnvironment(_environment_steps(4))
+    expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)
+
+    assert native_model.interact_called is True
+    assert native_model.interact_requested_output_channels == ("motor",)
+    assert [event.channel for event in session.emitted] == [
+        "motor", "motor", "motor", "motor",
+    ]
+    assert [event.meta["driver"] for event in session.emitted] == [
+        "interact", "interact", "interact", "interact",
+    ]
+    assert [event.meta["step_num"] for event in session.emitted] == [0, 1, 2, 3]
+    assert len(native_trajectory) == len(expected_trajectory)
+    for native_response, expected_response in zip(
+        native_trajectory, expected_trajectory
+    ):
+        np.testing.assert_array_equal(
+            native_response.action, expected_response.action
+        )
+        assert native_response.metadata == expected_response.metadata
 
 
 def test_environment_session_emits_motor_events_for_multistep_rollout():
@@ -785,7 +851,9 @@ def test_environment_session_emits_motor_events_for_multistep_rollout():
 
 
 def test_run_environment_matches_legacy_process_rollout_exactly():
-    helper_model = _make_environment_model(action_fn=_droid_action_fn)
+    helper_model = _native_environment_model(
+        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+    )
     helper_env = _SyntheticEnvironment(_environment_steps(4))
     helper_trajectory = run_environment(helper_model, helper_env)
 
@@ -804,21 +872,45 @@ def test_run_environment_matches_legacy_process_rollout_exactly():
     assert len(helper_env.actions) == len(legacy_env.actions)
     for helper_action, expected_action in zip(helper_env.actions, legacy_env.actions):
         np.testing.assert_array_equal(helper_action, expected_action)
+    assert helper_model.interact_called is True
+    assert helper_model.interact_requested_output_channels == ("motor",)
+
+
+def test_run_environment_falls_back_for_non_native_subjects():
+    subject = _NonNativeEnvironmentSubject(_droid_action_fn)
+    env = _SyntheticEnvironment(_environment_steps(3))
+
+    trajectory = run_environment(subject, env)
+
+    assert type(subject).interact is Subject.interact
+    assert subject.processed_steps == [0, 1, 2]
+    assert [response.metadata["step_num_seen"] for response in trajectory] == [
+        0, 1, 2,
+    ]
 
 
 def test_run_environment_terminates_cleanly_for_zero_and_one_step_envs():
-    model = _make_environment_model(action_fn=_droid_action_fn)
+    model = _native_environment_model(
+        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+    )
     zero_env = _SyntheticEnvironment([])
 
     assert run_environment(model, zero_env) == []
     assert zero_env.actions == []
+    assert model.interact_called is True
+    assert model.interact_requested_output_channels == ("motor",)
 
+    model = _native_environment_model(
+        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+    )
     one_env = _SyntheticEnvironment(_environment_steps(1))
     trajectory = run_environment(model, one_env)
 
     assert len(trajectory) == 1
     assert trajectory[0].metadata["step_num_seen"] == 0
     assert one_env.actions == []
+    assert model.interact_called is True
+    assert model.interact_requested_output_channels == ("motor",)
 
 
 def _ablation_state_change():

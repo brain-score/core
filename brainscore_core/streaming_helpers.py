@@ -140,6 +140,7 @@ class EnvironmentSession(Session):
 
     def __init__(self, environment):
         self.environment = environment
+        self.requested_output_channels = ("motor",)
         self.input_events: list[StreamEvent] = []
         self.emitted: list[StreamEvent] = []
         self._started = False
@@ -243,7 +244,10 @@ def apply_state_change(subject, state_change: StateChange):
 
 def run_environment(subject, environment) -> list:
     session = environment_session(environment)
-    _drive_environment_via_process(subject, session)
+    if _has_native_interact(subject):
+        subject.interact(session)
+    else:
+        _drive_environment_via_process(subject, session)
     return session.collect("motor")
 
 
@@ -386,6 +390,13 @@ def _has_native_interact(subject) -> bool:
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    _drive_environment_session_via_process(subject, session, driver="process")
+
+
+def _drive_environment_session_via_process(
+    subject, session: EnvironmentSession, driver: str = "interact"
+) -> None:
+    """Drive a live environment session through existing EnvironmentStep dispatch."""
     step = session.next_input()
     while step is not None:
         response = subject.process(step)
@@ -394,7 +405,7 @@ def _drive_environment_via_process(subject, session: EnvironmentSession) -> None
             payload=response,
             t_ms=float(step.step_num),
             meta={
-                "driver": "process",
+                "driver": driver,
                 "step_num": step.step_num,
             },
         ))

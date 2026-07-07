@@ -20,6 +20,7 @@ from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
     _drive_behavior_session_via_process,
+    _drive_environment_session_via_process,
     _drive_neural_session_via_process,
     _drive_state_change_session_via_process,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
@@ -260,12 +261,16 @@ class BrainScoreModel(Subject):
         if requested_channels == ["perturbation"]:
             _drive_state_change_session_via_process(self, session)
             return
+        if requested_channels == ["motor"]:
+            _drive_environment_session_via_process(self, session)
+            return
         if all(channel.startswith("neural:") for channel in requested_channels):
             _drive_neural_session_via_process(self, session)
             return
         raise NotImplementedError(
             "BrainScoreModel.interact currently supports requested "
-            "neural:<region>, behavior, or perturbation output channels; got "
+            "neural:<region>, behavior, perturbation, or motor output "
+            "channels; got "
             f"{requested_channels!r}."
         )
 
