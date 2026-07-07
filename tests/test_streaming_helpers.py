@@ -38,6 +38,11 @@ from tests.test_environment_step import (
     _droid_step,
     _make_model as _make_environment_model,
 )
+from tests.test_model_interface import (
+    _XArrayActivationsModel,
+    _XArrayPreprocessor,
+    make_stub_preprocessor,
+)
 from tests.test_state_change import (
     _counting_state_change_fn,
     _make_model as _make_state_change_model,
@@ -78,6 +83,16 @@ def _metadata_stimulus_set():
         "difficulty": [1, 2],
     }))
     stimuli.identifier = "metadata-synthetic"
+    return stimuli
+
+
+def _multimodal_stimulus_set():
+    stimuli = StimulusSet(pd.DataFrame({
+        "stimulus_id": ["s0", "s1"],
+        "image_file_name": ["s0.png", "s1.png"],
+        "sentence": ["hello", "world"],
+    }))
+    stimuli.identifier = "multimodal-synthetic"
     return stimuli
 
 
@@ -144,6 +159,45 @@ def _native_state_change_model(state_change_fn, model_cls=BrainScoreModel):
         preprocessors={"vision": lambda stimuli: stimuli},
         state_change_fn=state_change_fn,
     )
+
+
+def _native_multimodal_model(model_cls=BrainScoreModel):
+    activations = _XArrayActivationsModel()
+    text = _XArrayPreprocessor(label="text")
+    model = model_cls(
+        identifier="native-multimodal",
+        model=None,
+        region_layer_map={"IT": "layer.10"},
+        preprocessors={
+            "vision": make_stub_preprocessor(),
+            "text": text,
+        },
+        activations_model=activations,
+    )
+    return model, activations, text
+
+
+def _native_cross_tower_model(model_cls=BrainScoreModel):
+    activations = _XArrayActivationsModel()
+    text = _XArrayPreprocessor(label="text")
+    model = model_cls(
+        identifier="native-cross-tower",
+        model=None,
+        region_layer_map={
+            "IT": "vision_model.layer.10",
+            "language_network": "text_model.layer.20",
+        },
+        preprocessors={
+            "vision": make_stub_preprocessor(),
+            "text": text,
+        },
+        activations_model=activations,
+        region_modality_map={
+            "IT": "vision",
+            "language_network": "text",
+        },
+    )
+    return model, activations, text
 
 
 class _SyntheticSubject(Subject):
@@ -250,6 +304,47 @@ def test_score_stimuli_uses_native_interact_and_preserves_metadata_exactly():
     assert subject.interact_called is True
     assert subject.interact_requested_output_channels == ("neural:IT",)
     assert native_extractor.last_stimuli is stimuli
+    assert "modality" not in scored.coords
+    xr.testing.assert_identical(scored, expected)
+
+
+def test_score_stimuli_native_interact_matches_multimodal_process_exactly():
+    stimuli = _multimodal_stimulus_set()
+
+    legacy, _, _ = _native_multimodal_model()
+    legacy.start_recording("IT")
+    expected = legacy.process(stimuli, multi_modality=True)
+
+    subject, activations, text = _native_multimodal_model(
+        model_cls=_InteractTrackingBrainScoreModel
+    )
+    scored = score_stimuli(subject, stimuli, record="IT")
+
+    assert subject.interact_called is True
+    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert activations.call_args is not None
+    assert text.call_args is not None
+    assert set(scored["modality"].values.tolist()) == {"vision", "text"}
+    xr.testing.assert_identical(scored, expected)
+
+
+def test_score_stimuli_native_interact_matches_cross_tower_process_exactly():
+    stimuli = _multimodal_stimulus_set()
+
+    legacy, _, _ = _native_cross_tower_model()
+    legacy.start_recording("all")
+    expected = legacy.process(stimuli, multi_modality=True)
+
+    subject, activations, text = _native_cross_tower_model(
+        model_cls=_InteractTrackingBrainScoreModel
+    )
+    scored = score_stimuli(subject, stimuli, record="all")
+
+    assert subject.interact_called is True
+    assert subject.interact_requested_output_channels == ("neural:all",)
+    assert activations.call_args["layers"] == ["vision_model.layer.10"]
+    assert text.call_args["layers"] == ["text_model.layer.20"]
+    assert set(scored["modality"].values.tolist()) == {"vision", "text"}
     xr.testing.assert_identical(scored, expected)
 
 

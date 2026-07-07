@@ -43,6 +43,9 @@ _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY = {
     "stimulation": "stimulation",
     "pharmacological": "pharmacological",
 }
+_STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
+    modalities_to_input_channels(STIMULUS_COLUMN_TO_MODALITY.values())
+)
 
 
 class StimulusSetSession(InMemorySession):
@@ -64,7 +67,9 @@ class StimulusSetSession(InMemorySession):
         if not matching:
             raise ValueError(f"No emitted events for channel {channel!r}.")
 
-        if len(matching) == 1 and isinstance(matching[0].payload, NeuroidAssembly):
+        if len(matching) == 1 and _is_neural_assembly_payload(
+            matching[0].payload
+        ):
             return matching[0].payload
 
         return _collect_neural_events(channel, matching)
@@ -253,6 +258,7 @@ def _drive_neural_session_via_process(
     input_events = _drain_stream_events(session)
     stimuli = _stimuli_from_stream_session(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0
+    use_multi_modality = _should_use_multi_modality(subject, input_events)
 
     for channel in _requested_output_channels(session):
         family, region = parse_channel(channel)
@@ -262,7 +268,10 @@ def _drive_neural_session_via_process(
                 f"neural:<region> output channels; got {channel!r}."
             )
         subject.start_recording(region)
-        output = subject.process(stimuli)
+        if use_multi_modality:
+            output = subject.process(stimuli, multi_modality=True)
+        else:
+            output = subject.process(stimuli)
         session.emit(StreamEvent(
             channel=channel,
             payload=output,
@@ -289,6 +298,17 @@ def _stimuli_from_stream_session(session, events: list[StreamEvent]):
     if hasattr(session, "stimulus_set"):
         return session.stimulus_set
     return _reconstruct_stimulus_set_from_events(events)
+
+
+def _should_use_multi_modality(subject, events: list[StreamEvent]) -> bool:
+    if not hasattr(subject, "_process_multi_modality"):
+        return False
+    families = set()
+    for event in events:
+        family, _ = parse_channel(event.channel)
+        if family in _STIMULUS_INPUT_CHANNEL_FAMILIES:
+            families.add(family)
+    return len(families) > 1
 
 
 def _reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
@@ -685,6 +705,11 @@ def _collect_neural_events(channel: str,
 
     return NeuroidAssembly(data, coords=coords,
                            dims=["presentation", "neuroid"])
+
+
+def _is_neural_assembly_payload(payload) -> bool:
+    dims = getattr(payload, "dims", None)
+    return dims is not None and "presentation" in dims and "neuroid" in dims
 
 
 def _collect_behavior_events(events: list[StreamEvent]) -> BehavioralAssembly:
