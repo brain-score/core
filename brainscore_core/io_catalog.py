@@ -330,6 +330,17 @@ _SEED = [
                  "the model's action_fn, decoded by the environment harness",
                  owner="environment harness",
                  materializers=("EnvironmentResponse",)),
+    # --- outputs: physiological readouts (reserved for human harnesses) ---
+    CatalogEntry("pupil", OUTPUT, "human harness recording",
+                 "(t,) float pupil diameter time series, or scalar diameter",
+                 "the human harness (eye tracker)",
+                 meta_keys=("signal_type",),
+                 owner="human harness"),
+    CatalogEntry("skin_conductance", OUTPUT, "human harness recording",
+                 "(t,) float skin conductance time series, or scalar value",
+                 "the human harness (physiological sensor)",
+                 meta_keys=("signal_type",),
+                 owner="human harness"),
 ]
 
 for _entry in _SEED:
