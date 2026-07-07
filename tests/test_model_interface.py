@@ -768,6 +768,98 @@ class _XArrayPreprocessor:
         )
 
 
+_RICH_PRESENTATION_LEVELS = [
+    'stimulus_id',
+    'image_label',
+    'word',
+    'sentence',
+    'realpseudo',
+    'numeric_label',
+    'image_file_name',
+]
+
+_RICH_PRESENTATION_VALUES = {
+    'stimulus_id': ['roar_0000', 'roar_0001'],
+    'image_label': ['real', 'pseudo'],
+    'word': ['able', 'ablood'],
+    'sentence': ['able', 'ablood'],
+    'realpseudo': ['real', 'pseudo'],
+    'numeric_label': [1, 0],
+    'image_file_name': ['roar_0000.png', 'roar_0001.png'],
+}
+
+
+def _rich_presentation_index(levels=None):
+    import pandas as pd
+
+    levels = levels or _RICH_PRESENTATION_LEVELS
+    return pd.MultiIndex.from_arrays(
+        [_RICH_PRESENTATION_VALUES[level] for level in levels],
+        names=levels,
+    )
+
+
+def _rich_presentation_coords(exclude=()):
+    exclude = set(exclude)
+    return {
+        name: ('presentation', values)
+        for name, values in _RICH_PRESENTATION_VALUES.items()
+        if name not in exclude
+    }
+
+
+class _RichPresentationExtractor:
+    """Layer-aware extractor with configurable presentation coord packaging."""
+
+    identifier = 'rich_presentation_extractor'
+
+    def __init__(self, label, base_value, presentation_mode):
+        self.label = label
+        self.base_value = base_value
+        self.presentation_mode = presentation_mode
+        self.call_args = None
+
+    def __call__(self, stimuli, layers=None, **kwargs):
+        import numpy as np
+        import xarray as xr
+
+        self.call_args = {'stimuli': stimuli, 'layers': layers}
+        layers = list(layers or [f'{self.label}_layer'])
+        n_presentation = len(_RICH_PRESENTATION_VALUES['stimulus_id'])
+        n_neuroid = len(layers)
+        data = (
+            self.base_value
+            + np.arange(n_presentation * n_neuroid).reshape(
+                n_presentation, n_neuroid
+            )
+        )
+        coords = {
+            'layer': ('neuroid', np.array(layers)),
+            'neuroid_id': (
+                'neuroid',
+                np.array([
+                    f'{self.label}_n{i}' for i in range(n_neuroid)
+                ]),
+            ),
+        }
+        if self.presentation_mode == 'multiindex':
+            coords['presentation'] = _rich_presentation_index()
+        elif self.presentation_mode == 'partial_index':
+            coords['presentation'] = _rich_presentation_index(['stimulus_id'])
+            coords.update(_rich_presentation_coords(exclude={'stimulus_id'}))
+        elif self.presentation_mode == 'coords':
+            coords.update(_rich_presentation_coords())
+        else:
+            raise ValueError(
+                f'unknown presentation_mode={self.presentation_mode!r}'
+            )
+        return xr.DataArray(
+            data,
+            dims=('presentation', 'neuroid'),
+            coords=coords,
+        )
+
+
 class TestMultiModalityDispatch:
 
     def test_default_single_modality_backward_compat(self):
@@ -913,6 +1005,56 @@ class TestMultiModalityDispatch:
         # text_assembly has 1 neuroid (default layer). Multi = 1 + 1 = 2.
         assert single.sizes['neuroid'] == 1
         assert multi.sizes['neuroid'] == 2
+
+    def _make_rich_presentation_model(self, vision_mode, text_mode):
+        vision_act = _RichPresentationExtractor(
+            label='vision', base_value=1.0,
+            presentation_mode=vision_mode,
+        )
+        text_extractor = _RichPresentationExtractor(
+            label='text', base_value=101.0,
+            presentation_mode=text_mode,
+        )
+        model = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={},
+            preprocessors={
+                'vision': make_stub_preprocessor(),
+                'text': text_extractor,
+            },
+            activations_model=vision_act,
+        )
+        return model, vision_act, text_extractor
+
+    def test_multi_modality_reconciles_rich_presentation_multiindex(self):
+        """Rich presentation metadata that used to collide now fans out."""
+        import xarray as xr
+
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+
+        colliding, vision_act, text_extractor = (
+            self._make_rich_presentation_model(
+                vision_mode='multiindex',
+                text_mode='partial_index',
+            )
+        )
+        assembly = colliding.process(stimuli, multi_modality=True)
+
+        baseline, _, _ = self._make_rich_presentation_model(
+            vision_mode='coords',
+            text_mode='coords',
+        )
+        expected = baseline.process(stimuli, multi_modality=True)
+
+        assert vision_act.call_args is not None
+        assert text_extractor.call_args is not None
+        assert set(assembly['modality'].values.tolist()) == {'vision', 'text'}
+        assert assembly.sizes['neuroid'] == 2
+        assert assembly.indexes['presentation'].names == _RICH_PRESENTATION_LEVELS
+        assert int((assembly['modality'] == 'vision').sum()) == 1
+        assert int((assembly['modality'] == 'text').sum()) == 1
+        xr.testing.assert_identical(assembly, expected)
 
 
 # -- Cross-tower layer routing tests -----------------------------------------

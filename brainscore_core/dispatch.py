@@ -145,4 +145,30 @@ class InputDispatcher:
                 f"available={set(owner._preprocessors.keys())}."
             )
 
-        return xr.concat(sub_assemblies, dim='neuroid')
+        return _concat_modalities_along_neuroid(sub_assemblies, xr)
+
+
+def _concat_modalities_along_neuroid(sub_assemblies, xr):
+    """Concat modality assemblies without letting presentation indexes collide."""
+    flattened = [
+        _reset_presentation_index(assembly)
+        for assembly in sub_assemblies
+    ]
+    combined = xr.concat(flattened, dim='neuroid')
+    presentation_coords = [
+        name for name, coord in combined.coords.items()
+        if name != 'presentation' and coord.dims == ('presentation',)
+    ]
+    if presentation_coords:
+        combined = combined.set_index(presentation=presentation_coords)
+    return combined
+
+
+def _reset_presentation_index(assembly):
+    """Expose presentation MultiIndex levels as plain coords for concat."""
+    if 'presentation' not in getattr(assembly, 'indexes', {}):
+        return assembly
+    index = assembly.indexes['presentation']
+    if index.__class__.__name__ != 'MultiIndex':
+        return assembly
+    return assembly.reset_index('presentation')
