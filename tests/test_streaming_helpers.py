@@ -297,8 +297,8 @@ def test_collect_rejects_missing_channel():
         session.collect("neural:IT")
 
 
-def _behavior_model(features):
-    return BrainScoreModel(
+def _behavior_model(features, model_cls=BrainScoreModel):
+    return model_cls(
         identifier="test-model",
         model=None,
         region_layer_map={},
@@ -321,6 +321,8 @@ def test_behavior_session_emits_instruction_fitting_and_scoring_events():
     fitting = _make_image_stimulus_set(["cat", "dog"], identifier="fit")
     scoring = _make_image_stimulus_set(["cat", "dog"], identifier="score")
     session = behavior_session(_behavior_context(fitting, scoring))
+
+    assert session.requested_output_channels == ("behavior",)
 
     events = []
     while True:
@@ -359,20 +361,24 @@ def test_score_behavior_matches_legacy_start_task_process_exactly():
     legacy.start_task(legacy_context)
     expected = legacy.process(scoring)
 
-    helper_subject = _behavior_model(features)
+    helper_subject = _behavior_model(
+        features, model_cls=_InteractTrackingBrainScoreModel
+    )
     helper_context = _behavior_context(fitting, scoring)
     scored = score_behavior(helper_subject, helper_context)
 
+    assert helper_subject.interact_called is True
+    assert helper_subject.interact_requested_output_channels == ("behavior",)
     assert isinstance(scored, BehavioralAssembly)
     xr.testing.assert_identical(scored, expected)
 
 
-def _generation_model(calls):
+def _generation_model(calls, model_cls=BrainScoreModel):
     def fake_generate(stimulus_row, instruction, label_set):
         calls.append((stimulus_row["stimulus_id"], instruction, tuple(label_set)))
         return "cat" if stimulus_row["stimulus_id"] in {"s0", "s1", "s2"} else "dog"
 
-    return BrainScoreModel(
+    return model_cls(
         identifier="test-vlm",
         model=None,
         region_layer_map={},
@@ -402,13 +408,43 @@ def test_score_behavior_matches_legacy_generation_path_exactly():
     expected = legacy.process(scoring)
 
     helper_calls = []
-    helper_subject = _generation_model(helper_calls)
+    helper_subject = _generation_model(
+        helper_calls, model_cls=_InteractTrackingBrainScoreModel
+    )
     helper_context = _generation_context(scoring)
     scored = score_behavior(helper_subject, helper_context)
 
+    assert helper_subject.interact_called is True
+    assert helper_subject.interact_requested_output_channels == ("behavior",)
     assert isinstance(scored, BehavioralAssembly)
     xr.testing.assert_identical(scored, expected)
     assert helper_calls == legacy_calls
+
+
+def test_score_behavior_falls_back_for_non_native_subject():
+    scoring = _make_image_stimulus_set(
+        ["cat", "dog"], identifier="behavior_fallback"
+    )
+    expected = BehavioralAssembly(
+        np.array([[1.0, 0.0], [0.0, 1.0]]),
+        coords={
+            "stimulus_id": ("presentation", ["s0", "s1"]),
+            "choice": ("choice", ["cat", "dog"]),
+        },
+        dims=["presentation", "choice"],
+    )
+    subject = _SyntheticSubject(expected)
+    context = TaskContext(
+        task_type="probabilities",
+        label_set=["cat", "dog"],
+        metadata={"stimulus_set": scoring},
+    )
+
+    scored = score_behavior(subject, context)
+
+    assert type(subject).interact is Subject.interact
+    assert subject.process_input is scoring
+    xr.testing.assert_identical(scored, expected)
 
 
 def test_behavior_collect_packages_raw_label_events():

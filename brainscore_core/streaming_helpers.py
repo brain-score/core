@@ -76,6 +76,7 @@ class BehavioralSession(InMemorySession):
     def __init__(self, task_context):
         self.task_context = task_context
         self.scoring_stimuli = _behavior_stimuli_to_score(task_context)
+        self.requested_output_channels = ("behavior",)
         super().__init__(_behavior_events(task_context, self.scoring_stimuli))
 
     @classmethod
@@ -210,7 +211,10 @@ def score_stimuli(subject, stimulus_set, record: str = "IT") -> NeuroidAssembly:
 
 def score_behavior(subject, task_context) -> BehavioralAssembly:
     session = behavior_session(task_context)
-    _drive_behavior_via_process(subject, session, task_context)
+    if _has_native_interact(subject):
+        subject.interact(session)
+    else:
+        _drive_behavior_via_process(subject, session, task_context)
     return session.collect("behavior")
 
 
@@ -377,6 +381,22 @@ def _drive_state_change_via_process(subject, session: StateChangeSession,
 def _drive_behavior_via_process(subject, session: BehavioralSession,
                                 task_context) -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    _drive_behavior_session_via_process(
+        subject, session, task_context=task_context, driver="process"
+    )
+
+
+def _drive_behavior_session_via_process(
+    subject, session: BehavioralSession, task_context=None,
+    driver: str = "interact"
+) -> None:
+    """Drive a behavioral session through existing start_task/process logic."""
+    if task_context is None:
+        task_context = getattr(session, "task_context", None)
+    if task_context is None:
+        raise ValueError(
+            "behavior interact requires a session.task_context to drive."
+        )
     subject.start_task(task_context)
     stimuli = _behavior_stimuli_to_score(task_context)
     if stimuli is None:
@@ -389,7 +409,7 @@ def _drive_behavior_via_process(subject, session: BehavioralSession,
         channel="behavior",
         payload=output,
         t_ms=0.0,
-        meta={"driver": "process", "task_type": task_context.task_type},
+        meta={"driver": driver, "task_type": task_context.task_type},
     ))
 
 

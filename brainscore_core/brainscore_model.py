@@ -19,6 +19,7 @@ from .selection import UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
+    _drive_behavior_session_via_process,
     _drive_neural_session_via_process,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels as _neural_requested_output_channels,
@@ -250,8 +251,19 @@ class BrainScoreModel(Subject):
         return self._dispatcher.process(input_event, multi_modality)
 
     def interact(self, session) -> None:
-        """Drive a v2 streaming session through the existing neural path."""
-        _drive_neural_session_via_process(self, session)
+        """Drive a v2 streaming session through existing model paths."""
+        requested_channels = _neural_requested_output_channels(session)
+        if requested_channels == ["behavior"]:
+            _drive_behavior_session_via_process(self, session)
+            return
+        if all(channel.startswith("neural:") for channel in requested_channels):
+            _drive_neural_session_via_process(self, session)
+            return
+        raise NotImplementedError(
+            "BrainScoreModel.interact currently supports requested "
+            "neural:<region> or behavior output channels; got "
+            f"{requested_channels!r}."
+        )
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
