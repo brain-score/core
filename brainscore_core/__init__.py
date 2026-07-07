@@ -25,6 +25,7 @@ from .model_interface import (
     dispatch_metric,
 )
 from .compatibility import CompatibilityError, CompatibilityWarning, check_compatibility, check_io_catalog
+from .score_status import STATUS_NA, na_score, score_or_na
 from .memory import MemoryError, check_memory, get_available_memory
 from . import io_catalog
 from .io_catalog import CatalogEntry
