@@ -9,14 +9,14 @@ description = ""
 authors = []
 license = { 'file' = 'LICENSE' }
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 
 dependencies = [
     "tqdm",
-    "numpy>=1.21,<2.0",
+    "numpy<2",
     "boto3", # AWS S3 client for brainio lite
     "netCDF4", # NetCDF file format for brainio lite
-    "xarray<2022.6",  # groupby bug was introduced in index refactor: https://github.com/pydata/xarray/issues/6836
+    "xarray==2022.3.0",  # tested pre-index-refactor release; keep unified installs reproducible
     "pandas", # DataFrames for brainio lite
     "Pillow", # Image processing for brainio lite
     "psycopg2-binary", # postgres driver
