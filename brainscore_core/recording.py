@@ -40,6 +40,14 @@ class Recorder:
             recording_target = [recording_target]
 
         if isinstance(recording_target, str):
+            if recording_target not in owner._region_layer_map_dict:
+                import warnings
+                warnings.warn(
+                    f"Recording target '{recording_target}' is not a region in "
+                    f"region_layer_map (known regions: "
+                    f"{sorted(owner._region_layer_map_dict.keys())}); treating it "
+                    f"as a raw layer path. If you meant a region, check the spelling.",
+                    UserWarning, stacklevel=2)
             self.recording_layer = owner._region_layer_map_dict.get(
                 recording_target, recording_target
             )

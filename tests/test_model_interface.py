@@ -318,6 +318,31 @@ class TestBrainScoreModelDispatch:
         assert act_model.call_args['stimuli'] is stimuli
         assert act_model.call_args['layers'] == ['layer4']
 
+    def test_process_without_start_recording_raises(self):
+        """Forgetting start_recording must fail loudly, not return 0 neuroids."""
+        m = BrainScoreModel(
+            identifier='resnet',
+            model='torch_model',
+            region_layer_map={'IT': 'layer4'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=StubActivationsModel(),
+        )
+        stimuli = StubStimulusSet(columns=['image_file_name', 'stimulus_id'])
+        with pytest.raises(ValueError, match="start_recording"):
+            m.process(stimuli)  # no start_recording called
+
+    def test_start_recording_unknown_region_warns(self):
+        """A typo'd region name warns instead of silently becoming a layer path."""
+        m = BrainScoreModel(
+            identifier='resnet',
+            model='torch_model',
+            region_layer_map={'IT': 'layer4'},
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=StubActivationsModel(),
+        )
+        with pytest.warns(UserWarning, match="not a region"):
+            m.start_recording('ITT')  # typo of 'IT'
+
     def test_vision_without_activations_model_falls_to_preprocessor(self):
         """Vision stimuli fall through to preprocessor if no activations_model."""
         proc = make_stub_preprocessor(return_value='vision_via_preprocessor')

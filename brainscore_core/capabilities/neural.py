@@ -54,6 +54,16 @@ class NeuralEncodingCapability(Capability):
         if (model._composite_recording
                 and model._supports_layer_extraction(modality)):
             return model._process_composite_regions(stimuli, modality)
+        if (not layers and model._region_layer_map_dict
+                and model._supports_layer_extraction(modality)):
+            # regions ARE defined but none is active -> user forgot start_recording
+            # (an empty region_layer_map is a legitimate default-extraction path)
+            raise ValueError(
+                f"No active recording layer for model '{model.identifier}': "
+                f"call start_recording(<region>) before process(), otherwise "
+                f"extraction returns 0 neuroids. Known regions: "
+                f"{sorted(model._region_layer_map_dict.keys())}."
+            )
         assembly = model._extract_for_modality(stimuli, modality, layers)
         if model._is_multi_region and model._supports_layer_extraction(modality):
             assembly = model._tag_neuroids_with_regions(assembly)
