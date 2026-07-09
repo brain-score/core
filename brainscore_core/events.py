@@ -38,15 +38,19 @@ class Perturbation:
     """How to modify the activations at the selected units.
 
     :param kind: One of ``'zero'`` (zero out), ``'scale'`` (multiply by
-        ``scale``), ``'replace'`` (replace with ``replacement`` tensor),
-        or model-specific kinds (e.g., ``'noise'``) that the registered
+        ``scale``), ``'drive'`` (add ``amount`` — a stimulation / excitation
+        analog), ``'replace'`` (replace with ``replacement`` tensor), or
+        model-specific kinds (e.g., ``'noise'``) that the registered
         ``state_change_fn`` knows how to interpret.
     :param scale: Multiplier for ``kind='scale'``. Ignored otherwise.
+    :param amount: Additive offset for ``kind='drive'`` — inject activity into
+        the selected units, the counterpart of ablation. Ignored otherwise.
     :param replacement: Tensor or array to substitute in for ``kind='replace'``.
         Shape must match the selected units' activations.
     """
     kind: str
     scale: float = 0.0
+    amount: float = 0.0
     replacement: Optional[Any] = None
 
 
