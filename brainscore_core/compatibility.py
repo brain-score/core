@@ -272,7 +272,9 @@ def check_compatibility(model: Subject, benchmark) -> None:
         raise CompatibilityError(
             f"Model '{model.identifier}' has no layer mapping for region "
             f"'{required_region}'. Mapped regions: {set(model.region_layer_map.keys())}. "
-            f"Use the Arena tool to explore and commit layer mappings."
+            f"Use the layer-mapping explorer "
+            f"(brainscore_vision.tools.layer_mapping_explorer) to find and commit "
+            f"a region-to-layer mapping."
         )
 
     # Check 4 (v1.5): Input/Output Catalog documentation conformance. Warn-only;
