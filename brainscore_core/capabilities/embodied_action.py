@@ -3,6 +3,7 @@
 from .base import Capability
 from .registry import register_capability
 from ..events import EnvironmentResponse, EnvironmentStep, Message
+from ..io_catalog import check_payload
 
 
 class EmbodiedActionCapability(Capability):
@@ -22,6 +23,19 @@ class EmbodiedActionCapability(Capability):
         return self._process_environment_step(model, event)
 
     def _process_environment_step(self, model, input_event: EnvironmentStep):
+        # Validate camera payloads at the boundary (best-effort), so a malformed
+        # frame is flagged here instead of failing deep inside the policy.
+        issues = []
+        for cam_name, frame in (getattr(input_event, 'cameras', None) or {}).items():
+            rgb = getattr(frame, 'rgb', None)
+            if rgb is not None:
+                issues += [f"camera '{cam_name}': {m}"
+                           for m in check_payload('vision', rgb)]
+        if issues:
+            raise ValueError(
+                "EnvironmentStep camera payload(s) failed validation:\n  - "
+                + "\n  - ".join(issues)
+            )
         if model._action_fn is None:
             raise NotImplementedError(
                 f"Model '{model.identifier}' has no action_fn registered. "
