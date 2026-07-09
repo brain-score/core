@@ -131,6 +131,8 @@ class Subject(ABC):
         }
         if self._has_behavioral_output_path():
             channels.add("behavior")
+        if self._has_action_output_path():
+            channels.add("motor")
         return channels
 
     @property
@@ -186,6 +188,16 @@ class Subject(ABC):
             "behavioral_readout_layer",
             "generation_fn",
         ):
+            try:
+                value = getattr(self, attr)
+            except Exception:
+                continue
+            if value is not None:
+                return True
+        return False
+
+    def _has_action_output_path(self) -> bool:
+        for attr in ("_action_fn", "action_fn"):
             try:
                 value = getattr(self, attr)
             except Exception:
