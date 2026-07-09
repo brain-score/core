@@ -1,7 +1,7 @@
 """
 Temporal binning for naturalistic benchmarks.
 
-The core pattern (see [[Unified Model Interface - Vision and Goals]]
+The core pattern (see Unified Model Interface - Vision and Goals
 §"Temporal Binning: How Timestamps Travel Through the Pipeline"):
 
 1. Preprocessor expands a clip into individual frames/tokens with
