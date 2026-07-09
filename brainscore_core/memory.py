@@ -382,7 +382,14 @@ def check_memory(
     try:
         result = model.process(stimulus_set)
     except Exception as e:
-        logger.info(f"Memory check skipped: probe failed ({type(e).__name__}: {e})")
+        # Fail visibly, not silently: a swallowed probe disables the OOM guard,
+        # so the full run can OOM after hours with no prior warning.
+        logger.warning(
+            f"Memory pre-flight DISABLED for this run: the probe extraction failed "
+            f"({type(e).__name__}: {e}). The benchmark will run WITHOUT an out-of-memory "
+            f"estimate. Fix the error above, or pass check_mem=False to skip this check "
+            f"intentionally."
+        )
         return
 
     rss_after_probe = psutil.Process().memory_info().rss

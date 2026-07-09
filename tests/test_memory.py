@@ -329,6 +329,19 @@ class TestCheckMemory:
         with patch('brainscore_core.memory.get_available_memory', return_value=16_000_000_000):
             check_memory(model, bench)  # should not raise
 
+    def test_probe_failure_warns_loudly(self, caplog):
+        # A swallowed probe silently disables the OOM guard — it must WARN, not
+        # skip at INFO. Assert a WARNING-level record explains the guard is off.
+        import logging
+        model = FailingModel()
+        bench = FakeBenchmark(n_stimuli=10)
+        with patch('brainscore_core.memory.get_available_memory', return_value=16_000_000_000):
+            with caplog.at_level(logging.WARNING, logger='brainscore_core.memory'):
+                check_memory(model, bench)
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "probe failure should emit a WARNING, not a silent INFO skip"
+        assert 'DISABLED' in warnings[-1].getMessage()
+
     def test_graceful_when_no_stimulus_set(self):
         model = FakeModel()
         bench = MagicMock(spec=['identifier'])
