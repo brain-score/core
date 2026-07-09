@@ -1,9 +1,26 @@
 """Input-event dispatch and modality extraction for BrainScoreModel."""
 
+import os
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Set, Tuple
 
 from .capabilities import enabled_capabilities
 from .events import EnvironmentStep, Message, OutputEvent, StateChange
+
+
+@contextmanager
+def _activation_cache_disabled():
+    """Bypass result_caching for the duration. Used when a perturbation makes the
+    cached (unperturbed) activations invalid but the cache key cannot see it."""
+    prev = os.environ.get('RESULTCACHING_DISABLE')
+    os.environ['RESULTCACHING_DISABLE'] = '1'
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop('RESULTCACHING_DISABLE', None)
+        else:
+            os.environ['RESULTCACHING_DISABLE'] = prev
 
 
 def register_input_handler(cls, event_type: type, handler_name: str,
@@ -83,6 +100,16 @@ class InputDispatcher:
         return preprocessor is not None and hasattr(preprocessor, 'identifier')
 
     def extract_for_modality(self, stimuli, modality: str, layers: List[str]):
+        # A perturbation (lesion/stimulation) is a mutable forward-hook that the
+        # activation cache key does not fingerprint, so a cached UNperturbed
+        # extraction would be wrongly returned for a perturbed run. Bypass the
+        # cache while any perturbation is active.
+        if self.owner._active_perturbations:
+            with _activation_cache_disabled():
+                return self._extract_for_modality_inner(stimuli, modality, layers)
+        return self._extract_for_modality_inner(stimuli, modality, layers)
+
+    def _extract_for_modality_inner(self, stimuli, modality: str, layers: List[str]):
         owner = self.owner
         if modality == 'vision' and owner._activations_model is not None:
             return owner._activations_model(stimuli, layers=layers)
