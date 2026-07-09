@@ -63,12 +63,67 @@ class BrainScoreModel(Subject):
         activations_model: Any = None,
         visual_degrees: int = 8,
         *legacy_tail_args: Any,
+        behavioral_readout_layer: Optional[str] = None,
+        generation_fn: Optional[Callable] = None,
+        action_fn: Optional[Callable] = None,
+        state_change_fn: Optional[Callable] = None,
         required_modalities: Optional[Set[str]] = None,
         backbone_id: Optional[str] = None,
         region_modality_map: Optional[Dict[str, str]] = None,
         capability_config: Optional[Dict[str, Any]] = None,
         **legacy_capability_config: Any,
     ) -> None:
+        """A model (or, in principle, a human) evaluated through the unified interface.
+
+        Only ``identifier`` is always required; a feature-extraction model also
+        needs ``region_layer_map`` plus a ``preprocessors`` / ``activations_model``
+        pair. The four capability functions are optional and each enables an extra
+        evaluation path.
+
+        :param identifier: unique model name (also the activation-cache key).
+        :param model: the object perturbation hooks / generation run against (e.g.
+            the torch module); may be ``None`` for a feature-extraction model whose
+            wrapper holds its own module.
+        :param region_layer_map: brain region -> layer path (or a ``UnitSelector``).
+        :param preprocessors: modality -> callable. For ``vision``: a resize/normalize
+            callable paired with ``activations_model``. For ``text``/``audio``/``video``:
+            the whole extraction wrapper, with ``activations_model=None``. See EXTENDING.
+        :param activations_model: the vision extraction wrapper (e.g. PytorchWrapper).
+        :param visual_degrees: vision field-of-view; ignored by non-vision models.
+        :param behavioral_readout_layer: layer on which to fit a behavioral readout.
+        :param generation_fn: generate-and-parse callable for instruction-following
+            behavioral evaluation.
+        :param action_fn: ``EnvironmentStep -> EnvironmentResponse`` policy for
+            closed-loop / embodied evaluation.
+        :param state_change_fn: ``StateChange -> (PerturbationApplied, cleanup)`` for
+            lesion / stimulation evaluation.
+        :param required_modalities: input modalities the model cannot run without.
+        :param backbone_id: shared cache key so registrations with identical weights
+            reuse one activation cache.
+        :param region_modality_map: region -> modality routing for multi-tower models.
+
+        Note: passing capability functions POSITIONALLY (via the legacy tail) is
+        deprecated and error-prone; always pass them by keyword.
+        """
+        if legacy_tail_args:
+            import warnings
+            warnings.warn(
+                "Passing capability functions positionally to BrainScoreModel is "
+                "deprecated and error-prone: a mis-counted positional silently lands "
+                "in the wrong capability slot. Pass them by keyword instead "
+                "(behavioral_readout_layer=, generation_fn=, action_fn=, "
+                "state_change_fn=).",
+                DeprecationWarning, stacklevel=2)
+        # Fold the now-explicit capability kwargs into the config the normalizer
+        # sees, so they are visible in the signature/help() yet routed uniformly.
+        for _name, _val in (
+            ('behavioral_readout_layer', behavioral_readout_layer),
+            ('generation_fn', generation_fn),
+            ('action_fn', action_fn),
+            ('state_change_fn', state_change_fn),
+        ):
+            if _val is not None:
+                legacy_capability_config.setdefault(_name, _val)
         capability_values, required_modalities, backbone_id, region_modality_map = (
             normalize_capability_config(
                 capability_config,
@@ -250,6 +305,19 @@ class BrainScoreModel(Subject):
 
     def process(self, input_event: InputEvent,
                 multi_modality: bool = False) -> OutputEvent:
+        """Evaluate one input event and return the corresponding output event.
+
+        The single evaluation entry point; dispatch is by ``input_event`` type:
+        a ``StimulusSet`` / ``MultimodalStimulusSet`` -> ``NeuroidAssembly`` of
+        recorded activations (call ``start_recording`` first); a ``StateChange``
+        -> ``PerturbationApplied`` (apply) or ``None`` (reset); an
+        ``EnvironmentStep`` -> ``EnvironmentResponse`` (needs ``action_fn``).
+
+        :param input_event: the stimulus / state-change / environment-step to run.
+        :param multi_modality: if True, extract from every detected-and-supported
+            modality and concat along the neuroid axis; default routes a single
+            modality by ``MODALITY_PRIORITY``.
+        """
         return self._dispatcher.process(input_event, multi_modality)
 
     def interact(self, session) -> None:
