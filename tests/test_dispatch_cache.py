@@ -71,3 +71,29 @@ def test_reentrant_disable_restores_only_at_outermost():
     assert os.environ.get('RESULTCACHING_DISABLE') == '1'   # still disabled
     b.__exit__(None, None, None)                       # outermost exits
     assert os.environ.get('RESULTCACHING_DISABLE') is None  # restored
+
+
+def test_concurrent_enter_exit_leaves_state_clean():
+    """High-contention concurrent enter/exit: without the lock the depth counter
+    races (lost += updates) and leaks the flag; with the lock it ends clean."""
+    import threading
+    import brainscore_core.dispatch as dispatch
+    from brainscore_core.dispatch import _activation_cache_disabled
+    _clean_env()
+    n_threads, n_iter = 8, 300
+    barrier = threading.Barrier(n_threads)
+
+    def worker():
+        barrier.wait()
+        for _ in range(n_iter):
+            with _activation_cache_disabled():
+                pass
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert dispatch._cache_disable_depth == 0
+    assert os.environ.get('RESULTCACHING_DISABLE') is None
