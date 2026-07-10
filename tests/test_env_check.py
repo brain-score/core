@@ -29,6 +29,15 @@ def test_pins_report_drift(monkeypatch):
     assert len(drift) == 2  # numpy + xarray are fine
 
 
+def test_too_old_versions_also_report_drift(monkeypatch):
+    old = {"transformers": "4.0.0", "scikit-learn": "1.0.0",
+           "numpy": "1.26.4", "xarray": "2022.3.0"}
+    monkeypatch.setattr(_env_check, "version", lambda p: old[p])
+    drift = _env_check.check_env_pins()
+    assert any("transformers" in d for d in drift)
+    assert any("scikit-learn" in d for d in drift)
+
+
 def test_missing_package_is_skipped(monkeypatch):
     def _raise(pkg):
         from importlib.metadata import PackageNotFoundError
