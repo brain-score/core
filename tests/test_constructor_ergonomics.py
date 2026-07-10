@@ -43,3 +43,11 @@ def test_keyword_calls_do_not_warn():
     with warnings.catch_warnings():
         warnings.simplefilter('error', DeprecationWarning)
         BrainScoreModel('id', None, {}, {}, None, action_fn=_f)  # must not raise
+
+
+def test_identifier_only_construction_works():
+    # docstring says only identifier is always required — make that true
+    m = BrainScoreModel('id')
+    assert m.identifier == 'id'
+    assert m._region_layer_map_dict == {}
+    assert m._preprocessors == {}

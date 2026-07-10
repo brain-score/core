@@ -57,9 +57,9 @@ class BrainScoreModel(Subject):
     def __init__(
         self,
         identifier: str,
-        model: Any,
-        region_layer_map: Dict[str, Union[str, "UnitSelector"]],
-        preprocessors: Dict[str, Callable],
+        model: Any = None,
+        region_layer_map: Optional[Dict[str, Union[str, "UnitSelector"]]] = None,
+        preprocessors: Optional[Dict[str, Callable]] = None,
         activations_model: Any = None,
         visual_degrees: int = 8,
         *legacy_tail_args: Any,
@@ -136,6 +136,8 @@ class BrainScoreModel(Subject):
         )
         self._identifier_str = identifier
         self._model = model
+        region_layer_map = region_layer_map or {}
+        preprocessors = preprocessors or {}
         self._region_layer_selectors: Dict[str, UnitSelector] = {
             region: _promote_to_selector(value)
             for region, value in region_layer_map.items()
