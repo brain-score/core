@@ -13,7 +13,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 # (distribution name, ok(version_tuple) -> bool, human-readable expectation)
 _PINS = [
-    ("transformers", lambda v: (4, 45) <= (v[0], v[1]) < (5, 0), ">=4.45,<5"),
+    ("transformers", lambda v: (4, 57) <= (v[0], v[1]) < (5, 0), ">=4.57,<5"),
     ("scikit-learn", lambda v: (1, 5) <= (v[0], v[1]) < (1, 6), ">=1.5,<1.6"),
     ("numpy", lambda v: (1, 21) <= (v[0], v[1]) < (2, 0), ">=1.21,<2"),
     ("xarray", lambda v: (v[0], v[1], v[2]) == (2022, 3, 0), "==2022.3.0"),

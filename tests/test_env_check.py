@@ -44,3 +44,10 @@ def test_missing_package_is_skipped(monkeypatch):
         raise PackageNotFoundError(pkg)
     monkeypatch.setattr(_env_check, "version", _raise)
     assert _env_check.check_env_pins() == []  # core-only env: nothing to check
+
+
+def test_transformers_just_below_shipped_floor_flagged(monkeypatch):
+    v = {"transformers": "4.56.2", "scikit-learn": "1.5.2",
+         "numpy": "1.26.4", "xarray": "2022.3.0"}
+    monkeypatch.setattr(_env_check, "version", lambda p: v[p])
+    assert any("transformers" in d for d in _env_check.check_env_pins())
