@@ -462,6 +462,22 @@ class TestCheckMemory:
                 check_memory(model, bench)
         assert any('APPROXIMATE' in r.getMessage() for r in caplog.records)
 
+    def test_declared_plan_is_still_flagged_approximate(self, caplog):
+        # Finding 3 regression guard: even when BOTH cardinality and feature width
+        # are declared, temporal multiplicity / metric-observation count / GPU stay
+        # unmodelled, so APPROXIMATE must still appear. Fails against the parent,
+        # where declaring both suppressed the flag.
+        import logging
+        model = FakeModel(n_features=1000)
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10,
+                              expected_feature_dim=1000)
+        bench.expected_n_presentations = 100
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
+             _mock_memory(200_000_000):
+            with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+                check_memory(model, bench)
+        assert any('APPROXIMATE' in r.getMessage() for r in caplog.records)
+
     def test_shapeless_probe_result_warns_and_skips(self, caplog):
         import logging
         # process() returns a 1-D result -> feature width unreadable -> skip loudly.

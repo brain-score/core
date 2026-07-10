@@ -445,8 +445,9 @@ def check_memory(
     feature_dim: Optional[int] = None,
 ) -> None:
     """
-    Best-effort memory pre-flight: raise before a run that is *clearly* over
-    budget, and otherwise be honest that a "fit" is not a safety guarantee.
+    Best-effort memory pre-flight: raise when the estimated peak exceeds host RAM
+    (a strong signal, not a certainty — the estimate can over- or under-count),
+    and otherwise be honest that a "fit" is not a safety guarantee.
 
     This is NOT a reliable OOM oracle, and does not claim to be — the estimate is
     APPROXIMATE on every path until benchmarks can declare their execution plan.
