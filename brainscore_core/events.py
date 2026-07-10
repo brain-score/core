@@ -50,8 +50,8 @@ class Perturbation:
     """
     kind: str
     scale: float = 0.0
-    amount: float = 0.0
     replacement: Optional[Any] = None
+    amount: float = 0.0  # appended last to preserve the (kind, scale, replacement) positional API
 
 
 @dataclass
