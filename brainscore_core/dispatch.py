@@ -8,19 +8,32 @@ from .capabilities import enabled_capabilities
 from .events import EnvironmentStep, Message, OutputEvent, StateChange
 
 
+_cache_disable_depth = 0
+_cache_disable_prev = None
+
+
 @contextmanager
 def _activation_cache_disabled():
     """Bypass result_caching for the duration. Used when a perturbation makes the
-    cached (unperturbed) activations invalid but the cache key cannot see it."""
-    prev = os.environ.get('RESULTCACHING_DISABLE')
-    os.environ['RESULTCACHING_DISABLE'] = '1'
+    cached (unperturbed) activations invalid but the cache key cannot see it.
+
+    Reentrancy-safe via a depth counter: nested/interleaved contexts only restore
+    the original ``RESULTCACHING_DISABLE`` when the outermost one exits (a plain
+    save/restore would clear the flag early under interleaving)."""
+    global _cache_disable_depth, _cache_disable_prev
+    if _cache_disable_depth == 0:
+        _cache_disable_prev = os.environ.get('RESULTCACHING_DISABLE')
+        os.environ['RESULTCACHING_DISABLE'] = '1'
+    _cache_disable_depth += 1
     try:
         yield
     finally:
-        if prev is None:
-            os.environ.pop('RESULTCACHING_DISABLE', None)
-        else:
-            os.environ['RESULTCACHING_DISABLE'] = prev
+        _cache_disable_depth -= 1
+        if _cache_disable_depth == 0:
+            if _cache_disable_prev is None:
+                os.environ.pop('RESULTCACHING_DISABLE', None)
+            else:
+                os.environ['RESULTCACHING_DISABLE'] = _cache_disable_prev
 
 
 def register_input_handler(cls, event_type: type, handler_name: str,

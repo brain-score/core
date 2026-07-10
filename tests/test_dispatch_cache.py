@@ -57,3 +57,17 @@ def test_prior_disable_flag_is_restored():
         assert os.environ.get('RESULTCACHING_DISABLE') == 'some.module'  # restored
     finally:
         _clean_env()
+
+
+def test_reentrant_disable_restores_only_at_outermost():
+    """Interleaved enter/exit must keep the flag set until the OUTERMOST exit."""
+    from brainscore_core.dispatch import _activation_cache_disabled
+    _clean_env()
+    a, b = _activation_cache_disabled(), _activation_cache_disabled()
+    a.__enter__()
+    assert os.environ.get('RESULTCACHING_DISABLE') == '1'
+    b.__enter__()
+    a.__exit__(None, None, None)                       # inner exits first
+    assert os.environ.get('RESULTCACHING_DISABLE') == '1'   # still disabled
+    b.__exit__(None, None, None)                       # outermost exits
+    assert os.environ.get('RESULTCACHING_DISABLE') is None  # restored
