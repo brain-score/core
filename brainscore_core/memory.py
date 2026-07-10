@@ -388,7 +388,8 @@ def check_memory(
             f"Memory pre-flight DISABLED for this run: the probe extraction failed "
             f"({type(e).__name__}: {e}). The benchmark will run WITHOUT an out-of-memory "
             f"estimate. Fix the error above, or pass check_mem=False to skip this check "
-            f"intentionally."
+            f"intentionally.",
+            exc_info=True,  # attach the full traceback, not just the exception type/message
         )
         return
 

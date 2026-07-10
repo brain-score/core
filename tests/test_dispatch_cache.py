@@ -73,27 +73,38 @@ def test_reentrant_disable_restores_only_at_outermost():
     assert os.environ.get('RESULTCACHING_DISABLE') is None  # restored
 
 
-def test_concurrent_enter_exit_leaves_state_clean():
-    """High-contention concurrent enter/exit: without the lock the depth counter
-    races (lost += updates) and leaks the flag; with the lock it ends clean."""
+def test_enter_blocks_while_the_transition_lock_is_held():
+    """The depth/flag transition must run under ``_cache_disable_lock`` so a
+    second thread cannot interleave the read-modify of the shared counter.
+
+    Racing two threads to hit the exact bad schedule is GIL-nondeterministic, so
+    we prove the invariant directly and deterministically: hold the lock, then a
+    worker entering ``_activation_cache_disabled()`` must BLOCK until we release.
+    Against a lockless implementation the worker enters immediately and the first
+    assert fails — which is exactly the regression this guards."""
     import threading
     import brainscore_core.dispatch as dispatch
     from brainscore_core.dispatch import _activation_cache_disabled
     _clean_env()
-    n_threads, n_iter = 8, 300
-    barrier = threading.Barrier(n_threads)
+    dispatch._cache_disable_depth = 0
+    dispatch._cache_disable_prev = None
+
+    entered = threading.Event()
 
     def worker():
-        barrier.wait()
-        for _ in range(n_iter):
-            with _activation_cache_disabled():
-                pass
+        with _activation_cache_disabled():
+            entered.set()
 
-    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
-    for t in threads:
+    dispatch._cache_disable_lock.acquire()
+    t = threading.Thread(target=worker)
+    try:
         t.start()
-    for t in threads:
-        t.join()
-
+        # lock held -> the guarded transition cannot start (lockless impl: it can)
+        assert not entered.wait(timeout=0.5)
+    finally:
+        dispatch._cache_disable_lock.release()
+    # released -> the worker proceeds and completes cleanly
+    assert entered.wait(timeout=2)
+    t.join(timeout=2)
     assert dispatch._cache_disable_depth == 0
     assert os.environ.get('RESULTCACHING_DISABLE') is None

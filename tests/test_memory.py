@@ -341,6 +341,10 @@ class TestCheckMemory:
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert warnings, "probe failure should emit a WARNING, not a silent INFO skip"
         assert 'DISABLED' in warnings[-1].getMessage()
+        # WARN+traceback, not WARN+message: the record must carry exc_info so the
+        # log shows WHERE the probe failed, not just the exception type/message.
+        assert warnings[-1].exc_info is not None
+        assert warnings[-1].exc_info[0] is RuntimeError  # FailingModel.process raises
 
     def test_graceful_when_no_stimulus_set(self):
         model = FakeModel()

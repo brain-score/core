@@ -16,14 +16,14 @@ def test_pins_hold_at_targets(monkeypatch):
     ok = {"transformers": "4.57.1", "scikit-learn": "1.5.2",
           "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: ok[p])
-    assert _env_check.check_env_pins() == []
+    assert _env_check.check_env_bounds() == []
 
 
 def test_pins_report_drift(monkeypatch):
     drifted = {"transformers": "5.5.0", "scikit-learn": "1.7.2",
                "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: drifted[p])
-    drift = _env_check.check_env_pins()
+    drift = _env_check.check_env_bounds()
     assert any("transformers" in d for d in drift)
     assert any("scikit-learn" in d for d in drift)
     assert len(drift) == 2  # numpy + xarray are fine
@@ -33,7 +33,7 @@ def test_too_old_versions_also_report_drift(monkeypatch):
     old = {"transformers": "4.0.0", "scikit-learn": "1.0.0",
            "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: old[p])
-    drift = _env_check.check_env_pins()
+    drift = _env_check.check_env_bounds()
     assert any("transformers" in d for d in drift)
     assert any("scikit-learn" in d for d in drift)
 
@@ -43,11 +43,11 @@ def test_missing_package_is_skipped(monkeypatch):
         from importlib.metadata import PackageNotFoundError
         raise PackageNotFoundError(pkg)
     monkeypatch.setattr(_env_check, "version", _raise)
-    assert _env_check.check_env_pins() == []  # core-only env: nothing to check
+    assert _env_check.check_env_bounds() == []  # core-only env: nothing to check
 
 
 def test_transformers_just_below_shipped_floor_flagged(monkeypatch):
     v = {"transformers": "4.56.2", "scikit-learn": "1.5.2",
          "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: v[p])
-    assert any("transformers" in d for d in _env_check.check_env_pins())
+    assert any("transformers" in d for d in _env_check.check_env_bounds())

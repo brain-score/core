@@ -1,6 +1,8 @@
-"""Runtime check that installed dependency versions match UMI's pins.
+"""Runtime check that installed dependencies fall within UMI's compatibility bounds.
 
-Drift off these pins silently breaks scoring: ``transformers>=5`` removes
+These are the version ranges scoring is *verified against* — deliberately looser
+than any single install pin (that's the environment file's job). Drift outside
+them silently breaks scoring: ``transformers>=5`` removes
 ``DynamicCache.to_legacy_cache`` (the language KV-cache path AttributeErrors),
 and ``scikit-learn>=1.6`` changes ``LogisticRegression(multi_class=...)``
 semantics (behavioral-readout scores change without error). This module warns
@@ -11,8 +13,8 @@ dependencies (no torch/transformers import).
 """
 from importlib.metadata import version, PackageNotFoundError
 
-# (distribution name, ok(version_tuple) -> bool, human-readable expectation)
-_PINS = [
+# (distribution name, ok(version_tuple) -> bool, human-readable bound)
+_BOUNDS = [
     ("transformers", lambda v: (4, 57) <= (v[0], v[1]) < (5, 0), ">=4.57,<5"),
     ("scikit-learn", lambda v: (1, 5) <= (v[0], v[1]) < (1, 6), ">=1.5,<1.6"),
     ("numpy", lambda v: (1, 21) <= (v[0], v[1]) < (2, 0), ">=1.21,<2"),
@@ -36,10 +38,10 @@ def _parse(s):
     return tuple(parts)
 
 
-def check_env_pins():
-    """Return a list of human-readable drift messages (empty if all pins hold)."""
+def check_env_bounds():
+    """Return human-readable drift messages (empty if all bounds hold)."""
     drift = []
-    for pkg, ok, expected in _PINS:
+    for pkg, ok, expected in _BOUNDS:
         try:
             installed = version(pkg)
         except PackageNotFoundError:
@@ -55,8 +57,8 @@ def check_env_pins():
 
 
 def warn_on_drift():
-    """Emit a RuntimeWarning if any dependency pin is violated."""
-    drift = check_env_pins()
+    """Emit a RuntimeWarning if any dependency is outside its compatibility bound."""
+    drift = check_env_bounds()
     if drift:
         import warnings
         warnings.warn(
