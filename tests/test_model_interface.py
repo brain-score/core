@@ -343,6 +343,20 @@ class TestBrainScoreModelDispatch:
         with pytest.warns(UserWarning, match="not a region"):
             m.start_recording('ITT')  # typo of 'IT'
 
+    def test_multi_modality_process_without_start_recording_raises(self):
+        """The forgotten-start_recording guard must also cover multi_modality=True."""
+        m = BrainScoreModel(
+            identifier='vlm',
+            model='torch_model',
+            region_layer_map={'IT': 'layer4'},  # regions defined
+            preprocessors={'vision': make_stub_preprocessor(),
+                           'text': make_stub_preprocessor()},
+            activations_model=StubActivationsModel(),
+        )
+        stimuli = StubStimulusSet(columns=['image_file_name', 'sentence'])
+        with pytest.raises(ValueError, match="start_recording"):
+            m.process(stimuli, multi_modality=True)
+
     def test_vision_without_activations_model_falls_to_preprocessor(self):
         """Vision stimuli fall through to preprocessor if no activations_model."""
         proc = make_stub_preprocessor(return_value='vision_via_preprocessor')
