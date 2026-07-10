@@ -25,7 +25,8 @@ def _positive_int(value, name):
     rejected explicitly (``operator.index(True) == 1`` would otherwise slip
     ``True`` through as 1)."""
     import operator
-    if isinstance(value, bool):
+    # reject Python bool AND numpy bool_ (both pass operator.index as 0/1)
+    if isinstance(value, bool) or type(value).__name__ == 'bool_':
         raise ValueError(f"{name} must be an integer, got {value!r}")
     try:
         ivalue = operator.index(value)

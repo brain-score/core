@@ -56,6 +56,12 @@ class TestValidation:
         with pytest.raises(ValueError, match="must be an integer"):
             ExecutionPlan(n_extraction_presentations=True)
 
+    def test_numpy_bool_rejected_for_int_fields(self):
+        np = pytest.importorskip('numpy')
+        # np.bool_(True) also passes operator.index -> 1; must be rejected too.
+        with pytest.raises(ValueError, match="must be an integer"):
+            ExecutionPlan(n_extraction_presentations=np.bool_(True))
+
     def test_bad_metric_category_rejected(self):
         with pytest.raises(ValueError, match="metric_category must be one of"):
             ExecutionPlan(n_extraction_presentations=10, metric_category='banded')

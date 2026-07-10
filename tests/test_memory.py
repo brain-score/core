@@ -478,7 +478,7 @@ class TestCheckMemory:
                 check_memory(model, bench)
         assert any('APPROXIMATE' in r.getMessage() for r in caplog.records)
 
-    # ── ExecutionPlan (reliable) path ────────────────────────────────
+    # ── ExecutionPlan (DECLARED-grounded) path ───────────────────────
 
     def test_execution_plan_skips_the_probe(self):
         # A declared plan with feature_width means no probe: CountingFailingModel
@@ -579,22 +579,56 @@ class TestCheckMemory:
             with pytest.raises(MemoryError, match=r"metric \[ridgecv\]"):
                 check_memory(model, bench)
 
-    def test_plan_runs_ceiling_metric_false_drops_ceiling(self, caplog):
-        import logging
+    def test_plan_runs_ceiling_metric_flag_is_load_bearing(self):
+        # The ceiling metric (F = n_targets = 50000) has coef ~ 50000^2*8 ~ 20 GB
+        # and dominates. With runs_ceiling_metric=True the estimate raises; dropping
+        # the ceiling (False) leaves only the tiny model metric, which fits. If the
+        # flag were ignored, the False case would still raise.
         from brainscore_core.execution_plan import ExecutionPlan
         model = FakeModel()
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10,
-                              assembly=FakeAssembly(n_neuroids=1000))
-        bench.execution_plan = ExecutionPlan(n_extraction_presentations=100,
-                                             feature_width=1000,
-                                             runs_ceiling_metric=False)
+                              assembly=FakeAssembly(n_neuroids=50000))
+        common = dict(n_extraction_presentations=1000, feature_width=100,
+                      metric_feature_width=100, metric_observations=1000)
+        bench.execution_plan = ExecutionPlan(**common, runs_ceiling_metric=True)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=2_000_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
+        bench.execution_plan = ExecutionPlan(**common, runs_ceiling_metric=False)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=2_000_000_000), \
+             _mock_memory(200_000_000):
+            check_memory(model, bench)  # passes only because the ceiling was dropped
+
+    def test_complete_plan_does_not_touch_stimulus_set(self):
+        # A plan with feature_width declared must NOT access the (lazy/expensive)
+        # stimulus set, and a real MemoryError from that property must not be
+        # swallowed if it ever is touched.
+        from brainscore_core.execution_plan import ExecutionPlan
+
+        class _Bench:
+            identifier = 'test-ridge'
+            execution_plan = ExecutionPlan(n_extraction_presentations=100,
+                                           feature_width=1000)
+            @property
+            def stimulus_set(self):
+                raise AssertionError("stimulus_set must not be accessed")
+
         with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
              _mock_memory(200_000_000):
-            with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+            check_memory(FakeModel(), _Bench())  # no AssertionError -> never touched
+
+    def test_probed_zero_width_is_not_accepted(self, caplog):
+        import logging
+        # A degenerate (1, 0) probe result must be treated as unresolved (skip
+        # loudly), not a zero-width, zero-memory pass.
+        model = FakeModel(process_result=type('R', (), {'shape': (1, 0)})())
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
+             _mock_memory(200_000_000):
+            with caplog.at_level(logging.WARNING, logger='brainscore_core.memory'):
                 check_memory(model, bench)
-        # ceiling term omitted -> reported metric equals the model metric only; the
-        # estimate still logs (no crash). Sanity: it ran on the DECLARED path.
-        assert any('DECLARED-grounded' in r.getMessage() for r in caplog.records)
+        assert any('could NOT run' in r.getMessage() for r in caplog.records)
 
     def test_metric_observations_size_the_metric_independently(self):
         # metric_observations >> extraction: RSA metric is S^2 over metric_obs, so
@@ -647,7 +681,7 @@ class TestCheckMemory:
         assert model.process_calls == 0
 
     def test_execution_plan_without_feature_width_probes_for_raw(self):
-        # feature_width omitted -> the reliable path probes the model for the raw
+        # feature_width omitted -> the DECLARED path probes the model for the raw
         # (stimulus-invariant) width, then uses the declared cardinality. The
         # message reflects the PROBED 50000, proving the probe filled it in.
         from brainscore_core.execution_plan import ExecutionPlan

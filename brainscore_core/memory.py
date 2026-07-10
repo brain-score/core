@@ -322,11 +322,16 @@ PIPELINE_OVERHEAD = 1.2
 
 
 def _safe_getattr(obj, name):
-    """getattr that returns None instead of propagating — some benchmarks expose
-    ``stimulus_set`` as a property that loads (and can fail to load) data. The
-    memory pre-flight must never crash the run over that."""
+    """getattr that returns None instead of propagating a *load* failure — some
+    benchmarks expose ``stimulus_set`` as a property that loads (and can fail to
+    load) data, and the memory pre-flight must not crash the run over that. A real
+    ``MemoryError`` is re-raised (swallowing it would hide the exact OOM the
+    pre-flight exists to surface)."""
+    import builtins
     try:
         return getattr(obj, name, None)
+    except builtins.MemoryError:
+        raise
     except Exception:
         return None
 
@@ -424,9 +429,10 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
             last_error = e
             continue
         shape = getattr(result, 'shape', None)
-        if shape is not None and len(shape) >= 2:
+        if shape is not None and len(shape) >= 2 and int(shape[-1]) > 0:
             return int(shape[-1]), region
-        last_error = f"probe returned shape {shape!r} (need >=2 dims)"
+        last_error = (f"probe returned shape {shape!r} "
+                      f"(need >=2 dims and a positive feature width)")
     logger.warning(
         "Memory pre-flight could NOT run: no region yielded a readable feature "
         "width (last error: %s), so no estimate was made and the OOM guard is OFF "
@@ -522,9 +528,10 @@ def check_memory(
 
     # Resolve the plan first (so an invalid declaration is rejected, and a complete
     # plan needs no stimulus set). A supplied feature_dim FILLS the raw width; it
-    # does not bypass the plan.
+    # does not bypass the plan. The (possibly lazy/expensive) stimulus set is only
+    # accessed when actually needed — never when the plan already supplies the width
+    # or its own probe input.
     plan = _get_execution_plan(benchmark)
-    stimulus_set = _get_benchmark_stimulus_set(benchmark)
 
     if plan is not None:
         # DECLARED path.
@@ -536,11 +543,15 @@ def check_memory(
         if raw_width is not None:
             feature_width = _validate_positive_int(raw_width, 'feature_dim')
         else:
-            # probe for the raw width, using the plan's target + probe input
+            # probe for the raw width; touch the benchmark's stimulus set only if
+            # the plan gave no probe input of its own
+            probe_input = plan.probe_stimuli
+            stim_fallback = (None if probe_input is not None
+                             else _get_benchmark_stimulus_set(benchmark))
             feature_width, _region = _probe_feature_dim(
-                model, benchmark, stimulus_set,
+                model, benchmark, stim_fallback,
                 recording_target=plan.recording_target,
-                probe_stimuli=plan.probe_stimuli)
+                probe_stimuli=probe_input)
             if feature_width is None:
                 return  # probe failed; _probe_feature_dim already warned loudly
         metric_obs = plan.resolved_metric_observations
@@ -550,6 +561,7 @@ def check_memory(
         runs_ceiling = plan.runs_ceiling_metric
     else:
         # BEST-EFFORT path: needs a stimulus set to probe / count.
+        stimulus_set = _get_benchmark_stimulus_set(benchmark)
         if stimulus_set is None or len(stimulus_set) == 0:
             logger.info("Memory check not applicable: benchmark has no "
                         "stimulus_set (nothing to extract).")
