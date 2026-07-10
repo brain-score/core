@@ -357,6 +357,26 @@ class TestBrainScoreModelDispatch:
         with pytest.raises(ValueError, match="start_recording"):
             m.process(stimuli, multi_modality=True)
 
+    def test_selected_plain_modality_not_false_positived(self):
+        """The guard must check the SELECTED modality, not ANY detected one: a
+        layer-aware non-selected tower must not block a plain selected path."""
+        class _LayerAwareAudio:
+            identifier = 'audio-wrapper'
+
+            def __call__(self, stimuli, layers=None, **kwargs):
+                return 'audio_out'
+
+        m = BrainScoreModel(
+            identifier='mm',
+            model='torch_model',
+            region_layer_map={'A1': 'layer'},                 # regions defined, none active
+            preprocessors={'text': make_stub_preprocessor(),  # plain -> no extraction
+                           'audio': _LayerAwareAudio()},       # layer-aware -> extraction
+        )
+        stimuli = StubStimulusSet(columns=['sentence', 'audio_file_name'])
+        # text wins MODALITY_PRIORITY; must NOT raise despite audio supporting extraction
+        assert m.process(stimuli) == 'default_output'
+
     def test_vision_without_activations_model_falls_to_preprocessor(self):
         """Vision stimuli fall through to preprocessor if no activations_model."""
         proc = make_stub_preprocessor(return_value='vision_via_preprocessor')

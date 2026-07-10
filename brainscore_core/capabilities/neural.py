@@ -34,13 +34,18 @@ class NeuralEncodingCapability(Capability):
             )
 
         layers = model._recorder.current_layers()
+        modality = model._pick_modality(detected)
 
-        # Guard BOTH the single- and multi-modality paths: if regions ARE defined
-        # but none is active, the user forgot start_recording (an empty
-        # region_layer_map is a legitimate default-extraction path).
+        # Guard BOTH paths: if regions ARE defined but none is active, the user
+        # forgot start_recording (an empty region_layer_map is a legitimate
+        # default-extraction path). Check only the modality/modalities that will
+        # ACTUALLY run — the selected one for single dispatch, all detected for a
+        # multi-modality fan-out — so a non-selected layer-aware tower does not
+        # false-positive the selected plain-callable path.
+        will_run = detected if (multi_modality and len(detected) > 1) else {modality}
         if (not layers and model._region_layer_map_dict
                 and not model._composite_recording
-                and any(model._supports_layer_extraction(m) for m in detected)):
+                and any(model._supports_layer_extraction(m) for m in will_run)):
             raise ValueError(
                 f"No active recording layer for model '{model.identifier}': "
                 f"call start_recording(<region>) before process(), otherwise "
@@ -51,7 +56,6 @@ class NeuralEncodingCapability(Capability):
         if multi_modality and len(detected) > 1:
             return model._process_multi_modality(stimuli, detected, layers)
 
-        modality = model._pick_modality(detected)
         if not multi_modality and len(detected) > 1:
             import warnings
             warnings.warn(
