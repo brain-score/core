@@ -46,7 +46,9 @@ def check_env_pins():
             continue  # package not installed in this (e.g. core-only) env
         try:
             if not ok(_parse(installed)):
-                drift.append(f"{pkg}=={installed} violates the UMI pin ({expected})")
+                drift.append(
+                    f"{pkg}=={installed} is outside the UMI runtime "
+                    f"compatibility bound ({expected})")
         except Exception:
             continue  # unparseable version string: don't block import
     return drift
@@ -58,7 +60,9 @@ def warn_on_drift():
     if drift:
         import warnings
         warnings.warn(
-            "UMI dependency pins are violated by the installed environment:\n  - "
+            "Installed dependencies are outside UMI's runtime compatibility "
+            "bounds (these are the versions scoring is verified against; the exact "
+            "install pin is the environment file's job):\n  - "
             + "\n  - ".join(drift)
             + "\nScoring may be SILENTLY WRONG (transformers>=5 breaks the language "
             "KV-cache path; scikit-learn>=1.6 changes behavioral-readout semantics). "
