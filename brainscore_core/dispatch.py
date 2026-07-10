@@ -1,6 +1,7 @@
 """Input-event dispatch and modality extraction for BrainScoreModel."""
 
 import os
+import threading
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -10,6 +11,7 @@ from .events import EnvironmentStep, Message, OutputEvent, StateChange
 
 _cache_disable_depth = 0
 _cache_disable_prev = None
+_cache_disable_lock = threading.Lock()
 
 
 @contextmanager
@@ -17,23 +19,26 @@ def _activation_cache_disabled():
     """Bypass result_caching for the duration. Used when a perturbation makes the
     cached (unperturbed) activations invalid but the cache key cannot see it.
 
-    Reentrancy-safe via a depth counter: nested/interleaved contexts only restore
-    the original ``RESULTCACHING_DISABLE`` when the outermost one exits (a plain
-    save/restore would clear the flag early under interleaving)."""
+    Reentrancy- and thread-safe via a lock-guarded depth counter: nested,
+    interleaved, or concurrent contexts only restore the original
+    ``RESULTCACHING_DISABLE`` when the outermost/last one exits (a plain
+    save/restore would clear the flag early; an unlocked counter would race)."""
     global _cache_disable_depth, _cache_disable_prev
-    if _cache_disable_depth == 0:
-        _cache_disable_prev = os.environ.get('RESULTCACHING_DISABLE')
-        os.environ['RESULTCACHING_DISABLE'] = '1'
-    _cache_disable_depth += 1
+    with _cache_disable_lock:
+        if _cache_disable_depth == 0:
+            _cache_disable_prev = os.environ.get('RESULTCACHING_DISABLE')
+            os.environ['RESULTCACHING_DISABLE'] = '1'
+        _cache_disable_depth += 1
     try:
         yield
     finally:
-        _cache_disable_depth -= 1
-        if _cache_disable_depth == 0:
-            if _cache_disable_prev is None:
-                os.environ.pop('RESULTCACHING_DISABLE', None)
-            else:
-                os.environ['RESULTCACHING_DISABLE'] = _cache_disable_prev
+        with _cache_disable_lock:
+            _cache_disable_depth -= 1
+            if _cache_disable_depth == 0:
+                if _cache_disable_prev is None:
+                    os.environ.pop('RESULTCACHING_DISABLE', None)
+                else:
+                    os.environ['RESULTCACHING_DISABLE'] = _cache_disable_prev
 
 
 def register_input_handler(cls, event_type: type, handler_name: str,
