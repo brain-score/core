@@ -7,15 +7,21 @@ from brainscore_core.execution_plan import ExecutionPlan
 class TestDefaults:
     def test_metric_counts_default_to_extraction(self):
         p = ExecutionPlan(n_extraction_presentations=500, feature_width=1000)
-        # metric defaults mirror extraction when not separately declared
+        # metric defaults mirror extraction / raw width when not separately declared
         assert p.resolved_metric_observations == 500
-        assert p.resolved_metric_feature_width == 1000
+        assert p.resolved_metric_feature_width(1000) == 1000  # falls back to raw
 
     def test_metric_counts_can_differ(self):
         p = ExecutionPlan(n_extraction_presentations=500, feature_width=38400,
                           metric_observations=100, metric_feature_width=1000)
-        assert p.resolved_metric_observations == 100      # aggregated before metric
-        assert p.resolved_metric_feature_width == 1000    # compressed before metric
+        assert p.resolved_metric_observations == 100          # aggregated before metric
+        assert p.resolved_metric_feature_width(38400) == 1000  # compressed before metric
+
+    def test_feature_width_optional_falls_back_to_probed_raw(self):
+        # feature_width omitted -> the metric width resolves against the probed raw
+        p = ExecutionPlan(n_extraction_presentations=100)
+        assert p.feature_width is None
+        assert p.resolved_metric_feature_width(768) == 768
 
     def test_dtype_and_device_defaults(self):
         p = ExecutionPlan(n_extraction_presentations=1, feature_width=1)

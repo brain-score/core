@@ -504,17 +504,24 @@ def check_memory(
 
     plan = _get_execution_plan(benchmark)
     if plan is not None and feature_dim is None:
-        # RELIABLE path: the benchmark declared its execution shape, so nothing is
-        # probed or guessed. Extraction and metric counts/widths can genuinely
-        # differ (aggregation before the metric; feature compression).
+        # RELIABLE path: the benchmark declared its execution shape (cardinality,
+        # metric observation count, compression, device placement). The one
+        # model-dependent quantity — the raw feature width — is either declared or
+        # soundly probed (it's stimulus-invariant). Nothing is guessed.
         source = 'ExecutionPlan'
         approximate = False
         cardinality_declared = True
         on_device = plan.extraction_on_device
         n_presentations = plan.n_extraction_presentations
-        feature_width = plan.feature_width
+        if plan.feature_width is not None:
+            feature_width = plan.feature_width
+        else:
+            feature_width, _fsrc = _resolve_feature_dim(
+                model, benchmark, None, stimulus_set)
+            if feature_width is None:
+                return  # probe failed; _probe_feature_dim already warned loudly
         metric_obs = plan.resolved_metric_observations
-        metric_fw = plan.resolved_metric_feature_width
+        metric_fw = plan.resolved_metric_feature_width(feature_width)
         dtype_bytes = plan.activation_dtype_bytes
     else:
         # BEST-EFFORT path: probe / declared feature dim + raw (or expected) count.

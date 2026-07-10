@@ -579,6 +579,19 @@ class TestCheckMemory:
                 check_memory(model, bench)
         assert model.process_calls == 0
 
+    def test_execution_plan_without_feature_width_probes_for_raw(self):
+        # feature_width omitted -> the reliable path probes the model for the raw
+        # (stimulus-invariant) width, then uses the declared cardinality. The
+        # message reflects the PROBED 50000, proving the probe filled it in.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel(n_features=50000)
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=100000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=1_000_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError, match=r"n_features: 50000 \[ExecutionPlan\]"):
+                check_memory(model, bench)
+
     def test_non_plan_execution_plan_rejected(self):
         model = FakeModel()
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)

@@ -39,15 +39,17 @@ class ExecutionPlan:
     - ``n_extraction_presentations``: rows actually held in the activation matrix,
       AFTER row expansion (video -> per-TR frames) or filtering (relevant-event
       IDs), and INCLUDING temporal multiplicity (S clips x T bins -> S*T). This is
-      what ``len(stimulus_set)`` gets wrong.
-    - ``feature_width``: per-row extracted feature width (the RAW recording width
-      the activation matrix is stored at).
+      what ``len(stimulus_set)`` gets wrong, and it is fully benchmark-known.
+    - ``feature_width``: per-row RAW recording width. Optional — this is the ONE
+      model-dependent quantity, and it is stimulus-invariant, so leave it None and
+      the pre-flight probes the model for it (soundly). Declare it only to skip the
+      probe entirely (e.g. a candidate that configures recording inside __call__).
     - ``metric_observations``: rows the metric fits over. Defaults to
       ``n_extraction_presentations``; declare separately when the benchmark
-      aggregates (e.g. mean over frames / time) before the metric, so the two
-      counts genuinely differ.
+      aggregates (e.g. mean over frames / time) before the metric.
     - ``metric_feature_width``: feature width the metric SEES after any PCA /
-      compression (e.g. Algonauts 38K -> 1K). Defaults to ``feature_width``.
+      compression (e.g. Algonauts PCA -> 1000). Model-independent when the
+      compression target is fixed. Defaults to the resolved raw feature width.
     - ``activation_dtype_bytes``: bytes per activation element (float32 = 4).
     - ``extraction_on_device``: True if the activation matrix lives on an
       accelerator (GPU) rather than host RAM. The host-side estimate then excludes
@@ -55,7 +57,7 @@ class ExecutionPlan:
       separate budget the pre-flight deliberately does not model.
     """
     n_extraction_presentations: int
-    feature_width: int
+    feature_width: Optional[int] = None
     metric_observations: Optional[int] = None
     metric_feature_width: Optional[int] = None
     activation_dtype_bytes: int = 4
@@ -64,7 +66,8 @@ class ExecutionPlan:
     def __post_init__(self):
         self.n_extraction_presentations = _positive_int(
             self.n_extraction_presentations, 'n_extraction_presentations')
-        self.feature_width = _positive_int(self.feature_width, 'feature_width')
+        if self.feature_width is not None:
+            self.feature_width = _positive_int(self.feature_width, 'feature_width')
         if self.metric_observations is not None:
             self.metric_observations = _positive_int(
                 self.metric_observations, 'metric_observations')
@@ -83,7 +86,7 @@ class ExecutionPlan:
         """Metric row count, defaulting to the extraction presentation count."""
         return self.metric_observations or self.n_extraction_presentations
 
-    @property
-    def resolved_metric_feature_width(self) -> int:
-        """Metric feature width, defaulting to the raw extraction width."""
-        return self.metric_feature_width or self.feature_width
+    def resolved_metric_feature_width(self, raw_feature_width: int) -> int:
+        """Metric feature width: the declared compression target, else the raw
+        (probed or declared) recording width passed in."""
+        return self.metric_feature_width or raw_feature_width
