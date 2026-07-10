@@ -71,21 +71,26 @@ class CountingFailingModel(FakeModel):
         raise RuntimeError("model crashed")
 
 
-class RecordingGatedModel(FakeModel):
-    """Mimics a candidate (e.g. Lahner) that only accepts process() AFTER
-    start_recording — configured inside the benchmark's __call__, not via a
-    .region attribute. A naive probe (no recording) would fail-open."""
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
-        self._recording = False
+class MultiRegionProbeModel(FakeModel):
+    """A layer-aware candidate that only accepts process() AFTER start_recording
+    (configured inside the benchmark's __call__, no .region attr). Records ONE
+    region at a time; the width scales with how many regions were recorded (so a
+    naive record-all fallback would inflate it), and an audio region 'A1' raises
+    (a video wrapper can't serve it) — exercising cross-modality recovery."""
+    def __init__(self, per_region_features, region_layer_map, **k):
+        super().__init__(region_layer_map=region_layer_map, **k)
+        self._recorded = None
+        self._per = per_region_features
 
     def start_recording(self, target, time_bins=None, recording_type=None):
-        self._recording = True
+        self._recorded = [target] if isinstance(target, str) else list(target)
 
     def process(self, stimuli):
-        if not self._recording:
+        if not self._recorded:
             raise RuntimeError("recording not started")
-        return self._process_result
+        if 'A1' in self._recorded:
+            raise RuntimeError("audio layer not available on this wrapper")
+        return type('R', (), {'shape': (1, self._per * len(self._recorded))})()
 
 
 class FakeStimulusSet:
@@ -344,9 +349,9 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_probe_failure_warns_loudly(self, caplog):
-        # If the single-stimulus probe can't resolve a feature dim, the check is
-        # skipped — but LOUDLY (WARN + traceback), never a silent INFO skip. The
-        # skip is safe: the benchmark runs the same process() path and fails fast.
+        # If no region yields a readable feature dim, the check is skipped — but
+        # LOUDLY (WARN + traceback), never a silent INFO skip. The warning states
+        # the guard is OFF for this run (not that the skip is "safe").
         import logging
         model = FailingModel()
         bench = FakeBenchmark(n_stimuli=10)
@@ -389,22 +394,23 @@ class TestCheckMemory:
         with pytest.raises(ValueError, match="positive integer"):
             check_memory(model, bench, feature_dim=-1)
 
-    def test_recording_gated_candidate_is_probed_after_recording(self):
-        # Finding 2 (fail-open): a candidate that only accepts process() after
-        # start_recording must NOT silently disable the guard. _ensure_recording
-        # starts recording from the model's region_layer_map, so the probe works
-        # and the guard runs (raises here because the declared plan is over budget).
-        model = RecordingGatedModel(n_features=100000,
-                                    region_layer_map={'IT': 'layer.10'})
+    def test_probe_records_one_region_not_all_and_recovers_from_bad_region(self):
+        # Finding 2: the probe must record a SINGLE region (not sum every region's
+        # layers) and must skip a region whose modality it can't serve. Model has
+        # {'A1','IT'}: A1 (audio) raises, IT works. Correct behaviour -> width is
+        # ONE region (50000), not summed (100000), proving both properties.
+        model = MultiRegionProbeModel(per_region_features=50000,
+                                      region_layer_map={'A1': 'a', 'IT': 'i'})
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)  # no .region
         with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000):
-            with pytest.raises(MemoryError, match="single-stimulus probe"):
+            with pytest.raises(MemoryError, match=r"n_features: 50000 ") as exc:
                 check_memory(model, bench)
+        assert "100000" not in str(exc.value)  # NOT the summed 2-region width
 
-    def test_expected_n_presentations_drives_the_estimate(self):
-        # Finding 1: a benchmark that expands rows declares the true count; the
-        # estimate uses it. Raw len=10 would pass; declared 500K forces a raise.
+    def test_expected_n_presentations_drives_extraction(self):
+        # Finding 1a: a row-expanding benchmark declares the true count; extraction
+        # uses it. Raw len=10 would pass; declared 500K forces a raise.
         model = FakeModel(n_features=2000)
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
         bench.expected_n_presentations = 500_000
@@ -412,6 +418,37 @@ class TestCheckMemory:
              _mock_memory(200_000_000):
             with pytest.raises(MemoryError, match=r"n_presentations: 500000 \[declared\]"):
                 check_memory(model, bench)
+
+    def test_expected_n_presentations_sizes_the_metric_too(self):
+        # Finding 1 (the real bug): the METRIC term must fit over the declared
+        # count, not raw len. RSA metric is S^2, features are irrelevant (=1), so
+        # extraction is tiny; only a metric that uses the declared 500K raises.
+        model = FakeModel(n_features=1)
+        bench = FakeBenchmark(identifier='test-rsa', n_stimuli=10)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=100_000_000_000), \
+             _mock_memory(200_000_000):
+            check_memory(model, bench)  # raw S=10 -> RSA metric ~1.6KB -> passes
+        bench.expected_n_presentations = 500_000  # RSA metric ~4000 GB -> must raise
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=100_000_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
+
+    def test_non_integer_declarations_rejected(self):
+        # Finding 5: floats truncate silently and zero/negative slip through
+        # truthiness — reject them explicitly.
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        with pytest.raises(ValueError, match="must be an integer"):
+            check_memory(model, bench, feature_dim=1.9)
+        bench0 = FakeBenchmark(identifier='test-ridge', n_stimuli=10,
+                               expected_feature_dim=0)
+        with pytest.raises(ValueError, match="positive integer"):
+            check_memory(model, bench0)
+        benchneg = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        benchneg.expected_n_presentations = -5
+        with pytest.raises(ValueError, match="positive integer"):
+            check_memory(model, benchneg)
 
     def test_undeclared_pass_is_flagged_approximate(self, caplog):
         # Finding 1/3/4: a fit for an un-declared benchmark must NOT read as an

@@ -217,7 +217,8 @@ SAFETY_FACTORS = {
 }
 
 
-def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
+def estimate_metric_memory(benchmark, n_features: Optional[int] = None,
+                           n_stimuli: Optional[int] = None) -> int:
     """
     Estimate memory required for the benchmark's metric computation.
 
@@ -237,11 +238,17 @@ def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
             falls back to benchmark.expected_feature_dim or 1000. This is
             critical because models with region_layer_map skip PCA, so
             features can be 9K (alexnet) to 148K+ (ViT-L).
+        n_stimuli: number of observations the metric fits over. If None, reads
+            the raw stimulus-set length — but callers that know the real
+            processed cardinality (row-expanding benchmarks) must pass it, or the
+            metric term silently uses the raw count while extraction uses the
+            expanded one.
 
     Returns estimate in bytes.
     """
     category = _detect_metric_category(benchmark)
-    n_stimuli = _get_n_stimuli(benchmark)
+    if n_stimuli is None:
+        n_stimuli = _get_n_stimuli(benchmark)
     n_targets = _get_n_targets(benchmark)
     if n_features is None:
         n_features = getattr(benchmark, 'expected_feature_dim', 1000)
@@ -321,103 +328,114 @@ def _get_benchmark_stimulus_set(benchmark):
     return None
 
 
-def _probe_feature_dim(model, stimulus_set) -> Optional[int]:
-    """Discover the recording layer's feature width from ONE stimulus.
+def _validate_positive_int(value, name):
+    """Return value as a positive int, rejecting floats/negatives/zero.
 
-    Feature width is stimulus-invariant (it's the layer's channel count), so a
-    single stimulus gives the true dimension without extrapolating any memory
-    measurement. Returns None if the model can't process the stimulus — in which
-    case the full benchmark (same ``process`` path) will fail fast too, so the
-    memory guard has nothing to protect and the caller skips rather than fabricating
-    a number.
+    Uses ``operator.index`` so numpy integers are accepted but floats like 1.9 are
+    rejected outright (not silently truncated to 1)."""
+    import operator
+    try:
+        ivalue = operator.index(value)  # int-like only; floats raise TypeError
+    except TypeError:
+        raise ValueError(f"{name} must be an integer, got {value!r}")
+    if ivalue <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {value!r}")
+    return ivalue
+
+
+def _probe_regions(model, benchmark):
+    """Regions to try recording for the probe, in order.
+
+    The benchmark's own ``.region`` if it exposes one; otherwise the model's
+    ``region_layer_map`` keys tried ONE AT A TIME (never all at once — recording
+    every region would sum several layers and inflate the feature width, and would
+    request a modality a single-tower wrapper can't serve). ``[None]`` means the
+    model has no recording concept (e.g. a behavioral candidate) — probe as-is.
+    """
+    region = getattr(benchmark, 'region', None)
+    if region is not None:
+        return [region]
+    region_map = getattr(model, 'region_layer_map', None)
+    if region_map:
+        return list(region_map.keys())
+    return [None]
+
+
+def _probe_feature_dim(model, benchmark, stimulus_set):
+    """Discover the recording-layer feature width from ONE stimulus.
+
+    Feature width is stimulus-invariant (the layer's channel count), so one
+    stimulus gives it without extrapolating any memory measurement. Records a
+    SINGLE region at a time (see _probe_regions) and returns the first that yields
+    a readable width. Returns (None, None) if none do — e.g. a candidate that only
+    configures recording inside the benchmark's ``__call__`` and rejects a bare
+    probe; the caller then skips with a loud warning (the guard is OFF, not "safe").
+
+    Returns (n_features, region_used) or (None, None).
     """
     try:
         one = stimulus_set.iloc[:1] if hasattr(stimulus_set, 'iloc') else stimulus_set[:1]
     except Exception:
         one = stimulus_set
-    try:
-        result = model.process(one)
-    except Exception as e:
-        logger.warning(
-            f"Memory pre-flight could NOT run: the model failed to process a probe "
-            f"stimulus ({type(e).__name__}: {e}), so its feature dimension is unknown "
-            f"and no estimate was made. If the model configures itself inside the "
-            f"benchmark (e.g. start_recording called in __call__), the probe can fail "
-            f"for an otherwise-fine candidate — the OOM guard is then OFF for this run. "
-            f"Pass feature_dim=... to estimate anyway, or check_mem=False to silence.",
-            exc_info=True,
-        )
-        return None
-    shape = getattr(result, 'shape', None)
-    if shape is not None and len(shape) >= 2:
-        return int(shape[-1])
+    can_record = hasattr(model, 'start_recording')
+    time_bins = getattr(benchmark, 'timebins', None)
+    last_error = None
+    for region in _probe_regions(model, benchmark):
+        if region is not None and can_record:
+            try:
+                model.start_recording(region, time_bins=time_bins)
+            except Exception as e:
+                last_error = e
+                continue
+        try:
+            result = model.process(one)
+        except Exception as e:
+            last_error = e
+            continue
+        shape = getattr(result, 'shape', None)
+        if shape is not None and len(shape) >= 2:
+            return int(shape[-1]), region
+        last_error = f"probe returned shape {shape!r} (need >=2 dims)"
     logger.warning(
-        "Memory pre-flight could NOT run: the probe returned a result with shape "
-        "%r (need >=2 dims to read the feature width), so no estimate was made and "
-        "the OOM guard is OFF for this run. Pass feature_dim=... to estimate anyway.",
-        shape,
+        "Memory pre-flight could NOT run: no region yielded a readable feature "
+        "width (last error: %s), so no estimate was made and the OOM guard is OFF "
+        "for this run. Pass feature_dim=... to estimate anyway, or check_mem=False "
+        "to silence.",
+        last_error,
+        exc_info=last_error if isinstance(last_error, BaseException) else None,
     )
-    return None
+    return None, None
 
 
 def _resolve_feature_dim(model, benchmark, feature_dim, stimulus_set):
     """Resolve the model's per-stimulus feature width, preferring a declaration
-    over a probe. Returns (n_features, source) or (None, source) if unresolved."""
+    over a probe. Returns (n_features, source); n_features is None if unresolved."""
     if feature_dim is not None:
-        if int(feature_dim) <= 0:
-            raise ValueError(f"feature_dim must be a positive integer, got {feature_dim}")
-        return int(feature_dim), 'feature_dim argument'
+        return _validate_positive_int(feature_dim, 'feature_dim'), 'feature_dim argument'
     for obj, attr in ((benchmark, 'expected_feature_dim'), (model, 'feature_dim')):
         declared = getattr(obj, attr, None)
-        if declared:
-            if int(declared) <= 0:
-                raise ValueError(
-                    f"{type(obj).__name__}.{attr} must be a positive integer, "
-                    f"got {declared}")
-            return int(declared), f'{type(obj).__name__}.{attr}'
-    return _probe_feature_dim(model, stimulus_set), 'single-stimulus probe'
+        if declared is not None:  # is-not-None, so a declared 0 errors (not skipped)
+            name = f'{type(obj).__name__}.{attr}'
+            return _validate_positive_int(declared, name), name
+    dim, _region = _probe_feature_dim(model, benchmark, stimulus_set)
+    return dim, 'single-stimulus probe'
 
 
 def _get_n_presentations(benchmark, stimulus_set):
     """How many rows the model will actually process, and whether it is declared.
 
-    ``len(stimulus_set)`` is only a LOWER bound: benchmarks that expand each row
-    (video -> per-TR frames in Algonauts, clip -> frames in Lahner) process far
-    more presentations than the raw set has rows. A benchmark can declare the true
-    count via ``expected_n_presentations``; otherwise we fall back to the raw
-    length and flag the estimate as a lower bound.
+    ``len(stimulus_set)`` is only a rough proxy: benchmarks that expand each row
+    (video -> per-TR frames in Algonauts / Lahner) process MORE, while ones that
+    filter to relevant event IDs (time-resolved Lahner) process FEWER. A benchmark
+    can declare the true count via ``expected_n_presentations``; otherwise we use
+    the raw length and flag the whole estimate approximate.
 
     Returns (n_presentations, declared: bool).
     """
     declared = getattr(benchmark, 'expected_n_presentations', None)
-    if declared:
-        return int(declared), True
+    if declared is not None:
+        return _validate_positive_int(declared, 'expected_n_presentations'), True
     return len(stimulus_set), False
-
-
-def _ensure_recording(model, benchmark) -> None:
-    """Best-effort: put the model into a recording state so the probe produces
-    real activations.
-
-    Benchmarks that expose ``.region`` are configured directly. Benchmarks that
-    call ``start_recording`` inside ``__call__`` (e.g. Lahner) expose no region,
-    so a naive probe would fail for an otherwise-fine layer-aware candidate and
-    silently disable the guard. To avoid that fail-open, fall back to recording
-    the model's own ``region_layer_map`` regions.
-    """
-    if not hasattr(model, 'start_recording'):
-        return
-    region = getattr(benchmark, 'region', None)
-    time_bins = getattr(benchmark, 'timebins', None)
-    try:
-        if region is not None:
-            model.start_recording(region, time_bins=time_bins)
-            return
-        region_map = getattr(model, 'region_layer_map', None)
-        if region_map:
-            model.start_recording(list(region_map.keys()), time_bins=time_bins)
-    except Exception:
-        pass  # best-effort; the probe still falls back to a clear warning
 
 
 def check_memory(
@@ -430,26 +448,29 @@ def check_memory(
     Best-effort memory pre-flight: raise before a run that is *clearly* over
     budget, and otherwise be honest that a "fit" is not a safety guarantee.
 
-    This is NOT a reliable OOM oracle, and does not claim to be. A trustworthy
-    estimate needs the benchmark to declare its execution plan; absent that, two
-    inputs are only approximations:
-      - ``n_presentations``: from ``benchmark.expected_n_presentations`` if
-        declared, else ``len(stimulus_set)`` — a LOWER bound, because benchmarks
-        that expand rows (video->per-TR frames) process many more.
-      - ``n_features``: from ``feature_dim`` arg / ``benchmark.expected_feature_dim``
-        / ``model.feature_dim`` / a single-stimulus probe. The probed width is the
-        RAW recording width; benchmarks that PCA/compress features before the
-        metric (Algonauts, TR-resolved Lahner) see a smaller width, so the metric
-        term is an over-estimate there. Temporal outputs (S x T x F) are also not
-        modelled — the held matrix is undercounted by T.
+    This is NOT a reliable OOM oracle, and does not claim to be — the estimate is
+    APPROXIMATE on every path until benchmarks can declare their execution plan.
+    Both key inputs are approximate in *both* directions:
+      - ``n_presentations``: ``benchmark.expected_n_presentations`` if declared,
+        else ``len(stimulus_set)`` — which over-counts benchmarks that filter rows
+        (time-resolved Lahner keeps only relevant event IDs) and under-counts ones
+        that expand rows (video->per-TR frames). The metric fits over this same
+        count, which may itself differ from the extraction count (a benchmark can
+        aggregate frames before the metric) — a distinction only the future API
+        captures.
+      - ``n_features``: ``feature_dim`` arg / ``benchmark.expected_feature_dim`` /
+        ``model.feature_dim`` / a single-stimulus probe. The probed width is the
+        RAW recording width; benchmarks that PCA/compress before the metric
+        (Algonauts 38K->1K, TR-Lahner->512) see less, so the metric term over-
+        counts there. Temporal ``S x T x F`` outputs are not modelled — the held
+        matrix under-counts by T.
 
-    Because of these, the estimate is compared against HOST RAM only (the plan is
-    host-side numpy/sklearn); the GPU forward-pass working set is a separate,
-    unmodelled failure mode. The check RAISES only when the estimate exceeds the
-    budget (a definite problem), and for benchmarks that do NOT declare their plan
-    it logs that a pass is inconclusive rather than reporting a false all-clear.
-
-    Skips (with a loud warning) when no feature width can be resolved — e.g. a
+    The estimate is compared against HOST RAM only (the plan is host-side
+    numpy/sklearn); the GPU forward-pass working set is a separate, unmodelled
+    failure mode. Because the estimate can over- OR under-count, an over-budget
+    result is a strong signal but NOT a certainty — it may be a false rejection,
+    so the raise is override-able (``check_mem=False``) and every result is logged
+    APPROXIMATE. Skips (loudly) when no feature width can be resolved — e.g. a
     candidate that only configures recording inside the benchmark's ``__call__``.
 
     :param model: the model to check
@@ -467,10 +488,9 @@ def check_memory(
 
     stimulus_set = _get_benchmark_stimulus_set(benchmark)
     if stimulus_set is None or len(stimulus_set) == 0:
-        logger.info("Memory check skipped: benchmark has no stimulus_set")
+        logger.info("Memory check not applicable: benchmark has no stimulus_set "
+                    "(nothing to extract).")
         return
-
-    _ensure_recording(model, benchmark)
 
     n_features, source = _resolve_feature_dim(
         model, benchmark, feature_dim, stimulus_set)
@@ -487,10 +507,14 @@ def check_memory(
     held_activations = n_presentations * n_features * ACTIVATION_DTYPE_BYTES
     extraction_transient = int(held_activations * EXTRACTION_TRANSIENT_FACTOR)
 
-    # Metric workspace (float64 inside sklearn — accounted for in the helper).
-    estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
+    # Metric workspace (float64 inside sklearn). Pass n_presentations so the metric
+    # fits over the same cardinality as extraction — else a row-expanding benchmark
+    # would size the metric off the raw (much smaller) stimulus-set length.
+    estimated_metric_memory = estimate_metric_memory(
+        benchmark, n_features=n_features, n_stimuli=n_presentations)
     if category != 'behavioral':
-        estimated_ceiling_memory = estimate_metric_memory(benchmark, n_features=n_targets)
+        estimated_ceiling_memory = estimate_metric_memory(
+            benchmark, n_features=n_targets, n_stimuli=n_presentations)
     else:
         estimated_ceiling_memory = 0
     metric_total = (estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
@@ -500,7 +524,6 @@ def check_memory(
     peak_from_metric = baseline_rss + held_activations + metric_total
     total_estimated = max(peak_from_extraction, peak_from_metric)
 
-    approximate = not (cardinality_declared and source != 'single-stimulus probe')
     total_system = available + baseline_rss
     if total_estimated > total_system:
         raise MemoryError(
@@ -513,9 +536,10 @@ def check_memory(
             f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB, "
             f"n_features: {n_features} [{source}], "
             f"n_presentations: {n_presentations}"
-            f"{' [declared]' if cardinality_declared else ' [lower bound]'}). "
+            f"{' [declared]' if cardinality_declared else ' [approx]'}). "
             f"Available host RAM: {total_system / 1e9:.1f} GB. "
-            f"Set check_mem=False to skip this check."
+            f"This estimate is APPROXIMATE and may over-count (feature compression, "
+            f"row filtering) — if it is a false rejection, set check_mem=False."
         )
 
     utilization = total_estimated / total_system if total_system > 0 else 0
@@ -528,18 +552,11 @@ def check_memory(
         f"(held activations: {held_activations / 1e9:.1f} GB; "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB; "
         f"bottleneck: {peak_source}) — {total_system / 1e9:.1f} GB host RAM "
-        f"({utilization:.0%} utilization)"
+        f"({utilization:.0%} utilization). APPROXIMATE: stimulus expansion/filtering, "
+        f"temporal bins, feature compression, and GPU memory are not modelled, so "
+        f"this is not a guarantee either way. Declare expected_n_presentations / "
+        f"expected_feature_dim for a closer estimate."
     )
-    if approximate:
-        # Honest: an un-declared benchmark may expand stimuli / compress features
-        # in ways the plan can't see, so a "fit" is NOT an all-clear.
-        logger.info(
-            f"Memory estimate for '{getattr(benchmark, 'identifier', 'unknown')}' "
-            f"is APPROXIMATE (execution plan not declared): stimulus expansion, "
-            f"temporal bins, and feature compression are not modelled, so passing "
-            f"this check is not a guarantee against OOM. Declare "
-            f"expected_n_presentations / expected_feature_dim for a reliable check."
-        )
     if utilization > 0.8:
         warnings.warn(
             f"Memory utilization for '{model.identifier}' estimated at "
