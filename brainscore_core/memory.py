@@ -1,9 +1,19 @@
 """
-Probe-based memory pre-check for Brain-Score.
+Extraction-plan memory pre-check for Brain-Score.
 
-Runs a small batch of stimuli through the model, measures peak memory
-(including transient spikes), and extrapolates to the full benchmark.
-Prevents OOM failures after hours of computation.
+Estimates whether a (model, benchmark) pair will fit in memory BEFORE the run,
+so a benchmark can't OOM after hours of computation. The estimate is *computed*
+from a plan — ``n_stimuli x n_features x dtype`` for the activation matrix plus
+an analytic metric-workspace term — not extrapolated from a measured probe run.
+
+Why not a measured probe (the previous design): running one probe extraction and
+scaling its RSS to the full run is unsound. The benchmark frequently calls
+``process()`` on a different / filtered stimulus set than the probe (e.g. Lahner
+expands clips to frames), the plain-preprocessor path isn't cached, and a probe
+crash disabled the guard entirely (fail-open). The only thing a probe genuinely
+tells us is the recording layer's feature width — which is *stimulus-invariant*,
+so a single-stimulus probe (or an explicit ``feature_dim`` / ``expected_feature_dim``
+declaration) suffices, and everything else is arithmetic.
 
 Cross-platform: CUDA (torch.cuda), MPS (psutil), CPU (psutil).
 brainscore_core stays free of heavy dependencies -- torch is optional.
@@ -12,8 +22,6 @@ brainscore_core stays free of heavy dependencies -- torch is optional.
 import logging
 import resource
 import sys
-import threading
-import time
 import warnings
 from typing import Optional, TYPE_CHECKING
 
@@ -90,49 +98,6 @@ def _get_peak_rss() -> int:
     if sys.platform == 'linux':
         return maxrss * 1024
     return maxrss
-
-
-def _get_hwm_bytes() -> int:
-    """Get the OS-level high-water mark RSS in bytes.
-
-    Linux: ru_maxrss is in KB. macOS: ru_maxrss is in bytes.
-    This is the peak RSS since process start (monotonically increasing).
-    """
-    maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if sys.platform == 'linux':
-        return maxrss * 1024
-    return maxrss
-
-
-def _measure_peak_rss(func, *args, **kwargs):
-    """Run func while polling RSS in a background thread.
-
-    Returns (result, peak_rss_bytes). The peak captures transient spikes
-    (e.g., raw activations that are freed before func returns).
-    """
-    import psutil
-    peak = [psutil.Process().memory_info().rss]
-    stop = threading.Event()
-
-    def poll():
-        proc = psutil.Process()
-        while not stop.is_set():
-            try:
-                rss = proc.memory_info().rss
-                if rss > peak[0]:
-                    peak[0] = rss
-            except Exception:
-                pass
-            time.sleep(0.005)  # 5ms polling
-
-    thread = threading.Thread(target=poll, daemon=True)
-    thread.start()
-    try:
-        result = func(*args, **kwargs)
-    finally:
-        stop.set()
-        thread.join(timeout=1.0)
-    return result, peak[0]
 
 
 def _detect_metric_category(benchmark) -> str:
@@ -316,124 +281,151 @@ def estimate_metric_memory(benchmark, n_features: Optional[int] = None) -> int:
     return design + target + design * 3
 
 
+# Activations are extracted in float32; sklearn upcasts to float64 inside the
+# metric (that upcast is accounted for separately in estimate_metric_memory).
+ACTIVATION_DTYPE_BYTES = 4
+# The forward-pass transient (raw inputs + per-batch intermediates held while the
+# feature matrix accumulates) on top of the held activation matrix. A ceiling, not
+# a measurement — ponytail: bump if a model's per-batch working set dwarfs its
+# output matrix (very wide intermediate layers).
+EXTRACTION_TRANSIENT_FACTOR = 1.5
+# Slack over the analytic metric term for allocator fragmentation + temporaries.
+PIPELINE_OVERHEAD = 1.2
+
+
+def _get_benchmark_stimulus_set(benchmark):
+    """Resolve the benchmark's stimulus set (direct attr or via an assembly)."""
+    stimulus_set = getattr(benchmark, 'stimulus_set', None)
+    if stimulus_set is not None:
+        return stimulus_set
+    for attr in ('_assembly', 'train_assembly'):
+        assembly = getattr(benchmark, attr, None)
+        if assembly is not None:
+            stimulus_set = getattr(assembly, 'stimulus_set', None)
+            if stimulus_set is not None:
+                return stimulus_set
+    return None
+
+
+def _probe_feature_dim(model, stimulus_set) -> Optional[int]:
+    """Discover the recording layer's feature width from ONE stimulus.
+
+    Feature width is stimulus-invariant (it's the layer's channel count), so a
+    single stimulus gives the true dimension without extrapolating any memory
+    measurement. Returns None if the model can't process the stimulus — in which
+    case the full benchmark (same ``process`` path) will fail fast too, so the
+    memory guard has nothing to protect and the caller skips rather than fabricating
+    a number.
+    """
+    try:
+        one = stimulus_set.iloc[:1] if hasattr(stimulus_set, 'iloc') else stimulus_set[:1]
+    except Exception:
+        one = stimulus_set
+    try:
+        result = model.process(one)
+    except Exception as e:
+        logger.warning(
+            f"Memory pre-flight skipped: the model could not process a probe "
+            f"stimulus ({type(e).__name__}: {e}), so its feature dimension is "
+            f"unknown. This is safe — the benchmark runs the same process() path "
+            f"and will surface this error on its first stimulus, not after hours. "
+            f"Pass feature_dim=... to estimate anyway, or check_mem=False to silence.",
+            exc_info=True,
+        )
+        return None
+    shape = getattr(result, 'shape', None)
+    if shape is not None and len(shape) >= 2:
+        return int(shape[-1])
+    return None
+
+
+def _resolve_feature_dim(model, benchmark, feature_dim, stimulus_set):
+    """Resolve the model's per-stimulus feature width, preferring a declaration
+    over a probe. Returns (n_features, source) or (None, source) if unresolved."""
+    if feature_dim is not None:
+        return int(feature_dim), 'feature_dim argument'
+    for obj, attr in ((benchmark, 'expected_feature_dim'), (model, 'feature_dim')):
+        declared = getattr(obj, attr, None)
+        if declared:
+            return int(declared), f'{type(obj).__name__}.{attr}'
+    return _probe_feature_dim(model, stimulus_set), 'single-stimulus probe'
+
+
 def check_memory(
     model: 'UnifiedModel',
     benchmark,
     safety_factor: Optional[float] = None,
+    feature_dim: Optional[int] = None,
 ) -> None:
     """
-    Run a probe extraction through the model and estimate whether the
-    full benchmark will fit in memory.
+    Estimate whether the full benchmark will fit in memory, and raise before it
+    starts if not. The estimate is an extraction PLAN, not a measured extrapolation.
 
-    The probe runs the full stimulus set through the model to measure
-    extraction overhead and discover the feature dimension. The metric
-    cost is computed from benchmark metadata.
+    Plan = max of two peaks the OOM killer could hit:
+      1. extraction transient: baseline + (n_stimuli x n_features x 4) x transient_factor
+      2. metric workspace:     baseline + held activations + analytic metric term
 
-    Raises MemoryError if estimated total exceeds available memory.
-    Logs a warning if utilization exceeds 80%.
+    ``n_features`` (stimulus-invariant) comes from, in order: the ``feature_dim``
+    argument, ``benchmark.expected_feature_dim``, ``model.feature_dim``, or a
+    single-stimulus probe. If none resolve (the model can't process one stimulus),
+    the check is skipped with a warning — the benchmark will fail fast on the same
+    path, so there is nothing to guard.
+
+    Raises MemoryError if the estimated peak exceeds available memory.
+    Warns (ResourceWarning) if utilization exceeds 80%.
 
     :param model: the model to check
     :param benchmark: the benchmark to check against
-    :param safety_factor: no longer used (kept for API compatibility).
-        Estimation is now based on measured extraction + computed metric.
+    :param safety_factor: unused, kept for API compatibility (estimation is now
+        a computed plan, not a measured probe scaled by a fudge factor).
+    :param feature_dim: optional explicit per-stimulus feature width; skips the
+        probe entirely (the fully-declarative path).
     """
     available = get_available_memory()
-
-    # Auto-detect safety factor from benchmark metric category
     category = _detect_metric_category(benchmark)
-    if safety_factor is None:
-        safety_factor = SAFETY_FACTORS.get(category, 1.5)
-
-    # Get a probe stimulus from the benchmark's stimulus set.
-    # Benchmarks store stimuli in different places:
-    #   - benchmark.stimulus_set (some benchmarks expose directly)
-    #   - benchmark._assembly.stimulus_set (NeuralBenchmark, PropertiesBenchmark)
-    #   - benchmark.train_assembly.stimulus_set (TrainTestNeuralBenchmark)
-    stimulus_set = getattr(benchmark, 'stimulus_set', None)
-    if stimulus_set is None:
-        for attr in ('_assembly', 'train_assembly'):
-            assembly = getattr(benchmark, attr, None)
-            if assembly is not None:
-                stimulus_set = getattr(assembly, 'stimulus_set', None)
-                if stimulus_set is not None:
-                    break
-    if stimulus_set is None or len(stimulus_set) == 0:
-        logger.info("Memory check skipped: benchmark has no stimulus_set")
-        return  # can't probe without stimuli
-
-    # Configure model for recording if the benchmark specifies a region.
-    # Benchmarks normally call start_recording() before running the model;
-    # we replicate that here so the probe produces real activations.
-    region = getattr(benchmark, 'region', None)
-    if region is not None and hasattr(model, 'start_recording'):
-        timebins = getattr(benchmark, 'timebins', None)
-        model.start_recording(region, time_bins=timebins)
+    n_stimuli = _get_n_stimuli(benchmark)
 
     import psutil
     baseline_rss = psutil.Process().memory_info().rss
-    baseline_peak = _get_peak_rss()
 
-    # Run the full extraction as a probe. We use the complete stimulus set
-    # (not a subset) because:
-    # 1. The RSS delta measures the REAL extraction cost
-    # 2. The result gives us the actual feature dimension (n_features)
-    # 3. The extraction is cached, so the actual scoring run benefits
-    # 4. Stimulus subsets can fail due to metadata assertion mismatches
-    try:
-        result = model.process(stimulus_set)
-    except Exception as e:
-        # Fail visibly, not silently: a swallowed probe disables the OOM guard,
-        # so the full run can OOM after hours with no prior warning.
-        logger.warning(
-            f"Memory pre-flight DISABLED for this run: the probe extraction failed "
-            f"({type(e).__name__}: {e}). The benchmark will run WITHOUT an out-of-memory "
-            f"estimate. Fix the error above, or pass check_mem=False to skip this check "
-            f"intentionally.",
-            exc_info=True,  # attach the full traceback, not just the exception type/message
-        )
+    stimulus_set = _get_benchmark_stimulus_set(benchmark)
+    if n_stimuli == 0 or stimulus_set is None or len(stimulus_set) == 0:
+        logger.info("Memory check skipped: benchmark has no stimulus_set")
         return
 
-    rss_after_probe = psutil.Process().memory_info().rss
-    peak_after_probe = _get_peak_rss()
+    # Configure recording so a probe (if needed) records real activations — the
+    # benchmark normally calls this before running the model.
+    region = getattr(benchmark, 'region', None)
+    if region is not None and hasattr(model, 'start_recording'):
+        try:
+            model.start_recording(region, time_bins=getattr(benchmark, 'timebins', None))
+        except Exception:
+            pass  # recording config is best-effort; the probe falls back gracefully
 
-    # Extraction costs: sustained (what stays in memory) and transient (peak spike)
-    extraction_sustained = max(rss_after_probe - baseline_rss, 0)
-    extraction_peak = max(peak_after_probe - baseline_rss, 0)
+    n_features, source = _resolve_feature_dim(
+        model, benchmark, feature_dim, stimulus_set)
+    if n_features is None:
+        return  # unresolved feature dim; _probe_feature_dim already warned
 
-    # Read the actual feature dimension from the probe result.
-    # Critical: models with region_layer_map skip PCA entirely, so features
-    # can be 9K (alexnet) to 148K+ (ViT-L). Metric formulas depend on this.
-    n_features = 1000  # fallback
-    if result is not None:
-        shape = getattr(result, 'shape', None)
-        if shape is not None and len(shape) >= 2:
-            n_features = shape[-1]
-
-    n_stimuli = len(stimulus_set)
     n_targets = _get_n_targets(benchmark)
 
-    # Metric memory: computed from benchmark metadata + measured n_features.
-    # Uses float64 (8 bytes) because sklearn converts internally.
-    estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
+    # Extraction plan: the activation matrix held in memory (float32) plus a
+    # forward-pass transient. Computed, not measured — so it's independent of
+    # which stimulus subset the benchmark actually processes.
+    held_activations = n_stimuli * n_features * ACTIVATION_DTYPE_BYTES
+    extraction_transient = int(held_activations * EXTRACTION_TRANSIENT_FACTOR)
 
-    # Ceiling memory: the ceiling runs the same metric type but on neural data
-    # (neural-to-neural split-half reliability). For PLS/Ridge, the "features"
-    # are the neuroids from one half, predicting the other half's neuroids.
-    # This is typically much smaller than the model metric since n_targets << n_features,
-    # but for fMRI benchmarks with 50K+ voxels it can be significant.
-    if category not in ('behavioral',):
+    # Metric workspace (float64 inside sklearn — accounted for in the helper).
+    estimated_metric_memory = estimate_metric_memory(benchmark, n_features=n_features)
+    if category != 'behavioral':
         estimated_ceiling_memory = estimate_metric_memory(benchmark, n_features=n_targets)
     else:
         estimated_ceiling_memory = 0
-
-    # Predicted peak RSS during scoring. Two possible peaks:
-    # 1. Extraction peak (transient — image loading, forward pass, PCA calibration)
-    # 2. Post-extraction RSS + metric workspace (sustained + transient metric peak)
-    # The OOM killer cares about whichever is higher.
-    PIPELINE_OVERHEAD = 1.2
     metric_total = (estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
-    peak_from_extraction = baseline_rss + extraction_peak
-    peak_from_metric = rss_after_probe + metric_total
+
+    # The metric runs while the extracted activations are still resident.
+    peak_from_extraction = baseline_rss + extraction_transient
+    peak_from_metric = baseline_rss + held_activations + metric_total
     total_estimated = max(peak_from_extraction, peak_from_metric)
 
     total_system = available + baseline_rss
@@ -446,7 +438,7 @@ def check_memory(
             f"metric peak: {peak_from_metric / 1e9:.1f} GB, "
             f"metric [{category}]: {estimated_metric_memory / 1e9:.1f} GB, "
             f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB, "
-            f"n_features: {n_features}, n_stimuli: {n_stimuli}). "
+            f"n_features: {n_features} [{source}], n_stimuli: {n_stimuli}). "
             f"Available: {total_system / 1e9:.1f} GB total. "
             f"Set check_mem=False to skip this check."
         )
@@ -456,9 +448,9 @@ def check_memory(
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
-        f"[{category}, {n_features} features]: {total_estimated / 1e9:.1f} GB peak "
-        f"(extraction: {extraction_sustained / 1e9:.1f} GB sustained, "
-        f"{extraction_peak / 1e9:.1f} GB peak; "
+        f"[{category}, {n_features} features via {source}]: "
+        f"{total_estimated / 1e9:.1f} GB peak "
+        f"(held activations: {held_activations / 1e9:.1f} GB; "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB, "
         f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB; "
         f"bottleneck: {peak_source}) — "

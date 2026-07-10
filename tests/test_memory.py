@@ -300,13 +300,12 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_raises_when_insufficient_memory(self):
-        # Ridge: baseline=500MB, extraction=200MB (probe delta)
-        # metric(ridge, F=10K, S=1000, T=100):
-        #   gram=min(1000,10000)^2*8=8MB, design=1000*10000*8=80MB,
-        #   target=1000*100*8=0.8MB, centered=80MB, coef=10000*100*8=8MB
-        #   total metric ≈ 177MB
-        # total = 500 + 200 + 177 = 877MB. system=500+300=800MB. Fail.
-        model = FakeModel(activation_nbytes=100_000, n_features=10000)
+        # Ridge plan, baseline=500MB, F=20K, S=1000:
+        #   held = 1000*20000*4 = 80MB; extraction = 120MB
+        #   metric: design=1000*20000*8=160MB, centered=160MB, gram=8MB,
+        #           coef=20000*100*8=16MB -> ~345MB; *1.2 -> ~417MB
+        #   peak_metric = 500 + 80 + 417 = 997MB. system = 500+300 = 800MB. Fail.
+        model = FakeModel(n_features=20000)
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
         with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000, 700_000_000):
@@ -314,12 +313,14 @@ class TestCheckMemory:
                 check_memory(model, bench)
 
     def test_warns_at_high_utilization(self):
-        # PLS: baseline=200MB, extraction=700MB, metric=small
-        # total ≈ 900MB. system=200+900=1100MB. 82%. Warn.
-        model = FakeModel(activation_nbytes=1000)
-        bench = FakeBenchmark(identifier='test-pls', n_stimuli=10)
-        with patch('brainscore_core.memory.get_available_memory', return_value=900_000_000), \
-             _mock_memory(200_000_000, 900_000_000):
+        # Ridge plan, baseline=200MB, F=100K, S=1000:
+        #   held=400MB; metric design+centered≈1600MB, coef=80MB -> ~1688MB;
+        #   *1.2 -> ~2028MB. peak_metric = 200+400+2028 = ~2628MB.
+        #   system = 200+2900 = 3100MB -> ~85% utilization. Warn, no raise.
+        model = FakeModel(n_features=100000)
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=2_900_000_000), \
+             _mock_memory(200_000_000, 200_000_000):
             with pytest.warns(ResourceWarning, match="OOM risk"):
                 check_memory(model, bench)
 
@@ -330,8 +331,9 @@ class TestCheckMemory:
             check_memory(model, bench)  # should not raise
 
     def test_probe_failure_warns_loudly(self, caplog):
-        # A swallowed probe silently disables the OOM guard — it must WARN, not
-        # skip at INFO. Assert a WARNING-level record explains the guard is off.
+        # If the single-stimulus probe can't resolve a feature dim, the check is
+        # skipped — but LOUDLY (WARN + traceback), never a silent INFO skip. The
+        # skip is safe: the benchmark runs the same process() path and fails fast.
         import logging
         model = FailingModel()
         bench = FakeBenchmark(n_stimuli=10)
@@ -340,11 +342,33 @@ class TestCheckMemory:
                 check_memory(model, bench)
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert warnings, "probe failure should emit a WARNING, not a silent INFO skip"
-        assert 'DISABLED' in warnings[-1].getMessage()
+        assert 'skipped' in warnings[-1].getMessage()
         # WARN+traceback, not WARN+message: the record must carry exc_info so the
         # log shows WHERE the probe failed, not just the exception type/message.
         assert warnings[-1].exc_info is not None
         assert warnings[-1].exc_info[0] is RuntimeError  # FailingModel.process raises
+
+    def test_feature_dim_argument_skips_the_probe(self):
+        # The fully-declarative path: with feature_dim given, the probe is never
+        # called. Proof: FailingModel would SKIP (no raise) if probed, but the
+        # declared 100K dim drives a plan that RAISES — so the declaration won.
+        model = FailingModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
+             _mock_memory(500_000_000, 500_000_000):
+            with pytest.raises(MemoryError, match="single-stimulus probe|feature_dim argument"):
+                check_memory(model, bench, feature_dim=100000)
+
+    def test_expected_feature_dim_declaration_skips_the_probe(self):
+        # Same, via benchmark.expected_feature_dim: FailingModel is never probed,
+        # the declared dim drives the estimate and raises.
+        model = FailingModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000,
+                              expected_feature_dim=100000)
+        with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
+             _mock_memory(500_000_000, 500_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
 
     def test_graceful_when_no_stimulus_set(self):
         model = FakeModel()
@@ -358,9 +382,8 @@ class TestCheckMemory:
         check_memory(model, bench)  # should not raise
 
     def test_error_message_includes_identifiers(self):
-        # Ridge: baseline=500MB, extraction=200MB, metric≈177MB
-        # total=877MB > system=800MB. Fail.
-        model = FakeModel(identifier='big-vit', activation_nbytes=100_000, n_features=10000)
+        # Ridge plan, F=20K, S=1000 (same as the raise test): ~997MB > 800MB. Fail.
+        model = FakeModel(identifier='big-vit', n_features=20000)
         bench = FakeBenchmark(identifier='MajajHong2015-ridge', n_stimuli=1000)
         with patch('brainscore_core.memory.get_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000, 700_000_000):
@@ -379,21 +402,20 @@ class TestCheckMemory:
              _mock_memory(2_000_000_000, 2_500_000_000):
             check_memory(model, bench)  # should pass — dual Gram is tiny
 
-    def test_extraction_peak_detected(self):
-        # Extraction peaks at 3 GB (transient) but settles to 1.5 GB.
-        # Metric adds 0.1 GB on top of settled RSS.
-        # Peak = max(3 GB extraction, 1.5 + 0.1 GB metric) = 3 GB.
-        # System = 4 GB. Should pass (3 < 4).
-        model = FakeModel()
-        bench = FakeBenchmark(identifier='test-pls', n_stimuli=10)
-        with patch('brainscore_core.memory.get_available_memory', return_value=3_500_000_000), \
-             _mock_memory(500_000_000, 1_500_000_000, peak_rss=3_000_000_000):
-            check_memory(model, bench)  # passes — peak 3 GB < system 4 GB
-
-        # Same but system only 2.4 GB. Peak 3 GB > system 2.9 GB. Fail.
-        with patch('brainscore_core.memory.get_available_memory', return_value=2_400_000_000), \
-             _mock_memory(500_000_000, 1_500_000_000, peak_rss=3_000_000_000):
-            with pytest.raises(MemoryError):
+    def test_extraction_is_the_bottleneck_when_metric_is_cheap(self):
+        # Behavioral metric ≈ 0, so the extraction transient (1.5x held) is the
+        # peak: F=100K, S=2000 -> held=800MB, extraction=1200MB.
+        # baseline=500MB -> peak_extraction=1700MB > peak_metric=1300MB.
+        model = FakeModel(n_features=100000)
+        bench = FakeBenchmark(identifier='test-behavioral', n_stimuli=2000)
+        # system = 500+3000 = 3500MB. 1700 < 3500 -> pass.
+        with patch('brainscore_core.memory.get_available_memory', return_value=3_000_000_000), \
+             _mock_memory(500_000_000, 500_000_000):
+            check_memory(model, bench)
+        # system = 500+1000 = 1500MB. 1700 > 1500 -> fail (extraction-bound).
+        with patch('brainscore_core.memory.get_available_memory', return_value=1_000_000_000), \
+             _mock_memory(500_000_000, 500_000_000):
+            with pytest.raises(MemoryError, match="extraction"):
                 check_memory(model, bench)
 
     def test_ridgecv_metric_dominates(self):
