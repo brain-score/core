@@ -23,10 +23,13 @@ class TestDefaults:
         assert p.feature_width is None
         assert p.resolved_metric_feature_width(768) == 768
 
-    def test_dtype_and_device_defaults(self):
+    def test_defaults(self):
         p = ExecutionPlan(n_extraction_presentations=1, feature_width=1)
         assert p.activation_dtype_bytes == 4
-        assert p.extraction_on_device is False
+        assert p.runs_ceiling_metric is True
+        assert p.metric_category is None
+        assert p.recording_target is None
+        assert p.probe_stimuli is None
 
 
 class TestValidation:
@@ -43,10 +46,19 @@ class TestValidation:
         with pytest.raises(ValueError):
             ExecutionPlan(**kwargs)
 
-    def test_non_bool_device_rejected(self):
-        with pytest.raises(ValueError, match="extraction_on_device must be a bool"):
+    def test_non_bool_ceiling_flag_rejected(self):
+        with pytest.raises(ValueError, match="runs_ceiling_metric must be a bool"):
             ExecutionPlan(n_extraction_presentations=1, feature_width=1,
-                          extraction_on_device=1)
+                          runs_ceiling_metric=1)
+
+    def test_bool_rejected_for_int_fields(self):
+        # operator.index(True) == 1 would slip True through as a count — reject it.
+        with pytest.raises(ValueError, match="must be an integer"):
+            ExecutionPlan(n_extraction_presentations=True)
+
+    def test_bad_metric_category_rejected(self):
+        with pytest.raises(ValueError, match="metric_category must be one of"):
+            ExecutionPlan(n_extraction_presentations=10, metric_category='banded')
 
     def test_numpy_int_accepted(self):
         np = pytest.importorskip('numpy')
@@ -54,3 +66,11 @@ class TestValidation:
                           feature_width=np.int64(20))
         assert p.n_extraction_presentations == 10
         assert p.feature_width == 20
+
+    def test_frozen_after_construction(self):
+        # Validation runs once at construction; the plan must be immutable so a
+        # consumer can't be handed a mutated (invalid) plan.
+        import dataclasses
+        p = ExecutionPlan(n_extraction_presentations=1, feature_width=1)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            p.n_extraction_presentations = -1_000_000_000

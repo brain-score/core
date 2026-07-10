@@ -481,8 +481,8 @@ class TestCheckMemory:
     # ── ExecutionPlan (reliable) path ────────────────────────────────
 
     def test_execution_plan_skips_the_probe(self):
-        # A declared plan means no probe: CountingFailingModel would raise if
-        # probed, but the plan drives the estimate and process() is never called.
+        # A declared plan with feature_width means no probe: CountingFailingModel
+        # would raise if probed, but the plan drives the estimate.
         from brainscore_core.execution_plan import ExecutionPlan
         model = CountingFailingModel()
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
@@ -490,11 +490,11 @@ class TestCheckMemory:
                                              feature_width=100000)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000):
-            with pytest.raises(MemoryError, match="RELIABLE for host RAM"):
+            with pytest.raises(MemoryError, match="DECLARED-grounded"):
                 check_memory(model, bench)
         assert model.process_calls == 0
 
-    def test_execution_plan_result_is_not_flagged_approximate(self, caplog):
+    def test_execution_plan_result_is_declared_not_approximate(self, caplog):
         import logging
         from brainscore_core.execution_plan import ExecutionPlan
         model = FakeModel()
@@ -506,8 +506,95 @@ class TestCheckMemory:
             with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
                 check_memory(model, bench)
         msgs = [r.getMessage() for r in caplog.records]
-        assert any('RELIABLE' in m for m in msgs)
+        assert any('DECLARED-grounded' in m for m in msgs)
         assert not any('APPROXIMATE' in m for m in msgs)
+
+    def test_feature_dim_fills_the_plan_not_bypasses_it(self):
+        # Codex F2: passing feature_dim must FILL the plan's raw width, not disable
+        # the plan. A billion-row plan + feature_dim=1 must still raise (plan
+        # cardinality drives it); if feature_dim bypassed the plan, it would pass
+        # off the 10-row stimulus set.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=1_000_000_000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=1_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError, match="n_presentations: 1000000000"):
+                check_memory(model, bench, feature_dim=1)
+
+    def test_complete_plan_needs_no_stimulus_set(self):
+        # Codex F9: a plan with feature_width declared needs no stimulus set — the
+        # estimate must still run (and here, raise), not skip early.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = MagicMock(spec=['identifier', 'execution_plan'])
+        bench.identifier = 'test-ridge'
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=1_000_000,
+                                             feature_width=100000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=1_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
+
+    def test_plan_probe_uses_declared_target_and_stimuli(self):
+        # Codex F1/F5: the plan names the recording_target and a probe input of the
+        # shape the benchmark processes, so an image-only model that rejects the raw
+        # (video) stimulus still probes — recording the RIGHT region.
+        from brainscore_core.execution_plan import ExecutionPlan
+        recorded = {}
+
+        class _FrameOnlyModel(FakeModel):
+            def start_recording(self, target, time_bins=None, recording_type=None):
+                recorded['target'] = target
+            def process(self, stimuli):
+                if stimuli != 'ONE_FRAME':
+                    raise RuntimeError("image-only model can't process a video row")
+                return type('R', (), {'shape': (1, 4321)})()
+
+        model = _FrameOnlyModel(region_layer_map={'V1': 'a', 'IT': 'b'})
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)  # raw = videos
+        bench.execution_plan = ExecutionPlan(
+            n_extraction_presentations=100000,
+            recording_target='IT', probe_stimuli='ONE_FRAME')
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=1_000_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError, match=r"n_features: 4321"):
+                check_memory(model, bench)
+        assert recorded['target'] == 'IT'  # the declared target, not the first region
+
+    def test_plan_metric_category_override(self):
+        # Codex F3: the plan overrides identifier-based category detection. Identifier
+        # says nothing (-> PLS by default), but declaring ridgecv with many alphas
+        # blows the metric up and raises where PLS would pass.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='mystery-bench', n_stimuli=10,
+                              assembly=FakeAssembly(n_neuroids=5000))
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=1000,
+                                             feature_width=1000,
+                                             metric_category='ridgecv')
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError, match=r"metric \[ridgecv\]"):
+                check_memory(model, bench)
+
+    def test_plan_runs_ceiling_metric_false_drops_ceiling(self, caplog):
+        import logging
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10,
+                              assembly=FakeAssembly(n_neuroids=1000))
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=100,
+                                             feature_width=1000,
+                                             runs_ceiling_metric=False)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
+             _mock_memory(200_000_000):
+            with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+                check_memory(model, bench)
+        # ceiling term omitted -> reported metric equals the model metric only; the
+        # estimate still logs (no crash). Sanity: it ran on the DECLARED path.
+        assert any('DECLARED-grounded' in r.getMessage() for r in caplog.records)
 
     def test_metric_observations_size_the_metric_independently(self):
         # metric_observations >> extraction: RSA metric is S^2 over metric_obs, so
@@ -547,26 +634,6 @@ class TestCheckMemory:
              _mock_memory(200_000_000):
             check_memory(model, bench)  # passes
 
-    def test_extraction_on_device_excludes_the_host_matrix(self):
-        # A huge on-device activation matrix must NOT count against host RAM; only
-        # the (small, aggregated) metric does. Same plan on host would raise.
-        from brainscore_core.execution_plan import ExecutionPlan
-        model = FakeModel()
-        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
-        host_plan = dict(n_extraction_presentations=1_000_000, feature_width=100000,
-                         metric_observations=100, metric_feature_width=1000)
-        # on host: held = 1e6*1e5*4 = 400 GB -> raises
-        bench.execution_plan = ExecutionPlan(**host_plan, extraction_on_device=False)
-        with patch('brainscore_core.memory.get_host_available_memory', return_value=8_000_000_000), \
-             _mock_memory(500_000_000):
-            with pytest.raises(MemoryError):
-                check_memory(model, bench)
-        # on device: host holds only the small metric -> passes
-        bench.execution_plan = ExecutionPlan(**host_plan, extraction_on_device=True)
-        with patch('brainscore_core.memory.get_host_available_memory', return_value=8_000_000_000), \
-             _mock_memory(500_000_000):
-            check_memory(model, bench)  # passes
-
     def test_execution_plan_as_method_is_honored(self):
         from brainscore_core.execution_plan import ExecutionPlan
         model = CountingFailingModel()
@@ -575,7 +642,7 @@ class TestCheckMemory:
             n_extraction_presentations=1000, feature_width=100000)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000):
-            with pytest.raises(MemoryError, match="RELIABLE"):
+            with pytest.raises(MemoryError, match="DECLARED-grounded"):
                 check_memory(model, bench)
         assert model.process_calls == 0
 

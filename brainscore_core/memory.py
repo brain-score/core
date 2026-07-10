@@ -220,7 +220,8 @@ SAFETY_FACTORS = {
 
 
 def estimate_metric_memory(benchmark, n_features: Optional[int] = None,
-                           n_stimuli: Optional[int] = None) -> int:
+                           n_stimuli: Optional[int] = None,
+                           category: Optional[str] = None) -> int:
     """
     Estimate memory required for the benchmark's metric computation.
 
@@ -245,10 +246,14 @@ def estimate_metric_memory(benchmark, n_features: Optional[int] = None,
             processed cardinality (row-expanding benchmarks) must pass it, or the
             metric term silently uses the raw count while extraction uses the
             expanded one.
+        category: metric category override ('pls'/'ridge'/'ridgecv'/'rsa'/
+            'behavioral'). If None, inferred from the benchmark identifier — which
+            can be wrong (an id without 'ridge' that scores with ridge).
 
     Returns estimate in bytes.
     """
-    category = _detect_metric_category(benchmark)
+    if category is None:
+        category = _detect_metric_category(benchmark)
     if n_stimuli is None:
         n_stimuli = _get_n_stimuli(benchmark)
     n_targets = _get_n_targets(benchmark)
@@ -316,15 +321,28 @@ EXTRACTION_TRANSIENT_FACTOR = 1.5
 PIPELINE_OVERHEAD = 1.2
 
 
+def _safe_getattr(obj, name):
+    """getattr that returns None instead of propagating — some benchmarks expose
+    ``stimulus_set`` as a property that loads (and can fail to load) data. The
+    memory pre-flight must never crash the run over that."""
+    try:
+        return getattr(obj, name, None)
+    except Exception:
+        return None
+
+
 def _get_benchmark_stimulus_set(benchmark):
-    """Resolve the benchmark's stimulus set (direct attr or via an assembly)."""
-    stimulus_set = getattr(benchmark, 'stimulus_set', None)
+    """Resolve the benchmark's stimulus set (direct attr or via an assembly).
+
+    Defensive: a stimulus_set whose lazy load raises resolves to None (the plan
+    path may not need it, and the best-effort path skips cleanly)."""
+    stimulus_set = _safe_getattr(benchmark, 'stimulus_set')
     if stimulus_set is not None:
         return stimulus_set
     for attr in ('_assembly', 'train_assembly'):
-        assembly = getattr(benchmark, attr, None)
+        assembly = _safe_getattr(benchmark, attr)
         if assembly is not None:
-            stimulus_set = getattr(assembly, 'stimulus_set', None)
+            stimulus_set = _safe_getattr(assembly, 'stimulus_set')
             if stimulus_set is not None:
                 return stimulus_set
     return None
@@ -363,26 +381,37 @@ def _probe_regions(model, benchmark):
     return [None]
 
 
-def _probe_feature_dim(model, benchmark, stimulus_set):
+def _probe_feature_dim(model, benchmark, stimulus_set,
+                       recording_target=None, probe_stimuli=None):
     """Discover the recording-layer feature width from ONE stimulus.
 
     Feature width is stimulus-invariant (the layer's channel count), so one
-    stimulus gives it without extrapolating any memory measurement. Records a
-    SINGLE region at a time (see _probe_regions) and returns the first that yields
-    a readable width. Returns (None, None) if none do — e.g. a candidate that only
-    configures recording inside the benchmark's ``__call__`` and rejects a bare
-    probe; the caller then skips with a loud warning (the guard is OFF, not "safe").
+    stimulus gives it without extrapolating any memory measurement.
+
+    A declared ``recording_target`` records exactly that region (not the first that
+    happens to work), and ``probe_stimuli`` supplies an input of the shape the
+    benchmark actually processes (e.g. one frame for a video-expanding benchmark),
+    so an image-only model isn't handed a raw video row. Without them, records a
+    SINGLE region at a time (see _probe_regions) over the raw stimulus set.
+
+    Returns (None, None) if no region yields a readable width; the caller then skips
+    with a loud warning (the guard is OFF, not "safe").
 
     Returns (n_features, region_used) or (None, None).
     """
-    try:
-        one = stimulus_set.iloc[:1] if hasattr(stimulus_set, 'iloc') else stimulus_set[:1]
-    except Exception:
-        one = stimulus_set
+    if probe_stimuli is not None:
+        one = probe_stimuli
+    else:
+        try:
+            one = stimulus_set.iloc[:1] if hasattr(stimulus_set, 'iloc') else stimulus_set[:1]
+        except Exception:
+            one = stimulus_set
     can_record = hasattr(model, 'start_recording')
     time_bins = getattr(benchmark, 'timebins', None)
+    regions = ([recording_target] if recording_target is not None
+               else _probe_regions(model, benchmark))
     last_error = None
-    for region in _probe_regions(model, benchmark):
+    for region in regions:
         if region is not None and can_record:
             try:
                 model.start_recording(region, time_bins=time_bins)
@@ -447,114 +476,114 @@ def check_memory(
     feature_dim: Optional[int] = None,
 ) -> None:
     """
-    Memory pre-flight with two paths:
+    Memory pre-flight. Raise when the estimated host-RAM peak exceeds available
+    RAM. The estimate is compared against HOST RAM only (the plan models host-side
+    numpy/sklearn arrays); the GPU forward-pass working set is a separate,
+    unmodelled failure mode. The raise is always override-able with
+    ``check_mem=False``.
 
-    RELIABLE — when the benchmark declares an ``ExecutionPlan`` (attribute or
-    zero-arg method; see brainscore_core.execution_plan). The plan states the real
-    extraction cardinality, per-row feature width, metric observation count, metric
-    (post-compression) feature width, dtype, and host/device placement, so the
-    host-side estimate is exact — no probe, no guessing. Device VRAM for the forward
-    pass remains a separate budget the pre-flight does not model.
+    Two paths differ only in how well-grounded the *shapes* are; the *peak model*
+    on top (a coarse extraction-transient factor, sklearn-workspace formulas, an
+    allocator slack factor) is heuristic on BOTH:
 
-    BEST-EFFORT — when no plan is declared: raise when the estimated peak exceeds
-    host RAM (a strong signal, not a certainty — the estimate can over- or
-    under-count), and otherwise be honest that a "fit" is not a safety guarantee.
-    Every result on this path is flagged APPROXIMATE. Both key inputs are
-    approximate in *both* directions:
-      - ``n_presentations``: ``benchmark.expected_n_presentations`` if declared,
-        else ``len(stimulus_set)`` — which over-counts benchmarks that filter rows
-        (time-resolved Lahner keeps only relevant event IDs) and under-counts ones
-        that expand rows (video->per-TR frames). The metric fits over this same
-        count, which may itself differ from the extraction count (a benchmark can
-        aggregate frames before the metric) — a distinction only the future API
-        captures.
-      - ``n_features``: ``feature_dim`` arg / ``benchmark.expected_feature_dim`` /
-        ``model.feature_dim`` / a single-stimulus probe. The probed width is the
-        RAW recording width; benchmarks that PCA/compress before the metric
-        (Algonauts 38K->1K, TR-Lahner->512) see less, so the metric term over-
-        counts there. Temporal ``S x T x F`` outputs are not modelled — the held
-        matrix under-counts by T.
+    DECLARED — when the benchmark declares an ``ExecutionPlan`` (attribute or
+    zero-arg method; see brainscore_core.execution_plan). The real processed
+    cardinality, metric observation count, metric (post-compression) width, dtype,
+    and metric category come from the benchmark instead of ``len(stimulus_set)`` +
+    identifier inference — removing the order-of-magnitude errors. The one
+    model-dependent quantity, the raw feature width, is declared or soundly probed
+    (it is stimulus-invariant; the plan can name the ``recording_target`` and
+    ``probe_stimuli`` so the probe records the right layer with an input the model
+    can process). The estimate is DECLARED-grounded — much better, but not exact:
+    ``metric_feature_width`` may be an upper bound, and the workspace factors above
+    are still heuristic.
 
-    The estimate is compared against HOST RAM only (the plan is host-side
-    numpy/sklearn); the GPU forward-pass working set is a separate, unmodelled
-    failure mode. Because the estimate can over- OR under-count, an over-budget
-    result is a strong signal but NOT a certainty — it may be a false rejection,
-    so the raise is override-able (``check_mem=False``) and every result is logged
-    APPROXIMATE. Skips (loudly) when no feature width can be resolved — e.g. a
-    candidate that only configures recording inside the benchmark's ``__call__``.
+    BEST-EFFORT — when no plan is declared. ``n_presentations`` falls back to
+    ``benchmark.expected_n_presentations`` or ``len(stimulus_set)`` (which
+    over-counts row-filtering benchmarks and under-counts row-expanding ones), and
+    ``n_features`` to a probe / ``expected_feature_dim`` / ``model.feature_dim``.
+    Every result on this path is flagged APPROXIMATE.
+
+    Skips (loudly) when no feature width can be resolved — e.g. a candidate that
+    only configures recording inside the benchmark's ``__call__`` and the plan
+    supplies no ``probe_stimuli`` (the guard is OFF for that run, not "safe").
 
     :param model: the model to check
     :param benchmark: the benchmark to check against
     :param safety_factor: unused, kept for API compatibility.
-    :param feature_dim: optional explicit per-stimulus feature width (positive
-        int); skips the probe entirely (the fully-declarative path).
+    :param feature_dim: optional explicit raw feature width (positive int). Fills
+        the raw width whether or not a plan is declared — it does NOT disable a plan.
     """
     # Host RAM, not VRAM: the plan models host-side arrays (see get_host_available_memory).
     available = get_host_available_memory()
-    category = _detect_metric_category(benchmark)
 
     import psutil
     baseline_rss = psutil.Process().memory_info().rss
 
-    stimulus_set = _get_benchmark_stimulus_set(benchmark)
-    if stimulus_set is None or len(stimulus_set) == 0:
-        logger.info("Memory check not applicable: benchmark has no stimulus_set "
-                    "(nothing to extract).")
-        return
-
+    # Resolve the plan first (so an invalid declaration is rejected, and a complete
+    # plan needs no stimulus set). A supplied feature_dim FILLS the raw width; it
+    # does not bypass the plan.
     plan = _get_execution_plan(benchmark)
-    if plan is not None and feature_dim is None:
-        # RELIABLE path: the benchmark declared its execution shape (cardinality,
-        # metric observation count, compression, device placement). The one
-        # model-dependent quantity — the raw feature width — is either declared or
-        # soundly probed (it's stimulus-invariant). Nothing is guessed.
+    stimulus_set = _get_benchmark_stimulus_set(benchmark)
+
+    if plan is not None:
+        # DECLARED path.
         source = 'ExecutionPlan'
         approximate = False
         cardinality_declared = True
-        on_device = plan.extraction_on_device
         n_presentations = plan.n_extraction_presentations
-        if plan.feature_width is not None:
-            feature_width = plan.feature_width
+        raw_width = feature_dim if feature_dim is not None else plan.feature_width
+        if raw_width is not None:
+            feature_width = _validate_positive_int(raw_width, 'feature_dim')
         else:
-            feature_width, _fsrc = _resolve_feature_dim(
-                model, benchmark, None, stimulus_set)
+            # probe for the raw width, using the plan's target + probe input
+            feature_width, _region = _probe_feature_dim(
+                model, benchmark, stimulus_set,
+                recording_target=plan.recording_target,
+                probe_stimuli=plan.probe_stimuli)
             if feature_width is None:
                 return  # probe failed; _probe_feature_dim already warned loudly
         metric_obs = plan.resolved_metric_observations
         metric_fw = plan.resolved_metric_feature_width(feature_width)
         dtype_bytes = plan.activation_dtype_bytes
+        category = plan.metric_category or _detect_metric_category(benchmark)
+        runs_ceiling = plan.runs_ceiling_metric
     else:
-        # BEST-EFFORT path: probe / declared feature dim + raw (or expected) count.
+        # BEST-EFFORT path: needs a stimulus set to probe / count.
+        if stimulus_set is None or len(stimulus_set) == 0:
+            logger.info("Memory check not applicable: benchmark has no "
+                        "stimulus_set (nothing to extract).")
+            return
         n_features, source = _resolve_feature_dim(
             model, benchmark, feature_dim, stimulus_set)
         if n_features is None:
             return  # unresolved feature dim; _probe_feature_dim already warned loudly
         approximate = True
-        on_device = False
         n_presentations, cardinality_declared = _get_n_presentations(
             benchmark, stimulus_set)
         feature_width = metric_fw = n_features
         metric_obs = n_presentations
         dtype_bytes = ACTIVATION_DTYPE_BYTES
+        category = _detect_metric_category(benchmark)
+        runs_ceiling = category != 'behavioral'
 
     n_targets = _get_n_targets(benchmark)
 
-    # Extraction: the held activation matrix (float32 on host). When the plan says
-    # extraction runs on an accelerator, the raw matrix is device-side and excluded
-    # from the host budget (only the metric's host arrays count; device VRAM is a
-    # separate, unmodelled budget). The transient factor is a coarse scalar on the
-    # held matrix and is NOT an upper bound (a wide-input video model spikes above
-    # output width) — advisory only.
-    held_activations = 0 if on_device else n_presentations * feature_width * dtype_bytes
+    # Extraction: the held activation matrix (float32 on host). The transient factor
+    # is a coarse scalar on the held matrix and is NOT an upper bound (a wide-input
+    # video model spikes above output width) — heuristic, on both paths.
+    held_activations = n_presentations * feature_width * dtype_bytes
     extraction_transient = int(held_activations * EXTRACTION_TRANSIENT_FACTOR)
 
-    # Metric workspace (float64 inside sklearn). metric_obs / metric_fw may differ
-    # from the extraction counts (aggregation before the metric; feature compression).
+    # Metric workspace (float64 inside sklearn, with an allocator slack factor —
+    # both heuristic). metric_obs / metric_fw / category may differ from the
+    # extraction counts and from the identifier (aggregation before the metric;
+    # compression; a mis-named benchmark).
     estimated_metric_memory = estimate_metric_memory(
-        benchmark, n_features=metric_fw, n_stimuli=metric_obs)
-    if category != 'behavioral':
+        benchmark, n_features=metric_fw, n_stimuli=metric_obs, category=category)
+    if runs_ceiling and category != 'behavioral':
         estimated_ceiling_memory = estimate_metric_memory(
-            benchmark, n_features=n_targets, n_stimuli=metric_obs)
+            benchmark, n_features=n_targets, n_stimuli=metric_obs, category=category)
     else:
         estimated_ceiling_memory = 0
     metric_total = (estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
@@ -564,17 +593,9 @@ def check_memory(
     peak_from_metric = baseline_rss + held_activations + metric_total
     total_estimated = max(peak_from_extraction, peak_from_metric)
 
+    grounding = "APPROXIMATE" if approximate else "DECLARED-grounded"
     total_system = available + baseline_rss
     if total_estimated > total_system:
-        if approximate:
-            detail = ("This estimate is APPROXIMATE and may over-count (feature "
-                      "compression, row filtering) — if it is a false rejection, "
-                      "set check_mem=False.")
-        else:
-            detail = ("This estimate is RELIABLE for host RAM via the declared "
-                      "ExecutionPlan.") + (
-                " Device/VRAM for the forward pass is a separate budget, not "
-                "checked." if on_device else "")
         raise MemoryError(
             f"Estimated peak for '{model.identifier}' on "
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
@@ -586,20 +607,21 @@ def check_memory(
             f"n_features: {feature_width} [{source}], "
             f"n_presentations: {n_presentations}"
             f"{' [declared]' if cardinality_declared else ' [approx]'}). "
-            f"Available host RAM: {total_system / 1e9:.1f} GB. " + detail
+            f"Available host RAM: {total_system / 1e9:.1f} GB. This {grounding} "
+            f"estimate uses heuristic workspace factors and may over-count — if it "
+            f"is a false rejection, set check_mem=False."
         )
 
     utilization = total_estimated / total_system if total_system > 0 else 0
     peak_source = "extraction" if peak_from_extraction >= peak_from_metric else "metric"
     if approximate:
-        caveat = ("APPROXIMATE: stimulus expansion/filtering, temporal bins, "
-                  "feature compression, and GPU memory are not modelled, so this "
-                  "is not a guarantee either way. Declare an ExecutionPlan for a "
-                  "reliable check.")
+        caveat = ("APPROXIMATE: cardinality/width guessed from len(stimulus_set) + "
+                  "identifier, and the peak model is heuristic, so this is not a "
+                  "guarantee either way. Declare an ExecutionPlan to ground the shapes.")
     else:
-        caveat = ("RELIABLE for host RAM via the declared ExecutionPlan" +
-                  (" (device/VRAM for the forward pass not modelled)."
-                   if on_device else "."))
+        caveat = ("DECLARED-grounded (shapes from the benchmark's ExecutionPlan; "
+                  "peak model still uses heuristic workspace factors, so not exact). "
+                  "GPU/VRAM not modelled.")
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
