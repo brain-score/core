@@ -478,6 +478,114 @@ class TestCheckMemory:
                 check_memory(model, bench)
         assert any('APPROXIMATE' in r.getMessage() for r in caplog.records)
 
+    # ── ExecutionPlan (reliable) path ────────────────────────────────
+
+    def test_execution_plan_skips_the_probe(self):
+        # A declared plan means no probe: CountingFailingModel would raise if
+        # probed, but the plan drives the estimate and process() is never called.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = CountingFailingModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=1000,
+                                             feature_width=100000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
+             _mock_memory(500_000_000):
+            with pytest.raises(MemoryError, match="RELIABLE for host RAM"):
+                check_memory(model, bench)
+        assert model.process_calls == 0
+
+    def test_execution_plan_result_is_not_flagged_approximate(self, caplog):
+        import logging
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=100,
+                                             feature_width=1000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
+             _mock_memory(200_000_000):
+            with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+                check_memory(model, bench)
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any('RELIABLE' in m for m in msgs)
+        assert not any('APPROXIMATE' in m for m in msgs)
+
+    def test_metric_observations_size_the_metric_independently(self):
+        # metric_observations >> extraction: RSA metric is S^2 over metric_obs, so
+        # a tiny 10-row extraction but 500K-row metric must raise from the metric.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-rsa', n_stimuli=10)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=10,
+                                             feature_width=1,
+                                             metric_observations=500_000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=50_000_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
+
+    def test_metric_feature_width_sizes_the_metric_independently(self):
+        # feature_width tiny (extraction ~0) but metric_feature_width huge -> the
+        # metric term must use the compressed... here INFLATED metric width, proving
+        # it is independent of the extraction width.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=1,
+                                             feature_width=1,
+                                             metric_observations=100,
+                                             metric_feature_width=100000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=100_000_000), \
+             _mock_memory(200_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
+        # control: small metric width -> no raise (extraction is tiny)
+        bench.execution_plan = ExecutionPlan(n_extraction_presentations=1,
+                                             feature_width=1,
+                                             metric_observations=100,
+                                             metric_feature_width=1)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=100_000_000), \
+             _mock_memory(200_000_000):
+            check_memory(model, bench)  # passes
+
+    def test_extraction_on_device_excludes_the_host_matrix(self):
+        # A huge on-device activation matrix must NOT count against host RAM; only
+        # the (small, aggregated) metric does. Same plan on host would raise.
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        host_plan = dict(n_extraction_presentations=1_000_000, feature_width=100000,
+                         metric_observations=100, metric_feature_width=1000)
+        # on host: held = 1e6*1e5*4 = 400 GB -> raises
+        bench.execution_plan = ExecutionPlan(**host_plan, extraction_on_device=False)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=8_000_000_000), \
+             _mock_memory(500_000_000):
+            with pytest.raises(MemoryError):
+                check_memory(model, bench)
+        # on device: host holds only the small metric -> passes
+        bench.execution_plan = ExecutionPlan(**host_plan, extraction_on_device=True)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=8_000_000_000), \
+             _mock_memory(500_000_000):
+            check_memory(model, bench)  # passes
+
+    def test_execution_plan_as_method_is_honored(self):
+        from brainscore_core.execution_plan import ExecutionPlan
+        model = CountingFailingModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = lambda: ExecutionPlan(
+            n_extraction_presentations=1000, feature_width=100000)
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
+             _mock_memory(500_000_000):
+            with pytest.raises(MemoryError, match="RELIABLE"):
+                check_memory(model, bench)
+        assert model.process_calls == 0
+
+    def test_non_plan_execution_plan_rejected(self):
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
+        bench.execution_plan = {'not': 'a plan'}
+        with pytest.raises(TypeError, match="must be an ExecutionPlan"):
+            check_memory(model, bench)
+
     def test_shapeless_probe_result_warns_and_skips(self, caplog):
         import logging
         # process() returns a 1-D result -> feature width unreadable -> skip loudly.

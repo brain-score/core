@@ -25,6 +25,8 @@ import sys
 import warnings
 from typing import Optional, TYPE_CHECKING
 
+from .execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -328,19 +330,19 @@ def _get_benchmark_stimulus_set(benchmark):
     return None
 
 
-def _validate_positive_int(value, name):
-    """Return value as a positive int, rejecting floats/negatives/zero.
-
-    Uses ``operator.index`` so numpy integers are accepted but floats like 1.9 are
-    rejected outright (not silently truncated to 1)."""
-    import operator
-    try:
-        ivalue = operator.index(value)  # int-like only; floats raise TypeError
-    except TypeError:
-        raise ValueError(f"{name} must be an integer, got {value!r}")
-    if ivalue <= 0:
-        raise ValueError(f"{name} must be a positive integer, got {value!r}")
-    return ivalue
+def _get_execution_plan(benchmark) -> Optional[ExecutionPlan]:
+    """Return the benchmark's declared ExecutionPlan (attribute or zero-arg
+    method/property), or None if it declares none."""
+    plan = getattr(benchmark, 'execution_plan', None)
+    if plan is None:
+        return None
+    if callable(plan):
+        plan = plan()
+    if plan is not None and not isinstance(plan, ExecutionPlan):
+        raise TypeError(
+            f"benchmark.execution_plan must be an ExecutionPlan (or return one), "
+            f"got {type(plan).__name__}")
+    return plan
 
 
 def _probe_regions(model, benchmark):
@@ -445,13 +447,20 @@ def check_memory(
     feature_dim: Optional[int] = None,
 ) -> None:
     """
-    Best-effort memory pre-flight: raise when the estimated peak exceeds host RAM
-    (a strong signal, not a certainty — the estimate can over- or under-count),
-    and otherwise be honest that a "fit" is not a safety guarantee.
+    Memory pre-flight with two paths:
 
-    This is NOT a reliable OOM oracle, and does not claim to be — the estimate is
-    APPROXIMATE on every path until benchmarks can declare their execution plan.
-    Both key inputs are approximate in *both* directions:
+    RELIABLE — when the benchmark declares an ``ExecutionPlan`` (attribute or
+    zero-arg method; see brainscore_core.execution_plan). The plan states the real
+    extraction cardinality, per-row feature width, metric observation count, metric
+    (post-compression) feature width, dtype, and host/device placement, so the
+    host-side estimate is exact — no probe, no guessing. Device VRAM for the forward
+    pass remains a separate budget the pre-flight does not model.
+
+    BEST-EFFORT — when no plan is declared: raise when the estimated peak exceeds
+    host RAM (a strong signal, not a certainty — the estimate can over- or
+    under-count), and otherwise be honest that a "fit" is not a safety guarantee.
+    Every result on this path is flagged APPROXIMATE. Both key inputs are
+    approximate in *both* directions:
       - ``n_presentations``: ``benchmark.expected_n_presentations`` if declared,
         else ``len(stimulus_set)`` — which over-counts benchmarks that filter rows
         (time-resolved Lahner keeps only relevant event IDs) and under-counts ones
@@ -493,29 +502,52 @@ def check_memory(
                     "(nothing to extract).")
         return
 
-    n_features, source = _resolve_feature_dim(
-        model, benchmark, feature_dim, stimulus_set)
-    if n_features is None:
-        return  # unresolved feature dim; _probe_feature_dim already warned loudly
+    plan = _get_execution_plan(benchmark)
+    if plan is not None and feature_dim is None:
+        # RELIABLE path: the benchmark declared its execution shape, so nothing is
+        # probed or guessed. Extraction and metric counts/widths can genuinely
+        # differ (aggregation before the metric; feature compression).
+        source = 'ExecutionPlan'
+        approximate = False
+        cardinality_declared = True
+        on_device = plan.extraction_on_device
+        n_presentations = plan.n_extraction_presentations
+        feature_width = plan.feature_width
+        metric_obs = plan.resolved_metric_observations
+        metric_fw = plan.resolved_metric_feature_width
+        dtype_bytes = plan.activation_dtype_bytes
+    else:
+        # BEST-EFFORT path: probe / declared feature dim + raw (or expected) count.
+        n_features, source = _resolve_feature_dim(
+            model, benchmark, feature_dim, stimulus_set)
+        if n_features is None:
+            return  # unresolved feature dim; _probe_feature_dim already warned loudly
+        approximate = True
+        on_device = False
+        n_presentations, cardinality_declared = _get_n_presentations(
+            benchmark, stimulus_set)
+        feature_width = metric_fw = n_features
+        metric_obs = n_presentations
+        dtype_bytes = ACTIVATION_DTYPE_BYTES
 
-    n_presentations, cardinality_declared = _get_n_presentations(benchmark, stimulus_set)
     n_targets = _get_n_targets(benchmark)
 
-    # Extraction plan: the held activation matrix (float32) plus a coarse
-    # forward-pass transient. NOTE the transient factor is a rough scalar on the
-    # OUTPUT matrix and is NOT an upper bound on the true transient — a wide-input
-    # model (video (B,T,C,H,W)) can spike far above output width. Advisory only.
-    held_activations = n_presentations * n_features * ACTIVATION_DTYPE_BYTES
+    # Extraction: the held activation matrix (float32 on host). When the plan says
+    # extraction runs on an accelerator, the raw matrix is device-side and excluded
+    # from the host budget (only the metric's host arrays count; device VRAM is a
+    # separate, unmodelled budget). The transient factor is a coarse scalar on the
+    # held matrix and is NOT an upper bound (a wide-input video model spikes above
+    # output width) — advisory only.
+    held_activations = 0 if on_device else n_presentations * feature_width * dtype_bytes
     extraction_transient = int(held_activations * EXTRACTION_TRANSIENT_FACTOR)
 
-    # Metric workspace (float64 inside sklearn). Pass n_presentations so the metric
-    # fits over the same cardinality as extraction — else a row-expanding benchmark
-    # would size the metric off the raw (much smaller) stimulus-set length.
+    # Metric workspace (float64 inside sklearn). metric_obs / metric_fw may differ
+    # from the extraction counts (aggregation before the metric; feature compression).
     estimated_metric_memory = estimate_metric_memory(
-        benchmark, n_features=n_features, n_stimuli=n_presentations)
+        benchmark, n_features=metric_fw, n_stimuli=metric_obs)
     if category != 'behavioral':
         estimated_ceiling_memory = estimate_metric_memory(
-            benchmark, n_features=n_targets, n_stimuli=n_presentations)
+            benchmark, n_features=n_targets, n_stimuli=metric_obs)
     else:
         estimated_ceiling_memory = 0
     metric_total = (estimated_metric_memory + estimated_ceiling_memory) * PIPELINE_OVERHEAD
@@ -527,6 +559,15 @@ def check_memory(
 
     total_system = available + baseline_rss
     if total_estimated > total_system:
+        if approximate:
+            detail = ("This estimate is APPROXIMATE and may over-count (feature "
+                      "compression, row filtering) — if it is a false rejection, "
+                      "set check_mem=False.")
+        else:
+            detail = ("This estimate is RELIABLE for host RAM via the declared "
+                      "ExecutionPlan.") + (
+                " Device/VRAM for the forward pass is a separate budget, not "
+                "checked." if on_device else "")
         raise MemoryError(
             f"Estimated peak for '{model.identifier}' on "
             f"'{getattr(benchmark, 'identifier', 'unknown')}': "
@@ -535,28 +576,32 @@ def check_memory(
             f"metric peak: {peak_from_metric / 1e9:.1f} GB, "
             f"metric [{category}]: {estimated_metric_memory / 1e9:.1f} GB, "
             f"ceiling: {estimated_ceiling_memory / 1e9:.1f} GB, "
-            f"n_features: {n_features} [{source}], "
+            f"n_features: {feature_width} [{source}], "
             f"n_presentations: {n_presentations}"
             f"{' [declared]' if cardinality_declared else ' [approx]'}). "
-            f"Available host RAM: {total_system / 1e9:.1f} GB. "
-            f"This estimate is APPROXIMATE and may over-count (feature compression, "
-            f"row filtering) — if it is a false rejection, set check_mem=False."
+            f"Available host RAM: {total_system / 1e9:.1f} GB. " + detail
         )
 
     utilization = total_estimated / total_system if total_system > 0 else 0
     peak_source = "extraction" if peak_from_extraction >= peak_from_metric else "metric"
+    if approximate:
+        caveat = ("APPROXIMATE: stimulus expansion/filtering, temporal bins, "
+                  "feature compression, and GPU memory are not modelled, so this "
+                  "is not a guarantee either way. Declare an ExecutionPlan for a "
+                  "reliable check.")
+    else:
+        caveat = ("RELIABLE for host RAM via the declared ExecutionPlan" +
+                  (" (device/VRAM for the forward pass not modelled)."
+                   if on_device else "."))
     logger.info(
         f"Memory estimate for '{model.identifier}' on "
         f"'{getattr(benchmark, 'identifier', 'unknown')}' "
-        f"[{category}, {n_features} features via {source}, "
+        f"[{category}, {feature_width} features via {source}, "
         f"{n_presentations} presentations]: {total_estimated / 1e9:.1f} GB peak "
         f"(held activations: {held_activations / 1e9:.1f} GB; "
         f"metric: {estimated_metric_memory / 1e9:.1f} GB; "
         f"bottleneck: {peak_source}) — {total_system / 1e9:.1f} GB host RAM "
-        f"({utilization:.0%} utilization). APPROXIMATE: stimulus expansion/filtering, "
-        f"temporal bins, feature compression, and GPU memory are not modelled, so "
-        f"this is not a guarantee either way. Declare expected_n_presentations / "
-        f"expected_feature_dim for a closer estimate."
+        f"({utilization:.0%} utilization). {caveat}"
     )
     if utilization > 0.8:
         warnings.warn(
