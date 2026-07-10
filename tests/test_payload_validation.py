@@ -28,6 +28,20 @@ def test_valid_camera_payload_passes():
     assert isinstance(resp, EnvironmentResponse)
 
 
+def test_rgba_channel_layout_rejected():
+    step = EnvironmentStep(
+        cameras={'wrist': CameraFrame(rgb=np.zeros((8, 8, 4), dtype='uint8'))})
+    with pytest.raises(ValueError, match="H, W, 3"):
+        _agent().process(step)
+
+
+def test_channels_first_layout_rejected():
+    step = EnvironmentStep(
+        cameras={'wrist': CameraFrame(rgb=np.zeros((3, 8, 8), dtype='uint8'))})
+    with pytest.raises(ValueError, match="H, W, 3"):
+        _agent().process(step)
+
+
 def test_no_cameras_is_fine():
     resp = _agent().process(EnvironmentStep(observation={'anything': 1}))
     assert isinstance(resp, EnvironmentResponse)

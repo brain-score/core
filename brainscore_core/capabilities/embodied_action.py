@@ -31,6 +31,13 @@ class EmbodiedActionCapability(Capability):
             if rgb is not None:
                 issues += [f"camera '{cam_name}': {m}"
                            for m in check_payload('vision', rgb)]
+                # check_payload only verifies ndim + dtype; a CameraFrame is
+                # channels-last RGB, so also reject (H, W, 4) / (3, H, W).
+                shape = getattr(rgb, 'shape', None)
+                if shape is not None and not (len(shape) == 3 and shape[-1] == 3):
+                    issues.append(
+                        f"camera '{cam_name}': rgb shape {tuple(shape)} is not "
+                        f"(H, W, 3) channels-last RGB.")
         if issues:
             raise ValueError(
                 "EnvironmentStep camera payload(s) failed validation:\n  - "
