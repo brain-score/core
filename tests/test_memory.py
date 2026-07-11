@@ -510,7 +510,7 @@ class TestCheckMemory:
         assert not any('APPROXIMATE' in m for m in msgs)
 
     def test_feature_dim_fills_the_plan_not_bypasses_it(self):
-        # Codex F2: passing feature_dim must FILL the plan's raw width, not disable
+        # passing feature_dim must FILL the plan's raw width, not disable
         # the plan. A billion-row plan + feature_dim=1 must still raise (plan
         # cardinality drives it); if feature_dim bypassed the plan, it would pass
         # off the 10-row stimulus set.
@@ -524,7 +524,7 @@ class TestCheckMemory:
                 check_memory(model, bench, feature_dim=1)
 
     def test_complete_plan_needs_no_stimulus_set(self):
-        # Codex F9: a plan with feature_width declared needs no stimulus set — the
+        # a plan with feature_width declared needs no stimulus set — the
         # estimate must still run (and here, raise), not skip early.
         from brainscore_core.execution_plan import ExecutionPlan
         model = FakeModel()
@@ -538,7 +538,7 @@ class TestCheckMemory:
                 check_memory(model, bench)
 
     def test_plan_probe_uses_declared_target_and_stimuli(self):
-        # Codex F1/F5: the plan names the recording_target and a probe input of the
+        # the plan names the recording_target and a probe input of the
         # shape the benchmark processes, so an image-only model that rejects the raw
         # (video) stimulus still probes — recording the RIGHT region.
         from brainscore_core.execution_plan import ExecutionPlan
@@ -564,7 +564,7 @@ class TestCheckMemory:
         assert recorded['target'] == 'IT'  # the declared target, not the first region
 
     def test_plan_metric_category_override(self):
-        # Codex F3: the plan overrides identifier-based category detection. Identifier
+        # the plan overrides identifier-based category detection. Identifier
         # says nothing (-> PLS by default), but declaring ridgecv with many alphas
         # blows the metric up and raises where PLS would pass.
         from brainscore_core.execution_plan import ExecutionPlan
