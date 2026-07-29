@@ -212,8 +212,12 @@ def environment_session(environment) -> EnvironmentSession:
     return EnvironmentSession(environment)
 
 
-def score_stimuli(subject, stimulus_set, record: str = "IT",
+def neural_response(subject, stimulus_set, record: str = "IT",
                   time_bins=None) -> NeuroidAssembly:
+    """Run ``subject`` on ``stimulus_set`` and return its neural response as a
+    ``NeuroidAssembly``. This is the model's output, not a Score -- comparing it
+    to measured data (and ceiling-normalizing) is the benchmark's job, via a metric.
+    """
     session = stimulus_session(stimulus_set, record=record,
                                time_bins=time_bins)
     if _has_native_interact(subject):
@@ -224,7 +228,10 @@ def score_stimuli(subject, stimulus_set, record: str = "IT",
     return session.collect(f"neural:{record}")
 
 
-def score_behavior(subject, task_context) -> BehavioralAssembly:
+def behavioral_response(subject, task_context) -> BehavioralAssembly:
+    """Run ``subject`` on the task and return its behavior as a
+    ``BehavioralAssembly`` -- the model's output, not a Score.
+    """
     session = behavior_session(task_context)
     if _has_native_interact(subject):
         subject.interact(session)
@@ -482,7 +489,7 @@ def _drive_behavior_session_via_process(
     stimuli = _behavior_stimuli_to_score(task_context)
     if stimuli is None:
         raise ValueError(
-            "score_behavior requires stimuli to score. Provide "
+            "behavioral_response requires stimuli to elicit a response. Provide "
             "task_context.metadata['stimulus_set'] or fitting_stimuli."
         )
     output = subject.process(stimuli)

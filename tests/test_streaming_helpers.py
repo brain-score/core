@@ -18,8 +18,8 @@ from brainscore_core.streaming_helpers import (
     apply_state_change,
     behavior_session,
     environment_session,
-    score_behavior,
-    score_stimuli,
+    behavioral_response,
+    neural_response,
     state_change_session,
     stimulus_session,
     run_environment,
@@ -372,20 +372,20 @@ def test_collect_packages_raw_neural_events_as_neuroid_assembly():
     assert list(collected["region"].values) == ["IT", "IT"]
 
 
-def test_score_stimuli_matches_process_assembly_exactly():
+def test_neural_response_matches_process_assembly_exactly():
     expected = _assembly()
     subject = _SyntheticSubject(expected)
     stimuli = _stimulus_set()
 
     assert type(subject).interact is Subject.interact
-    scored = score_stimuli(subject, stimuli, record="IT")
+    scored = neural_response(subject, stimuli, record="IT")
 
     assert subject.recording_target == "IT"
     assert subject.process_input is stimuli
     xr.testing.assert_identical(scored, expected)
 
 
-def test_score_stimuli_uses_native_interact_and_preserves_metadata_exactly():
+def test_neural_response_uses_native_interact_and_preserves_metadata_exactly():
     stimuli = _metadata_stimulus_set()
 
     legacy_extractor = _MetadataPreservingExtractor()
@@ -397,7 +397,7 @@ def test_score_stimuli_uses_native_interact_and_preserves_metadata_exactly():
     subject = _native_neural_model(
         native_extractor, model_cls=_InteractTrackingBrainScoreModel
     )
-    scored = score_stimuli(subject, stimuli, record="IT")
+    scored = neural_response(subject, stimuli, record="IT")
 
     assert subject.interact_called is True
     assert subject.interact_requested_output_channels == ("neural:IT",)
@@ -406,7 +406,7 @@ def test_score_stimuli_uses_native_interact_and_preserves_metadata_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
-def test_score_stimuli_native_interact_matches_multimodal_process_exactly():
+def test_neural_response_native_interact_matches_multimodal_process_exactly():
     stimuli = _multimodal_stimulus_set()
 
     legacy, _, _ = _native_multimodal_model()
@@ -416,7 +416,7 @@ def test_score_stimuli_native_interact_matches_multimodal_process_exactly():
     subject, activations, text = _native_multimodal_model(
         model_cls=_InteractTrackingBrainScoreModel
     )
-    scored = score_stimuli(subject, stimuli, record="IT")
+    scored = neural_response(subject, stimuli, record="IT")
 
     assert subject.interact_called is True
     assert subject.interact_requested_output_channels == ("neural:IT",)
@@ -426,7 +426,7 @@ def test_score_stimuli_native_interact_matches_multimodal_process_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
-def test_score_stimuli_native_interact_matches_cross_tower_process_exactly():
+def test_neural_response_native_interact_matches_cross_tower_process_exactly():
     stimuli = _multimodal_stimulus_set()
 
     legacy, _, _ = _native_cross_tower_model()
@@ -436,7 +436,7 @@ def test_score_stimuli_native_interact_matches_cross_tower_process_exactly():
     subject, activations, text = _native_cross_tower_model(
         model_cls=_InteractTrackingBrainScoreModel
     )
-    scored = score_stimuli(subject, stimuli, record="all")
+    scored = neural_response(subject, stimuli, record="all")
 
     assert subject.interact_called is True
     assert subject.interact_requested_output_channels == ("neural:all",)
@@ -446,7 +446,7 @@ def test_score_stimuli_native_interact_matches_cross_tower_process_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
-def test_score_stimuli_native_interact_threads_time_bins_exactly():
+def test_neural_response_native_interact_threads_time_bins_exactly():
     stimuli = _metadata_stimulus_set()
     time_bins = [(70, 170), (170, 270)]
 
@@ -455,7 +455,7 @@ def test_score_stimuli_native_interact_threads_time_bins_exactly():
     expected = legacy.process(stimuli)
 
     subject = _TrackingTemporalBrainScoreModel()
-    scored = score_stimuli(subject, stimuli, record="IT", time_bins=time_bins)
+    scored = neural_response(subject, stimuli, record="IT", time_bins=time_bins)
 
     assert subject.interact_called is True
     assert subject.interact_requested_output_channels == ("neural:IT",)
@@ -465,7 +465,7 @@ def test_score_stimuli_native_interact_threads_time_bins_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
-def test_score_stimuli_without_time_bins_keeps_2d_output():
+def test_neural_response_without_time_bins_keeps_2d_output():
     stimuli = _metadata_stimulus_set()
 
     legacy = _TemporalBrainScoreModel()
@@ -473,7 +473,7 @@ def test_score_stimuli_without_time_bins_keeps_2d_output():
     expected = legacy.process(stimuli)
 
     subject = _TrackingTemporalBrainScoreModel()
-    scored = score_stimuli(subject, stimuli, record="IT")
+    scored = neural_response(subject, stimuli, record="IT")
 
     assert subject.interact_called is True
     assert subject.interact_requested_output_channels == ("neural:IT",)
@@ -586,7 +586,7 @@ def test_behavior_session_emits_instruction_fitting_and_scoring_events():
     ]
 
 
-def test_score_behavior_matches_legacy_start_task_process_exactly():
+def test_behavioral_response_matches_legacy_start_task_process_exactly():
     fitting = _make_image_stimulus_set(["cat"] * 6 + ["dog"] * 6)
     scoring = _make_image_stimulus_set(
         ["cat"] * 3 + ["dog"] * 3, identifier="behavior_score"
@@ -604,7 +604,7 @@ def test_score_behavior_matches_legacy_start_task_process_exactly():
         features, model_cls=_InteractTrackingBrainScoreModel
     )
     helper_context = _behavior_context(fitting, scoring)
-    scored = score_behavior(helper_subject, helper_context)
+    scored = behavioral_response(helper_subject, helper_context)
 
     assert helper_subject.interact_called is True
     assert helper_subject.interact_requested_output_channels == ("behavior",)
@@ -635,7 +635,7 @@ def _generation_context(scoring_stimuli):
     )
 
 
-def test_score_behavior_matches_legacy_generation_path_exactly():
+def test_behavioral_response_matches_legacy_generation_path_exactly():
     scoring = _make_image_stimulus_set(
         ["cat"] * 3 + ["dog"] * 3, identifier="gen_test"
     )
@@ -651,7 +651,7 @@ def test_score_behavior_matches_legacy_generation_path_exactly():
         helper_calls, model_cls=_InteractTrackingBrainScoreModel
     )
     helper_context = _generation_context(scoring)
-    scored = score_behavior(helper_subject, helper_context)
+    scored = behavioral_response(helper_subject, helper_context)
 
     assert helper_subject.interact_called is True
     assert helper_subject.interact_requested_output_channels == ("behavior",)
@@ -660,7 +660,7 @@ def test_score_behavior_matches_legacy_generation_path_exactly():
     assert helper_calls == legacy_calls
 
 
-def test_score_behavior_falls_back_for_non_native_subject():
+def test_behavioral_response_falls_back_for_non_native_subject():
     scoring = _make_image_stimulus_set(
         ["cat", "dog"], identifier="behavior_fallback"
     )
@@ -679,7 +679,7 @@ def test_score_behavior_falls_back_for_non_native_subject():
         metadata={"stimulus_set": scoring},
     )
 
-    scored = score_behavior(subject, context)
+    scored = behavioral_response(subject, context)
 
     assert type(subject).interact is Subject.interact
     assert subject.process_input is scoring

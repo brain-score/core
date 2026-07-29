@@ -119,15 +119,15 @@ def test_typed_helpers_are_importable():
     from brainscore_core.streaming_helpers import (
         apply_state_change,
         run_environment,
-        score_behavior,
-        score_stimuli,
+        behavioral_response,
+        neural_response,
     )
 
     for helper in (
         apply_state_change,
         run_environment,
-        score_behavior,
-        score_stimuli,
+        behavioral_response,
+        neural_response,
     ):
         assert callable(helper)
         assert inspect.isfunction(helper)
