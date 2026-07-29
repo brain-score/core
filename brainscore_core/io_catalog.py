@@ -29,11 +29,26 @@ INPUT = "input"
 OUTPUT = "output"
 BOTH = "both"
 REGISTRY_VERSION = "2.0"
+# ``video`` is a temporal sub-kind of ``vision`` (a still image is a 1-frame
+# clip). The contract exposes a single visual channel, ``vision``, that covers
+# static and dynamic input; ``video`` is kept as a recognized alias so existing
+# registrations and benchmarks keep working. Everything canonicalizes via
+# ``canonical_modality`` before it is used as a lookup / compatibility key.
+MODALITY_ALIASES = {
+    "video": "vision",
+}
+
+
+def canonical_modality(modality: str) -> str:
+    """Fold modality aliases to their canonical name (e.g. ``video`` -> ``vision``)."""
+    return MODALITY_ALIASES.get(modality, modality)
+
+
 MODALITY_TO_INPUT_CHANNEL = {
     "vision": "vision",
     "text": "text",
     "audio": "audio",
-    "video": "video",
+    "video": "vision",  # temporal vision -> the one visual channel
 }
 
 _DIRECTIONS = (INPUT, OUTPUT, BOTH)

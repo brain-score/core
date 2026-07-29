@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from .capabilities import enabled_capabilities
 from .events import EnvironmentStep, Message, OutputEvent, StateChange
+from .io_catalog import canonical_modality
 
 
 _cache_disable_depth = 0
@@ -94,12 +95,37 @@ class InputDispatcher:
             f"input event type {type(input_event).__name__}."
         )
 
+    def _preprocessor_for(self, modality: str):
+        """The preprocessor whose canonical modality matches ``modality``.
+
+        Resolves a legacy ``video``-keyed preprocessor when requested under the
+        canonical ``vision`` name (video is temporal vision). Raises ``KeyError``
+        when no key canonicalizes to ``modality``.
+        """
+        owner = self.owner
+        if modality in owner._preprocessors:
+            return owner._preprocessors[modality]
+        for key, value in owner._preprocessors.items():
+            if canonical_modality(key) == modality:
+                return value
+        raise KeyError(modality)
+
+    def _has_preprocessor_for(self, modality: str) -> bool:
+        try:
+            self._preprocessor_for(modality)
+            return True
+        except KeyError:
+            return False
+
     def detect_modalities(self, stimuli) -> Set[str]:
         owner = self.owner
         detected: Set[str] = set()
         for col in stimuli.columns:
             modality = owner.COLUMN_TO_MODALITY.get(col)
-            if modality and modality in owner._preprocessors:
+            if modality is None:
+                continue
+            modality = canonical_modality(modality)
+            if self._has_preprocessor_for(modality):
                 detected.add(modality)
         return detected
 
@@ -112,10 +138,12 @@ class InputDispatcher:
 
     def supports_layer_extraction(self, modality: str) -> bool:
         owner = self.owner
+        modality = canonical_modality(modality)
         if modality == 'vision' and owner._activations_model is not None:
             return True
-        preprocessor = owner._preprocessors.get(modality)
-        return preprocessor is not None and hasattr(preprocessor, 'identifier')
+        if not self._has_preprocessor_for(modality):
+            return False
+        return hasattr(self._preprocessor_for(modality), 'identifier')
 
     def extract_for_modality(self, stimuli, modality: str, layers: List[str]):
         # A perturbation (lesion/stimulation) is a mutable forward-hook that the
@@ -129,10 +157,11 @@ class InputDispatcher:
 
     def _extract_for_modality_inner(self, stimuli, modality: str, layers: List[str]):
         owner = self.owner
+        modality = canonical_modality(modality)
         if modality == 'vision' and owner._activations_model is not None:
             return owner._activations_model(stimuli, layers=layers)
 
-        preprocessor = owner._preprocessors[modality]
+        preprocessor = self._preprocessor_for(modality)
         if hasattr(preprocessor, 'identifier'):
             return preprocessor(stimuli, layers=layers)
         return preprocessor(
@@ -158,7 +187,7 @@ class InputDispatcher:
 
         sub_assemblies = []
         for modality in ordered:
-            if modality not in owner._preprocessors:
+            if not self._has_preprocessor_for(modality):
                 continue
             modality_layers = owner._filter_layers_for_modality(
                 layers, modality)

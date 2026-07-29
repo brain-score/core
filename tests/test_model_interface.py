@@ -1270,7 +1270,25 @@ class TestBrainScoreModelColumnDetection:
 
     def test_video_path(self):
         m = self._make_model('video')
-        assert m._detect_modalities(StubStimulusSet(['video_path'])) == {'video'}
+        # video is temporal vision -> it folds into the unified 'vision' channel
+        assert m._detect_modalities(StubStimulusSet(['video_path'])) == {'vision'}
+
+    def test_video_model_reports_the_unified_vision_modality(self):
+        m = self._make_model('video')
+        assert m.supported_modalities == {'vision'}
+        assert m.available_modalities == {'vision'}
+
+    def test_video_preprocessor_resolves_under_canonical_vision(self):
+        # a legacy video-keyed preprocessor is found when extraction asks for 'vision'
+        m = self._make_model('video')
+        out = m._extract_for_modality(StubStimulusSet(['video_path']), 'vision', [])
+        assert out == 'video_out'
+
+    def test_canonical_modality_folds_video_into_vision(self):
+        from brainscore_core.io_catalog import canonical_modality
+        assert canonical_modality('video') == 'vision'
+        assert canonical_modality('vision') == 'vision'
+        assert canonical_modality('audio') == 'audio'
 
     def test_ignores_columns_without_matching_preprocessor(self):
         m = self._make_model('vision')

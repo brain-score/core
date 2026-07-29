@@ -6,6 +6,7 @@ from .behavioral import BehavioralReadout
 from .capability_config import normalize_capability_config
 from .contract import Subject, TaskContext
 from .dispatch import InputDispatcher, register_input_handler
+from .io_catalog import canonical_modality
 from .events import (
     EnvironmentStep,
     InputEvent,
@@ -38,13 +39,13 @@ class BrainScoreModel(Subject):
         'filename': 'vision',
         'sentence': 'text',
         'text': 'text',
-        'video_path': 'video',
+        'video_path': 'vision',  # video is temporal vision -> the one visual channel
         'audio_path': 'audio',
         'audio_file_name': 'audio',
         'audio_file': 'audio',
     }
 
-    MODALITY_PRIORITY: Tuple[str, ...] = ('vision', 'text', 'audio', 'video')
+    MODALITY_PRIORITY: Tuple[str, ...] = ('vision', 'text', 'audio')
 
     _INPUT_HANDLERS: List[Tuple[type, str]] = [
         (StateChange, '_dispatch_state_change'),
@@ -206,11 +207,12 @@ class BrainScoreModel(Subject):
 
     @property
     def supported_modalities(self) -> Set[str]:
-        return set(self._preprocessors.keys())
+        # a ``video``-keyed preprocessor reports as ``vision`` (temporal vision)
+        return {canonical_modality(m) for m in self._preprocessors.keys()}
 
     @property
     def available_modalities(self) -> Set[str]:
-        return set(self._preprocessors.keys())
+        return {canonical_modality(m) for m in self._preprocessors.keys()}
 
     @property
     def required_modalities(self) -> Set[str]:

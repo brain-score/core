@@ -174,7 +174,8 @@ def test_accepted_input_channels_derive_from_accepted_modalities():
     )
 
     assert benchmark_required_input_channels(benchmark) == set()
-    assert benchmark_accepted_input_channels(benchmark) == {"vision", "video"}
+    # video folds into the unified vision channel, so both modalities map to 'vision'
+    assert benchmark_accepted_input_channels(benchmark) == {"vision"}
     check_channel_compatibility(subject, benchmark)
 
 

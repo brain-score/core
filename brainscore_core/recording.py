@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional, Tuple, Union
 
+from .io_catalog import canonical_modality
 from .selection import CompositeSelector
 
 
@@ -108,10 +109,11 @@ class Recorder:
         owner = self.owner
         if not owner._region_modality_map:
             return list(layers)
+        modality = canonical_modality(modality)
         layer_to_modality: Dict[str, str] = {}
         for region, m in owner._region_modality_map.items():
             layer_path = owner._region_layer_map_dict[region]
-            layer_to_modality.setdefault(layer_path, m)
+            layer_to_modality.setdefault(layer_path, canonical_modality(m))
         return [
             layer for layer in layers
             if layer_to_modality.get(layer, modality) == modality
