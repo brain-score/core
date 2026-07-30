@@ -184,6 +184,19 @@ class TestBrainScoreModelConstruction:
         )
         assert m.supported_modalities == {'vision', 'text'}
 
+    def test_input_modalities_preserves_raw_video_key(self):
+        # channel unification canonicalizes video->vision in supported_modalities,
+        # but input_modalities keeps the raw declared key so a benchmark can tell a
+        # native-video model (VideoWrapper) from a still-image one.
+        m = BrainScoreModel(
+            identifier='vjepa',
+            model=None,
+            region_layer_map={'IT': 'blocks.16'},
+            preprocessors={'video': lambda m, s, **kw: None},
+        )
+        assert m.supported_modalities == {'vision'}   # canonicalized
+        assert m.input_modalities == {'video'}        # raw, un-canonicalized
+
     def test_with_activations_model(self):
         act_model = StubActivationsModel()
         m = BrainScoreModel(

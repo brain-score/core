@@ -217,6 +217,19 @@ class BrainScoreModel(Subject):
         return {canonical_modality(m) for m in self._preprocessors.keys()}
 
     @property
+    def input_modalities(self) -> Set[str]:
+        """The RAW declared input-modality keys (pre-canonicalization).
+
+        ``supported_modalities`` canonicalizes ``video`` into ``vision`` (temporal
+        vision) so compatibility and routing treat them as one modality. This
+        property keeps the *declared processing style* instead: a native-video
+        model reports ``'video'`` here (its VideoWrapper consumes whole clips) but
+        ``'vision'`` in ``supported_modalities``. Benchmarks that must present
+        whole clips vs. still frames route on this, not on ``supported_modalities``.
+        """
+        return set(self._preprocessors.keys())
+
+    @property
     def required_modalities(self) -> Set[str]:
         return set(self._required_modalities)
 
