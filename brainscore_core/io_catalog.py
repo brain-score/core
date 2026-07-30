@@ -274,10 +274,12 @@ def validate(
 
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
+    # `vision` is the one visual channel: a still is a 1-frame clip, so it
+    # accepts both static (H, W, 3) and temporal (T, H, W, 3) payloads.
     CatalogEntry("vision", INPUT, "StimulusSet column",
-                 "(H, W, 3) uint8 image, or a path to one",
-                 "image preprocessor + a vision model harness (wrapper)",
-                 meta_keys=("stimulus_id",), expected_ndim=(3,), expected_dtype="uint8",
+                 "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, or a path to one",
+                 "image/video preprocessor + a vision model harness (wrapper)",
+                 meta_keys=("stimulus_id",), expected_ndim=(3, 4), expected_dtype="uint8",
                  materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
                  "a Python str",
@@ -288,8 +290,11 @@ _SEED = [
                  "an audio model harness (AudioWrapper)",
                  meta_keys=("stimulus_id", "sample_rate_hz"), expected_ndim=(1,),
                  materializers=("StimulusSet",)),
+    # `video` is a backward-compatible alias of `vision` (temporal vision); it
+    # canonicalizes to `vision` via ``canonical_modality``. New registrations
+    # should use `vision`, which accepts both static and temporal payloads.
     CatalogEntry("video", INPUT, "StimulusSet column",
-                 "(T, H, W, 3) uint8 clip, or a path",
+                 "(T, H, W, 3) uint8 clip, or a path (alias of the vision channel)",
                  "a video model harness (VideoWrapper)",
                  meta_keys=("stimulus_id",), expected_ndim=(4,),
                  materializers=("StimulusSet",)),

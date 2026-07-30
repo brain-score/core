@@ -45,7 +45,7 @@ import warnings
 from typing import Optional, Set
 
 from . import io_catalog
-from .io_catalog import modalities_to_input_channels
+from .io_catalog import canonical_modality, modalities_to_input_channels
 from .model_interface import Subject
 from .streaming import parse_channel
 
@@ -206,15 +206,18 @@ def check_compatibility(model: Subject, benchmark) -> None:
     Emits :class:`DeprecationWarning` if the benchmark still sets the
     deprecated ``available_modalities`` field.
     """
-    model_available: Set[str] = set(model.available_modalities)
-    model_required: Set[str] = set(model.required_modalities)
-    bench_required: Set[str] = set(getattr(benchmark, 'required_modalities', set()))
+    # canonicalize so aliases match (e.g. a benchmark requiring 'video' is
+    # satisfied by a model reporting the canonical 'vision')
+    model_available: Set[str] = {canonical_modality(m) for m in model.available_modalities}
+    model_required: Set[str] = {canonical_modality(m) for m in model.required_modalities}
+    bench_required: Set[str] = {canonical_modality(m)
+                                for m in getattr(benchmark, 'required_modalities', set())}
 
     # Deprecation warning — must fire before any short-circuit error so
     # benchmark maintainers see it even when the pairing is incompatible.
     bench_available_attr = getattr(benchmark, 'available_modalities', None)
     if bench_available_attr is not None:
-        bench_available: Set[str] = set(bench_available_attr)
+        bench_available: Set[str] = {canonical_modality(m) for m in bench_available_attr}
         # Only warn if it actually adds something beyond required (otherwise
         # it's a redundant declaration not a multi-input claim).
         if bench_available - bench_required:
@@ -245,7 +248,8 @@ def check_compatibility(model: Subject, benchmark) -> None:
     # falls back to frame-aggregation for still-image models). Declared as
     # `accepted_modalities`; the model must provide at least one. Distinct from
     # `required_modalities` (all-of); empty/absent means no any-of constraint.
-    bench_accepted: Set[str] = set(getattr(benchmark, 'accepted_modalities', set()))
+    bench_accepted: Set[str] = {canonical_modality(m)
+                                for m in getattr(benchmark, 'accepted_modalities', set())}
     if bench_accepted and not (bench_accepted & model_available):
         raise CompatibilityError(
             f"Model '{model.identifier}' provides none of the input formats "

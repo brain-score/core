@@ -1290,6 +1290,18 @@ class TestBrainScoreModelColumnDetection:
         assert canonical_modality('vision') == 'vision'
         assert canonical_modality('audio') == 'audio'
 
+    def test_video_preprocessor_with_vision_region_map_constructs(self):
+        # a legacy 'video' preprocessor with region_modality_map/required saying
+        # 'vision' must construct (video canonicalizes to vision)
+        m = BrainScoreModel(
+            identifier='v', model=None,
+            region_layer_map={'IT': 'layer4'},
+            preprocessors={'video': make_stub_preprocessor('out')},
+            region_modality_map={'IT': 'vision'},
+            required_modalities={'vision'},
+        )
+        assert m.available_modalities == {'vision'}
+
     def test_ignores_columns_without_matching_preprocessor(self):
         m = self._make_model('vision')
         detected = m._detect_modalities(StubStimulusSet(['image_file_name', 'sentence']))

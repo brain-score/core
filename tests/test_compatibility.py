@@ -121,6 +121,19 @@ class TestAcceptedModalities:
         check_compatibility(model, bench)  # should not raise
 
 
+class TestVideoVisionUnification:
+    """video folds into vision; the two are interchangeable for compatibility."""
+
+    def test_video_benchmark_runs_a_vision_model(self):
+        # bench requires 'video', model reports canonical 'vision' -> compatible
+        check_compatibility(FakeModel(modalities={'vision'}),
+                            FakeBenchmark(required_modalities={'video'}))
+
+    def test_vision_benchmark_runs_a_video_model(self):
+        check_compatibility(FakeModel(modalities={'video'}),
+                            FakeBenchmark(required_modalities={'vision'}))
+
+
 # ── Deprecated benchmark.available_modalities ────────────────────────
 
 class TestDeprecatedBenchmarkAvailableModalities:

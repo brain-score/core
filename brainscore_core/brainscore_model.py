@@ -157,8 +157,9 @@ class BrainScoreModel(Subject):
                     f"region_modality_map references regions not in "
                     f"region_layer_map: {sorted(unknown_regions)}."
                 )
-            unknown_modalities = (set(self._region_modality_map.values())
-                                  - set(preprocessors.keys()))
+            unknown_modalities = (
+                {canonical_modality(m) for m in self._region_modality_map.values()}
+                - {canonical_modality(k) for k in preprocessors.keys()})
             if unknown_modalities:
                 raise ValueError(
                     f"region_modality_map references modalities with no "
@@ -182,8 +183,9 @@ class BrainScoreModel(Subject):
         self._capability_state: Dict[str, Any] = {}
         self._capability_setup_done: Set[str] = set()
 
-        required = set(required_modalities) if required_modalities else set()
-        available = set(preprocessors.keys())
+        required = ({canonical_modality(m) for m in required_modalities}
+                    if required_modalities else set())
+        available = {canonical_modality(k) for k in preprocessors.keys()}
         if not required.issubset(available):
             raise ValueError(
                 f"required_modalities {required} must be a subset of the "
