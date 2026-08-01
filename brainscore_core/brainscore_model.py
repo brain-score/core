@@ -20,8 +20,10 @@ from .selection import UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
+    _drive_behavior_session_streaming,
     _drive_behavior_session_via_process,
     _drive_environment_session_via_process,
+    _drive_neural_session_streaming,
     _drive_neural_session_via_process,
     _drive_state_change_session_via_process,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
@@ -343,7 +345,10 @@ class BrainScoreModel(Subject):
         """Drive a v2 streaming session through existing model paths."""
         requested_channels = _requested_output_channels(session)
         if requested_channels == ["behavior"]:
-            _drive_behavior_session_via_process(self, session)
+            if getattr(session, "streaming", False):
+                _drive_behavior_session_streaming(self, session)
+            else:
+                _drive_behavior_session_via_process(self, session)
             return
         if requested_channels == ["perturbation"]:
             _drive_state_change_session_via_process(self, session)
@@ -352,7 +357,12 @@ class BrainScoreModel(Subject):
             _drive_environment_session_via_process(self, session)
             return
         if all(channel.startswith("neural:") for channel in requested_channels):
-            _drive_neural_session_via_process(self, session)
+            # A session may ask to be consumed one input at a time (inputs generated
+            # on demand rather than known up front). Same scores, different arrival.
+            if getattr(session, "streaming", False):
+                _drive_neural_session_streaming(self, session)
+            else:
+                _drive_neural_session_via_process(self, session)
             return
         raise NotImplementedError(
             "BrainScoreModel.interact currently supports requested "
