@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -51,15 +51,15 @@ _STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
 class StimulusSetSession(InMemorySession):
     """Buffered open-loop session built from a StimulusSet-like table."""
 
-    def __init__(self, stimulus_set, record: str = "IT", time_bins=None):
+    def __init__(self, stimulus_set, record: Union[str, Sequence[str]] = "IT", time_bins=None):
         self.stimulus_set = stimulus_set
         self.record = record
         self.time_bins = time_bins
-        self.requested_output_channels = (f"neural:{record}",)
+        self.requested_output_channels = _neural_channels(record)
         super().__init__(_stimulus_events(stimulus_set))
 
     @classmethod
-    def from_stimulus_set(cls, stimulus_set, record: str = "IT",
+    def from_stimulus_set(cls, stimulus_set, record: Union[str, Sequence[str]] = "IT",
                           time_bins=None):
         return cls(stimulus_set, record=record, time_bins=time_bins)
 
@@ -193,7 +193,7 @@ class EnvironmentSession(Session):
         return [event.payload for event in self.emitted if event.channel == channel]
 
 
-def stimulus_session(stimulus_set, record: str = "IT",
+def stimulus_session(stimulus_set, record: Union[str, Sequence[str]] = "IT",
                      time_bins=None) -> StimulusSetSession:
     return StimulusSetSession.from_stimulus_set(
         stimulus_set, record=record, time_bins=time_bins
@@ -212,12 +212,23 @@ def environment_session(environment) -> EnvironmentSession:
     return EnvironmentSession(environment)
 
 
-def neural_response(subject, stimulus_set, record: str = "IT",
+def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "IT",
                   time_bins=None) -> NeuroidAssembly:
     """Run ``subject`` on ``stimulus_set`` and return its neural response as a
     ``NeuroidAssembly``. This is the model's output, not a Score -- comparing it
     to measured data (and ceiling-normalizing) is the benchmark's job, via a metric.
     """
+    if not isinstance(record, str):
+        # This returns ONE assembly, so it cannot represent several regions without
+        # silently picking one or inventing a container type. Say so instead.
+        raise TypeError(
+            "neural_response returns a single assembly and therefore takes a single "
+            f"region; got {record!r}. To record several regions, use the session API:\n"
+            "    session = stimulus_session(stimuli, record=['V4', 'IT'])\n"
+            "    subject.interact(session)\n"
+            "    v4, it = session.collect('neural:V4'), session.collect('neural:IT')\n"
+            "Or record them in one pass and split on the region coord:\n"
+            "    subject.start_recording(['V4', 'IT']); assembly = subject.process(stimuli)")
     session = stimulus_session(stimulus_set, record=record,
                                time_bins=time_bins)
     if _has_native_interact(subject):
@@ -259,7 +270,7 @@ def run_environment(subject, environment) -> list:
 
 
 def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
-                       record: str = "IT", time_bins=None) -> None:
+                       record: Union[str, Sequence[str]] = "IT", time_bins=None) -> None:
     """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
     _start_recording(subject, record, time_bins=time_bins)
     output = subject.process(stimulus_set)
@@ -555,6 +566,30 @@ def _reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
 
 
+def _neural_channels(record) -> tuple:
+    """Build the requested neural channel names for a ``record`` target.
+
+    ``record`` accepts a single region name or a sequence of them, mirroring
+    ``start_recording``. Formatting a sequence straight into the channel string
+    would produce one channel literally named ``neural:['V4', 'IT']``, which then
+    fails to match any region -- so the sequence case gets one channel each.
+    """
+    if isinstance(record, str):
+        return (f"neural:{record}",)
+    try:
+        regions = list(record)
+    except TypeError:
+        raise TypeError(
+            f"record must be a region name or a sequence of them; got "
+            f"{type(record).__name__}")
+    if not regions:
+        raise ValueError("record must name at least one region")
+    non_str = [r for r in regions if not isinstance(r, str)]
+    if non_str:
+        raise TypeError(f"every record entry must be a region name; got {non_str!r}")
+    return tuple(f"neural:{region}" for region in regions)
+
+
 def _requested_output_channels(session) -> list[str]:
     requested = getattr(session, "requested_output_channels", None)
     if requested is not None:
@@ -562,9 +597,7 @@ def _requested_output_channels(session) -> list[str]:
 
     record = getattr(session, "record", None)
     if record is not None:
-        if isinstance(record, str):
-            return [f"neural:{record}"]
-        return [f"neural:{region}" for region in record]
+        return list(_neural_channels(record))
 
     raise ValueError(
         "streaming interact requires the session to declare "
@@ -735,11 +768,11 @@ class StreamingStimulusSetSession(Session):
 
     streaming = True
 
-    def __init__(self, stimulus_set, record: str = "IT", time_bins=None):
+    def __init__(self, stimulus_set, record: Union[str, Sequence[str]] = "IT", time_bins=None):
         self.stimulus_set = stimulus_set
         self.record = record
         self.time_bins = time_bins
-        self.requested_output_channels = (f"neural:{record}",)
+        self.requested_output_channels = _neural_channels(record)
         self.emitted: list[StreamEvent] = []
         self._pending: list[StreamEvent] = []
         self._rows = stimulus_set.iterrows()
@@ -806,7 +839,7 @@ class WindowedStreamSession(Session):
     streaming = True
 
     def __init__(self, frames, *, fps: float, window_ms: float,
-                 stride_ms: Optional[float] = None, record: str = "IT",
+                 stride_ms: Optional[float] = None, record: Union[str, Sequence[str]] = "IT",
                  window_to_stimuli=None, time_bins=None):
         if fps <= 0:
             raise ValueError(f"fps must be > 0, got {fps}")
@@ -821,7 +854,7 @@ class WindowedStreamSession(Session):
         self.stride_ms = float(stride_ms)
         self.record = record
         self.time_bins = time_bins
-        self.requested_output_channels = (f"neural:{record}",)
+        self.requested_output_channels = _neural_channels(record)
         self.emitted: list[StreamEvent] = []
         self._window_frames = max(1, int(round(self.window_ms * self.fps / 1000.0)))
         self._stride_frames = max(1, int(round(self.stride_ms * self.fps / 1000.0)))

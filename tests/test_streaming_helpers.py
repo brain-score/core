@@ -1065,3 +1065,57 @@ def test_apply_state_change_falls_back_for_non_native_subject():
     assert type(subject).interact is Subject.interact
     assert subject.process_input is state_change
     assert result is applied
+
+
+class TestRecordAcceptsSeveralRegions:
+    """`record` mirrors start_recording: a region name OR a sequence of them.
+
+    Regression for a silent failure: the session constructors formatted `record`
+    straight into the channel string, so a list produced ONE channel literally
+    named "neural:['V4', 'IT']". Nothing raised; the channel simply matched no
+    region, and callers got an empty or wrong result.
+    """
+
+    @staticmethod
+    def _stimuli():
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        return StimulusSet(pd.DataFrame([
+            {'stimulus_id': 'a', 'image_file_name': 'a.png'}]))
+
+    def test_list_record_yields_one_channel_per_region(self):
+        from brainscore_core.streaming_helpers import (
+            stimulus_session, _requested_output_channels)
+        session = stimulus_session(self._stimuli(), record=['V4', 'IT'])
+        assert _requested_output_channels(session) == ['neural:V4', 'neural:IT']
+
+    def test_single_region_string_unchanged(self):
+        from brainscore_core.streaming_helpers import (
+            stimulus_session, _requested_output_channels)
+        session = stimulus_session(self._stimuli(), record='IT')
+        assert _requested_output_channels(session) == ['neural:IT']
+
+    def test_windowed_session_also_splits(self):
+        from brainscore_core.streaming_helpers import WindowedStreamSession
+        session = WindowedStreamSession(iter([]), fps=30, window_ms=100,
+                                        record=['V4', 'IT'])
+        assert list(session.requested_output_channels) == ['neural:V4', 'neural:IT']
+
+    def test_empty_record_raises(self):
+        import pytest
+        from brainscore_core.streaming_helpers import stimulus_session
+        with pytest.raises(ValueError, match='at least one region'):
+            stimulus_session(self._stimuli(), record=[])
+
+    def test_non_string_region_raises(self):
+        import pytest
+        from brainscore_core.streaming_helpers import stimulus_session
+        with pytest.raises(TypeError, match='region name'):
+            stimulus_session(self._stimuli(), record=[1, 2])
+
+    def test_neural_response_rejects_several_regions(self):
+        """It returns one assembly, so it must not silently pick a region."""
+        import pytest
+        from brainscore_core.streaming_helpers import neural_response
+        with pytest.raises(TypeError, match='single region'):
+            neural_response(object(), self._stimuli(), record=['V4', 'IT'])
