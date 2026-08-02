@@ -22,7 +22,15 @@ class Recorder:
                         recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
                         recording_type: Optional[str] = None) -> None:
-        """Configure which model layers to extract."""
+        """Configure the layers extracted by subsequent ``process`` calls.
+
+        A string names one region, ``'all'`` expands to every mapped region,
+        and a list records several mapped regions in one extraction. An unknown
+        string is treated as a raw layer path with a warning; unknown entries in
+        a list are rejected because they cannot be given region provenance.
+        ``recording_type`` is accepted for legacy adapter compatibility and is
+        otherwise ignored by ``BrainScoreModel``.
+        """
         del recording_type
         owner = self.owner
 
@@ -120,7 +128,7 @@ class Recorder:
         ]
 
     def tag_neuroids_with_regions(self, assembly):
-        """Add a 'region' coord to the neuroid axis of a multi-layer assembly."""
+        """Map recorded layer provenance to a per-neuroid ``region`` coord."""
         import numpy as np
 
         owner = self.owner

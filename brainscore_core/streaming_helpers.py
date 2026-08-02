@@ -389,20 +389,20 @@ def _demultiplex_neural_output(output, channel_regions):
 def _drive_neural_session_streaming(
     subject, session, driver: str = "interact_streaming"
 ) -> None:
-    """Streaming perception: pull ONE input at a time, process it, emit, repeat.
+    """Pull one session input event, process it, emit its outputs, and repeat.
 
     This is the perception-path twin of ``_drive_environment_session_via_process``.
     The batch driver drains the whole session up front and makes a single
     ``process()`` call, which is faster but requires every input to exist before
-    scoring starts. This driver never holds more than one stimulus, so a session
-    may generate inputs on demand (decode a video frame, poll a camera).
+    scoring starts. This driver does not buffer ahead: the session decides whether
+    an event contains one stimulus, a bounded window, or a real-time delivery.
 
-    Scores are identical to the batch path -- the model sees the same stimuli, one
-    at a time instead of all at once. What changes is *when* inputs must exist, not
-    what comes out. It is slower: batch size collapses to 1 and per-stimulus calls
-    do not share an activations-cache entry.
+    ``StreamingStimulusSetSession`` collapses batch size to one and may be slower;
+    ``WindowedStreamSession`` restores bounded batches; ``RealTimeStreamSession``
+    can additionally drop or reject late windows according to its policy.
 
-    Opt in with ``session.streaming = True``.
+    Built-in streaming session classes declare ``streaming = True``. A custom
+    session can opt into this driver by declaring the same protocol flag.
     """
     channels = _requested_output_channels(session)
     channel_regions = []
@@ -723,13 +723,12 @@ def _drive_behavior_session_streaming(
 
 
 class StreamingStimulusSetSession(Session):
-    """Open-loop session that GENERATES one input event at a time.
+    """Open-loop session that creates one stimulus event at a time.
 
     ``StimulusSetSession`` materializes every event in a deque up front. This one
-    holds a row iterator and builds each event only when it is asked for, so at no
-    point does the whole stream exist in memory. That is the property a real feed
-    (a decoded video, a camera) needs, and it is why this class exists separately
-    rather than as a flag on the buffered one.
+    retains the caller's stimulus table but builds its event queue lazily from a
+    row iterator, so event buffering stays bounded. Truly generated feeds that do
+    not already exist as a table use ``WindowedStreamSession`` instead.
 
     ``streaming = True`` is what routes ``interact`` to the one-at-a-time driver.
     """

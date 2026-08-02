@@ -414,6 +414,13 @@ class BrainScoreModel(Subject):
                         recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
                         recording_type: Optional[str] = None) -> None:
+        """Configure neural recording for subsequent ``process`` calls.
+
+        ``recording_target`` is a mapped region name, ``'all'``, a list of
+        mapped regions, or a raw layer path. Multiple regions are extracted in
+        one call and returned with per-neuroid ``layer`` and ``region``
+        provenance. See :class:`Recorder` for validation details.
+        """
         self._recorder.start_recording(recording_target, time_bins,
                                        recording_type)
 
