@@ -338,8 +338,22 @@ def _demultiplex_neural_output(output, channel_regions):
     if not hasattr(output, 'dims') or 'neuroid' not in output.dims:
         raise ValueError(
             "Multiple neural output channels require an assembly with a "
-            "per-neuroid 'region' coordinate so outputs can be demultiplexed "
-            "without relying on concatenation order."
+            "'neuroid' dimension and per-neuroid provenance so outputs can be "
+            "demultiplexed without relying on concatenation order."
+        )
+    try:
+        layer_coord = output['layer']
+    except KeyError as error:
+        raise ValueError(
+            "Multiple neural output channels require an assembly with a "
+            "per-neuroid 'layer' coordinate; attribution by concatenation "
+            "order is not allowed."
+        ) from error
+    if layer_coord.dims != ('neuroid',):
+        raise ValueError(
+            "The neural output 'layer' coordinate must be one-dimensional "
+            "along 'neuroid' to preserve output provenance; got dims "
+            f"{layer_coord.dims}."
         )
     try:
         region_coord = output['region']

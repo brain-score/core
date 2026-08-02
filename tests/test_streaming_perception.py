@@ -138,6 +138,27 @@ def test_streaming_multi_region_records_once_and_demultiplexes_each_window():
 
 
 @pytest.mark.unit
+def test_streaming_multi_region_rejects_missing_layer_provenance():
+    class _MissingLayerSubject(_MultiRegionSubject):
+        def process(self, stimuli, multi_modality=False):
+            output = super().process(stimuli, multi_modality=multi_modality)
+            import xarray as xr
+            return xr.DataArray(
+                np.asarray(output),
+                dims=('presentation', 'neuroid'),
+                coords={'region': ('neuroid', list(self.active_regions))},
+            )
+
+    subject = _MissingLayerSubject()
+    session = _request_two_regions(StimulusSetSession(_stimulus_set(1),
+                                                      record='early'))
+
+    from brainscore_core.streaming_helpers import _drive_neural_session_via_process
+    with pytest.raises(ValueError, match="per-neuroid 'layer' coordinate"):
+        _drive_neural_session_via_process(subject, session)
+
+
+@pytest.mark.unit
 def test_streaming_session_processes_one_stimulus_at_a_time():
     subject = _CountingSubject()
     session = StreamingStimulusSetSession(_stimulus_set(4), record='IT')

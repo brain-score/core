@@ -124,8 +124,11 @@ class Recorder:
         import numpy as np
 
         owner = self.owner
-        if 'layer' not in assembly.coords:
-            return assembly
+        assembly = self.ensure_layer_provenance(
+            assembly,
+            self.current_layers(),
+            description="Multi-region neural output",
+        )
         layer_to_regions: Dict[str, List[str]] = {}
         for region in self.recording_regions:
             layer = owner._region_layer_map_dict[region]
@@ -137,6 +140,43 @@ class Recorder:
             for layer in neuroid_layers
         ])
         return assembly.assign_coords(region=('neuroid', neuroid_regions))
+
+    @staticmethod
+    def ensure_layer_provenance(assembly, layer_paths, description):
+        """Require or safely add per-neuroid layer attribution.
+
+        A missing coordinate can only be filled when every neuroid necessarily
+        came from one layer. With several requested layers, assigning by position
+        would recreate the unstable-order attribution bug, so fail explicitly.
+        """
+        import numpy as np
+
+        if not hasattr(assembly, 'dims') or 'neuroid' not in assembly.dims:
+            raise ValueError(
+                f"{description} has no 'neuroid' dimension and cannot carry "
+                "per-neuroid layer provenance."
+            )
+        try:
+            layer_coord = assembly['layer']
+        except KeyError:
+            unique_layers = list(dict.fromkeys(layer_paths))
+            if len(unique_layers) != 1:
+                raise ValueError(
+                    f"{description} has no per-neuroid 'layer' coordinate for "
+                    f"requested layers {unique_layers}; attribution by "
+                    "concatenation order is not allowed."
+                )
+            assembly = assembly.assign_coords(
+                layer=('neuroid', np.array(
+                    [unique_layers[0]] * assembly.sizes['neuroid']))
+            )
+            layer_coord = assembly['layer']
+        if layer_coord.dims != ('neuroid',):
+            raise ValueError(
+                f"{description} has a 'layer' coordinate with dims "
+                f"{layer_coord.dims}; expected ('neuroid',)."
+            )
+        return assembly
 
     def process_composite_regions(self, stimuli, modality):
         """Extract and concatenate blocks for composite recording regions."""
@@ -151,6 +191,11 @@ class Recorder:
                            if isinstance(selector, CompositeSelector)
                            else [selector.layer_path])
             assembly = owner._extract_for_modality(stimuli, modality, layer_paths)
+            assembly = self.ensure_layer_provenance(
+                assembly,
+                layer_paths,
+                description=f"Composite region {region!r} output",
+            )
             block = self.gather_composite_units(assembly, selector)
             n = block.sizes['neuroid']
             block = block.assign_coords(

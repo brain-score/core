@@ -678,7 +678,85 @@ class _XArrayActivationsModel:
         )
 
 
+class _NeuroidAssemblyActivationsModel:
+    """Returns BrainIO's MultiIndex-backed assembly in a chosen layer order."""
+
+    def __init__(self, output_layers):
+        self.output_layers = list(output_layers)
+
+    def __call__(self, stimuli, layers=None, **kwargs):
+        del stimuli, layers, kwargs
+        import numpy as np
+        from brainscore_core.supported_data_standards.brainio.assemblies import (
+            NeuroidAssembly,
+        )
+
+        n_neuroid = len(self.output_layers)
+        return NeuroidAssembly(
+            np.zeros((2, n_neuroid)),
+            dims=('presentation', 'neuroid'),
+            coords={
+                'layer': ('neuroid', np.array(self.output_layers)),
+                'neuroid_id': ('neuroid', np.arange(n_neuroid)),
+            },
+        )
+
+
+class _UnattributedActivationsModel:
+    def __call__(self, stimuli, layers=None, **kwargs):
+        del stimuli, layers, kwargs
+        import xarray as xr
+        import numpy as np
+
+        return xr.DataArray(
+            np.zeros((2, 2)),
+            dims=('presentation', 'neuroid'),
+            coords={'neuroid_id': ('neuroid', np.arange(2))},
+        )
+
+
 class TestMultiRegionStartRecording:
+
+    def test_provenance_follows_layer_coord_not_position(self):
+        act = _NeuroidAssemblyActivationsModel(
+            ['late_layer', 'early_layer']
+        )
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={
+                'early': 'early_layer',
+                'late': 'late_layer',
+            },
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=act,
+        )
+        m.start_recording(['early', 'late'])
+
+        assembly = m.process(StubStimulusSet(columns=['image_file_name']))
+
+        provenance = dict(zip(assembly['layer'].values.tolist(),
+                              assembly['region'].values.tolist()))
+        assert provenance == {
+            'early_layer': 'early',
+            'late_layer': 'late',
+        }
+
+    def test_multi_layer_output_without_layer_coord_raises(self):
+        m = BrainScoreModel(
+            identifier='test',
+            model=None,
+            region_layer_map={
+                'early': 'early_layer',
+                'late': 'late_layer',
+            },
+            preprocessors={'vision': make_stub_preprocessor()},
+            activations_model=_UnattributedActivationsModel(),
+        )
+        m.start_recording(['early', 'late'])
+
+        with pytest.raises(ValueError, match="no per-neuroid 'layer' coordinate"):
+            m.process(StubStimulusSet(columns=['image_file_name']))
 
     def test_single_region_string_backward_compat(self):
         """String target keeps old behavior; no 'region' coord added."""
