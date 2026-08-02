@@ -52,6 +52,91 @@ class _CountingSubject:
             dims=['presentation', 'neuroid'])
 
 
+class _MultiRegionSubject:
+    """Returns every active region in one assembly, as list recording requires."""
+
+    def __init__(self):
+        self.recording_calls = []
+        self.active_regions = []
+        self.process_calls = 0
+
+    def start_recording(self, recording_target, time_bins=None,
+                        recording_type=None):
+        del time_bins, recording_type
+        self.recording_calls.append(recording_target)
+        self.active_regions = (
+            [recording_target]
+            if isinstance(recording_target, str)
+            else list(recording_target)
+        )
+
+    def process(self, stimuli, multi_modality=False):
+        del multi_modality
+        self.process_calls += 1
+        ids = list(stimuli['stimulus_id'])
+        regions = list(self.active_regions)
+        data = np.tile(np.arange(1, len(regions) + 1, dtype=float),
+                       (len(ids), 1))
+        return NeuroidAssembly(
+            data,
+            coords={
+                'stimulus_id': ('presentation', ids),
+                'neuroid_id': ('neuroid', [f'n{i}' for i in range(len(regions))]),
+                'layer': ('neuroid', [f'{region}_layer' for region in regions]),
+                'region': ('neuroid', regions),
+            },
+            dims=['presentation', 'neuroid'],
+        )
+
+
+def _request_two_regions(session):
+    session.requested_output_channels = ('neural:early', 'neural:late')
+    return session
+
+
+@pytest.mark.unit
+def test_batch_multi_region_records_once_and_demultiplexes_channels():
+    from brainscore_core.streaming_helpers import _drive_neural_session_via_process
+
+    subject = _MultiRegionSubject()
+    session = _request_two_regions(StimulusSetSession(_stimulus_set(3),
+                                                      record='early'))
+
+    _drive_neural_session_via_process(subject, session)
+
+    assert subject.recording_calls == [['early', 'late']]
+    assert subject.process_calls == 1
+    for channel, region in (('neural:early', 'early'),
+                            ('neural:late', 'late')):
+        payloads = [event.payload for event in session.emitted
+                    if event.channel == channel]
+        assert len(payloads) == 1
+        assert payloads[0].sizes['neuroid'] == 1
+        assert payloads[0]['region'].values.tolist() == [region]
+
+
+@pytest.mark.unit
+def test_streaming_multi_region_records_once_and_demultiplexes_each_window():
+    from brainscore_core.streaming_helpers import _drive_neural_session_streaming
+
+    subject = _MultiRegionSubject()
+    session = _request_two_regions(StreamingStimulusSetSession(
+        _stimulus_set(3), record='early'))
+
+    _drive_neural_session_streaming(subject, session)
+
+    assert subject.recording_calls == [['early', 'late']]
+    assert subject.process_calls == 3
+    for channel, region in (('neural:early', 'early'),
+                            ('neural:late', 'late')):
+        payloads = [event.payload for event in session.emitted
+                    if event.channel == channel]
+        assert len(payloads) == 3
+        assert all(payload.sizes['neuroid'] == 1 for payload in payloads)
+        assert all(payload['region'].values.tolist() == [region]
+                   for payload in payloads)
+
+
 @pytest.mark.unit
 def test_streaming_session_processes_one_stimulus_at_a_time():
     subject = _CountingSubject()

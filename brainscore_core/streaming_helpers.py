@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -280,6 +280,7 @@ def _drive_neural_session_via_process(
     use_multi_modality = _should_use_multi_modality(subject, input_events)
     time_bins = getattr(session, "time_bins", None)
 
+    channel_regions = []
     for channel in _requested_output_channels(session):
         family, region = parse_channel(channel)
         if family != "neural" or region is None:
@@ -287,24 +288,88 @@ def _drive_neural_session_via_process(
                 "neural interact currently supports requested "
                 f"neural:<region> output channels; got {channel!r}."
             )
-        _start_recording(subject, region, time_bins=time_bins)
-        if use_multi_modality:
-            output = subject.process(stimuli, multi_modality=True)
-        else:
-            output = subject.process(stimuli)
+        channel_regions.append((channel, region))
+
+    recording_target = _combined_recording_target(channel_regions)
+    _start_recording(subject, recording_target, time_bins=time_bins)
+    if use_multi_modality:
+        output = subject.process(stimuli, multi_modality=True)
+    else:
+        output = subject.process(stimuli)
+    for channel, region, channel_output in _demultiplex_neural_output(
+        output, channel_regions
+    ):
         session.emit(StreamEvent(
             channel=channel,
-            payload=output,
+            payload=channel_output,
             t_ms=output_t_ms,
             meta={"driver": driver, "record": region},
         ))
 
 
-def _start_recording(subject, region: str, time_bins=None) -> None:
+def _combined_recording_target(
+    channel_regions: List[Tuple[str, str]]
+) -> Union[str, List[str]]:
+    regions = [region for _, region in channel_regions]
+    return regions[0] if len(regions) == 1 else regions
+
+
+def _start_recording(
+    subject, recording_target: Union[str, List[str]], time_bins=None
+) -> None:
     if time_bins is None:
-        subject.start_recording(region)
+        subject.start_recording(recording_target)
     else:
-        subject.start_recording(region, time_bins=time_bins)
+        subject.start_recording(recording_target, time_bins=time_bins)
+
+
+def _demultiplex_neural_output(output, channel_regions):
+    """Return one region-specific payload per requested neural channel.
+
+    A single requested channel keeps the historical payload object unchanged.
+    Multiple channels require explicit per-neuroid ``region`` provenance; an
+    unattributed combined assembly is rejected instead of being silently assigned
+    according to concatenation order.
+    """
+    if len(channel_regions) == 1:
+        channel, region = channel_regions[0]
+        return [(channel, region, output)]
+
+    if not hasattr(output, 'dims') or 'neuroid' not in output.dims:
+        raise ValueError(
+            "Multiple neural output channels require an assembly with a "
+            "per-neuroid 'region' coordinate so outputs can be demultiplexed "
+            "without relying on concatenation order."
+        )
+    try:
+        region_coord = output['region']
+    except KeyError as error:
+        raise ValueError(
+            "Multiple neural output channels require an assembly with a "
+            "per-neuroid 'region' coordinate so outputs can be demultiplexed "
+            "without relying on concatenation order."
+        ) from error
+    if region_coord.dims != ('neuroid',):
+        raise ValueError(
+            "The neural output 'region' coordinate must be one-dimensional "
+            "along 'neuroid' to demultiplex requested channels; got dims "
+            f"{region_coord.dims}."
+        )
+
+    region_values = np.asarray(region_coord.values)
+    outputs = []
+    for channel, region in channel_regions:
+        positions = np.flatnonzero([
+            region in str(value).split('|') for value in region_values
+        ])
+        if not len(positions):
+            raise ValueError(
+                f"Neural output contains no neuroids attributed to requested "
+                f"region {region!r}; available region labels are "
+                f"{sorted(set(str(value) for value in region_values))}."
+            )
+        outputs.append((channel, region, output.isel(neuroid=positions)))
+    return outputs
 
 
 def _drive_neural_session_streaming(
@@ -326,7 +391,7 @@ def _drive_neural_session_streaming(
     Opt in with ``session.streaming = True``.
     """
     channels = _requested_output_channels(session)
-    regions = []
+    channel_regions = []
     for channel in channels:
         family, region = parse_channel(channel)
         if family != "neural" or region is None:
@@ -334,11 +399,11 @@ def _drive_neural_session_streaming(
                 "streaming neural interact supports requested neural:<region> "
                 f"output channels; got {channel!r}."
             )
-        regions.append((channel, region))
+        channel_regions.append((channel, region))
 
     time_bins = getattr(session, "time_bins", None)
-    for _, region in regions:
-        _start_recording(subject, region, time_bins=time_bins)
+    recording_target = _combined_recording_target(channel_regions)
+    _start_recording(subject, recording_target, time_bins=time_bins)
 
     stream_index = 0
     event = session.next_input()
@@ -349,12 +414,13 @@ def _drive_neural_session_streaming(
                 f"{type(event).__name__}."
             )
         stimuli = _one_row_stimuli(session, event, stream_index)
-        for channel, region in regions:
-            _start_recording(subject, region, time_bins=time_bins)
-            output = subject.process(stimuli)
+        output = subject.process(stimuli)
+        for channel, region, channel_output in _demultiplex_neural_output(
+            output, channel_regions
+        ):
             session.emit(StreamEvent(
                 channel=channel,
-                payload=output,
+                payload=channel_output,
                 t_ms=event.t_ms,
                 meta={
                     "driver": driver,
