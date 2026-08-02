@@ -24,7 +24,7 @@ class UniqueKeyDict(dict):
 
 def get_secret(secret_name: str, region_name: str = 'us-east-2') -> str:
     session = boto3.session.Session()
-    _logger.info("Fetch secret from secret manager")
+    _logger.debug("Fetch secret from secret manager")
     client = session.client(
         service_name='secretsmanager',
         region_name=region_name,
@@ -32,12 +32,8 @@ def get_secret(secret_name: str, region_name: str = 'us-east-2') -> str:
     secret_value_response = client.get_secret_value(
         SecretId=secret_name
     )
-    # Secrets Manager decrypts the secret value using the associated KMS CMK
-    # Depending on whether the secret was a string or binary, only one of these fields will be populated
-    _logger.info(f'Secret {secret_name} successfully fetched')
+    _logger.debug('Secret successfully fetched')
     if 'SecretString' in secret_value_response:
-        _logger.info("Inside string response...")
         return secret_value_response['SecretString']
     else:
-        _logger.info("Inside binary response...")
         return secret_value_response['SecretBinary']
