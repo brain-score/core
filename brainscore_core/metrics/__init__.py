@@ -22,6 +22,12 @@ class Score(DataAssembly):
     (`score.attrs['raw']`).
     """
 
+    # xarray asks every DataArray subclass to declare __slots__; without it, importing
+    # brainscore emits a FutureWarning that is the first output a new user ever sees.
+    # Empty is correct here — Score adds no instance attributes of its own, and the
+    # brainio assemblies it derives from already declare __slots__ = () the same way.
+    __slots__ = ()
+
     RAW_VALUES_KEY = 'raw'
 
     def sel(self, *args, _apply_raw=True, **kwargs):
