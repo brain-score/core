@@ -20,13 +20,26 @@ def test_pins_hold_at_targets(monkeypatch):
 
 
 def test_pins_report_drift(monkeypatch):
-    drifted = {"transformers": "5.5.0", "scikit-learn": "1.7.2",
+    # transformers 5 is supported now, so 6 is the first version that drifts.
+    drifted = {"transformers": "6.0.0", "scikit-learn": "1.7.2",
                "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: drifted[p])
     drift = _env_check.check_env_bounds()
     assert any("transformers" in d for d in drift)
     assert any("scikit-learn" in d for d in drift)
     assert len(drift) == 2  # numpy + xarray are fine
+
+
+def test_transformers_5_is_within_bounds(monkeypatch):
+    """The KV-cache and image-processor changes in 5 are handled, so it passes.
+
+    Guards the bound itself: this was <5 until the sliding window stopped
+    depending on to_legacy_cache and registrations pinned their image processor.
+    """
+    ok = {"transformers": "5.14.1", "scikit-learn": "1.5.2",
+          "numpy": "1.26.4", "xarray": "2022.3.0"}
+    monkeypatch.setattr(_env_check, "version", lambda p: ok[p])
+    assert _env_check.check_env_bounds() == []
 
 
 def test_too_old_versions_also_report_drift(monkeypatch):
