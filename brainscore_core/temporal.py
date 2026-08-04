@@ -667,3 +667,56 @@ def hrf_convolve(
         conv = np.convolve(features[:, j], hrf, mode='full')[:n_time]
         out[:, j] = conv
     return out
+
+
+def lanczos_kernel(cutoff, offsets, window=3):
+    """Lanczos (windowed-sinc) weights at ``offsets``, in the same time units.
+
+    ``window`` bounds how many sinc lobes contribute; beyond it the weight is
+    zero, which is what makes this a finite filter rather than an infinite sinc.
+    """
+    scaled = np.asarray(offsets, dtype=float) * cutoff
+    with np.errstate(divide='ignore', invalid='ignore'):
+        weights = (window * np.sin(np.pi * scaled)
+                   * np.sin(np.pi * scaled / window)
+                   / (np.pi ** 2 * scaled ** 2))
+    weights[scaled == 0] = 1.0
+    weights[np.abs(scaled) > window] = 0.0
+    return weights
+
+
+def lanczos_downsample(features, feature_times, target_times, window=3,
+                       cutoff_mult=1.0):
+    """Resample irregularly-timed ``features`` onto ``target_times``.
+
+    Stimulus features arrive at word or token times — irregular, several per
+    second — while fMRI samples on a slow regular grid. Taking only the last
+    value in each sample discards the rest of the window; a windowed-sinc filter
+    keeps them, low-passed at the target grid's own frequency so nothing above
+    what that grid can represent is folded back in.
+
+    This is the filter used by LITcoder (``lanczosinterp2D``) for the same job,
+    reproduced here so a Brain-Score benchmark can adopt the same downsampling
+    without taking on that dependency.
+
+    :param features: ``(n_feature_times, n_features)``.
+    :param feature_times: when each row of ``features`` occurred.
+    :param target_times: evenly spaced times to resample onto; their spacing
+        sets the low-pass cutoff.
+    :returns: ``(len(target_times), n_features)``.
+    """
+    features = np.asarray(features, dtype=float)
+    feature_times = np.asarray(feature_times, dtype=float)
+    target_times = np.asarray(target_times, dtype=float)
+    if features.shape[0] != feature_times.shape[0]:
+        raise ValueError(
+            f'{features.shape[0]} feature rows but {feature_times.shape[0]} '
+            f'feature times')
+    if len(target_times) < 2:
+        raise ValueError('need at least two target times to infer a cutoff')
+
+    cutoff = cutoff_mult / np.mean(np.diff(target_times))
+    weights = np.empty((len(target_times), len(feature_times)))
+    for index, target in enumerate(target_times):
+        weights[index] = lanczos_kernel(cutoff, target - feature_times, window)
+    return weights @ features

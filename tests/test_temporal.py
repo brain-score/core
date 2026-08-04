@@ -501,3 +501,73 @@ def test_window_plan_bad_params_raise():
             window_plan(**bad)
     with pytest.raises(ValueError):
         window_plan(1000, 400, strategy='bogus')
+
+
+class TestLanczosDownsample:
+    """Resampling irregular stimulus features onto the fMRI sampling grid.
+
+    Checked against the reference implementation's behaviour (LITcoder's
+    ``lanczosinterp2D``) rather than only for self-consistency, since the point
+    of having it is to match that pipeline's downsampling.
+    """
+
+    @staticmethod
+    def _reference(data, oldtime, newtime, window=3, cutoff_mult=1.0):
+        """LITcoder's lanczosinterp2D, transcribed."""
+        def lanczosfun(cutoff, t, window):
+            t = np.asarray(t, dtype=float) * cutoff
+            with np.errstate(divide='ignore', invalid='ignore'):
+                val = (window * np.sin(np.pi * t) * np.sin(np.pi * t / window)
+                       / (np.pi ** 2 * t ** 2))
+            val[t == 0] = 1.0
+            val[np.abs(t) > window] = 0.0
+            return val
+
+        cutoff = 1 / np.mean(np.diff(newtime)) * cutoff_mult
+        sincmat = np.zeros((len(newtime), len(oldtime)))
+        for ndi in range(len(newtime)):
+            sincmat[ndi, :] = lanczosfun(cutoff, newtime[ndi] - np.asarray(oldtime), window)
+        return np.dot(sincmat, data)
+
+    def test_matches_the_reference_implementation(self):
+        from brainscore_core.temporal import lanczos_downsample
+        rng = np.random.default_rng(0)
+        feature_times = np.sort(rng.uniform(0, 100, 400))
+        features = rng.normal(size=(400, 6))
+        target_times = np.arange(2.0, 100.0, 2.0)
+        ours = lanczos_downsample(features, feature_times, target_times)
+        theirs = self._reference(features, feature_times, target_times)
+        assert np.allclose(ours, theirs, atol=1e-12)
+
+    def test_shape_follows_the_target_grid(self):
+        from brainscore_core.temporal import lanczos_downsample
+        rng = np.random.default_rng(1)
+        out = lanczos_downsample(rng.normal(size=(50, 3)),
+                                 np.linspace(0, 40, 50), np.arange(0, 40, 2.0))
+        assert out.shape == (20, 3)
+
+    def test_constant_signal_is_preserved(self):
+        """A flat input must stay flat: the kernel should not ring on constants."""
+        from brainscore_core.temporal import lanczos_downsample
+        feature_times = np.arange(0, 60, 0.25)
+        features = np.full((len(feature_times), 2), 3.0)
+        out = lanczos_downsample(features, feature_times, np.arange(10, 50, 2.0))
+        assert np.allclose(out, out[0], rtol=1e-6)
+
+    def test_window_bounds_the_support(self):
+        """Outside the window the kernel is exactly zero, making it finite."""
+        from brainscore_core.temporal import lanczos_kernel
+        weights = lanczos_kernel(0.5, np.array([0.0, 1.0, 100.0]), window=3)
+        assert weights[0] == 1.0
+        assert weights[-1] == 0.0
+
+    def test_mismatched_lengths_raise(self):
+        from brainscore_core.temporal import lanczos_downsample
+        with pytest.raises(ValueError, match='feature rows'):
+            lanczos_downsample(np.zeros((5, 2)), np.arange(4), np.arange(0, 10, 2.0))
+
+    def test_single_target_time_raises(self):
+        """The cutoff comes from the target spacing, so one point is undefined."""
+        from brainscore_core.temporal import lanczos_downsample
+        with pytest.raises(ValueError, match='at least two target times'):
+            lanczos_downsample(np.zeros((5, 2)), np.arange(5), np.array([1.0]))
