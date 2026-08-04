@@ -51,7 +51,7 @@ class UserManager:
     """
 
     def __init__(self, db_secret: str):
-        logger.info(f"Connecting to db using secret '{db_secret}")
+        logger.debug("Connecting to db")
         connect_db(db_secret=db_secret)
 
     def _generate_temp_pass(self, length: int) -> str:
@@ -132,7 +132,7 @@ class MetadataEndpoint:
 
     def __init__(self, domain_plugins: DomainPlugins, db_secret: str):
         self.domain_plugins = domain_plugins
-        logger.info(f"Connecting to db using secret '{db_secret}'")
+        logger.debug("Connecting to db")
         connect_db(db_secret=db_secret)
 
     def process_metadata(self, plugin_dir: str, plugin_type: str, domain: str = None) -> dict:
@@ -206,7 +206,7 @@ class RunScoringEndpoint:
     def __init__(self, domain_plugins: DomainPlugins, db_secret: str):
         self.domain_plugins = domain_plugins
         self._db_secret = db_secret
-        logger.info(f"Connecting to db using secret '{db_secret}'")
+        logger.debug("Connecting to db")
         connect_db(db_secret=db_secret)
 
     def _is_production(self) -> bool:
