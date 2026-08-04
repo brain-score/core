@@ -783,3 +783,49 @@ class TestCheckMemory:
              _mock_memory(100_000_000, 500_000_000):
             with pytest.raises(MemoryError):
                 check_memory(model, bench_cv_big)  # fails — RidgeCV metric is huge
+
+
+class TestProbeCacheIsolation:
+    """The memory probe must not share an activation-cache key with the real run.
+
+    Slicing a StimulusSet keeps the parent's identifier, and activation caches
+    key on that identifier rather than on the rows. Sharing it broke scoring in
+    both directions: cold cache, the probe stored a one-row assembly the full run
+    then read back; warm cache, the probe read the full assembly. Either way the
+    presentation dimension disagreed with the stimulus set and packaging raised.
+    """
+
+    @staticmethod
+    def _stimulus_set(n=4):
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        s = StimulusSet(pd.DataFrame({'stimulus_id': [f'i{i}' for i in range(n)]}))
+        s.identifier = 'hvm-public'
+        s.stimulus_paths = {f'i{i}': f'/tmp/i{i}.png' for i in range(n)}
+        return s
+
+    def test_probe_identifier_differs_from_the_parent(self):
+        from brainscore_core.memory import _isolate_probe_identifier
+        parent = self._stimulus_set()
+        probe = _isolate_probe_identifier(parent.iloc[:1], parent)
+        assert probe.identifier != parent.identifier
+        assert parent.identifier == 'hvm-public'      # parent untouched
+
+    def test_probe_identifier_is_derived_and_stable(self):
+        from brainscore_core.memory import _isolate_probe_identifier
+        parent = self._stimulus_set()
+        first = _isolate_probe_identifier(parent.iloc[:1], parent).identifier
+        second = _isolate_probe_identifier(parent.iloc[:1], parent).identifier
+        assert first == second == 'hvm-public-memory-probe'
+
+    def test_identifierless_stimulus_set_passes_through(self):
+        import pandas as pd
+        from brainscore_core.memory import _isolate_probe_identifier
+        plain = pd.DataFrame({'stimulus_id': ['a', 'b']})
+        assert _isolate_probe_identifier(plain.iloc[:1], plain) is not None
+
+    def test_unsliceable_stimulus_set_is_not_renamed(self):
+        """When the probe *is* the full set, renaming it would rename the run."""
+        from brainscore_core.memory import _isolate_probe_identifier
+        parent = self._stimulus_set()
+        assert _isolate_probe_identifier(parent, parent).identifier == 'hvm-public'

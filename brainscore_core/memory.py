@@ -386,6 +386,30 @@ def _probe_regions(model, benchmark):
     return [None]
 
 
+
+def _isolate_probe_identifier(probe_stimuli, stimulus_set):
+    """Give the one-stimulus probe its own activation-cache identity.
+
+    Slicing a StimulusSet keeps the parent's ``identifier``, and activation
+    caches are keyed on that identifier rather than on the rows. Sharing it makes
+    the probe and the real run collide in both directions: with a cold cache the
+    probe stores a one-row assembly that the full run then reads back, and with a
+    warm cache the probe reads the full assembly. Either way the presentation
+    dimension does not match the stimulus set and packaging raises.
+
+    Renaming the probe keeps the two runs in separate cache entries. Returns the
+    input untouched if it carries no identifier to rename.
+    """
+    parent_identifier = getattr(stimulus_set, 'identifier', None)
+    if parent_identifier is None or probe_stimuli is stimulus_set:
+        return probe_stimuli
+    try:
+        probe_stimuli.identifier = f'{parent_identifier}-memory-probe'
+    except Exception:
+        pass
+    return probe_stimuli
+
+
 def _probe_feature_dim(model, benchmark, stimulus_set,
                        recording_target=None, probe_stimuli=None):
     """Discover the recording-layer feature width from ONE stimulus.
@@ -411,6 +435,7 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
             one = stimulus_set.iloc[:1] if hasattr(stimulus_set, 'iloc') else stimulus_set[:1]
         except Exception:
             one = stimulus_set
+        one = _isolate_probe_identifier(one, stimulus_set)
     can_record = hasattr(model, 'start_recording')
     time_bins = getattr(benchmark, 'timebins', None)
     regions = ([recording_target] if recording_target is not None
