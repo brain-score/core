@@ -1,6 +1,7 @@
 """Concrete Brain-Score subject implementation."""
 
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from types import MappingProxyType
+from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from .behavioral import BehavioralReadout
 from .capability_config import normalize_capability_config
@@ -141,14 +142,7 @@ class BrainScoreModel(Subject):
         self._model = model
         region_layer_map = region_layer_map or {}
         preprocessors = preprocessors or {}
-        self._region_layer_selectors: Dict[str, UnitSelector] = {
-            region: _promote_to_selector(value)
-            for region, value in region_layer_map.items()
-        }
-        self._region_layer_map_dict: Dict[str, str] = {
-            region: selector.layer_path
-            for region, selector in self._region_layer_selectors.items()
-        }
+        self._install_region_layer_map(region_layer_map)
         self._region_modality_map: Dict[str, str] = dict(
             region_modality_map or {})
         if self._region_modality_map:
@@ -201,9 +195,46 @@ class BrainScoreModel(Subject):
     def identifier(self) -> str:
         return self._identifier_str
 
+    def _install_region_layer_map(self, region_layer_map) -> None:
+        """Rebuild both region->selector and region->layer-path from one mapping.
+
+        The two are derived from the same source and must not drift, which is
+        why callers cannot edit either directly.
+        """
+        self._region_layer_selectors: Dict[str, UnitSelector] = {
+            region: _promote_to_selector(value)
+            for region, value in dict(region_layer_map).items()
+        }
+        self._region_layer_map_dict: Dict[str, str] = {
+            region: selector.layer_path
+            for region, selector in self._region_layer_selectors.items()
+        }
+
     @property
-    def region_layer_map(self) -> Dict[str, str]:
-        return dict(self._region_layer_map_dict)
+    def region_layer_map(self) -> Mapping[str, str]:
+        """Read-only view of region -> layer path.
+
+        Returned read-only on purpose. This used to hand back a fresh ``dict``,
+        so ``model.region_layer_map['IT'] = 'h.3'`` edited a throwaway copy and
+        did nothing — no error, no effect. That silently produced a whole layer
+        sweep in which every layer scored identically, because every run was
+        really reading the same layer.
+
+        Mutating the view now raises. Assign a complete mapping, or use
+        :meth:`set_region_layer` for one region; either keeps the selector and
+        layer-path forms in step.
+        """
+        return MappingProxyType(self._region_layer_map_dict)
+
+    @region_layer_map.setter
+    def region_layer_map(self, region_layer_map) -> None:
+        self._install_region_layer_map(region_layer_map)
+
+    def set_region_layer(self, region: str, value) -> None:
+        """Point one region at a layer path (or ``UnitSelector``)."""
+        updated = dict(self._region_layer_selectors)
+        updated[region] = value
+        self._install_region_layer_map(updated)
 
     @property
     def region_layer_selectors(self) -> Dict[str, "UnitSelector"]:

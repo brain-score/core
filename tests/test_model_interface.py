@@ -161,16 +161,60 @@ class TestBrainScoreModelConstruction:
         assert m.region_layer_map == {'V1': 'layer1', 'IT': 'layer4'}
         assert m.supported_modalities == {'vision'}
 
-    def test_region_layer_map_returns_copy(self):
-        m = BrainScoreModel(
+    @staticmethod
+    def _model(region_layer_map=None):
+        return BrainScoreModel(
             identifier='test',
             model=None,
-            region_layer_map={'V1': 'layer1'},
+            region_layer_map=region_layer_map or {'V1': 'layer1'},
             preprocessors={'vision': lambda m, s, **kw: None},
         )
-        rlm = m.region_layer_map
-        rlm['V1'] = 'hacked'
+
+    def test_region_layer_map_rejects_mutation(self):
+        """Editing the map in place must raise, not quietly do nothing.
+
+        This previously returned a fresh dict, so an in-place edit changed a
+        throwaway copy: no error, no effect. A layer sweep written that way
+        produced an identical score for every layer, because every run read the
+        layer the model was actually built with.
+        """
+        m = self._model()
+        with pytest.raises(TypeError):
+            m.region_layer_map['V1'] = 'hacked'
         assert m.region_layer_map['V1'] == 'layer1'
+
+    def test_region_layer_map_is_still_readable_like_a_dict(self):
+        m = self._model({'V1': 'layer1', 'IT': 'layer4'})
+        assert m.region_layer_map['IT'] == 'layer4'
+        assert set(m.region_layer_map) == {'V1', 'IT'}
+        assert dict(m.region_layer_map) == {'V1': 'layer1', 'IT': 'layer4'}
+        assert 'V1' in m.region_layer_map
+
+    def test_assigning_a_whole_map_works(self):
+        m = self._model()
+        m.region_layer_map = {'IT': 'layer4'}
+        assert dict(m.region_layer_map) == {'IT': 'layer4'}
+
+    def test_set_region_layer_updates_one_region(self):
+        m = self._model({'V1': 'layer1', 'IT': 'layer4'})
+        m.set_region_layer('IT', 'layer8')
+        assert m.region_layer_map == {'V1': 'layer1', 'IT': 'layer8'}
+
+    def test_setter_keeps_selectors_and_layer_paths_in_step(self):
+        """The two derived views must not drift — the reason direct edits are
+        refused in the first place."""
+        m = self._model()
+        m.set_region_layer('IT', 'layer4')
+        assert m.region_layer_map['IT'] == 'layer4'
+        assert m.region_layer_selectors['IT'].layer_path == 'layer4'
+        assert set(m.region_layer_map) == set(m.region_layer_selectors)
+
+    def test_recording_follows_a_reassigned_layer(self):
+        """The end the wart broke: changing the map must change what is read."""
+        m = self._model({'IT': 'layer1'})
+        m.set_region_layer('IT', 'layer9')
+        m.start_recording('IT')
+        assert m._recording_layers == ['layer9']
 
     def test_multiple_modalities(self):
         m = BrainScoreModel(
