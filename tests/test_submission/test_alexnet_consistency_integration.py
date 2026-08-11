@@ -232,7 +232,7 @@ class TestAlexNetConsistencyIntegration(unittest.TestCase):
             self.assertIsNotNone(requeried_meta, "Should return metadata along with model")
             self.assertEqual(requeried_meta.architecture, 'CNN')
             
-            logger.info("SUCCESS: Metadata correctly linked to alexnet model and can be requeried by identifier") 
+            logger.info("SUCCESS: Metadata correctly linked to alexnet model and can be required by identifier") 
             
         finally:
             # Clean up

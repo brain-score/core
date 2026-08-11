@@ -79,3 +79,10 @@ filterwarnings = [
 [tool.setuptools.package-data]
 # include bash files (e.g. 'test_plugin.sh') in package install
 "brainscore_core.plugin_management" = ["**"]
+
+[tool.codespell]
+# Ref: https://github.com/codespell-project/codespell#using-a-config-file
+skip = '.git*'
+check-hidden = true
+# ignore-regex = ''
+# ignore-words-list = ''
