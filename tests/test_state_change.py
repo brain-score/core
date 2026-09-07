@@ -254,10 +254,15 @@ class TestResetClearsPerturbations:
                 target=Selection(layer='blocks.10'),
                 perturbation=Perturbation(kind='zero'),
             ))
-        model.reset()  # should NOT raise
+        with pytest.warns(RuntimeWarning, match='still perturbed'):
+            model.reset()  # should NOT raise
         # h-0 and h-2 ran cleanly; h-1 raised but was still tolerated
         assert 'h-0' in cleanup_log and 'h-2' in cleanup_log
-        assert model._active_perturbations == {}
+        # h-1's cleanup failed, so that perturbation is still in effect. Its
+        # handle is deliberately retained: forgetting it would leave the model
+        # damaged while reporting nothing active. Only the succeeding two are
+        # deregistered.
+        assert list(model._active_perturbations) == ['h-1']
 
 
 class TestSelectiveReset:
@@ -343,3 +348,79 @@ class TestSyntheticAblationLifecycle:
         # Side effect undone
         assert model_state['output'] == 1.0
         assert applied.handle_id not in model._active_perturbations
+
+
+class TestCleanupFailuresAreNotLost:
+    """A cleanup that raises leaves the model perturbed.
+
+    Forgetting the handle in that case is worse than the failure itself: the
+    model reports nothing active while still being damaged, so every later
+    score is silently taken from a lesioned model.
+    """
+
+    @staticmethod
+    def _model_with(cleanups):
+        from brainscore_core.perturbation import PerturbationManager
+
+        class _Owner:
+            identifier = 'test'
+
+        manager = PerturbationManager(_Owner())
+        manager.active_perturbations.update(cleanups)
+        return manager
+
+    def test_failed_cleanup_keeps_its_handle(self):
+        def boom():
+            raise RuntimeError('hook already detached')
+
+        manager = self._model_with({'bad': boom})
+        with pytest.warns(RuntimeWarning, match='still perturbed'):
+            manager.reset()
+        assert 'bad' in manager.active_perturbations, (
+            'a handle whose cleanup failed must stay registered so reset can retry')
+
+    def test_one_failure_does_not_block_the_others(self):
+        ran = []
+
+        def boom():
+            raise RuntimeError('nope')
+
+        manager = self._model_with({'bad': boom, 'good': lambda: ran.append('good')})
+        with pytest.warns(RuntimeWarning):
+            manager.reset()
+        assert ran == ['good']
+        assert list(manager.active_perturbations) == ['bad']
+
+    def test_clean_reset_is_silent_and_empties_the_registry(self):
+        import warnings
+        manager = self._model_with({'a': lambda: None, 'b': lambda: None})
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')       # any warning fails the test
+            manager.reset()
+        assert manager.active_perturbations == {}
+
+    def test_retrying_reset_clears_a_handle_that_later_succeeds(self):
+        state = {'fail': True}
+
+        def flaky():
+            if state['fail']:
+                state['fail'] = False
+                raise RuntimeError('transient')
+
+        manager = self._model_with({'flaky': flaky})
+        with pytest.warns(RuntimeWarning):
+            manager.reset()
+        manager.reset()                          # second attempt succeeds
+        assert manager.active_perturbations == {}
+
+    def test_selective_reset_keeps_the_handle_when_undo_raises(self):
+        from brainscore_core.model_interface import StateChange
+
+        def boom():
+            raise RuntimeError('nope')
+
+        manager = self._model_with({'h1': boom})
+        with pytest.raises(RuntimeError):
+            manager.dispatch_state_change(StateChange(kind='reset', handle_id='h1'))
+        assert 'h1' in manager.active_perturbations, (
+            'a raising undo must not deregister the perturbation')

@@ -15,13 +15,35 @@ class PerturbationManager:
         self.active_perturbations: Dict[str, Callable[[], None]] = {}
 
     def reset(self) -> None:
+        """Undo every active perturbation.
+
+        One cleanup that raises must not prevent the others from running, so
+        each is attempted independently. A failed cleanup is *not* forgotten,
+        though: its handle stays registered and the failure is reported. A
+        cleanup that raised leaves the model still perturbed, so dropping the
+        handle silently would leave every later score computed on a damaged
+        model with nothing left to show it.
+        """
+        failures = []
         for handle_id, cleanup in list(self.active_perturbations.items()):
-            del handle_id
             try:
                 cleanup()
-            except Exception:
-                pass
-        self.active_perturbations.clear()
+            except Exception as error:                       # noqa: BLE001
+                failures.append((handle_id, error))
+            else:
+                self.active_perturbations.pop(handle_id, None)
+        if failures:
+            import warnings
+            detail = '; '.join(f'{handle!r}: {type(err).__name__}: {err}'
+                               for handle, err in failures)
+            warnings.warn(
+                f"{len(failures)} perturbation cleanup(s) failed, so this model "
+                f"is still perturbed and any score taken from it now is invalid. "
+                f"The handles remain registered and reset() can be retried: "
+                f"{detail}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def resolve_selection(self, state_change):
         """Resolve a ``UnitSelection`` target to a concrete ``Selection``."""
@@ -49,13 +71,17 @@ class PerturbationManager:
                     f"StateChange(kind='reset') requires handle_id to identify "
                     f"which perturbation to undo. Use model.reset() to clear all."
                 )
-            cleanup = self.active_perturbations.pop(handle_id, None)
+            cleanup = self.active_perturbations.get(handle_id)
             if cleanup is None:
                 raise KeyError(
                     f"No active perturbation with handle_id={handle_id!r}. "
                     f"Active: {list(self.active_perturbations.keys())}."
                 )
+            # Deregister only once the undo has actually succeeded; popping
+            # first would lose the handle to a raising cleanup and leave the
+            # model perturbed with no way to retry.
             cleanup()
+            self.active_perturbations.pop(handle_id, None)
             return None
 
         if owner._state_change_fn is None:
