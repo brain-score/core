@@ -80,3 +80,27 @@ def warn_on_drift():
             RuntimeWarning,
             stacklevel=2,
         )
+
+
+def describe_env():
+    """Per-dependency status, including the ones that are fine.
+
+    ``check_env_bounds`` reports only problems, which is what a warning needs.
+    A user asking "is my environment right?" needs to see the passing rows too,
+    otherwise silence is indistinguishable from nothing having been checked.
+
+    :return: rows of ``(package, installed or None, expected, ok)`` where ``ok``
+        is None for a package that is absent or has an unparseable version
+    """
+    rows = []
+    for pkg, ok, expected in _BOUNDS:
+        try:
+            installed = version(pkg)
+        except PackageNotFoundError:
+            rows.append((pkg, None, expected, None))
+            continue
+        try:
+            rows.append((pkg, installed, expected, bool(ok(_parse(installed)))))
+        except Exception:
+            rows.append((pkg, installed, expected, None))
+    return rows
