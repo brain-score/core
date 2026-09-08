@@ -119,20 +119,65 @@ class RandomSelection(UnitSelection):
     layer — the standard "is the effect specific, or just damage?" control.
     ``n_total`` is the layer's unit count, available as
     ``FunctionalSelection`` result ``metadata['n_recorded']``.
+
+    For subset recordings, pass ``population`` from the functional selection's
+    ``metadata['unit_population']``. Its entries are original layer indices;
+    ``n_total`` is the population size, not the largest original index.
     """
     layer: str
     n_units: int
     n_total: int
     seed: int = 0
+    population: Optional[List[int]] = None
 
     def resolve(self, model) -> 'Selection':
         import numpy as np
         k = min(self.n_units, self.n_total)
         rng = np.random.RandomState(self.seed)
-        idx = sorted(int(i) for i in rng.choice(self.n_total, size=k, replace=False))
+        population = (np.arange(self.n_total) if self.population is None
+                      else _validate_unit_indices(self.population))
+        if len(population) != self.n_total:
+            raise ValueError('n_total must match the declared unit population.')
+        idx = sorted(int(i) for i in rng.choice(population, size=k, replace=False))
         return Selection(layer=self.layer, indices=idx,
                          metadata={'selector': 'random', 'seed': self.seed,
-                                   'n_total': self.n_total})
+                                   'n_total': self.n_total,
+                                   'unit_population': population.tolist()})
+
+
+def _validate_unit_indices(values):
+    import operator
+    import numpy as np
+    try:
+        indices = np.asarray([operator.index(value) for value in values], dtype=int)
+    except TypeError as error:
+        raise ValueError('Original unit indices must be integers.') from error
+    if np.any(indices < 0) or len(np.unique(indices)) != len(indices):
+        raise ValueError('Original unit indices must be non-negative and unique within a layer.')
+    return indices
+
+
+def selection_unit_indices(assembly, model=None, recording_target=None):
+    """Map recorded positions to original units in a single layer.
+
+    Full-layer output retains the historical position convention. Subset
+    recordings must carry addresses from before subsetting, never renumbered
+    positions in the reduced assembly.
+    """
+    import numpy as np
+    for name in ('unit_index', 'neuron_number_in_layer', 'neuroid_num'):
+        try:
+            coord = assembly[name]
+        except KeyError:
+            continue
+        if coord.dims != ('neuroid',):
+            raise ValueError(f'{name} must have dims (neuroid,) for unit selection.')
+        return _validate_unit_indices(coord.values)
+    selector = getattr(model, 'region_layer_selectors', {}).get(recording_target)
+    if isinstance(selector, CompositeSelector) and any(
+            indices is not None for _, indices in selector.layers):
+        raise ValueError('Subset recording has no original unit_index coordinates.')
+    return np.arange(assembly.sizes['neuroid'])
 
 
 @dataclass
@@ -200,12 +245,16 @@ class FunctionalSelection(UnitSelection):
             order = np.argsort(score)[::-1][:self.n_units]
         else:
             order = np.where(score >= self.threshold)[0]
-        idx = sorted(int(i) for i in order)
         # the layer path the state_change_fn hooks — from the recorded coord
-        layer_path = self.recording_target
-        if 'layer' in asm.coords:
+        layer_path = getattr(model, 'region_layer_map', {}).get(
+            self.recording_target, self.recording_target)
+        try:
+            layer_values = asm['layer'].values
+        except KeyError:
+            layer_values = None
+        if layer_values is not None:
             uniq = list(dict.fromkeys(
-                str(x) for x in np.asarray(asm['layer'].values).ravel()))
+                str(x) for x in np.asarray(layer_values).ravel()))
             if len(uniq) == 1:
                 layer_path = uniq[0]
             elif len(uniq) > 1:
@@ -213,8 +262,11 @@ class FunctionalSelection(UnitSelection):
                     f"recording {self.recording_target!r} spans {len(uniq)} layers "
                     f"{uniq}; functional localization across a composite region "
                     f"isn't supported yet — record a single-layer region.")
+        population = selection_unit_indices(asm, model, self.recording_target)
+        idx = sorted(int(i) for i in population[order])
         return Selection(layer=layer_path, indices=idx,
                          metadata={'selector': 'functional', 'sign': self.sign,
                                    'contrast': self.contrast,
                                    'n_recorded': int(vals.shape[1]),
+                                   'unit_population': population.tolist(),
                                    'n_selected': len(idx)})

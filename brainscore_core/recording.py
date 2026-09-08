@@ -103,6 +103,31 @@ class Recorder:
         self.recording_layers = []
         self.recording_regions = []
         self.is_multi_region = False
+        self.composite_recording = False
+        self.time_bins = None
+
+    def snapshot(self):
+        """Copy all recording configuration, including raw-layer and idle states."""
+        from copy import deepcopy
+        return {key: deepcopy(value) for key, value in vars(self).items()
+                if key != 'owner'}
+
+    def restore(self, state):
+        for key, value in state.items():
+            setattr(self, key, value)
+
+    def regions_for_modality(self, modality):
+        if modality is None:
+            return list(self.recording_regions)
+        routing = self.owner._region_modality_map
+        return [region for region in self.recording_regions
+                if region not in routing
+                or canonical_modality(routing[region]) == canonical_modality(modality)]
+
+    def layers_for_region(self, region):
+        selector = self.owner._region_layer_selectors[region]
+        return (list(selector.layer_paths) if isinstance(selector, CompositeSelector)
+                else [selector.layer_path])
 
     def current_layers(self) -> List[str]:
         if self.recording_layers:
@@ -115,32 +140,26 @@ class Recorder:
                                    modality: str) -> List[str]:
         """Return the subset of ``layers`` that belong to ``modality``."""
         owner = self.owner
-        if not owner._region_modality_map:
+        if not owner._region_modality_map or not self.recording_regions:
             return list(layers)
-        modality = canonical_modality(modality)
-        layer_to_modality: Dict[str, str] = {}
-        for region, m in owner._region_modality_map.items():
-            layer_path = owner._region_layer_map_dict[region]
-            layer_to_modality.setdefault(layer_path, canonical_modality(m))
-        return [
-            layer for layer in layers
-            if layer_to_modality.get(layer, modality) == modality
-        ]
+        allowed = {layer for region in self.regions_for_modality(modality)
+                   for layer in self.layers_for_region(region)}
+        return [layer for layer in layers if layer in allowed]
 
-    def tag_neuroids_with_regions(self, assembly):
+    def tag_neuroids_with_regions(self, assembly, modality=None):
         """Map recorded layer provenance to a per-neuroid ``region`` coord."""
         import numpy as np
 
-        owner = self.owner
         assembly = self.ensure_layer_provenance(
             assembly,
-            self.current_layers(),
+            self.filter_layers_for_modality(self.current_layers(), modality)
+            if modality is not None else self.current_layers(),
             description="Multi-region neural output",
         )
         layer_to_regions: Dict[str, List[str]] = {}
-        for region in self.recording_regions:
-            layer = owner._region_layer_map_dict[region]
-            layer_to_regions.setdefault(layer, []).append(region)
+        for region in self.regions_for_modality(modality):
+            for layer in self.layers_for_region(region):
+                layer_to_regions.setdefault(layer, []).append(region)
 
         neuroid_layers = assembly['layer'].values
         neuroid_regions = np.array([
@@ -193,7 +212,7 @@ class Recorder:
 
         owner = self.owner
         blocks = []
-        for region in self.recording_regions:
+        for region in self.regions_for_modality(modality):
             selector = owner._region_layer_selectors[region]
             layer_paths = (list(selector.layer_paths)
                            if isinstance(selector, CompositeSelector)
@@ -204,12 +223,36 @@ class Recorder:
                 layer_paths,
                 description=f"Composite region {region!r} output",
             )
+            assembly = self.ensure_unit_indices(assembly)
             block = self.gather_composite_units(assembly, selector)
             n = block.sizes['neuroid']
             block = block.assign_coords(
                 region=('neuroid', np.array([region] * n)))
             blocks.append(block)
         return xr.concat(blocks, dim='neuroid')
+
+    @staticmethod
+    def ensure_unit_indices(assembly):
+        """Attach original per-layer positions BEFORE any composite subsetting."""
+        import numpy as np
+        try:
+            assembly['unit_index']
+            return assembly
+        except KeyError:
+            pass
+        for name in ('neuron_number_in_layer', 'neuroid_num'):
+            try:
+                coord = assembly[name]
+            except KeyError:
+                continue
+            if coord.dims == ('neuroid',):
+                return assembly.assign_coords(unit_index=('neuroid', coord.values))
+        counts = {}
+        indices = []
+        for layer in assembly['layer'].values:
+            indices.append(counts.get(layer, 0))
+            counts[layer] = indices[-1] + 1
+        return assembly.assign_coords(unit_index=('neuroid', np.asarray(indices)))
 
     def gather_composite_units(self, assembly, selector):
         """Keep the units selected from a possibly multi-layer assembly."""

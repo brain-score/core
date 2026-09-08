@@ -2,6 +2,7 @@
 
 from .base import Capability
 from .registry import register_capability
+from ..io_catalog import canonical_modality
 
 
 class NeuralEncodingCapability(Capability):
@@ -35,6 +36,17 @@ class NeuralEncodingCapability(Capability):
 
         layers = model._recorder.current_layers()
         modality = model._pick_modality(detected)
+        requested_modalities = {
+            model._region_modality_map[r] for r in model._recording_regions
+            if r in model._region_modality_map}
+        requested_modalities = {canonical_modality(m) for m in requested_modalities}
+        missing = requested_modalities - detected
+        if missing:
+            raise ValueError(f'Recording targets require missing input modalities: {sorted(missing)}.')
+        if len(requested_modalities) == 1:
+            modality = next(iter(requested_modalities))
+        elif len(requested_modalities) > 1 and not multi_modality:
+            raise ValueError('Recording targets span modalities; pass multi_modality=True.')
 
         # Guard BOTH paths: if regions ARE defined but none is active, the user
         # forgot start_recording (an empty region_layer_map is a legitimate
@@ -62,7 +74,7 @@ class NeuralEncodingCapability(Capability):
                 f"Stimulus set contains multiple supported modalities "
                 f"{sorted(detected)} for model '{model.identifier}'. "
                 f"Default process(..., multi_modality=False) will use "
-                f"'{modality}' via MODALITY_PRIORITY. Pass "
+                f"'{modality}' via recording-target routing or MODALITY_PRIORITY. Pass "
                 f"multi_modality=True to extract all supported modalities, "
                 f"or provide stimulus columns for only the modality you want.",
                 UserWarning,
@@ -71,9 +83,10 @@ class NeuralEncodingCapability(Capability):
         if (model._composite_recording
                 and model._supports_layer_extraction(modality)):
             return model._process_composite_regions(stimuli, modality)
+        layers = model._filter_layers_for_modality(layers, modality)
         assembly = model._extract_for_modality(stimuli, modality, layers)
         if model._is_multi_region and model._supports_layer_extraction(modality):
-            assembly = model._tag_neuroids_with_regions(assembly)
+            assembly = model._tag_neuroids_with_regions(assembly, modality)
         return assembly
 
 

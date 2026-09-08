@@ -141,6 +141,7 @@ class BehavioralReadout:
         saved_layers = owner._recording_layers
         saved_regions = owner._recording_regions
         saved_multi = owner._is_multi_region
+        saved_composite = owner._composite_recording
         saved_classifier = self.readout_classifier
         owner._recording_layer = owner._behavioral_readout_layer
         owner._recording_layers = (
@@ -149,6 +150,7 @@ class BehavioralReadout:
         )
         owner._recording_regions = []
         owner._is_multi_region = False
+        owner._composite_recording = False
         self.readout_classifier = None
         try:
             features = owner.process(stimuli)
@@ -157,6 +159,7 @@ class BehavioralReadout:
             owner._recording_layers = saved_layers
             owner._recording_regions = saved_regions
             owner._is_multi_region = saved_multi
+            owner._composite_recording = saved_composite
             self.readout_classifier = saved_classifier
 
         if 'presentation' in features.dims and 'neuroid' in features.dims:

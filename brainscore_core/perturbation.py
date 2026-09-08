@@ -51,14 +51,11 @@ class PerturbationManager:
         if not isinstance(target, UnitSelection):
             return state_change
         owner = self.owner
-        saved_regions = list(getattr(owner, '_recording_regions', []) or [])
-        saved_time_bins = owner._time_bins
+        saved_recording = owner._recorder.snapshot()
         try:
             resolved = target.resolve(owner)
         finally:
-            if saved_regions:
-                tgt = saved_regions if len(saved_regions) > 1 else saved_regions[0]
-                owner.start_recording(tgt, time_bins=saved_time_bins)
+            owner._recorder.restore(saved_recording)
         return replace(state_change, target=resolved)
 
     def dispatch_state_change(self, state_change):

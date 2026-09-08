@@ -245,3 +245,41 @@ def test_dispatch_restores_time_bins_after_localizer():
     model.process(StateChange(kind='ablation', target=_SwitchSelection(),
                               perturbation=Perturbation(kind='zero')))
     assert model._time_bins == [(0, 100)]            # restored, not None
+
+
+@pytest.mark.parametrize('initial', [None, 'raw.layer'])
+@pytest.mark.parametrize('fail', [False, True])
+def test_selection_restores_idle_and_raw_recording_even_on_failure(initial, fail):
+    class SwitchSelection(UnitSelection):
+        def resolve(self, model):
+            model.start_recording('IT', time_bins=[(0, 50)])
+            if fail:
+                raise RuntimeError('localizer failed')
+            return Selection('enc.1', [0])
+    model = _make_model(state_change_fn=_capturing_state_change_fn({}),
+                        region_layer_map={'IT': 'enc.1'})
+    if initial is not None:
+        with pytest.warns(UserWarning, match='raw layer'):
+            model.start_recording(initial, time_bins=[(1, 2)])
+    expected = model._recorder.snapshot()
+    event = StateChange('ablation', target=SwitchSelection(), perturbation=Perturbation('zero'))
+    if fail:
+        with pytest.raises(RuntimeError, match='localizer failed'):
+            model.process(event)
+    else:
+        model.process(event)
+    assert model._recorder.snapshot() == expected
+
+
+@pytest.mark.parametrize('population', [[4, 4], [-1, 4], [1.5, 4]])
+def test_random_selection_rejects_ambiguous_population(population):
+    with pytest.raises(ValueError, match='indices'):
+        RandomSelection('L', n_units=1, n_total=2, population=population).resolve(None)
+
+
+def test_subset_without_original_addresses_is_rejected():
+    from brainscore_core.selection import CompositeSelector
+    model = _FakeSubject(_localizer_assembly(n_neuro=2, discriminating=1))
+    model.region_layer_selectors = {'VWFA': CompositeSelector((('enc.5', (4, 1)),))}
+    with pytest.raises(ValueError, match='original unit_index'):
+        FunctionalSelection('VWFA', 'stim', (['word'], ['nonword']), n_units=1).resolve(model)

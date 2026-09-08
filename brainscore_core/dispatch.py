@@ -195,7 +195,9 @@ class InputDispatcher:
                     and not modality_layers
                     and owner._recording_regions):
                 continue
-            sub = owner._extract_for_modality(stimuli, modality, modality_layers)
+            sub = (owner._process_composite_regions(stimuli, modality)
+                   if owner._composite_recording else
+                   owner._extract_for_modality(stimuli, modality, modality_layers))
             if not hasattr(sub, 'dims') or 'neuroid' not in sub.dims:
                 raise TypeError(
                     f"multi_modality dispatch requires every preprocessor "
@@ -204,8 +206,8 @@ class InputDispatcher:
                     f"{type(sub).__name__}. Upgrade the preprocessor to a "
                     f"layer-aware extractor (TextWrapper / VLMVisionWrapper)."
                 )
-            if owner._is_multi_region:
-                sub = owner._tag_neuroids_with_regions(sub)
+            if owner._is_multi_region and not owner._composite_recording:
+                sub = owner._tag_neuroids_with_regions(sub, modality)
             n_neuroid = sub.sizes['neuroid']
             sub = sub.assign_coords(
                 modality=('neuroid', np.array([modality] * n_neuroid))

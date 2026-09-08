@@ -432,8 +432,8 @@ class BrainScoreModel(Subject):
                                 layers: List[str]):
         return self._dispatcher.process_multi_modality(stimuli, detected, layers)
 
-    def _tag_neuroids_with_regions(self, assembly):
-        return self._recorder.tag_neuroids_with_regions(assembly)
+    def _tag_neuroids_with_regions(self, assembly, modality=None):
+        return self._recorder.tag_neuroids_with_regions(assembly, modality)
 
     def _process_composite_regions(self, stimuli, modality):
         return self._recorder.process_composite_regions(stimuli, modality)
@@ -464,6 +464,24 @@ class BrainScoreModel(Subject):
         self._recorder.reset()
         self._behavioral.reset()
         self._perturbations.reset()
+        # Callable capabilities and extractors may own episode/history state.
+        # Reset each provider once, including bound-method registrations.
+        providers = [self._action_fn, self._generation_fn, self._activations_model,
+                     *self._preprocessors.values()]
+        seen, failures = set(), []
+        for provider in providers:
+            provider = getattr(provider, '__self__', provider)
+            if provider is None or provider is self or id(provider) in seen:
+                continue
+            seen.add(id(provider))
+            reset = getattr(provider, 'reset', None)
+            if callable(reset):
+                try:
+                    reset()
+                except Exception as error:
+                    failures.append(error)
+        if failures:
+            raise RuntimeError('A model provider failed to reset; the model is not clean.') from failures[0]
 
     def _resolve_selection(self, state_change: 'StateChange') -> 'StateChange':
         return self._perturbations.resolve_selection(state_change)
@@ -537,6 +555,7 @@ class BrainScoreModel(Subject):
             stimuli = StimulusSet(pd.DataFrame({
                 'sentence': text,
                 'stimulus_id': list(range(len(text))),
+                'context_id': ['passage'] * len(text),
             }))
             content_hash = hashlib.md5(
                 '|'.join(text).encode('utf-8')).hexdigest()[:12]
