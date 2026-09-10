@@ -30,7 +30,7 @@ from .execution_plan import ExecutionPlan, _positive_int as _validate_positive_i
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from .model_interface import UnifiedModel
+    from .model_interface import Subject
 
 
 class MemoryError(Exception):
@@ -501,7 +501,7 @@ def _get_n_presentations(benchmark, stimulus_set):
 
 
 def check_memory(
-    model: 'UnifiedModel',
+    model: 'Subject',
     benchmark,
     safety_factor: Optional[float] = None,
     feature_dim: Optional[int] = None,

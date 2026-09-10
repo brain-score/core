@@ -3,7 +3,7 @@ Behavioral readout for BrainScoreModel.
 
 Ports the `ProbabilitiesClassifier` pattern from `brainscore_vision.model_helpers
 .brain_transformation.behavior` into `brainscore_core` so behavioral readout is
-available to any UnifiedModel without depending on domain-specific code.
+available to any Subject without depending on domain-specific code.
 
 Usage (internal to BrainScoreModel):
     classifier = ProbabilitiesClassifier()
