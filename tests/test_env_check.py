@@ -13,7 +13,7 @@ def test_parse_leading_numeric():
 
 
 def test_pins_hold_at_targets(monkeypatch):
-    ok = {"transformers": "4.57.1", "scikit-learn": "1.5.2",
+    ok = {"transformers": "4.57.1", "scikit-learn": "1.7.2",
           "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: ok[p])
     assert _env_check.check_env_bounds() == []
@@ -21,7 +21,9 @@ def test_pins_hold_at_targets(monkeypatch):
 
 def test_pins_report_drift(monkeypatch):
     # transformers 5 is supported now, so 6 is the first version that drifts.
-    drifted = {"transformers": "6.0.0", "scikit-learn": "1.7.2",
+    # scikit-learn 1.8 is the first that drifts: it drops
+    # LogisticRegression(multi_class=...), which moves binary readout scores.
+    drifted = {"transformers": "6.0.0", "scikit-learn": "1.8.0",
                "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: drifted[p])
     drift = _env_check.check_env_bounds()
@@ -36,7 +38,7 @@ def test_transformers_5_is_within_bounds(monkeypatch):
     Guards the bound itself: this was <5 until the sliding window stopped
     depending on to_legacy_cache and registrations pinned their image processor.
     """
-    ok = {"transformers": "5.14.1", "scikit-learn": "1.5.2",
+    ok = {"transformers": "5.14.1", "scikit-learn": "1.7.2",
           "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: ok[p])
     assert _env_check.check_env_bounds() == []
@@ -60,7 +62,7 @@ def test_missing_package_is_skipped(monkeypatch):
 
 
 def test_transformers_just_below_shipped_floor_flagged(monkeypatch):
-    v = {"transformers": "4.56.2", "scikit-learn": "1.5.2",
+    v = {"transformers": "4.56.2", "scikit-learn": "1.7.2",
          "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: v[p])
     assert any("transformers" in d for d in _env_check.check_env_bounds())

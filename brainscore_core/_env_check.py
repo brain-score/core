@@ -2,10 +2,26 @@
 
 These are the version ranges scoring is *verified against* — deliberately looser
 than any single install pin (that's the environment file's job). Drift outside
-them silently breaks scoring: ``scikit-learn>=1.6`` changes
-``LogisticRegression(multi_class=...)`` semantics, so behavioral-readout scores
-change without error. This module warns loudly at import rather than letting a
-scored run be silently wrong.
+them silently breaks scoring. This module warns loudly at import rather than
+letting a scored run be silently wrong.
+
+``scikit-learn`` moved from 1.5 to 1.7.2 on 2026-09-10, matching the version
+``language/environment_lock.yml`` already locked. The 1.5 pin had made four
+registered benchmarks unrunnable — ``Pereira2018.{243,384}sentences-ridge``,
+``Blank2014-ridge`` and ``Fedorenko2016-ridge`` all route through
+``kfold='group'``, and upstream calls ``GroupKFold(shuffle=..., random_state=...)``,
+parameters that only exist from 1.6.
+
+The bump is score-neutral, which was checked rather than assumed:
+``LogisticRegression(multi_class='multinomial')`` is still honoured in 1.7.2 and
+returns bit-identical probabilities to 1.5.1 for both binary and multiclass
+fits. sklearn's own warning says removal was planned for 1.7; it actually
+slipped to **1.8**, which is why the upper bound is ``<1.8``. At 1.8 the
+argument disappears and binary problems become proper binary logistic fits
+(as if ``multi_class='ovr'``), which does move probabilities — measured on a
+seeded 400x30 binary fit, mid-range values shift from 0.0019 to 0.0076.
+Multiclass is unaffected. Crossing into 1.8 therefore needs the behavioral
+readouts re-measured, and is a deliberate step rather than a version bump.
 
 ``transformers`` 5 is now supported. The two things that blocked it are handled:
 ``DynamicCache.to_legacy_cache`` was removed, so the KV sliding window selects a
@@ -23,7 +39,7 @@ from importlib.metadata import version, PackageNotFoundError
 # (distribution name, ok(version_tuple) -> bool, human-readable bound)
 _BOUNDS = [
     ("transformers", lambda v: (4, 57) <= (v[0], v[1]) < (6, 0), ">=4.57,<6"),
-    ("scikit-learn", lambda v: (1, 5) <= (v[0], v[1]) < (1, 6), ">=1.5,<1.6"),
+    ("scikit-learn", lambda v: (1, 7) <= (v[0], v[1]) < (1, 8), ">=1.7,<1.8"),
     ("numpy", lambda v: (1, 21) <= (v[0], v[1]) < (2, 0), ">=1.21,<2"),
     ("xarray", lambda v: (v[0], v[1], v[2]) == (2022, 3, 0), "==2022.3.0"),
 ]
@@ -73,9 +89,9 @@ def warn_on_drift():
             "bounds (these are the versions scoring is verified against; the exact "
             "install pin is the environment file's job):\n  - "
             + "\n  - ".join(drift)
-            + "\nScoring may be SILENTLY WRONG (scikit-learn>=1.6 changes "
-            "LogisticRegression semantics, so behavioral-readout scores move "
-            "without erroring). Install the pinned environment "
+            + "\nScoring may be SILENTLY WRONG (scikit-learn>=1.8 drops "
+            "LogisticRegression(multi_class=...), so binary behavioral-readout "
+            "scores move without erroring). Install the pinned environment "
             "(environment-unified.yml) to fix.",
             RuntimeWarning,
             stacklevel=2,
