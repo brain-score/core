@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from .capabilities import enabled_capabilities
 from .events import EnvironmentStep, Message, OutputEvent, StateChange
+from .streaming import StreamEvent
 from .io_catalog import canonical_modality
 
 
@@ -64,6 +65,17 @@ class InputDispatcher:
 
     def process(self, input_event, multi_modality: bool = False) -> OutputEvent:
         owner = self.owner
+        if isinstance(input_event, StreamEvent):
+            from .io_catalog import validate, INPUT, OUTPUT
+            issues = validate(input_event.channel, input_event.payload, INPUT)
+            if issues:
+                raise ValueError('; '.join(issues))
+            output = self.process_capabilities(input_event, multi_modality)
+            if isinstance(output, StreamEvent):
+                issues = validate(output.channel, output.payload, OUTPUT)
+                if issues:
+                    raise ValueError('; '.join(issues))
+            return output
         for event_type, handler_name in owner._INPUT_HANDLERS:
             if isinstance(input_event, event_type):
                 return getattr(owner, handler_name)(input_event)
@@ -120,8 +132,10 @@ class InputDispatcher:
     def detect_modalities(self, stimuli) -> Set[str]:
         owner = self.owner
         detected: Set[str] = set()
+        from .io_catalog import stimulus_columns
+        columns = {**owner.COLUMN_TO_MODALITY, **stimulus_columns()}
         for col in stimuli.columns:
-            modality = owner.COLUMN_TO_MODALITY.get(col)
+            modality = columns.get(col)
             if modality is None:
                 continue
             modality = canonical_modality(modality)
@@ -134,7 +148,7 @@ class InputDispatcher:
         for m in owner.MODALITY_PRIORITY:
             if m in detected:
                 return m
-        return next(iter(detected))
+        return sorted(detected)[0]
 
     def supports_layer_extraction(self, modality: str) -> bool:
         owner = self.owner

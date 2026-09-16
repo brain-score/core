@@ -14,6 +14,21 @@ class Capability(ABC):
 
     identifier: str
     order: int = 1000
+    input_channels = frozenset()
+    output_channels = frozenset()
+
+    def reset(self, model, state) -> None:
+        """Release experiment state. Retain configuration needed by later calls."""
+        state.clear()
+
+    def supports_session(self, model, channels) -> bool:
+        """Opt into a complete requested output combination before execution."""
+        return False
+
+    def interact(self, model, session) -> None:
+        """Execute a session accepted by supports_session."""
+        raise NotImplementedError(self.identifier)
+
 
     def setup(self, model) -> Dict[str, Any]:
         """Return per-model state stored under ``model._capability_state``."""

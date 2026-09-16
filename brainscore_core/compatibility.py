@@ -129,6 +129,15 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
             f"{_format_channels(bench_required | bench_accepted)}."
         )
 
+    if getattr(benchmark, "uses_session", False):
+        probe = getattr(subject, "check_session_support", None)
+        if not callable(probe):
+            raise CompatibilityError("Session benchmark requires a session-support probe")
+        try:
+            probe(bench_requested)
+        except (ValueError, NotImplementedError) as error:
+            raise CompatibilityError(str(error)) from error
+
 
 def benchmark_required_input_channels(benchmark) -> Set[str]:
     """Return v2 required input channels, deriving from v1.5 modalities."""

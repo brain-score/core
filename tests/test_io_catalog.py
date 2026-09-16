@@ -83,7 +83,8 @@ class TestCheckPayload:
 
 
 class TestRegister:
-    def test_register_and_get_roundtrip(self):
+    def test_register_and_get_roundtrip(self, monkeypatch):
+        monkeypatch.setattr(io_catalog, "_CATALOG", dict(io_catalog._CATALOG))
         entry = CatalogEntry(
             name="pupil", kind=OUTPUT, carried_by="start_recording('pupil')",
             payload_contract="(time,) float diameter in mm",

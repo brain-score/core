@@ -192,6 +192,44 @@ class BrainScoreModel(Subject):
         self._backbone_id = backbone_id or identifier
 
     @property
+    def capability_config(self):
+        """Read-only registration configuration for external capability authors."""
+        return MappingProxyType(self._capability_config)
+
+    def capability_state(self, identifier):
+        """Per-model capability state, initialized by the registry before dispatch."""
+        return self._capability_state[identifier]
+
+    def _declared_capabilities(self):
+        from .capabilities import capability_registry
+        return [c for c in capability_registry.values() if c.enabled_for(self)]
+
+    @property
+    def in_channels(self):
+        return super().in_channels | set().union(
+            *(set(c.input_channels) for c in self._declared_capabilities()))
+
+    @property
+    def out_channels(self):
+        return super().out_channels | set().union(
+            *(set(c.output_channels) for c in self._declared_capabilities()))
+
+    def check_session_support(self, channels):
+        """Reject unsupported or ambiguous output combinations before consuming input."""
+        channels = frozenset(channels)
+        if not channels:
+            raise ValueError('A session must request at least one output channel.')
+        custom = [c for c in self._declared_capabilities()
+                  if c.supports_session(self, channels)]
+        if len(custom) > 1:
+            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in custom]}')
+        stock = (channels in ({'behavior'}, {'motor'}, {'perturbation'})
+                 or all(c.startswith('neural:') for c in channels))
+        if not custom and not stock:
+            raise NotImplementedError(f'No session handler for {sorted(channels)}')
+        return custom[0] if custom else None
+
+    @property
     def identifier(self) -> str:
         return self._identifier_str
 
@@ -375,6 +413,12 @@ class BrainScoreModel(Subject):
     def interact(self, session) -> None:
         """Drive a v2 streaming session through existing model paths."""
         requested_channels = _requested_output_channels(session)
+        custom = self.check_session_support(requested_channels)
+        if custom is not None:
+            from .capabilities.registry import _setup_once
+            _setup_once(self, custom)
+            custom.interact(self, session)
+            return
         if requested_channels == ["behavior"]:
             if getattr(session, "streaming", False):
                 _drive_behavior_session_streaming(self, session)
@@ -461,14 +505,26 @@ class BrainScoreModel(Subject):
                                     **kwargs)
 
     def reset(self) -> None:
-        self._recorder.reset()
-        self._behavioral.reset()
-        self._perturbations.reset()
+        failures = []
+        for component in (self._recorder, self._behavioral, self._perturbations):
+            try:
+                component.reset()
+            except Exception as error:
+                failures.append(error)
         # Callable capabilities and extractors may own episode/history state.
         # Reset each provider once, including bound-method registrations.
         providers = [self._action_fn, self._generation_fn, self._activations_model,
                      *self._preprocessors.values()]
-        seen, failures = set(), []
+        seen = set()
+        from .capabilities import capability_registry
+        for identifier, state in self._capability_state.items():
+            capability = capability_registry.get(identifier)
+            if capability is not None:
+                try:
+                    capability.reset(self, state)
+                    self._capability_setup_done.discard(identifier)
+                except Exception as error:
+                    failures.append(error)
         for provider in providers:
             provider = getattr(provider, '__self__', provider)
             if provider is None or provider is self or id(provider) in seen:

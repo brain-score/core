@@ -365,3 +365,11 @@ _SEED = [
 
 for _entry in _SEED:
     register(_entry)
+
+
+_STIMULUS_COLUMNS: Dict[str, str] = {}
+
+
+def stimulus_columns() -> Dict[str, str]:
+    """External stimulus-column bindings, returned as a copy."""
+    return dict(_STIMULUS_COLUMNS)

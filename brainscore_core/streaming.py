@@ -59,7 +59,10 @@ def parse_channel(name: str) -> tuple[str, str | None]:
 class Session(ABC):
     @abstractmethod
     def next_input(self) -> Optional[StreamEvent]:
-        """Return the next input event, or ``None`` when no input is ready."""
+        """Return the next input event, or ``None`` at end of input.
+
+        This is a synchronous contract. A live source waits for its next event
+        or raises on timeout; temporary unavailability must not return None."""
 
     @abstractmethod
     def emit(self, event: StreamEvent) -> None:

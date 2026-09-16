@@ -789,7 +789,8 @@ def test_environment_session_advances_after_motor_emit():
     first_step = session.next_input()
     assert first_step.step_num == 0
     assert session.input_events[0].channel == "observation"
-    assert session.next_input() is None
+    with pytest.raises(RuntimeError, match="Emit an action"):
+        session.next_input()
 
     session.emit(StreamEvent(
         channel="motor",

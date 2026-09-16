@@ -26,7 +26,13 @@ class EmbodiedActionCapability(Capability):
         # Validate camera payloads at the boundary (best-effort), so a malformed
         # frame is flagged here instead of failing deep inside the policy.
         issues = []
-        for cam_name, frame in (getattr(input_event, 'cameras', None) or {}).items():
+        observation = input_event.observation
+        cameras = getattr(input_event, 'cameras', None)
+        if isinstance(observation, dict) and observation.get('cameras') is not None:
+            cameras = observation['cameras']
+        if cameras is not None and not isinstance(cameras, dict):
+            raise ValueError('Environment cameras must be a name-to-CameraFrame mapping.')
+        for cam_name, frame in (cameras or {}).items():
             rgb = getattr(frame, 'rgb', None)
             if rgb is not None:
                 issues += [f"camera '{cam_name}': {m}"
