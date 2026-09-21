@@ -10,7 +10,7 @@ from typing import ForwardRef, get_args
 from brainscore_core.streaming import StreamEvent
 
 from brainscore_core.model_interface import (
-    Subject,
+    UnifiedModel,
     BrainScoreModel,
     InputEvent,
     OutputEvent,
@@ -59,8 +59,8 @@ def test_output_event_assembly_members_are_forward_refs():
     assert {f.__forward_arg__ for f in fwd} == {'NeuroidAssembly', 'BehavioralAssembly'}
 
 
-def test_subject_process_returns_output_event():
-    assert Subject.process.__annotations__.get('return') is OutputEvent
+def test_legacy_model_process_returns_output_event():
+    assert UnifiedModel.process.__annotations__.get('return') is OutputEvent
 
 
 def test_brainscoremodel_process_returns_output_event():
@@ -70,7 +70,7 @@ def test_brainscoremodel_process_returns_output_event():
 def test_process_input_is_annotated_input_event():
     """The ABC's input parameter is named input_event (not the old `stimuli`)
     and annotated InputEvent — the signature is honest about the generic input."""
-    sig = inspect.signature(Subject.process)
+    sig = inspect.signature(UnifiedModel.process)
     params = list(sig.parameters)
     assert params == ['self', 'input_event']
-    assert Subject.process.__annotations__.get('input_event') is InputEvent
+    assert UnifiedModel.process.__annotations__.get('input_event') is InputEvent

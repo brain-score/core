@@ -5,7 +5,7 @@ from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Uni
 
 from .behavioral import BehavioralReadout
 from .capability_config import normalize_capability_config
-from .contract import Subject, TaskContext
+from .contract import UnifiedModel, TaskContext
 from .dispatch import InputDispatcher, register_input_handler
 from .io_catalog import canonical_modality
 from .events import (
@@ -33,8 +33,8 @@ from .streaming_helpers import (
 )
 
 
-class BrainScoreModel(Subject):
-    """Compositional implementation of Subject (formerly UnifiedModel)."""
+class BrainScoreModel(UnifiedModel):
+    """Compositional subject with session and legacy typed evaluation paths."""
 
     COLUMN_TO_MODALITY: Dict[str, str] = {
         'image_file_name': 'vision',
@@ -397,7 +397,7 @@ class BrainScoreModel(Subject):
                 multi_modality: bool = False) -> OutputEvent:
         """Evaluate one input event and return the corresponding output event.
 
-        The single evaluation entry point; dispatch is by ``input_event`` type:
+        The legacy typed evaluation entry point; dispatch is by ``input_event`` type:
         a ``StimulusSet`` / ``MultimodalStimulusSet`` -> ``NeuroidAssembly`` of
         recorded activations (call ``start_recording`` first); a ``StateChange``
         -> ``PerturbationApplied`` (apply) or ``None`` (reset); an

@@ -2,10 +2,13 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
 from .io_catalog import modalities_to_input_channels
+
+if TYPE_CHECKING:
+    from .streaming import Session
 
 
 @dataclass
@@ -38,41 +41,61 @@ class TaskContext:
 
 
 class Subject(ABC):
+    """Minimal contract for a subject evaluated through a session.
+
+    Declare identity and supported channels, then implement ``interact`` to
+    consume inputs with ``session.next_input()`` and emit responses with
+    ``session.emit(event)``. A subject need not expose layers, modalities, or
+    legacy model methods. Declarations may be properties or class attributes.
+
+    ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
+    override it to clear memory and interventions between independent runs.
     """
-    Base interface for all Brain-Score subjects.
 
-    Renamed from ``UnifiedModel`` in v1.5. The interface describes a *subject*,
-    not specifically a model: every event and measurement is something you could
-    present to, or read from, a biological subject through a human harness, not
-    only a model. ``UnifiedModel`` remains a deprecated alias (defined below the
-    class) for one release so existing imports keep working unchanged.
+    @property
+    @abstractmethod
+    def identifier(self) -> str:
+        """Stable subject name."""
+        ...
 
-    Defines identity, lifecycle, and a single processing method.
-    Benchmarks call process(stimuli) for all evaluation. What the model
-    perceives is determined by the stimulus content. What the model
-    produces is determined by the measurement configuration (start_task
-    for behavioral, start_recording for neural).
+    @property
+    @abstractmethod
+    def in_channels(self) -> Set[str]:
+        """Input channels the subject can consume."""
+        ...
 
-    ## Two-tier modality declaration
+    @property
+    @abstractmethod
+    def out_channels(self) -> Set[str]:
+        """Output channels the subject can emit."""
+        ...
 
-    Models declare modality support at two tiers, mirroring the benchmark-side
-    contract (`required_modalities` / `available_modalities`):
+    @property
+    def required_channels(self) -> Set[str]:
+        """Inputs the subject cannot run without; none by default."""
+        return set()
 
-    - ``required_modalities``: HARD requirement. The stimulus set MUST contain
-      columns covering every modality in this set, or the compatibility check
-      rejects the pairing before any compute runs. Use this for models that
-      cannot produce a prediction at all without a particular input modality
-      (pure language models, pure video models, and models whose forward pass
-      requires all of vision+audio+text fused together, e.g. TRIBEv2-locked).
-    - ``available_modalities``: SOFT capability. Modalities the model CAN
-      consume if provided, but does not hard-require. A benchmark that
-      provides additional available modalities will surface a
-      ``CompatibilityWarning`` for modalities present in the stimuli that the
-      model cannot consume.
+    @abstractmethod
+    def interact(self, session: "Session") -> None:
+        """Consume session inputs and emit responses until the session ends."""
+        ...
 
-    The invariant ``required_modalities ⊆ available_modalities`` always holds.
-    The legacy ``supported_modalities`` property is kept as an alias for
-    ``available_modalities`` so older benchmarks continue to work.
+    def reset(self) -> None:
+        """Clear state between independent runs; stateless subjects do nothing."""
+        pass
+
+
+class UnifiedModel(Subject):
+    """Compatibility base for the older typed model interface.
+
+    Existing implementations retain ``process``, ``start_task``,
+    ``start_recording``, layer maps, and modality declarations. Channel defaults
+    are derived from those declarations. ``BrainScoreModel`` and domain adapters
+    provide session drivers over their existing computation paths.
+
+    New session-native implementations should inherit ``Subject`` directly.
+    ``UnifiedModel`` remains a ``Subject`` subclass, but is no longer an alias
+    for it: the legacy requirements must not constrain the native contract.
     """
 
     @property
@@ -211,11 +234,3 @@ class Subject(ABC):
             return str(self.identifier)
         except Exception:
             return type(self).__name__
-
-
-# Deprecated alias. ``UnifiedModel`` was the v1 name for the subject contract.
-# Renamed to ``Subject`` in v1.5 to make the interface subject-agnostic: a model
-# or a future human harness satisfies the same contract. Kept as an alias for one
-# release so existing imports (``from brainscore_core import UnifiedModel``) keep
-# working. New code should use ``Subject``.
-UnifiedModel = Subject

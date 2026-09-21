@@ -3,7 +3,7 @@ import pytest
 from brainscore_core.model_interface import BrainScoreModel, Subject, UnifiedModel
 
 
-class _ChannelSubject(Subject):
+class _ChannelSubject(UnifiedModel):
     def __init__(self):
         self._behavioral_readout_layer = "readout"
 
@@ -56,15 +56,15 @@ def test_subject_channel_properties_are_overridable():
     assert subject.required_channels == {"instruction"}
 
 
-def test_interact_default_is_non_abstract_and_clear():
+def test_legacy_interact_default_is_non_abstract_and_clear():
     subject = _ChannelSubject()
 
     with pytest.raises(NotImplementedError, match="no v2 interact\\(\\) path yet"):
         subject.interact(session=None)
 
 
-def test_existing_subject_subclass_still_instantiates_without_interact():
-    class ExistingSubject(Subject):
+def test_legacy_subclass_still_instantiates_without_interact():
+    class ExistingSubject(UnifiedModel):
         @property
         def identifier(self):
             return "existing"
@@ -100,5 +100,6 @@ def test_brainscore_model_gets_channel_identity_from_preprocessors():
     assert model.required_channels == set()
 
 
-def test_unifiedmodel_alias_still_resolves():
-    assert UnifiedModel is Subject
+def test_unifiedmodel_remains_a_subject():
+    assert issubclass(UnifiedModel, Subject)
+    assert UnifiedModel is not Subject

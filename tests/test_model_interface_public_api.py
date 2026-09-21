@@ -56,7 +56,7 @@ def test_model_interface_public_surface_snapshot():
                     if not name.startswith('_')}
 
     assert public_names == EXPECTED_PUBLIC_NAMES
-    assert model_interface.UnifiedModel is model_interface.Subject
+    assert issubclass(model_interface.UnifiedModel, model_interface.Subject)
 
 
 def test_brainscore_model_dispatch_order_snapshot():

@@ -6,7 +6,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .contract import Subject
+from .contract import Subject, UnifiedModel
 from .io_catalog import modalities_to_input_channels
 from .streaming import InMemorySession, Session, StreamEvent, parse_channel
 from .events import (
@@ -614,7 +614,8 @@ def _requested_output_channels(session) -> list[str]:
 
 
 def _has_native_interact(subject) -> bool:
-    return getattr(type(subject), "interact", None) is not Subject.interact
+    interact = getattr(type(subject), "interact", None)
+    return callable(interact) and interact not in (Subject.interact, UnifiedModel.interact)
 
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:

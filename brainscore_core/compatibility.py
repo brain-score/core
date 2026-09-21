@@ -46,7 +46,7 @@ from typing import Optional, Set
 
 from . import io_catalog
 from .io_catalog import canonical_modality, modalities_to_input_channels
-from .model_interface import Subject
+from .model_interface import Subject, UnifiedModel
 from .streaming import parse_channel
 
 
@@ -132,11 +132,15 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
     if getattr(benchmark, "uses_session", False):
         probe = getattr(subject, "check_session_support", None)
         if not callable(probe):
-            raise CompatibilityError("Session benchmark requires a session-support probe")
-        try:
-            probe(bench_requested)
-        except (ValueError, NotImplementedError) as error:
-            raise CompatibilityError(str(error)) from error
+            # Native subjects implement the session contract directly. The
+            # optional probe belongs to configurable compatibility wrappers.
+            if not (isinstance(subject, Subject) and not isinstance(subject, UnifiedModel)):
+                raise CompatibilityError("Session benchmark requires a session-support probe")
+        else:
+            try:
+                probe(bench_requested)
+            except (ValueError, NotImplementedError) as error:
+                raise CompatibilityError(str(error)) from error
 
 
 def benchmark_required_input_channels(benchmark) -> Set[str]:
@@ -215,6 +219,12 @@ def check_compatibility(model: Subject, benchmark) -> None:
     Emits :class:`DeprecationWarning` if the benchmark still sets the
     deprecated ``available_modalities`` field.
     """
+    # Native subjects declare channels, not modality names or layer maps.
+    # Keep the legacy checks unchanged for typed models and domain adapters.
+    if isinstance(model, Subject) and not isinstance(model, UnifiedModel):
+        check_channel_compatibility(model, benchmark)
+        return
+
     # canonicalize so aliases match (e.g. a benchmark requiring 'video' is
     # satisfied by a model reporting the canonical 'vision')
     model_available: Set[str] = {canonical_modality(m) for m in model.available_modalities}

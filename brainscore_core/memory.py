@@ -23,15 +23,12 @@ import logging
 import resource
 import sys
 import warnings
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from .execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
+from .contract import Subject, UnifiedModel
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from .model_interface import Subject
-
 
 class MemoryError(Exception):
     """Raised when estimated memory exceeds available resources."""
@@ -383,6 +380,12 @@ def _probe_regions(model, benchmark):
     region_map = getattr(model, 'region_layer_map', None)
     if region_map:
         return list(region_map.keys())
+    if isinstance(model, Subject) and not isinstance(model, UnifiedModel):
+        channels = getattr(benchmark, 'requested_output_channels', None)
+        if channels is None:
+            channels = model.out_channels
+        return [channel.split(':', 1)[1] for channel in sorted(channels)
+                if channel.startswith('neural:')] or [None]
     return [None]
 
 
@@ -449,7 +452,13 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
                 last_error = e
                 continue
         try:
-            result = model.process(one)
+            if isinstance(model, Subject) and not isinstance(model, UnifiedModel):
+                from .streaming_helpers import neural_response
+                if region is None:
+                    raise ValueError('Feature-width probe requires a neural output channel')
+                result = neural_response(model, one, record=region, time_bins=time_bins)
+            else:
+                result = model.process(one)
         except Exception as e:
             last_error = e
             continue

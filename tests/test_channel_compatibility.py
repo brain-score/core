@@ -28,14 +28,6 @@ class _Subject(Subject):
         return self._identifier
 
     @property
-    def region_layer_map(self):
-        return {}
-
-    @property
-    def supported_modalities(self):
-        return set()
-
-    @property
     def in_channels(self):
         return set(self._in_channels)
 
@@ -47,9 +39,8 @@ class _Subject(Subject):
     def required_channels(self):
         return set(self._required_channels)
 
-    def process(self, input_event):
+    def interact(self, session):
         self.process_called = True
-        return 0
 
 
 class _Benchmark:
