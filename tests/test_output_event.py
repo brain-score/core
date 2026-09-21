@@ -1,12 +1,13 @@
 """OutputEvent union contract.
 
 `process()` returns one of a declared set of output shapes, symmetric with
-InputEvent. These tests pin the contract so a new output type is added as a
-union member (no Subject ABC change). They are pure introspection — no model
+InputEvent. StreamEvent carries extension-defined outputs without growing the
+union or changing Subject for each new domain. These are introspection tests: no model
 weights, no BrainIO import — so they run anywhere.
 """
 import inspect
 from typing import ForwardRef, get_args
+from brainscore_core.streaming import StreamEvent
 
 from brainscore_core.model_interface import (
     Subject,
@@ -37,6 +38,7 @@ def test_output_event_has_the_current_members():
         'EnvironmentResponse',   # embodied step
         'PerturbationApplied',   # state-change acknowledgement
         'Message',               # communicative event (also an InputEvent member)
+        'StreamEvent',           # typed payload for external output extensions
     ]
 
 
@@ -47,6 +49,7 @@ def test_output_event_includes_concrete_runtime_types():
     args = get_args(OutputEvent)
     assert EnvironmentResponse in args
     assert PerturbationApplied in args
+    assert StreamEvent in args
 
 
 def test_output_event_assembly_members_are_forward_refs():
