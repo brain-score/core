@@ -3,7 +3,7 @@ from .benchmarks import Benchmark
 from .model_interface import (
     TaskContext,
     Subject,
-    UnifiedModel,  # deprecated alias for Subject
+    UnifiedModel,  # compatibility base for the legacy typed interface
     BrainScoreModel,
     UnitSelector,
     LayerSelector,

@@ -8,14 +8,14 @@ import warnings
 
 import pytest
 
-from brainscore_core.model_interface import Subject
+from brainscore_core.model_interface import UnifiedModel
 from brainscore_core.compatibility import (
     check_compatibility,
     CompatibilityWarning,
 )
 
 
-class _Model(Subject):
+class _Model(UnifiedModel):
     def __init__(self, available, region_map=None):
         self._av = set(available)
         self._rm = region_map or {}

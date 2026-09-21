@@ -8,8 +8,6 @@ API-CONTRACT.md and _DESIGN-CANON.md in the unified-model-interface-v2 vault.
 from dataclasses import MISSING, fields
 import inspect
 
-import pytest
-
 from brainscore_core import io_catalog
 from brainscore_core.contract import Subject
 from brainscore_core.streaming import Session, StreamEvent
@@ -35,20 +33,12 @@ PINNED_SEED_CHANNELS = {
 
 
 class _MinimalSubject(Subject):
-    @property
-    def identifier(self):
-        return "minimal-subject"
+    identifier = "minimal-subject"
+    in_channels = set()
+    out_channels = set()
 
-    @property
-    def region_layer_map(self):
-        return {}
-
-    @property
-    def supported_modalities(self):
-        return set()
-
-    def process(self, input_event):
-        return input_event
+    def interact(self, session):
+        pass
 
 
 def test_seed_channel_registry_matches_pinned_contract_surface():
@@ -106,12 +96,16 @@ def test_session_abc_contract_is_minimal():
 def test_subject_interact_and_reset_contract_are_pinned():
     assert hasattr(Subject, "interact")
     assert hasattr(Subject, "reset")
-    assert "interact" not in Subject.__abstractmethods__
+    assert Subject.__abstractmethods__ == {
+        "identifier", "in_channels", "out_channels", "interact",
+    }
     assert "reset" not in Subject.__abstractmethods__
 
     subject = _MinimalSubject()
-    with pytest.raises(NotImplementedError, match="no v2 interact"):
-        subject.interact(session=None)
+    assert subject.interact(session=None) is None
+    assert not hasattr(subject, "process")
+    assert not hasattr(subject, "region_layer_map")
+    assert not hasattr(subject, "supported_modalities")
     assert subject.reset() is None
 
 
