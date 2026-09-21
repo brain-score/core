@@ -138,8 +138,9 @@ class StateChangeSession(InMemorySession):
 class EnvironmentSession(Session):
     """Live closed-loop session over an environment reset/step API."""
 
-    def __init__(self, environment):
+    def __init__(self, environment, *, action_validator=None):
         self.environment = environment
+        self.action_validator = action_validator
         self.requested_output_channels = ("motor",)
         self.input_events: list[StreamEvent] = []
         self.emitted: list[StreamEvent] = []
@@ -150,8 +151,10 @@ class EnvironmentSession(Session):
         self._last_step: Optional[EnvironmentStep] = None
 
     def next_input(self) -> Optional[EnvironmentStep]:
-        if self._done or self._awaiting_emit:
+        if self._done:
             return None
+        if self._awaiting_emit:
+            raise RuntimeError("Emit an action before requesting the next observation")
         if not self._started:
             self._started = True
             self._pending_step = _environment_reset(self.environment)
@@ -168,18 +171,23 @@ class EnvironmentSession(Session):
     def emit(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
+        if not self._awaiting_emit or self._done:
+            raise RuntimeError("No observation is awaiting an action")
         if event.channel != "motor":
             raise ValueError(
                 f"EnvironmentSession.emit only supports 'motor'; "
                 f"got {event.channel!r}."
             )
+        action = _motor_action_payload(event.payload)
+        if self.action_validator is not None:
+            action = self.action_validator(action)
         self.emitted.append(event)
         self._awaiting_emit = False
         if _environment_step_terminates(self._last_step):
             self._done = True
             return
         self._pending_step = _environment_step(
-            self.environment, _motor_action_payload(event.payload)
+            self.environment, action
         )
         if self._pending_step is None:
             self._done = True
@@ -208,8 +216,8 @@ def state_change_session(state_change: StateChange) -> StateChangeSession:
     return StateChangeSession.from_state_change(state_change)
 
 
-def environment_session(environment) -> EnvironmentSession:
-    return EnvironmentSession(environment)
+def environment_session(environment, *, action_validator=None) -> EnvironmentSession:
+    return EnvironmentSession(environment, action_validator=action_validator)
 
 
 def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "IT",
@@ -624,9 +632,11 @@ def _drive_environment_session_via_process(
         session.emit(StreamEvent(
             channel="motor",
             payload=response,
-            t_ms=float(step.step_num),
+            t_ms=float(step.context.get("t_ms", step.step_num)),
             meta={
                 "driver": driver,
+                "time_source": step.context.get("time_source", "legacy_step_index"),
+                "time_inferred": step.context.get("time_inferred", True),
                 "step_num": step.step_num,
             },
         ))
@@ -1135,8 +1145,10 @@ def _environment_step_event(step: EnvironmentStep) -> StreamEvent:
     return StreamEvent(
         channel="observation",
         payload=step,
-        t_ms=float(step.step_num),
+        t_ms=float(step.context.get("t_ms", step.step_num)),
         meta={
+            "time_source": step.context.get("time_source", "legacy_step_index"),
+            "time_inferred": step.context.get("time_inferred", True),
             "step_num": step.step_num,
             "is_first": step.is_first,
             "is_last": step.is_last,

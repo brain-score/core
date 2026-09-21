@@ -8,10 +8,13 @@ from .base import Capability
 capability_registry: Dict[str, Capability] = {}
 
 
-def register_capability(capability: Capability) -> Capability:
+def register_capability(capability: Capability, *, replace: bool = False) -> Capability:
     """Register ``capability`` by identifier and return it."""
     if not getattr(capability, 'identifier', None):
         raise ValueError("Capability must define a non-empty identifier.")
+    previous = capability_registry.get(capability.identifier)
+    if previous is not None and previous is not capability and not replace:
+        raise ValueError(f"Capability {capability.identifier!r} already registered; use replace=True explicitly.")
     capability_registry[capability.identifier] = capability
     return capability
 

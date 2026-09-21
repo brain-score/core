@@ -6,6 +6,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+class PluginNotFoundError(AssertionError, KeyError):
+    """No plugin registration matches; construction errors are separate."""
+
+
 class ImportPlugin:
     """ import plugin and (optionally) install dependencies """
 
@@ -56,7 +60,8 @@ class ImportPlugin:
                     specified_plugin_dirname = plugin_dirname
                     plugin_registrations_count += 1
 
-        assert plugin_registrations_count > 0, f"No registrations found for {self.identifier}"
+        if plugin_registrations_count == 0:
+            raise PluginNotFoundError(f"No registrations found for {self.identifier}")
         assert plugin_registrations_count == 1, f"More than one registration found for {self.identifier}"
 
         return specified_plugin_dirname

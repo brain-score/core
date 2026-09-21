@@ -1,5 +1,6 @@
 """Input/output event dataclasses for the Brain-Score subject contract."""
 
+from .streaming import StreamEvent
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
@@ -297,6 +298,8 @@ def output_event_kind(output: 'OutputEvent') -> str:
     duck typing for the two forward-ref assembly types (whose concrete classes
     aren't imported in core) so it never requires a hard BrainIO import.
     """
+    if isinstance(output, StreamEvent):
+        return output.channel.split(':', 1)[0]
     if isinstance(output, EnvironmentResponse):
         return 'environment'
     if isinstance(output, Message):
@@ -343,7 +346,7 @@ def dispatch_metric(output: 'OutputEvent', metric_map: Dict[str, Any]):
 # until a second interactive modality makes the flattening costly.
 # StimulusSet is a forward ref to avoid a hard BrainIO dependency in core; the
 # runtime type check happens at dispatch time inside BrainScoreModel.process().
-InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message]  # type: ignore[name-defined]
+InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message, StreamEvent]  # type: ignore[name-defined]
 
 # Output event type for process(). Symmetric with InputEvent: every process()
 # call returns one of these members, and the union grows by ADDING a member when
@@ -361,4 +364,4 @@ InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message]  # type
 # change: MotorOutput (continuous motor regression, §2.4) and GeneratedSequence
 # (variable-length tokens + per-token logprobs).
 OutputEvent = Union['NeuroidAssembly', 'BehavioralAssembly',
-                    EnvironmentResponse, PerturbationApplied, Message]
+                    EnvironmentResponse, PerturbationApplied, Message, StreamEvent]
