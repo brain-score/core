@@ -12,6 +12,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 dependencies = [
+    "brainscore-metadata==0.1.0", # lightweight shared metadata contract
     "tqdm",
     "numpy>=1.21,<2.0",
     "boto3", # AWS S3 client for brainio lite
@@ -79,3 +80,6 @@ filterwarnings = [
 [tool.setuptools.package-data]
 # include bash files (e.g. 'test_plugin.sh') in package install
 "brainscore_core.plugin_management" = ["**"]
+
+[tool.setuptools.packages.find]
+include = ["brainscore_core*"]

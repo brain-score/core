@@ -130,6 +130,19 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
     plugin_info_dict["test_all_plugins"] = plugin_types_to_test_all(changed_plugin_related_files)
     plugin_info_dict["is_automergeable"] = (len(changed_non_plugin_files) + len(changed_plugin_related_files)) == 0
 
+    # Metadata proposals need repository review rather than plugin auto-merge.
+    # This check only reads data and never imports the submitted plugin.
+    from brainscore_metadata.contract import read_yaml, MetadataError
+    for filename in changed_files_list:
+        if filename.endswith(('/metadata.yaml', '/metadata.yml')) and Path(filename).is_file():
+            try:
+                document = read_yaml(Path(filename).read_bytes())
+            except (MetadataError, OSError):
+                plugin_info_dict['is_automergeable'] = False
+                continue
+            if isinstance(document, dict) and document.get('schema_version') == '2.0':
+                plugin_info_dict['is_automergeable'] = False
+
     return plugin_info_dict
 
 

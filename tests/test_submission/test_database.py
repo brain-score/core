@@ -254,3 +254,39 @@ class TestPublic(SchemaTest):
         # test
         public_benchmarks = public_benchmark_identifiers(domain='test')
         assert public_benchmarks == ["dummy_child1", "dummy_child2"]
+
+
+class TestPublishedMetadataGuard:
+    def test_published_identifier_cannot_use_legacy_writer(self):
+        from unittest.mock import MagicMock, patch
+        import pytest
+        from brainscore_core.submission import database
+        proxy = MagicMock()
+        proxy.obj = database.PostgresqlDatabase('unused')
+        proxy.execute_sql.side_effect = [
+            MagicMock(), MagicMock(fetchone=lambda: ('brainscore_model_metadata_publication',)),
+            MagicMock(fetchone=lambda: (1,)),
+        ]
+        with patch.object(database, 'database_proxy', proxy), patch.object(database, '_create_legacy_model_meta_entry') as writer:
+            with pytest.raises(ValueError, match='reviewed metadata PR'):
+                database.create_model_meta_entry('example', {'architecture': 'DCNN'})
+            writer.assert_not_called()
+
+    def test_database_without_publication_table_keeps_legacy_support(self):
+        from unittest.mock import MagicMock, patch
+        from brainscore_core.submission import database
+        proxy = MagicMock()
+        proxy.obj = database.PostgresqlDatabase('unused')
+        proxy.execute_sql.side_effect = [MagicMock(), MagicMock(fetchone=lambda: (None,))]
+        with patch.object(database, 'database_proxy', proxy), patch.object(database, '_create_legacy_model_meta_entry', return_value='legacy') as writer:
+            assert database.create_model_meta_entry('example', {'architecture': 'DCNN'}) == 'legacy'
+            writer.assert_called_once_with('example', {'architecture': 'DCNN'})
+
+    def test_v2_rejected_before_database_access(self):
+        from unittest.mock import patch
+        import pytest
+        from brainscore_core.submission import database
+        with patch.object(database, 'database_proxy') as proxy:
+            with pytest.raises(ValueError, match='trusted merged-PR publisher'):
+                database.create_model_meta_entry('example', {'model': {'parameter_count': 100}})
+            proxy.atomic.assert_not_called()

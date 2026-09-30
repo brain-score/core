@@ -8,8 +8,6 @@ import time
 import importlib
 
 from brainscore_core.submission.endpoints import MetadataEndpoint
-from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
-from brainscore_core.plugin_management.generate_benchmark_metadata import BenchmarkMetadataGenerator
 
 # allowed plugin types for metadata
 ALLOWED_PLUGINS = {
@@ -89,6 +87,14 @@ def validate_metadata_file(metadata_path):
     if not isinstance(data, dict):
         errors.append("Top-level structure must be a dictionary.")
         return errors, None
+
+    if data.get('schema_version') == '2.0':
+        try:
+            from brainscore_metadata import load
+            with open(metadata_path) as stream:
+                return [], load(stream.read())
+        except (ImportError, ValueError) as exc:
+            return [f"Metadata v2 validation failed: {exc}"], None
 
     # check that at least one allowed plugin type is present.
     found_plugin_type = False
@@ -185,11 +191,13 @@ def generate_metadata(plugin_dir, plugin_type, benchmark_type="neural", domain="
         return None
     
     if plugin_type == "models":
+        from brainscore_core.plugin_management.generate_model_metadata import ModelMetadataGenerator
         generator = ModelMetadataGenerator(plugin_dir, domain_plugin)
         model_list = generator.find_registered_models(plugin_dir)
         metadata_path = generator(model_list)
         metadata_path = metadata_path[0] if metadata_path else None
     elif plugin_type == "benchmarks":
+        from brainscore_core.plugin_management.generate_benchmark_metadata import BenchmarkMetadataGenerator
         generator = BenchmarkMetadataGenerator(plugin_dir, domain_plugin)
         benchmark_list = generator.find_registered_benchmarks(plugin_dir)
         metadata_path = generator(benchmark_list)
@@ -286,6 +294,10 @@ def main():
         with open("validated_metadata.json", "w") as f:
             json.dump(data, f)
         print("Validated metadata saved to validated_metadata.json", file=sys.stderr)
+
+    if data.get('schema_version') == '2.0':
+        print("Metadata v2 validated. Database publication is handled only by the merged-PR publisher.", file=sys.stderr)
+        return
 
     if args.db_connection:  # if metadata was altered, must upload to db on new connection
         print("Creating metadata endpoint...", file=sys.stderr)
