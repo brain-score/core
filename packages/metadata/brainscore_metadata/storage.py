@@ -152,11 +152,29 @@ def from_tables(tables, domain):
     return validate(document, domain)
 
 
-def legacy_projection(entry):
-    """Project v2 facts into legacy fields without inventing numeric values."""
-    result = dict(entry.get("legacy", {}))
+def legacy_projection(entry, previous=None):
+    """Preserve bootstrap values and project only explicit, lossless changes."""
+    legacy = entry.get("legacy", {})
+    if previous is None:
+        result = dict(legacy)
+    else:
+        old_legacy = previous.get("legacy", {})
+        result = {
+            key: legacy.get(key)
+            for key in legacy.keys() | old_legacy.keys()
+            if legacy.get(key) != old_legacy.get(key)
+        }
+
+    def project(key, path, value):
+        if value is None:
+            return
+        if previous is None:
+            result.setdefault(key, value)
+        elif get_path(entry, path) != get_path(previous, path):
+            result[key] = value
+
     count = get_path(entry, "/model/parameter_count")
-    result["total_parameter_count"] = count
+    project("total_parameter_count", "/model/parameter_count", count)
     family = get_path(entry, "/model/architecture/family")
     architecture = {
         "convolutional_neural_network": "DCNN",
@@ -164,18 +182,19 @@ def legacy_projection(entry):
         "recurrent_convolutional_neural_network": "Recurrent",
         "hybrid_convolutional_transformer": "Hybrid",
         "raw_pixels": "Pixels",
-    }.get(family, family)
-    result["architecture"] = architecture
+    }.get(family)
+    project("architecture", "/model/architecture/family", architecture)
     layers = get_path(entry, "/model/trainable_layers")
-    result["trainable_layers"] = (
+    layers = (
         int(layers)
         if isinstance(layers, str) and layers.isdigit() and int(layers) <= 2147483647
         else None
     )
+    project("trainable_layers", "/model/trainable_layers", layers)
     return result
 
 
-def from_legacy(values):
+def from_legacy(values, domain=None):
     """Preserve legacy siblings during file conversion; never claim verification."""
     entry = {
         "legacy": dict(values),
@@ -206,7 +225,9 @@ def from_legacy(values):
     if architecture:
         family = {
             "DCNN": "convolutional_neural_network",
-            "Transformer": "vision_transformer",
+            "Transformer": "vision_transformer"
+            if domain == "vision"
+            else "transformer",
         }.get(architecture, architecture)
         put_path(entry, "/model/architecture/family", family)
         entry["assertions"].append(

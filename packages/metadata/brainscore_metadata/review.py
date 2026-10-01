@@ -64,19 +64,38 @@ def submission_author(pr):
     return match.group(1).lower() if match else ""
 
 
+def review_exclusions(pr, commits):
+    """A PR author, submitter, or commit author/committer cannot review it."""
+    # GitHub caps this endpoint at 250 commits even when pagination succeeds.
+    if len(commits) >= 250 or pr.get("commits", len(commits)) != len(commits):
+        raise MetadataError(
+            "Cannot verify every PR commit author; use a smaller metadata PR"
+        )
+    excluded = {pr["user"]["login"].lower(), submission_author(pr)}
+    for commit in commits:
+        for role in ("author", "committer"):
+            user = commit.get(role) or {}
+            if user.get("login"):
+                excluded.add(user["login"].lower())
+    return excluded
+
+
 def override(pr, repository):
     if "metadata-source-override" not in {
         label["name"] for label in pr.get("labels", [])
     }:
         return False
     latest = {}
+    excluded = review_exclusions(
+        pr, pages(f"/repos/{repository}/pulls/{pr['number']}/commits")
+    )
     for review in pages(f"/repos/{repository}/pulls/{pr['number']}/reviews"):
         if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
             latest[review["user"]["login"]] = review
     for user, review in latest.items():
         if (
             review["user"].get("type") != "User"
-            or user.lower() in {pr["user"]["login"].lower(), submission_author(pr)}
+            or user.lower() in excluded
             or review["state"] != "APPROVED"
             or review.get("commit_id") != pr["head"]["sha"]
         ):
@@ -117,8 +136,6 @@ def check_pr(repository, number, domain, root, head_sha=None):
             raise MetadataError(
                 "Metadata must be inside one registered plugin directory"
             )
-        if item["status"] in {"renamed", "removed"}:
-            raise MetadataError("Metadata removal/rename requires a separate migration")
         raw = content(pr["head"]["repo"]["full_name"], path, pr["head"]["sha"])
         header = read_yaml(raw)
         old_raw = (
@@ -135,6 +152,14 @@ def check_pr(repository, number, domain, root, head_sha=None):
                 raise MetadataError("Metadata cannot be downgraded to a legacy schema")
             continue
         after = load(raw, domain)
+        if item["status"] == "added":
+            needs_override = True
+            findings.append(
+                {
+                    "path": path,
+                    "migration": "initial v2 publication requires maintainer review",
+                }
+            )
         if item["status"] != "added":
             if was_v2:
                 before = load(old_raw, domain)

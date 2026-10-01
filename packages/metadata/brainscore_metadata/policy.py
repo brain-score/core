@@ -24,11 +24,11 @@ def editability(entry, path):
     kinds = {source_kind(source) for source in sources.values()}
     if "paper" in kinds or "huggingface" in kinds:
         return False, "Backed by a paper or Hugging Face source."
-    if "unreviewed" in kinds:
-        return False, "Source review is needed before this field can be edited."
     value = get_path(entry, path)
     if value is None or value == "" or value == []:
         return True, "Undocumented; add a source with your proposal."
+    if "unreviewed" in kinds:
+        return False, "Source review is needed before this field can be edited."
     if kinds and kinds <= {"other"}:
         return True, "Editable with a supporting source."
     return False, "Source review is needed before this field can be edited."
@@ -46,11 +46,20 @@ def protected_changes(before, after):
             if not editability(before, path)[0]:
                 changed.append(path)
             # Self-certifying a field as verified also requires reviewer override.
-            elif (
-                any(a["status"] == "verified" for a in new_evidence[0])
-                and old_evidence != new_evidence
-            ):
+            elif is_verified(after, path):
                 changed.append(path)
     if before.get("legacy", {}) != after.get("legacy", {}):
         changed.append("/legacy")
     return sorted(set(changed))
+
+
+def is_verified(entry, path):
+    """A field-specific assertion overrides an inherited status, not its sources."""
+    assertions = [
+        a
+        for a in entry.get("assertions", [])
+        if path == a["path"] or path.startswith(a["path"] + "/")
+    ]
+    if not assertions:
+        return False
+    return max(assertions, key=lambda a: len(a["path"]))["status"] == "verified"
