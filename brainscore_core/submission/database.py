@@ -118,6 +118,27 @@ def safe_create_model_meta_entry(model_identifier: str, metadata: dict, max_atte
 
 
 def create_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
+    """Keep legacy jobs from overwriting metadata owned by the PR publisher."""
+    if set(metadata) & {'model', 'training', 'data', 'eval', 'io', 'provenance', 'legal', 'people', 'use', 'lineage', 'sources', 'assertions', 'legacy'}:
+        raise ValueError("Metadata v2 may only be written by the trusted merged-PR publisher")
+    with database_proxy.atomic():
+        if isinstance(database_proxy.obj, PostgresqlDatabase):
+            # Shared with the website publisher and CSV bootstrap command.
+            database_proxy.execute_sql('SELECT pg_advisory_xact_lock(%s)', (67256020,))
+            exists = database_proxy.execute_sql(
+                "SELECT to_regclass('brainscore_model_metadata_publication')"
+            ).fetchone()[0]
+            if exists:
+                published = database_proxy.execute_sql(
+                    "SELECT 1 FROM brainscore_model_metadata_publication "
+                    "WHERE lower(identifier)=lower(%s) LIMIT 1", (model_identifier,)
+                ).fetchone()
+                if published:
+                    raise ValueError("Repository-published metadata requires a reviewed metadata PR")
+        return _create_legacy_model_meta_entry(model_identifier, metadata)
+
+
+def _create_legacy_model_meta_entry(model_identifier: str, metadata: dict) -> ModelMeta:
     """
     Given a model identifier and a metadata dict, get or create a ModelMeta record.
     The metadata dict can include keys such as architecture, model_family, etc.

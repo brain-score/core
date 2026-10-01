@@ -158,6 +158,9 @@ class MetadataEndpoint:
         with open(metadata_path, 'r') as f:
             data = yaml.safe_load(f)
 
+        if data.get('schema_version') == '2.0':
+            raise ValueError("Metadata v2 may only be written by the trusted merged-PR publisher")
+
         if plugin_type not in data:
             raise ValueError(f"Expected top-level key '{plugin_type}' in metadata file.")
 

@@ -122,3 +122,19 @@ class TestHandleMetadata:
             
             with pytest.raises(SystemExit):
                 create_metadata_pr(tmp_dir, branch_name="test-branch")
+
+
+def test_v2_metadata_is_validated_but_rejected_by_legacy_endpoint(tmp_path):
+    from brainscore_core.submission.endpoints import MetadataEndpoint
+    from brainscore_core.metadata import dump
+    path = tmp_path / 'metadata.yaml'
+    path.write_text(dump({'schema_version': '2.0', 'domain': 'vision',
+                          'models': {'example': {'model': {'parameter_count': 100}}}}))
+    errors, data = validate_metadata_file(path)
+    assert errors == []
+    assert data['schema_version'] == '2.0'
+    endpoint = MetadataEndpoint.__new__(MetadataEndpoint)
+    with patch('brainscore_core.submission.endpoints.create_model_meta_entry') as writer:
+        with pytest.raises(ValueError, match='trusted merged-PR publisher'):
+            endpoint.process_metadata(str(tmp_path), 'models', 'vision')
+        writer.assert_not_called()

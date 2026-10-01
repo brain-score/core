@@ -130,6 +130,11 @@ def parse_plugin_changes(changed_files: str, domain_root: str) -> dict:
     plugin_info_dict["test_all_plugins"] = plugin_types_to_test_all(changed_plugin_related_files)
     plugin_info_dict["is_automergeable"] = (len(changed_non_plugin_files) + len(changed_plugin_related_files)) == 0
 
+    # Metadata proposals need repository review rather than plugin auto-merge.
+    # Include deletions and downgrades, even when the checkout has no head file.
+    if any(filename.endswith(('/metadata.yaml', '/metadata.yml')) for filename in changed_files_list):
+        plugin_info_dict['is_automergeable'] = False
+
     return plugin_info_dict
 
 

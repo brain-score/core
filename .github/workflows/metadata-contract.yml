@@ -1,0 +1,24 @@
+name: Metadata contract
+on:
+  pull_request:
+    paths: ['brainscore_core/**', 'tests/test_metadata/**', 'pyproject.toml', 'MANIFEST.in', '.github/workflows/metadata-contract.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install build
+      - run: python -m build
+      - run: pip install dist/*.whl
+      - name: Check the installed wheel outside the source checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m brainscore_core.metadata.cli --help
+          python -m brainscore_core.metadata.review --help
+          python -m pip check
+          python -m unittest discover -s "$GITHUB_WORKSPACE/tests/test_metadata" -v

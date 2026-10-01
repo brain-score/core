@@ -1,5 +1,5 @@
 from peewee import Proxy, Model as PeeweeModel, CharField, ForeignKeyField, IntegerField, BooleanField, DateTimeField, \
-    FloatField, TextField, PrimaryKeyField
+    FloatField, TextField, PrimaryKeyField, BigIntegerField
 
 database_proxy = Proxy()
 
@@ -91,13 +91,13 @@ class ModelMeta(PeeweeBase):
     model = ForeignKeyField(column_name='model_id', field='id', model=Model, primary_key=True)
     architecture = CharField(max_length=100, null=True, default=None)
     model_family = CharField(max_length=100, null=True, default=None)
-    total_parameter_count = IntegerField(null=True, default=None)
+    total_parameter_count = BigIntegerField(null=True, default=None)
     total_layers = IntegerField(null=True, default=None)
     training_dataset = CharField(max_length=100, null=True, default=None)
     task_specialization = CharField(max_length=100, null=True, default=None)
     brainscore_link = CharField(max_length=256, null=True, default=None)
     hugging_face_link = CharField(max_length=256, null=True, default=None)
-    trainable_parameter_count = IntegerField(null=True, default=None)
+    trainable_parameter_count = BigIntegerField(null=True, default=None)
     trainable_layers = IntegerField(null=True, default=None)
     model_size_mb = FloatField(null=True, default=None)
     extra_notes = CharField(max_length=1000, null=True, default=None)

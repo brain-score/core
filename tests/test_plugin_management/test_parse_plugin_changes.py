@@ -293,3 +293,21 @@ class TestIsPluginOnly:
 
         # First value: modifies_plugins
         assert return_values == "False"
+
+
+def test_v2_metadata_cannot_auto_merge(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = Path('brainscore_core/models/example/metadata.yaml')
+    path.parent.mkdir(parents=True)
+    path.write_text('schema_version: "2.0"\ndomain: vision\nmodels: {example: {}}\n')
+    result = parse_plugin_changes(str(path), 'brainscore_core')
+    assert result['is_automergeable'] is False
+
+
+def test_deleted_or_downgraded_metadata_cannot_auto_merge(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = Path('brainscore_core/models/example/metadata.yaml')
+    assert parse_plugin_changes(str(path), 'brainscore_core')['is_automergeable'] is False
+    path.parent.mkdir(parents=True)
+    path.write_text('models: {example: {architecture: DCNN}}\n')
+    assert parse_plugin_changes(str(path), 'brainscore_core')['is_automergeable'] is False

@@ -13,6 +13,26 @@ See the [Documentation](https://brain-score-core.readthedocs.io) for more detail
 Brain-Score is made by and for the community. To contribute,
 please [send in a pull request](https://github.com/brain-score/core/pulls).
 
+## Shared metadata contract
+
+`brainscore_core.metadata` contains the YAML contract, source policy, conversion,
+and review checks used by the website and domain workflows. It is included in
+the normal core distribution; no separate metadata package needs publishing.
+Importing metadata does not load core's scoring modules. Existing imports of
+`Metric`, `Score`, and `Benchmark` remain supported and load on demand.
+
+```sh
+python -m pip install .
+python -m brainscore_core.metadata.cli --help
+python -m brainscore_core.metadata.review --help
+python -m unittest discover -s tests/test_metadata -v
+```
+
+Consumers install core from a full approved Git commit SHA supplied through
+`METADATA_CORE_REF`. Merge the core changes before configuring that pin in the
+website build and domain workflows. Keep metadata publication disabled until
+database migrations, review protections, and the dev rehearsal are complete.
+
 ## License
 
 MIT license
