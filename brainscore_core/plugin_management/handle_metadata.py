@@ -90,7 +90,7 @@ def validate_metadata_file(metadata_path):
 
     if data.get('schema_version') == '2.0':
         try:
-            from brainscore_metadata import load
+            from brainscore_core.metadata import load
             with open(metadata_path) as stream:
                 return [], load(stream.read())
         except (ImportError, ValueError) as exc:

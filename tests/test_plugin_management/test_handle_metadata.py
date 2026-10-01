@@ -126,7 +126,7 @@ class TestHandleMetadata:
 
 def test_v2_metadata_is_validated_but_rejected_by_legacy_endpoint(tmp_path):
     from brainscore_core.submission.endpoints import MetadataEndpoint
-    from brainscore_metadata import dump
+    from brainscore_core.metadata import dump
     path = tmp_path / 'metadata.yaml'
     path.write_text(dump({'schema_version': '2.0', 'domain': 'vision',
                           'models': {'example': {'model': {'parameter_count': 100}}}}))

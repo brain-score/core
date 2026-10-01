@@ -12,7 +12,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 dependencies = [
-    "brainscore-metadata==0.1.0", # lightweight shared metadata contract
+    "PyYAML>=6.0.3,<7", # metadata contract
     "tqdm",
     "numpy>=1.21,<2.0",
     "boto3", # AWS S3 client for brainio lite
@@ -83,3 +83,6 @@ filterwarnings = [
 
 [tool.setuptools.packages.find]
 include = ["brainscore_core*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__/*", "*.pyc"]

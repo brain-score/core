@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from brainscore_metadata import (
+from brainscore_core.metadata import (
     load,
     dump,
     validate,
@@ -8,7 +8,7 @@ from brainscore_metadata import (
     protected_changes,
     editability,
 )
-from brainscore_metadata.storage import to_tables
+from brainscore_core.metadata.storage import to_tables
 
 
 def fixture():
@@ -101,7 +101,7 @@ class ContractTests(unittest.TestCase):
 class ReviewTests(unittest.TestCase):
     def test_schema_downgrade_and_renaming_outside_root_rejected(self):
         from unittest.mock import patch
-        from brainscore_metadata.review import check_pr
+        from brainscore_core.metadata.review import check_pr
 
         pr = {
             "base": {"repo": {"full_name": "brain-score/vision"}, "sha": "base"},
@@ -117,10 +117,10 @@ class ReviewTests(unittest.TestCase):
             },
         ]:
             with (
-                patch("brainscore_metadata.review.api", return_value=pr),
-                patch("brainscore_metadata.review.pages", return_value=[item]),
+                patch("brainscore_core.metadata.review.api", return_value=pr),
+                patch("brainscore_core.metadata.review.pages", return_value=[item]),
                 patch(
-                    "brainscore_metadata.review.content",
+                    "brainscore_core.metadata.review.content",
                     side_effect=["models: {}", dump(fixture())],
                 ),
             ):
