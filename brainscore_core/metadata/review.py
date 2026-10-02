@@ -4,7 +4,6 @@ import argparse
 import base64
 import json
 import os
-import re
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 from .contract import load, MetadataError, MAX_BYTES
@@ -47,66 +46,6 @@ def content(repository, path, ref):
     return base64.b64decode(value["content"]).decode()
 
 
-def submission_author(pr):
-    """Exclude the verified contributor encoded in an App-created branch."""
-    head = pr.get("head", {})
-    if (
-        pr.get("user", {}).get("type") != "Bot"
-        or not head.get("repo", {}).get("full_name")
-        or head["repo"]["full_name"]
-        != pr.get("base", {}).get("repo", {}).get("full_name")
-    ):
-        return ""
-    match = re.fullmatch(
-        r"web_metadata_[1-9][0-9]*_([A-Za-z0-9-]{1,39})_[a-f0-9]{20}/update_metadata",
-        head.get("ref", ""),
-    )
-    return match.group(1).lower() if match else ""
-
-
-def review_exclusions(pr, commits):
-    """A PR author, submitter, or commit author/committer cannot review it."""
-    # GitHub caps this endpoint at 250 commits even when pagination succeeds.
-    if len(commits) >= 250 or pr.get("commits", len(commits)) != len(commits):
-        raise MetadataError(
-            "Cannot verify every PR commit author; use a smaller metadata PR"
-        )
-    excluded = {pr["user"]["login"].lower(), submission_author(pr)}
-    for commit in commits:
-        for role in ("author", "committer"):
-            user = commit.get(role) or {}
-            if user.get("login"):
-                excluded.add(user["login"].lower())
-    return excluded
-
-
-def override(pr, repository):
-    if "metadata-source-override" not in {
-        label["name"] for label in pr.get("labels", [])
-    }:
-        return False
-    latest = {}
-    excluded = review_exclusions(
-        pr, pages(f"/repos/{repository}/pulls/{pr['number']}/commits")
-    )
-    for review in pages(f"/repos/{repository}/pulls/{pr['number']}/reviews"):
-        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-            latest[review["user"]["login"]] = review
-    for user, review in latest.items():
-        if (
-            review["user"].get("type") != "User"
-            or user.lower() in excluded
-            or review["state"] != "APPROVED"
-            or review.get("commit_id") != pr["head"]["sha"]
-        ):
-            continue
-        if api(f"/repos/{repository}/collaborators/{quote(user)}/permission").get(
-            "permission"
-        ) in {"write", "maintain", "admin"}:
-            return True
-    return False
-
-
 def check_pr(repository, number, domain, root, head_sha=None):
     from .contract import read_yaml
 
@@ -118,7 +57,6 @@ def check_pr(repository, number, domain, root, head_sha=None):
             "The PR head changed; rerun validation for the latest revision"
         )
     findings = []
-    needs_override = False
     for item in pages(f"/repos/{repository}/pulls/{number}/files"):
         path = item["filename"]
         previous = item.get("previous_filename", "")
@@ -153,11 +91,10 @@ def check_pr(repository, number, domain, root, head_sha=None):
             continue
         after = load(raw, domain)
         if item["status"] == "added":
-            needs_override = True
             findings.append(
                 {
                     "path": path,
-                    "migration": "initial v2 publication requires maintainer review",
+                    "migration": "initial v2 publication requires a merged PR",
                 }
             )
         if item["status"] != "added":
@@ -170,24 +107,18 @@ def check_pr(repository, number, domain, root, head_sha=None):
                 for key, entry in before["models"].items():
                     changed = protected_changes(entry, after["models"][key])
                     if changed:
-                        needs_override = True
                         findings.append(
                             {"path": path, "model": key, "protected_fields": changed}
                         )
             else:
-                needs_override = True
                 findings.append(
                     {
                         "path": path,
-                        "migration": "legacy-to-v2 conversion requires maintainer review",
+                        "migration": "legacy-to-v2 conversion requires a merged PR",
                     }
                 )
         findings.append(
             {"path": path, "models": list(after["models"]), "status": "valid"}
-        )
-    if needs_override and not override(pr, repository):
-        raise MetadataError(
-            "Protected metadata needs the metadata-source-override label and approval by a maintainer on the current PR revision"
         )
     return findings
 

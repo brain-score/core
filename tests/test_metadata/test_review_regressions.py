@@ -4,52 +4,65 @@ from unittest.mock import patch
 
 from brainscore_core.metadata import editability, protected_changes
 from brainscore_core.metadata.storage import legacy_projection, from_legacy
-from brainscore_core.metadata.review import override
 
 
 class ReviewRegressions(unittest.TestCase):
-    def test_incomplete_or_capped_commit_list_cannot_establish_independence(self):
-        from brainscore_core.metadata import MetadataError
-        from brainscore_core.metadata.review import review_exclusions
-
-        for count, commits in [(251, [{}] * 250), (3, [{}] * 2), (250, [{}] * 250)]:
-            with self.assertRaises(MetadataError):
-                review_exclusions(
-                    {"commits": count, "user": {"login": "author"}}, commits
-                )
-
-    def test_new_v2_file_requires_override(self):
-        from brainscore_core.metadata import dump, MetadataError
+    def test_new_v2_file_validates_without_reviews_or_labels(self):
+        from brainscore_core.metadata import dump
         from brainscore_core.metadata.review import check_pr
 
         pr = {
-            "number": 1,
+            "number": 1, "merged": False, "labels": [],
             "base": {"repo": {"full_name": "brain-score/vision"}},
             "head": {"sha": "head", "repo": {"full_name": "brain-score/vision"}},
         }
-        document = {
-            "schema_version": "2.0",
-            "domain": "vision",
-            "models": {"example": {}},
-        }
+        document = {"schema_version": "2.0", "domain": "vision", "models": {"example": {}}}
+        path = "brainscore_vision/models/example/metadata.yaml"
+        with (
+            patch("brainscore_core.metadata.review.api", return_value=pr) as api,
+            patch("brainscore_core.metadata.review.pages", return_value=[{"filename": path, "status": "added"}]) as pages,
+            patch("brainscore_core.metadata.review.content", return_value=dump(document)),
+        ):
+            findings = check_pr("brain-score/vision", 1, "vision", "brainscore_vision/models", "head")
+        self.assertEqual(findings[-1]["status"], "valid")
+        api.assert_called_once_with("/repos/brain-score/vision/pulls/1")
+        pages.assert_called_once_with("/repos/brain-score/vision/pulls/1/files")
+
+    def test_protected_changes_validate_without_review(self):
+        from brainscore_core.metadata import dump
+        from brainscore_core.metadata.review import check_pr
+
+        before = {"schema_version": "2.0", "domain": "vision", "models": {"example": {
+            "model": {"parameter_count": 10},
+            "sources": {"paper": {"kind": "paper", "url": "https://example.org/paper"}},
+            "assertions": [{"path": "/model/parameter_count", "status": "probable", "sources": ["paper"]}],
+        }}}
+        after = deepcopy(before)
+        after["models"]["example"]["model"]["parameter_count"] = 20
+        pr = {"labels": [], "base": {"repo": {"full_name": "brain-score/vision"}, "sha": "base"},
+              "head": {"sha": "head", "repo": {"full_name": "brain-score/vision"}}}
+        with (
+            patch("brainscore_core.metadata.review.api", return_value=pr) as api,
+            patch("brainscore_core.metadata.review.pages", return_value=[{"filename": "brainscore_vision/models/example/metadata.yaml", "status": "modified"}]),
+            patch("brainscore_core.metadata.review.content", side_effect=[dump(after), dump(before)]),
+        ):
+            findings = check_pr("brain-score/vision", 1, "vision", "brainscore_vision/models")
+        self.assertEqual(findings[0]["protected_fields"], ["/model/parameter_count"])
+        self.assertEqual(findings[-1]["status"], "valid")
+        api.assert_called_once_with("/repos/brain-score/vision/pulls/1")
+
+    def test_stale_head_fails_before_reading_files(self):
+        from brainscore_core.metadata import MetadataError
+        from brainscore_core.metadata.review import check_pr
+
+        pr = {"base": {"repo": {"full_name": "brain-score/vision"}}, "head": {"sha": "changed"}}
         with (
             patch("brainscore_core.metadata.review.api", return_value=pr),
-            patch(
-                "brainscore_core.metadata.review.pages",
-                return_value=[
-                    {
-                        "filename": "brainscore_vision/models/example/metadata.yaml",
-                        "status": "added",
-                    }
-                ],
-            ),
-            patch(
-                "brainscore_core.metadata.review.content", return_value=dump(document)
-            ),
-            patch("brainscore_core.metadata.review.override", return_value=False),
+            patch("brainscore_core.metadata.review.pages") as pages,
         ):
             with self.assertRaises(MetadataError):
-                check_pr("brain-score/vision", 1, "vision", "brainscore_vision/models")
+                check_pr("brain-score/vision", 1, "vision", "brainscore_vision/models", "old")
+            pages.assert_not_called()
 
     def test_lossless_bootstrap_and_incremental_legacy_projection(self):
         legacy = {
@@ -107,7 +120,7 @@ class ReviewRegressions(unittest.TestCase):
             entry["sources"]["source"]["kind"] = kind
             self.assertFalse(editability(entry, "/model/parameter_count")[0])
 
-    def test_verified_value_change_requires_downgrade_or_override(self):
+    def test_verified_value_change_stays_marked_protected(self):
         before = {
             "model": {"parameter_count": 10},
             "sources": {"repo": {"kind": "other"}},
@@ -127,45 +140,3 @@ class ReviewRegressions(unittest.TestCase):
         )
         self.assertEqual(protected_changes(before, after), [])
         self.assertEqual(after["assertions"][0], before["assertions"][0])
-
-    def test_commit_author_or_committer_cannot_supply_override(self):
-        pr = {
-            "number": 1,
-            "user": {"login": "submitter"},
-            "head": {"sha": "head"},
-            "labels": [{"name": "metadata-source-override"}],
-        }
-        reviews = [
-            {
-                "user": {"login": "maintainer", "type": "User"},
-                "state": "APPROVED",
-                "commit_id": "head",
-            }
-        ]
-        for role in ["author", "committer"]:
-            with (
-                patch(
-                    "brainscore_core.metadata.review.pages",
-                    side_effect=lambda path: (
-                        [{role: {"login": "maintainer"}}]
-                        if path.endswith("/commits")
-                        else reviews
-                    ),
-                ),
-                patch(
-                    "brainscore_core.metadata.review.api",
-                    return_value={"permission": "admin"},
-                ),
-            ):
-                self.assertFalse(override(pr, "brain-score/vision"))
-        with (
-            patch(
-                "brainscore_core.metadata.review.pages",
-                side_effect=lambda path: [] if path.endswith("/commits") else reviews,
-            ),
-            patch(
-                "brainscore_core.metadata.review.api",
-                return_value={"permission": "admin"},
-            ),
-        ):
-            self.assertTrue(override(pr, "brain-score/vision"))
