@@ -1,9 +1,4 @@
-"""Tests for the v1.5 ``Subject`` rename (formerly ``UnifiedModel``).
-
-v1.5 renames the ABC ``UnifiedModel`` to ``Subject`` to make the interface
-subject-agnostic, keeping ``UnifiedModel`` as a deprecated alias so existing
-imports keep working bit-for-bit.
-"""
+"""The minimal subject and the legacy compatibility base remain interoperable."""
 from abc import ABC
 
 import pytest
@@ -13,20 +8,12 @@ from brainscore_core.model_interface import Subject, UnifiedModel, BrainScoreMod
 
 
 class _ConcreteSubject(Subject):
-    @property
-    def identifier(self):
-        return "test"
+    identifier = "test"
+    in_channels = {"vision"}
+    out_channels = {"behavior"}
 
-    @property
-    def region_layer_map(self):
-        return {}
-
-    @property
-    def supported_modalities(self):
-        return {"vision"}
-
-    def process(self, stimuli):
-        return None
+    def interact(self, session):
+        pass
 
 
 class TestSubjectRename:
@@ -35,18 +22,19 @@ class TestSubjectRename:
         with pytest.raises(TypeError):
             Subject()  # abstract, cannot instantiate
 
-    def test_unifiedmodel_is_alias_of_subject(self):
-        assert UnifiedModel is Subject
+    def test_unifiedmodel_is_compatibility_subclass(self):
+        assert issubclass(UnifiedModel, Subject)
+        assert UnifiedModel is not Subject
 
     def test_subject_exported_from_package(self):
         assert brainscore_core.Subject is Subject
-        assert brainscore_core.UnifiedModel is Subject
+        assert brainscore_core.UnifiedModel is UnifiedModel
 
     def test_brainscoremodel_subclasses_subject(self):
         assert issubclass(BrainScoreModel, Subject)
-        assert issubclass(BrainScoreModel, UnifiedModel)  # via alias
+        assert issubclass(BrainScoreModel, UnifiedModel)  # via the compatibility base
 
-    def test_legacy_subclassing_via_alias_still_works(self):
+    def test_legacy_subclassing_still_works(self):
         # Code written against the old name keeps working unchanged.
         class LegacyModel(UnifiedModel):
             @property
@@ -72,5 +60,5 @@ class TestSubjectRename:
     def test_new_subclassing_via_subject(self):
         m = _ConcreteSubject()
         assert isinstance(m, Subject)
-        assert isinstance(m, UnifiedModel)  # alias identity
-        assert m.supported_modalities == {"vision"}
+        assert not isinstance(m, UnifiedModel)
+        assert m.in_channels == {"vision"}

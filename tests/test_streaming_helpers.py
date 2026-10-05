@@ -10,7 +10,7 @@ from brainscore_core.model_interface import (
     PerturbationApplied,
     Selection,
     StateChange,
-    Subject,
+    UnifiedModel,
     TaskContext,
 )
 from brainscore_core.streaming import StreamEvent
@@ -268,7 +268,7 @@ class _TrackingTemporalBrainScoreModel(_TemporalBrainScoreModel):
         return super().interact(session)
 
 
-class _SyntheticSubject(Subject):
+class _SyntheticSubject(UnifiedModel):
     def __init__(self, output):
         self.output = output
         self.recording_target = None
@@ -294,7 +294,7 @@ class _SyntheticSubject(Subject):
         return self.output
 
 
-class _NonNativeEnvironmentSubject(Subject):
+class _NonNativeEnvironmentSubject(UnifiedModel):
     def __init__(self, action_fn):
         self.action_fn = action_fn
         self.processed_steps = []
@@ -377,7 +377,7 @@ def test_neural_response_matches_process_assembly_exactly():
     subject = _SyntheticSubject(expected)
     stimuli = _stimulus_set()
 
-    assert type(subject).interact is Subject.interact
+    assert type(subject).interact is UnifiedModel.interact
     scored = neural_response(subject, stimuli, record="IT")
 
     assert subject.recording_target == "IT"
@@ -681,7 +681,7 @@ def test_behavioral_response_falls_back_for_non_native_subject():
 
     scored = behavioral_response(subject, context)
 
-    assert type(subject).interact is Subject.interact
+    assert type(subject).interact is UnifiedModel.interact
     assert subject.process_input is scoring
     xr.testing.assert_identical(scored, expected)
 
@@ -883,7 +883,7 @@ def test_run_environment_falls_back_for_non_native_subjects():
 
     trajectory = run_environment(subject, env)
 
-    assert type(subject).interact is Subject.interact
+    assert type(subject).interact is UnifiedModel.interact
     assert subject.processed_steps == [0, 1, 2]
     assert [response.metadata["step_num_seen"] for response in trajectory] == [
         0, 1, 2,
@@ -1063,7 +1063,7 @@ def test_apply_state_change_falls_back_for_non_native_subject():
 
     result = apply_state_change(subject, state_change)
 
-    assert type(subject).interact is Subject.interact
+    assert type(subject).interact is UnifiedModel.interact
     assert subject.process_input is state_change
     assert result is applied
 
