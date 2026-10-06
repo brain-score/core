@@ -60,6 +60,15 @@ class CompatibilityWarning(UserWarning):
     pass
 
 
+def ensure_legacy_benchmark_modalities(benchmark, modalities):
+    """Supply a domain default only when a legacy benchmark has no input contract."""
+    if (getattr(benchmark, 'required_input_channels', None) is None
+            and not getattr(benchmark, 'required_modalities', None)
+            and not getattr(benchmark, 'accepted_modalities', None)):
+        benchmark.required_modalities = set(modalities)
+    return benchmark
+
+
 def check_channel_compatibility(subject: Subject, benchmark) -> None:
     """Check the UMI v2.0 channel compatibility contract.
 
