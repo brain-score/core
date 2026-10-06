@@ -3,8 +3,8 @@
 Wrappers declare their extraction settings; custom stateful providers can expose
 ``cache_config()`` returning immutable configuration, excluding counters and lazy
 memoization. Unsupported or cyclic state bypasses caching, never falls back to a
-name-only key. Checkpoint contents remain the responsibility of ``backbone_id``:
-use a new identifier/revision when replacing weights.
+name-only key. File contents are checked at each lookup. Tensor hashes can be
+reused within a scoring scope while tracked tensor state remains unchanged.
 """
 
 import dataclasses
@@ -15,17 +15,109 @@ import json
 import logging
 import sys
 import types
+import weakref
 from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import numpy as np
 from result_caching import store_xarray as _store_xarray, is_enabled
 
 logger = logging.getLogger(__name__)
+_weight_hashes = ContextVar('brainscore_weight_hashes', default=None)
+_HASH_CHUNK_BYTES = 4 * 1024 * 1024
+
+
+@contextmanager
+def weight_fingerprint_scope():
+    """Reuse unchanged weight hashes within one scoring run, never across runs.
+
+    Normal tensor edits and storage replacement invalidate entries. Writes via
+    .data aliases or NumPy bypass version counters and must occur between runs.
+    Outside this scope every lookup reads the full tensor contents.
+    """
+    token = _weight_hashes.set({})
+    try:
+        yield
+    finally:
+        _weight_hashes.reset(token)
 
 
 class UncacheableConfiguration(ValueError):
     pass
+
+
+@dataclasses.dataclass(frozen=True)
+class FileContent:
+    """An input file whose bytes, not only its path, affect extraction."""
+
+    path: str
+
+
+def file_inputs(paths):
+    """Declare file-backed inputs without reading them when caching is disabled."""
+    return [FileContent(str(path)) for path in paths]
+
+
+def _tensor_chunks(value, max_elements):
+    """Yield bounded, logical-order slices without flattening the whole tensor."""
+    if value.numel() <= max_elements:
+        yield value
+    elif value.is_contiguous():
+        flat = value.view(-1)
+        for start in range(0, flat.numel(), max_elements):
+            yield flat[start:start + max_elements]
+    else:
+        row_elements = value[0].numel()
+        if row_elements > max_elements:
+            for index in range(value.shape[0]):
+                yield from _tensor_chunks(value[index], max_elements)
+        else:
+            rows = max(1, max_elements // max(1, row_elements))
+            for start in range(0, value.shape[0], rows):
+                yield value[start:start + rows]
+
+
+def _hash_tensor(tensor):
+    """Read tensor bytes in bounded chunks; no memoization in this function."""
+    torch = sys.modules['torch']
+    digest = hashlib.sha256()
+    chunk = max(1, _HASH_CHUNK_BYTES // tensor.element_size())
+    for part in _tensor_chunks(tensor.detach(), chunk):
+        # Transfer before resolving views so temporary copies stay bounded.
+        data = part.cpu().resolve_conj().resolve_neg().contiguous().reshape(-1)
+        if data.stride(0) != 1:
+            # A one-element view can be "contiguous" while retaining a stride.
+            data = data.clone(memory_format=torch.contiguous_format)
+        digest.update(data.view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _tensor_content(tensor):
+    torch = sys.modules['torch']
+    if tensor.device.type == 'meta' or tensor.layout != torch.strided or tensor.is_quantized:
+        raise UncacheableConfiguration('tensor storage cannot be fingerprinted safely')
+    cache = _weight_hashes.get()
+    try:
+        version = tensor._version
+    except RuntimeError:
+        # Inference tensors do not have version counters: never memoize them.
+        cache, version = None, None
+    key = (tensor.data_ptr(), version, tuple(tensor.shape), tuple(tensor.stride()),
+           str(tensor.dtype), str(tensor.device), tensor.storage_offset(),
+           tensor.is_conj(), tensor.is_neg())
+    storage = tensor.untyped_storage()
+    entry = cache.get(id(tensor)) if cache is not None else None
+    if (entry is not None and entry[0]() is tensor and entry[1]() is storage
+            and entry[2] == key):
+        digest = entry[3]
+    else:
+        digest = _hash_tensor(tensor)
+        if cache is not None:
+            cache[id(tensor)] = (weakref.ref(tensor), weakref.ref(storage), key, digest)
+    return {'shape': list(tensor.shape), 'dtype': str(tensor.dtype),
+            'sha256': digest}
 
 
 def _name(value):
@@ -47,6 +139,18 @@ def _canonical(value, active):
         return {'numpy_scalar': str(value.dtype), 'value': _canonical(value.item(), active)}
     if isinstance(value, Path):
         return {'path': str(value)}
+    if isinstance(value, FileContent):
+        digest = hashlib.sha256()
+        try:
+            with open(value.path, 'rb') as handle:
+                for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b''):
+                    digest.update(chunk)
+        except OSError as error:
+            raise UncacheableConfiguration(f'cannot read input file {value.path}: {error}') from error
+        return {'path': value.path, 'sha256': digest.hexdigest()}
+    torch = sys.modules.get('torch')
+    if torch is not None and isinstance(value, torch.Tensor):
+        return _tensor_content(value)
     if isinstance(value, np.dtype):
         return {'dtype': str(value)}
     if isinstance(value, bytes):
@@ -130,11 +234,13 @@ def fingerprint(configuration):
     """Return a stable, versioned key; never use repr() or object addresses."""
     payload = json.dumps(_canonical(configuration, set()), sort_keys=True,
                          separators=(',', ':'), ensure_ascii=True)
-    return 'v1-' + hashlib.sha256(payload.encode('utf-8')).hexdigest()
+    return 'v2-' + hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
-def extraction_fingerprint(configuration):
+def extraction_fingerprint(configuration, *, cache_identifier=None):
     """Fail closed for opaque third-party providers, leaving extraction runnable."""
+    if cache_identifier is not None and not is_enabled(cache_identifier):
+        return None
     try:
         return fingerprint(configuration)
     except UncacheableConfiguration as error:
@@ -143,10 +249,10 @@ def extraction_fingerprint(configuration):
 
 
 def model_config(model):
-    """Lightweight model metadata, including installed perturbation hooks.
+    """Model metadata and state, including installed perturbation hooks.
 
-    Never copy/hash tensors or load weights. Runtime eval/train flags are omitted:
-    the extraction wrappers explicitly call eval() before every forward pass.
+    Tensor contents are hashed during fingerprinting, not while building this
+    description. Runtime eval/train flags are omitted: extraction calls eval().
     """
     if model is None:
         return None
@@ -162,6 +268,7 @@ def model_config(model):
         'structure': [(name, _name(module), module.extra_repr() if hasattr(module, 'extra_repr') else None)
                       for name, module in modules],
         'tensor_layout': [(tuple(tensor.shape), str(tensor.dtype), str(tensor.device)) for tensor in tensors],
+        'tensor_contents': tensors,
         'dtypes': sorted({str(tensor.dtype) for tensor in tensors}),
         'devices': sorted({str(tensor.device) for tensor in tensors}),
         'torch_version': getattr(torch, '__version__', None),
