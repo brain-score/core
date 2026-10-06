@@ -89,8 +89,11 @@ class PluginTestRunner(EnvironmentManager):
         If generic tests for the plugin type are defined by the domain library, those are run first.
         """
 
-        run_command = f"bash {self.script_path} \
-            {self.plugin_directory} {self.plugin_name} {self.test} {self.library_path} {self.generic_plugin_test}"
+        run_command = [
+            'bash', str(self.script_path), str(self.plugin_directory),
+            self.plugin_name, str(self.test), str(self.library_path),
+            str(self.generic_plugin_test),
+        ]
 
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
