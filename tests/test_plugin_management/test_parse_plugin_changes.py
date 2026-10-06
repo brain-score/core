@@ -204,7 +204,7 @@ class TestRunChangedPlugins:
         assert len(run_mock.call_args[1]) == 0, "expected no keyword arguments"
         command = run_mock.call_args[0][0]
         print(command)
-        command_parts = command.split()
+        command_parts = command
         script_path = str(Path(__file__).parent.parent.parent /
                           'brainscore_core' / 'plugin_management' / 'test_plugin.sh')
         plugin_directory = str(Path(self.domain_root) / 'models' / 'dummy_model')

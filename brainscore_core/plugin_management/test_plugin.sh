@@ -45,21 +45,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-conda create -n $PLUGIN_NAME python=$PYTHON_VERSION -y || exit 3
-conda activate $PLUGIN_NAME || exit 3
+conda create -n "$PLUGIN_NAME" "python=$PYTHON_VERSION" -y || exit 3
+conda activate "$PLUGIN_NAME" || exit 3
 conda install pip || exit 3
 pip install --upgrade pip setuptools || exit 3
 
 python -m pip install -e ".[test]" --default-timeout=600 --retries=5 || exit 3  # install library requirements
 
 if [ -f "$CONDA_ENV_PATH" ]; then
-  conda env update --file $CONDA_ENV_PATH || exit 3
+  conda env update --file "$CONDA_ENV_PATH" || exit 3
 fi
 if [ -f "$PLUGIN_SETUP_PATH" ]; then
-  pip install $PLUGIN_PATH --default-timeout=600 --retries=5 || exit 3
+  pip install "$PLUGIN_PATH" --default-timeout=600 --retries=5 || exit 3
 fi
 if [ -f "$PLUGIN_REQUIREMENTS_PATH" ]; then
-  pip install -r $PLUGIN_REQUIREMENTS_PATH --default-timeout=600 --retries=5 || exit 3
+  pip install -r "$PLUGIN_REQUIREMENTS_PATH" --default-timeout=600 --retries=5 || exit 3
 fi
 
 pip install junitparser || exit 3
@@ -67,9 +67,9 @@ pip install junitparser || exit 3
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
   if [ "${OPENMIND}" ]; then
-    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO" "--junitxml" $XML_FILE;
+    pytest -m "$PYTEST_SETTINGS" "-vv" "$GENERIC_TEST_PATH" "--plugin_directory" "$PLUGIN_PATH" "--log-cli-level=INFO" "--junitxml" "$XML_FILE";
   else
-    pytest -m "$PYTEST_SETTINGS" "-vv" $GENERIC_TEST_PATH "--plugin_directory" $PLUGIN_PATH "--log-cli-level=INFO";
+    pytest -m "$PYTEST_SETTINGS" "-vv" "$GENERIC_TEST_PATH" "--plugin_directory" "$PLUGIN_PATH" "--log-cli-level=INFO";
   fi
   GENERIC_TEST_SUCCESS=$?
 fi
@@ -77,22 +77,22 @@ fi
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
-  pytest -m "$PYTEST_SETTINGS" "-vv" $PLUGIN_TEST_PATH "-k" $SINGLE_TEST "--log-cli-level=INFO"
+  pytest -m "$PYTEST_SETTINGS" "-vv" "$PLUGIN_TEST_PATH" "-k" "$SINGLE_TEST" "--log-cli-level=INFO"
   PLUGIN_TEST_SUCCESS=$?
 else
   if [ "${TRAVIS}" ]; then
     if [ "$PRIVATE_ACCESS" = 1 ]; then
-      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
+      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" "$PLUGIN_TEST_PATH";
     elif [ "$PRIVATE_ACCESS" != 1 ]; then 
-      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" $PLUGIN_TEST_PATH;
+      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" "$PLUGIN_TEST_PATH";
     fi
   else
-    pytest -m "$PYTEST_SETTINGS" $PLUGIN_TEST_PATH "--junitxml" $PLUGIN_XML_FILE "-s" "-o log_cli=true";
+    pytest -m "$PYTEST_SETTINGS" "$PLUGIN_TEST_PATH" "--junitxml" "$PLUGIN_XML_FILE" "-s" "-o log_cli=true";
   fi 
   PLUGIN_TEST_SUCCESS=$?
   if [ "${OPENMIND}" ]; then
-    junitparser merge $XML_FILE $PLUGIN_XML_FILE $XML_FILE
-    rm $PLUGIN_XML_FILE
+    junitparser merge "$XML_FILE" "$PLUGIN_XML_FILE" "$XML_FILE"
+    rm "$PLUGIN_XML_FILE"
   fi
 fi
 
