@@ -20,15 +20,21 @@ Glossary
         :doc:`Metrics <./metrics>`
 
     Benchmark
-        A benchmark runs an experiment on an ArtificialSubject,
+        A benchmark runs an experiment on a compatible subject,
         and compares the resulting measurements (often model predictions) to biological measurements
         using a particular metric, resulting in a similarity score.
         Benchmarks typically use a dataset and a metric,
         and additionally specify the experimental paradigm for running subjects.
         :doc:`Benchmarks <./benchmarks>`
 
+    Subject (UMI)
+        The interface through which an experiment or benchmark uses a model.
+        A native Subject declares its channels and implements interact(session).
+        BrainScoreModel implements Subject with extraction and task helpers.
+
     ArtificialSubject
-        An ArtificialSubject implements a set of interface functions that benchmarks can interact with.
+        ArtificialSubject is the existing language-model interface, retained through a UMI adapter.
+        It implements functions that language benchmarks can interact with.
         This way, we can run experiments on computational models implementing these functions
         in the same way as a human experimental subject. These interface functions include
         behavioral tasks (e.g., next-word prediction or reading times),
@@ -36,9 +42,8 @@ Glossary
         and a method to digest stimuli.
 
     Model
-        A model usually refers to a computational model,
-        but we generally try to be more explicit in what we refer to with the ArtificialSubject term
-        (which can be viewed as an umbrella term for computational models).
+        The network or service performing the computation. A subject supplies the
+        interface through which an experiment uses it.
 
     Plug-in
         New data, metrics, benchmarks, and models can be added to the Brain-Score platform as standalone modules

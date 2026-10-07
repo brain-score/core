@@ -1,4 +1,4 @@
-"""Streaming primitives for the Unified Model Interface v2.0 contract."""
+"""Streaming primitives for the Unified Model Interface session contract."""
 
 from abc import ABC, abstractmethod
 from collections import deque
@@ -22,7 +22,7 @@ class StreamEvent:
 def parse_channel(name: str) -> tuple[str, str | None]:
     """Parse a channel name into ``(family, address)``.
 
-    Channel names follow the v2.0 grammar ``family`` or ``family:address``.
+    Channel names follow the channel grammar ``family`` or ``family:address``.
     Registry-specific meaning and payload validation are handled elsewhere.
     """
     if not isinstance(name, str):

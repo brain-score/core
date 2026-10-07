@@ -5,14 +5,14 @@
 Brain-Score is a platform to evaluate computational models of mind and brain function on their match to behavioral and
 neural measurements in domains such as vision and language. The intent of Brain-Score is to adopt many (ideally all) the
 experimental benchmarks in the field for the purpose of model testing, falsification, and comparison. To that end,
-Brain-Score operationalizes experimental data into quantitative benchmarks that any model candidate following
-the `BrainModel` interface can be scored on.
+Brain-Score turns experimental data into quantitative benchmarks that evaluate
+subjects with compatible inputs, outputs and methods.
 
-> **UMI migration:** BrainModel, ArtificialSubject, look_at, and digest_text
-> are pre-UMI interfaces retained for compatibility. New cross-domain work
-> should use Subject or BrainScoreModel with process(). Start in the
-> distribution's unified/docs/getting_started.md and
-> unified/docs/umi_api_reference.md.
+> **UMI integration:** `Subject` defines session interaction through
+> `interact(session)`. `BrainScoreModel` implements it with extraction and task
+> helpers, including `process()`. Existing vision `BrainModel` and language
+> `ArtificialSubject` plugins remain supported through adapters. See
+> [the interface guide](docs/UMI_MIGRATION.md).
 
 See the [Documentation](https://brain-score-core.readthedocs.io) for more details.
 

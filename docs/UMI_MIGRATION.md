@@ -36,21 +36,20 @@ For table-based evaluations, `neural_response` and `behavioral_response` in
 `brainscore_core.streaming_helpers` build sessions and collect assemblies. The
 benchmark applies its metric to those responses.
 
-## Existing model implementations
+## Choose helpers for your subject
 
-`UnifiedModel` is the compatibility base for the older typed interface.
-It retains the existing abstract `identifier`, `region_layer_map`,
-`supported_modalities`, and `process()` requirements, derives channels from
-legacy declarations, and preserves task and recording methods.
+`UnifiedModel` is a `Subject` base with task, recording, and `process()` methods.
+It requires `identifier`, `region_layer_map`, and `supported_modalities`, and
+derives channel declarations from the modalities. Use `BrainScoreModel` for a
+configurable implementation with extraction helpers.
 
 `UnifiedModel` is a subclass of `Subject`, not an alias. `BrainScoreModel` and
 the vision and language adapters inherit this compatibility base, so they
 remain subjects and keep their existing computation paths.
 
-Code that inherited the earlier `Subject` and only implemented the typed
-interface should inherit `UnifiedModel` instead. Native implementations should
-inherit `Subject` and implement the session contract directly. Code that checks
-`UnifiedModel is Subject` must use the appropriate subclass or instance check.
+Implement `Subject` directly when you want to own session handling. A benchmark
+that calls `process()` or recording methods needs a subject providing those
+methods; inheriting `Subject` alone does not provide them.
 
 Existing vision `BrainModel` and language `ArtificialSubject` plugins keep
 working through their permanent adapters. No plugin removal or re-registration

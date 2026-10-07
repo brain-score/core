@@ -86,7 +86,7 @@ class Subject(ABC):
 
 
 class UnifiedModel(Subject):
-    """Compatibility base for the older typed model interface.
+    """Subject base with task, recording, and process methods.
 
     Existing implementations retain ``process``, ``start_task``,
     ``start_recording``, layer maps, and modality declarations. Channel defaults

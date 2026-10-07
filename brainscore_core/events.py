@@ -57,7 +57,7 @@ class Perturbation:
 
 @dataclass
 class StateChange:
-    """Induce a state change in the model (dysfunction, lesion, perturbation).
+    """Apply or remove an intervention in the model.
 
     Used to simulate conditions like dyslexia, prosopagnosia, or pharmacological
     effects. Passed to ``model.process()`` the same way stimuli are — the
@@ -125,10 +125,9 @@ class CameraFrame:
     keyed by name on :class:`EnvironmentStep` (e.g., ``'exterior_1'``,
     ``'exterior_2'``, ``'wrist'``).
 
-    v1.5 deprecation: this is a robotics-specific type. New code should import it
+    This is a robotics-specific type. New code should import it
     from the robotics environment harness in the ``brainscore`` package and pack
-    it into ``EnvironmentStep.observation``. It is kept in ``core`` for one
-    release so existing embodied registrations keep working.
+    it into ``EnvironmentStep.observation``. The ``core`` import remains available for compatibility.
     """
     rgb: Any  # numpy.ndarray (H, W, 3) uint8 — required
     depth: Optional[Any] = None  # numpy.ndarray (H, W) float32, in meters
@@ -145,10 +144,9 @@ class Proprioception:
     coordinate transform. The ``base_*`` fields are unused for arm-only setups;
     populate them for mobile-manipulation robots.
 
-    v1.5 deprecation: this is a robotics-specific type. New code should import it
+    This is a robotics-specific type. New code should import it
     from the robotics environment harness in the ``brainscore`` package and pack
-    it into ``EnvironmentStep.observation``. It is kept in ``core`` for one
-    release so existing embodied registrations keep working.
+    it into ``EnvironmentStep.observation``. The ``core`` import remains available for compatibility.
     """
     joint_position: Any  # (n_joints,) float64 — 7 for Franka
     cartesian_position: Any  # (6,) float64 — xyz + euler/rpy
@@ -170,7 +168,7 @@ class EnvironmentStep:
     a stimulus — the interface generalizes over input type rather than adding
     a separate agent method.
 
-    v1.5: this is a device-agnostic envelope. The preferred field is
+    This is a device-agnostic envelope. The preferred field is
     ``observation`` (a harness-defined payload). The ``cameras`` and
     ``proprioception`` fields are the deprecated DROID-shaped instantiation,
     kept for one release; the robotics environment harness in the ``brainscore``
@@ -251,7 +249,7 @@ class EnvironmentStep:
 class EnvironmentResponse:
     """The model's response to one :class:`EnvironmentStep`.
 
-    v1.5: ``action`` is a harness-defined payload, not pinned to any device. The
+    ``action`` is a harness-defined payload, not pinned to any device. The
     environment harness decides its shape. The DROID instantiation uses a compact
     7-D action (6 joint velocities + 1 gripper position); other environments use
     their own. ``action_dict`` carries an optional structured form and
@@ -272,8 +270,7 @@ class Message:
     *consume* (``InputEvent``). That dual membership is exactly what
     first-class multi-agent social interaction needs — one agent's utterance is
     the next agent's stimulus, with no bespoke routing protocol and no ABC
-    change (the design's named multi-agent enabler; see Developer Reference
-    §6.1 item 3).
+    change.
 
     ``process(Message)`` routes to the model's ``action_fn`` (an agent
     *responds* to a message), and a responder may return either a ``Message`` or
@@ -290,7 +287,7 @@ class Message:
 
 def output_event_kind(output: 'OutputEvent') -> str:
     """Classify an ``OutputEvent`` member so metrics can dispatch on output type
-    instead of the benchmark hard-selecting one (Developer Reference §6.1 item 4).
+    instead of the benchmark hard-selecting one.
 
     Returns one of ``'neural'`` (NeuroidAssembly), ``'behavioral'``
     (BehavioralAssembly), ``'environment'`` (EnvironmentResponse), ``'message'``

@@ -8,18 +8,11 @@ from .events import Selection
 
 
 class UnitSelector(ABC):
-    """Forward-compat ABC for ``region_layer_map`` values.
+    """Base for selectors used as ``region_layer_map`` values.
 
-    Today every submitter declares one layer per region with a bare string.
-    The interface accepts ``Union[str, UnitSelector]`` so future selectors
-    (multi-layer regions, indexed sub-populations, spike-level alignment)
-    are additive subclasses, not an interface change. Bare strings are
-    auto-promoted to ``LayerSelector(name=str)`` at registration time.
-
-    Subclasses must expose a ``layer_path`` property returning the dotted
-    module path the wrapper extracts from. Future selectors that span
-    multiple layers will return the canonical or default one and supply
-    additional metadata for the wrapper to consume.
+    Use ``LayerSelector`` for one layer or ``CompositeSelector`` for units
+    across layers. A string layer path is promoted to ``LayerSelector``.
+    ``Selection`` instead describes a concrete recording/intervention target.
     """
 
     @property
@@ -30,11 +23,7 @@ class UnitSelector(ABC):
 
 @dataclass(frozen=True)
 class LayerSelector(UnitSelector):
-    """The single concrete ``UnitSelector`` for the initial release.
-
-    One dotted module path per region — the value every existing
-    registration uses.
-    """
+    """Select one layer for a region mapping; ``name`` is its layer path."""
     name: str
 
     @property
@@ -84,8 +73,8 @@ def _promote_to_selector(value: Union[str, UnitSelector]) -> UnitSelector:
 class UnitSelection(ABC):
     """Resolves to a concrete :class:`Selection` by inspecting a model.
 
-    ``resolve(model)`` uses only the public ``start_recording`` + ``process``
-    interface, so the same selection runs against any :class:`Subject`. A
+    Functional selection requires the ``start_recording`` + ``process``
+    interface; a native :class:`Subject` need not provide those methods. A
     :class:`StateChange` ``target`` may be either an already-resolved
     ``Selection`` or an unresolved ``UnitSelection``; ``process(StateChange)``
     resolves the latter (snapshotting and restoring the model's recording

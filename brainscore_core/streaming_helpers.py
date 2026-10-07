@@ -1,4 +1,4 @@
-"""Typed convenience helpers over the UMI v2.0 streaming substrate."""
+"""Typed convenience helpers over the UMI session interface."""
 
 from __future__ import annotations
 
@@ -468,7 +468,7 @@ def _drive_neural_session_streaming(
 
 def _one_row_stimuli(session, event: StreamEvent, stream_index: int):
     """Dispatch: a window event already carries its own stimuli; a single-input event
-    is turned into one row. Tier 1 emits the latter, Tier 2 the former."""
+    is turned into one row. Single-input sessions emit the latter; windowed sessions emit the former."""
     payload = event.payload
     if hasattr(payload, "columns") and hasattr(payload, "iterrows"):
         return payload            # already a StimulusSet-like window
@@ -828,17 +828,15 @@ class StreamingStimulusSetSession(Session):
 
 
 class WindowedStreamSession(Session):
-    """Tier 2: consume an OPEN-ENDED frame feed in fixed windows.
+    """Consume an open-ended frame feed in fixed windows.
 
     ``window_plan`` in ``temporal.py`` tiles a known duration. A real feed has no
     known duration, so windowing here is incremental: pull frames from an iterator,
     hold at most one window's worth, emit when the window fills, slide by the stride,
     keep going until the feed runs dry.
 
-    This is the shape that makes streaming useful rather than merely possible --
-    Tier 1 collapses the batch to one stimulus, which is correct but slow. A window
-    restores batching (the model sees ``window_ms`` of material at once) while the
-    memory held stays constant no matter how long the feed runs.
+    A window batches ``window_ms`` of material into one model call. The session
+    holds at most one window, so its frame buffer does not grow with the feed.
 
     ``frames`` is any iterable of per-frame payloads; it is never listed, so a lazy
     decoder stays lazy. ``window_to_stimuli(frames, start_ms, end_ms)`` converts one
@@ -941,9 +939,9 @@ def _default_window_to_stimuli(frames, start_ms, end_ms):
 
 
 class RealTimeStreamSession(Session):
-    """Tier 3: a windowed feed that runs against a wall clock.
+    """A windowed feed that runs against a wall clock.
 
-    Tiers 1 and 2 are about *when inputs must exist*. This tier adds the constraint
+    Batch and windowed sessions manage input availability. This session adds the constraint
     that makes streaming hard in practice: the feed advances whether or not the model
     is finished. A window covers ``window_ms`` of world time, so if the model takes
     longer than that to process one, it is falling behind and something must give.
