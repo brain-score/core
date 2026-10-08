@@ -159,3 +159,15 @@ def test_scoring_opens_pr_only_when_v2_metadata_gains_values(tmp_path, monkeypat
                         lambda *args, **kwargs: path.write_text(path.read_text() + '\n'))
     handle_metadata.main()
     assert opened == [str(tmp_path)]
+
+
+def test_scored_v2_metadata_does_not_reload_models(tmp_path, monkeypatch):
+    from brainscore_core.metadata import dump
+    from brainscore_core.plugin_management import handle_metadata
+    path = tmp_path / 'metadata.yaml'
+    path.write_text(dump({'schema_version': '2.0', 'domain': 'vision',
+                          'models': {'test_model': {'legacy': {'runnable': True}}}}))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr('sys.argv', ['handle_metadata', '--plugin-dir', str(tmp_path), '--plugin-type', 'models'])
+    monkeypatch.setattr(handle_metadata, 'generate_metadata', lambda *args, **kwargs: pytest.fail('models reloaded'))
+    handle_metadata.main()

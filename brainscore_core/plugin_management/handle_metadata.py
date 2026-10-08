@@ -297,8 +297,9 @@ def main():
         print("Validated metadata saved to validated_metadata.json", file=sys.stderr)
 
     if data.get('schema_version') == '2.0':
-        if args.plugin_type == "models" and not new_metadata:
-            # Submitted values win; scoring fills only the fields left empty.
+        unscored = any(not entry.get("legacy") for entry in data["models"].values())
+        if args.plugin_type == "models" and not new_metadata and unscored:
+            # Submitted values win; models load only while an entry lacks computed values.
             with open(metadata_path, encoding="utf-8") as f:
                 before = f.read()
             generate_metadata(args.plugin_dir, args.plugin_type, domain=args.domain)
