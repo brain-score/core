@@ -1,20 +1,42 @@
 name: Release
+# Reusable: vision and language call this with
+#   uses: brain-score/core/.github/workflows/release.yml@main
+#   with: { release-paths: '<regex>' }
+#   secrets: inherit
+# A merge releases only if it changes a file matching release-paths (or the
+# [project] dependencies); the PR title then picks the level.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Release level to force (for the first release or a missed one)
+        type: choice
+        options: [patch, minor, major]
+  workflow_call:
+    inputs:
+      release-paths:
+        description: Regex; a changed file matching it can release
+        type: string
+        required: true
 concurrency:
   group: release
   cancel-in-progress: false
 permissions:
   contents: read
+env:
+  TYPE_BUMPS: |
+    feat=minor
+    fix=patch
+    perf=patch
 jobs:
   release:
-    # The release commit carries [skip ci]; this guard also stops it re-releasing.
+    # The release commit carries the skip-ci marker; this guard also stops it re-releasing.
     if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.release.outputs.released }}
-      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/create-github-app-token@v3.2.0
         id: app-token
@@ -28,10 +50,42 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
       - name: Release only the commit that triggered this run
         run: git reset --hard ${{ github.sha }}
+      - name: Decide the release level
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCED: ${{ inputs.level }}
+          RELEASE_PATHS: ${{ inputs.release-paths || '^brainscore_core/' }}
+        shell: python
+        run: |
+          import json, os, re, subprocess, tomllib
+          def git(*a): return subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout
+          def deps(rev):
+              return tomllib.loads(git("show", f"{rev}:pyproject.toml"))["project"].get("dependencies")
+          def out(level, why):
+              print(f"level={level or 'none'}: {why}")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f: f.write(f"level={level}\n")
+          if os.environ["FORCED"]:
+              out(os.environ["FORCED"], "forced by workflow_dispatch"); raise SystemExit
+          files = git("diff", "--name-only", "HEAD^", "HEAD").split()
+          shipped = [f for f in files if re.search(os.environ["RELEASE_PATHS"], f)]
+          if "pyproject.toml" in files and deps("HEAD^") != deps("HEAD"): shipped.append("pyproject.toml dependencies")
+          if not shipped: out("", "no shipped file changed"); raise SystemExit
+          subject, _, body = git("log", "-1", "--format=%B").partition("\n")
+          m = re.match(r"(\w+)(\([^)]*\))?(!)?: ", subject)
+          bumps = dict(l.split("=") for l in os.environ["TYPE_BUMPS"].split())
+          level = bumps.get(m.group(1), "") if m else ""
+          if m and (m.group(3) or "BREAKING CHANGE" in body):
+              pr = json.loads(subprocess.run(["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/{os.environ['GITHUB_SHA']}/pulls"], capture_output=True, text=True, check=True).stdout)
+              labels = {l["name"] for p in pr[:1] for l in p["labels"]}
+              level = "major" if "major update" in labels else "minor"
+          out(level, f"title '{subject}', shipped changes: {shipped[:5]}")
       - uses: python-semantic-release/python-semantic-release@v10.7.0
         id: release
+        if: steps.gate.outputs.level != ''
         with:
           github_token: ${{ steps.app-token.outputs.token }}
+          force: ${{ steps.gate.outputs.level }}
           changelog: "false"
       - uses: actions/upload-artifact@v4
         if: steps.release.outputs.released == 'true'

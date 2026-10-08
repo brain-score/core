@@ -1,10 +1,10 @@
 name: PR title
 # Reusable: vision and language call this with
 #   uses: brain-score/core/.github/workflows/pr-title.yml@main
-# Keep TYPE_BUMPS in step with [tool.semantic_release.commit_parser_options] in pyproject.toml.
+# Keep the releasing types in step with TYPE_BUMPS in release.yml.
 on:
   pull_request_target:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
   workflow_call:
 permissions:
   pull-requests: write
@@ -56,7 +56,9 @@ jobs:
             | Type | Release |
             |---|---|
             ${{ steps.types.outputs.table }}
-            | any type with `!`, e.g. `feat!:`, or a `BREAKING CHANGE:` footer | major |
+            | `feat!:` or a `BREAKING CHANGE:` footer, plus the `major update` label | major (minor without the label) |
+
+            Only changes to shipped files release. Changes under tests, docs, `.github` or plugin folders never release, whatever the type.
 
             The scope is optional. Examples:
             - `feat(metadata): add dataset vocabularies`
@@ -69,6 +71,25 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v3.0.5
         with:
           header: pr-title
+          delete: true
+      - name: Warn when a breaking change lacks the major label
+        if: >-
+          steps.lint.outcome == 'success'
+          && (contains(github.event.pull_request.title, '!:') || contains(github.event.pull_request.body, 'BREAKING CHANGE'))
+          && !contains(github.event.pull_request.labels.*.name, 'major update')
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          header: pr-major
+          message: |
+            This PR is marked as a breaking change, but it has no `major update` label, so it will release as a **minor** version. Add the `major update` label if a major release is intended.
+      - name: Remove the major warning when it no longer applies
+        if: >-
+          steps.lint.outcome != 'success'
+          || !(contains(github.event.pull_request.title, '!:') || contains(github.event.pull_request.body, 'BREAKING CHANGE'))
+          || contains(github.event.pull_request.labels.*.name, 'major update')
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          header: pr-major
           delete: true
       - name: Fail on an invalid title
         if: steps.lint.outcome == 'failure'
