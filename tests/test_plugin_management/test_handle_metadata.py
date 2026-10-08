@@ -138,3 +138,24 @@ def test_v2_metadata_is_validated_but_rejected_by_legacy_endpoint(tmp_path):
         with pytest.raises(ValueError, match='trusted merged-PR publisher'):
             endpoint.process_metadata(str(tmp_path), 'models', 'vision')
         writer.assert_not_called()
+
+
+def test_scoring_opens_pr_only_when_v2_metadata_gains_values(tmp_path, monkeypatch):
+    from brainscore_core.metadata import dump
+    from brainscore_core.plugin_management import handle_metadata
+    path = tmp_path / 'metadata.yaml'
+    path.write_text(dump({'schema_version': '2.0', 'domain': 'vision',
+                          'models': {'test_model': {'model': {'parameter_count': 123}}}}))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr('sys.argv', ['handle_metadata', '--plugin-dir', str(tmp_path), '--plugin-type', 'models'])
+    opened = []
+    monkeypatch.setattr(handle_metadata, 'create_metadata_pr', lambda plugin_dir: opened.append(plugin_dir) or '7')
+
+    monkeypatch.setattr(handle_metadata, 'generate_metadata', lambda *args, **kwargs: None)
+    handle_metadata.main()
+    assert opened == []
+
+    monkeypatch.setattr(handle_metadata, 'generate_metadata',
+                        lambda *args, **kwargs: path.write_text(path.read_text() + '\n'))
+    handle_metadata.main()
+    assert opened == [str(tmp_path)]

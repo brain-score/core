@@ -1,5 +1,7 @@
 import os
 import yaml
+from brainscore_core.metadata.contract import dump, get_path, put_path
+from brainscore_core.metadata.storage import from_legacy
 from brainscore_core.plugin_management.domain_plugin_interface import DomainPluginInterface
 from typing import List, Optional, Any
 import sys
@@ -80,31 +82,39 @@ class ModelMetadataGenerator:
 
         Notes:
         - The YAML file (`metadata.yml`) is stored in the specified `model_dir`.
-        - If an existing YAML file is found, it is updated rather than overwritten.
+        - If an existing YAML file is found, computed values fill only its empty fields;
+          values already in the file are kept.
         - Delegates metadata creation to the domain plugin.
         - Prints an error message and returns None if an exception occurs.
         """
         try:
-            yaml_filename = "metadata.yml"
-            yaml_path = os.path.join(model_dir, yaml_filename)
+            yaml_path = metadata_file_path(model_dir)
 
             model_dir_name = model_dir.split("/")[-1]
             new_metadata = self.domain_plugin.create_model_metadata(model, model_name, model_dir_name)
-            
+
             if os.path.exists(yaml_path) and os.path.getsize(yaml_path) > 0:
                 with open(yaml_path, "r", encoding="utf-8") as file:
                     existing_metadata = yaml.safe_load(file) or {}
             else:
                 existing_metadata = {}
-            
-            if "models" not in existing_metadata:
-                existing_metadata["models"] = {}
-            
-            existing_metadata["models"][model_name] = new_metadata
-            
+
+            models = existing_metadata.setdefault("models", {})
+            if existing_metadata.get("schema_version") == "2.0":
+                computed = from_legacy(new_metadata, existing_metadata.get("domain"))
+                models[model_name] = merge_v2_entry(models.get(model_name), computed)
+                content = dump(existing_metadata)
+            else:
+                entry = models.get(model_name) or {}
+                for key, value in new_metadata.items():
+                    if entry.get(key) is None:
+                        entry[key] = value
+                models[model_name] = entry
+                content = yaml.dump(existing_metadata, default_flow_style=False, sort_keys=False, indent=4)
+
             with open(yaml_path, "w", encoding="utf-8") as file:
-                yaml.dump(existing_metadata, file, default_flow_style=False, sort_keys=False, indent=4)
-            
+                file.write(content)
+
             print(f"Saved model metadata to {yaml_path}", file=sys.stderr)
             return yaml_path
         except Exception as e:
@@ -138,3 +148,39 @@ class ModelMetadataGenerator:
             print(error_message, file=sys.stderr)
             return None
 
+
+
+def metadata_file_path(model_dir: str) -> str:
+    """Return the plugin's existing metadata file, or ``metadata.yml`` for a new one."""
+    yaml_path = os.path.join(model_dir, "metadata.yaml")
+    if os.path.exists(yaml_path) and not os.path.exists(os.path.join(model_dir, "metadata.yml")):
+        return yaml_path
+    return os.path.join(model_dir, "metadata.yml")
+
+
+def merge_v2_entry(entry: Optional[dict], computed: dict) -> dict:
+    """
+    Fill a schema 2.0 entry with computed values without replacing existing ones.
+
+    A field is filled only when it is empty and has no assertion on it or a parent
+    section, so documented values and documented absences both stay untouched.
+    """
+    if not entry:
+        return computed
+    legacy = entry.setdefault("legacy", {})
+    for key, value in computed["legacy"].items():
+        if legacy.get(key) is None:
+            legacy[key] = value
+    asserted = {assertion["path"] for assertion in entry.get("assertions", [])}
+    for assertion in computed["assertions"]:
+        path = assertion["path"]
+        leaf = path + "/family" if path == "/model/architecture" else path
+        if any(leaf == known or leaf.startswith(known + "/") for known in asserted):
+            continue
+        if get_path(entry, leaf) not in (None, ""):
+            continue
+        put_path(entry, leaf, get_path(computed, leaf))
+        entry.setdefault("sources", {}).setdefault("legacy", computed["sources"]["legacy"])
+        entry.setdefault("assertions", []).append(assertion)
+        asserted.add(path)
+    return entry

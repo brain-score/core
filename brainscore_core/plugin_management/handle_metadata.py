@@ -222,7 +222,8 @@ def create_metadata_pr(plugin_dir, branch_name="auto/metadata-update"):
     Note: This requires that repo has been checked out with a full history,
     and that gh is installed/authenticated.
     """
-    metadata_path = os.path.join(plugin_dir, "metadata.yml")
+    from brainscore_core.plugin_management.generate_model_metadata import metadata_file_path
+    metadata_path = metadata_file_path(plugin_dir)
     unique_suffix = str(int(time.time()))
     branch_name += f"_{unique_suffix}"
     try:
@@ -296,6 +297,15 @@ def main():
         print("Validated metadata saved to validated_metadata.json", file=sys.stderr)
 
     if data.get('schema_version') == '2.0':
+        if args.plugin_type == "models" and not new_metadata:
+            # Submitted values win; scoring fills only the fields left empty.
+            with open(metadata_path, encoding="utf-8") as f:
+                before = f.read()
+            generate_metadata(args.plugin_dir, args.plugin_type, domain=args.domain)
+            with open(metadata_path, encoding="utf-8") as f:
+                if f.read() != before:
+                    print(create_metadata_pr(args.plugin_dir))
+                    return
         print("Metadata v2 validated. Database publication is handled only by the merged-PR publisher.", file=sys.stderr)
         return
 

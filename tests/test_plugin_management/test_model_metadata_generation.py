@@ -278,3 +278,59 @@ class TestModelMetadataIntegration:
 if __name__ == "__main__":
     # Run unit tests only by default
     pytest.main([__file__, "-v", "-m", "not integration"]) 
+
+class TestExistingMetadataMerge:
+    """Scoring fills empty fields and keeps values already in the file."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.generator = ModelMetadataGenerator(self.temp_dir, MockModelDomainPlugin())
+
+    def teardown_method(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def write(self, name, document):
+        with open(os.path.join(self.temp_dir, name), "w") as f:
+            yaml.safe_dump(document, f)
+
+    def read(self, name):
+        with open(os.path.join(self.temp_dir, name)) as f:
+            return f.read()
+
+    def test_submitted_v2_field_survives_scoring(self):
+        from brainscore_core.metadata import load
+        self.write("metadata.yaml", {"schema_version": "2.0", "domain": "vision", "models": {
+            "test_model": {"model": {"display_name": "Test model", "parameter_count": 123}}}})
+
+        self.generator(["test_model"])
+
+        entry = load(self.read("metadata.yaml"), "vision")["models"]["test_model"]
+        assert entry["model"]["display_name"] == "Test model"
+        assert entry["model"]["parameter_count"] == 123
+        assert entry["model"]["architecture"]["family"] == "convolutional_neural_network"
+        assert entry["legacy"]["total_parameter_count"] == 1500
+        assert {a["path"] for a in entry["assertions"]} == {
+            "/model/trainable_layers", "/provenance/source_url", "/model/architecture"}
+        assert not os.path.exists(os.path.join(self.temp_dir, "metadata.yml"))
+
+    def test_documented_absence_is_not_filled(self):
+        from brainscore_core.metadata import load
+        self.write("metadata.yaml", {"schema_version": "2.0", "domain": "vision", "models": {"test_model": {
+            "sources": {"paper": {"kind": "other", "citation": "Author 2026"}},
+            "assertions": [{"path": "/model/architecture", "status": "undocumented", "sources": ["paper"]}]}}})
+
+        self.generator(["test_model"])
+
+        entry = load(self.read("metadata.yaml"), "vision")["models"]["test_model"]
+        assert "architecture" not in entry["model"]
+        assert entry["model"]["parameter_count"] == 1500
+
+    def test_existing_legacy_value_survives_scoring(self):
+        self.write("metadata.yml", {"models": {"test_model": {"architecture": "Transformer", "model_size_mb": None}}})
+
+        self.generator(["test_model"])
+
+        entry = yaml.safe_load(self.read("metadata.yml"))["models"]["test_model"]
+        assert entry["architecture"] == "Transformer"
+        assert entry["model_size_mb"] == 0.006
