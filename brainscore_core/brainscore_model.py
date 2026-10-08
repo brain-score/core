@@ -206,8 +206,11 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        return super().in_channels | set().union(
+        channels = super().in_channels | set().union(
             *(set(c.input_channels) for c in self._declared_capabilities()))
+        if self._action_fn is not None:
+            channels.add('observation')
+        return channels
 
     @property
     def out_channels(self):

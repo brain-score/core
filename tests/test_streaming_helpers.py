@@ -802,7 +802,7 @@ def test_environment_session_advances_after_motor_emit():
     assert second_step.step_num == 1
 
 
-def test_native_environment_interact_matches_legacy_rollout_exactly():
+def test_native_environment_interact_preserves_applied_legacy_actions():
     session = environment_session(_SyntheticEnvironment(_environment_steps(4)))
     native_model = _native_environment_model(
         _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
@@ -813,17 +813,18 @@ def test_native_environment_interact_matches_legacy_rollout_exactly():
 
     legacy_model = _make_environment_model(action_fn=_droid_action_fn)
     legacy_env = _SyntheticEnvironment(_environment_steps(4))
-    expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)
+    # The old loop predicted once after termination; that response was never applied.
+    expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)[:-1]
 
     assert native_model.interact_called is True
     assert native_model.interact_requested_output_channels == ("motor",)
     assert [event.channel for event in session.emitted] == [
-        "motor", "motor", "motor", "motor",
+        "motor", "motor", "motor",
     ]
     assert [event.meta["driver"] for event in session.emitted] == [
-        "interact", "interact", "interact", "interact",
+        "interact", "interact", "interact",
     ]
-    assert [event.meta["step_num"] for event in session.emitted] == [0, 1, 2, 3]
+    assert [event.meta["step_num"] for event in session.emitted] == [0, 1, 2]
     assert len(native_trajectory) == len(expected_trajectory)
     for native_response, expected_response in zip(
         native_trajectory, expected_trajectory
@@ -842,16 +843,16 @@ def test_environment_session_emits_motor_events_for_multistep_rollout():
     _drive_environment_via_process(model, session)
 
     assert [event.channel for event in session.emitted] == [
-        "motor", "motor", "motor",
+        "motor", "motor",
     ]
     assert [
         event.payload.metadata["step_num_seen"]
         for event in session.emitted
-    ] == [0, 1, 2]
-    assert [event.meta["step_num"] for event in session.emitted] == [0, 1, 2]
+    ] == [0, 1]
+    assert [event.meta["step_num"] for event in session.emitted] == [0, 1]
 
 
-def test_run_environment_matches_legacy_process_rollout_exactly():
+def test_run_environment_preserves_applied_legacy_actions():
     helper_model = _native_environment_model(
         _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
     )
@@ -860,7 +861,8 @@ def test_run_environment_matches_legacy_process_rollout_exactly():
 
     legacy_model = _make_environment_model(action_fn=_droid_action_fn)
     legacy_env = _SyntheticEnvironment(_environment_steps(4))
-    expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)
+    # The old loop predicted once after termination; that response was never applied.
+    expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)[:-1]
 
     assert len(helper_trajectory) == len(expected_trajectory)
     for helper_response, expected_response in zip(
@@ -884,9 +886,9 @@ def test_run_environment_falls_back_for_non_native_subjects():
     trajectory = run_environment(subject, env)
 
     assert type(subject).interact is UnifiedModel.interact
-    assert subject.processed_steps == [0, 1, 2]
+    assert subject.processed_steps == [0, 1]
     assert [response.metadata["step_num_seen"] for response in trajectory] == [
-        0, 1, 2,
+        0, 1,
     ]
 
 
@@ -907,8 +909,7 @@ def test_run_environment_terminates_cleanly_for_zero_and_one_step_envs():
     one_env = _SyntheticEnvironment(_environment_steps(1))
     trajectory = run_environment(model, one_env)
 
-    assert len(trajectory) == 1
-    assert trajectory[0].metadata["step_num_seen"] == 0
+    assert trajectory == []  # Already terminal: no action is requested.
     assert one_env.actions == []
     assert model.interact_called is True
     assert model.interact_requested_output_channels == ("motor",)

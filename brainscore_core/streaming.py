@@ -15,7 +15,7 @@ _ADDRESS_RE = re.compile(r"^[A-Za-z0-9_./\-\[\]:]+$")
 class StreamEvent:
     channel: str
     payload: Any
-    t_ms: float
+    t_ms: Optional[float]  # None when an environment has no physical time scale.
     meta: dict = field(default_factory=dict)
 
 
