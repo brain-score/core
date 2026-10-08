@@ -243,10 +243,8 @@ class TestModelMetadataIntegration:
             pytest.skip("VisionDomainPlugin not available for integration test")
 
     def teardown_method(self):
-        yaml_path = Path(self.model_path) / "metadata.yml"
-        if yaml_path.exists():
-            yaml_path.unlink()
-            print(f"Deleted: {yaml_path}")
+        import shutil
+        shutil.rmtree(getattr(self, "output_dir", ""), ignore_errors=True)
 
     def test_real_model_discovery(self):
         """Test discovery of real vision models."""
@@ -256,10 +254,12 @@ class TestModelMetadataIntegration:
 
     def test_real_model_metadata_extraction(self):
         """Test metadata extraction from real vision models."""
+        # Write to a scratch folder: the installed plugin's own metadata file must stay untouched.
+        self.output_dir = tempfile.mkdtemp()
         model_list = self.generator.find_registered_models(self.model_path)
-        yaml_paths = self.generator(model_list)
-        
-        yaml_path = Path(self.model_path) / "metadata.yml"
+        ModelMetadataGenerator(self.output_dir, self.vision_plugin)(model_list)
+
+        yaml_path = Path(self.output_dir) / "metadata.yml"
         with open(yaml_path, 'r') as f:
             metadata = yaml.safe_load(f)
         
