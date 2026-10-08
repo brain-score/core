@@ -100,6 +100,9 @@ build_command = "python -m pip install build && python -m build"
 [tool.semantic_release.branches.main]
 match = "main"
 
+# Keep in step with TYPE_BUMPS in .github/workflows/pr-title.yml.
 [tool.semantic_release.commit_parser_options]
 minor_tags = ["feat"]
 patch_tags = ["fix", "perf"]
+allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "test", "ci", "chore", "build", "plugin", "model", "benchmark", "data", "metric"]
+default_bump_level = 0
