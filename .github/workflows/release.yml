@@ -1,0 +1,53 @@
+name: Release
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  release:
+    # The release commit carries [skip ci]; this guard also stops it re-releasing.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/create-github-app-token@v3.2.0
+        id: app-token
+        with:
+          client-id: ${{ secrets.CORE_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CORE_RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Release only the commit that triggered this run
+        run: git reset --hard ${{ github.sha }}
+      - uses: python-semantic-release/python-semantic-release@v10.7.0
+        id: release
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          changelog: "false"
+      - uses: actions/upload-artifact@v4
+        if: steps.release.outputs.released == 'true'
+        with:
+          name: dist
+          path: dist/
+  publish:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
