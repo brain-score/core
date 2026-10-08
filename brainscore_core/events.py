@@ -169,7 +169,7 @@ class EnvironmentStep:
     a separate agent method.
 
     This is a device-agnostic envelope. The preferred field is
-    ``observation`` (a harness-defined payload). The ``cameras`` and
+    ``observation`` (an environment-defined payload). The ``cameras`` and
     ``proprioception`` fields are the deprecated DROID-shaped instantiation,
     kept for one release; the robotics environment harness in the ``brainscore``
     package is their going-forward home. ``core`` commits only to the
@@ -249,12 +249,14 @@ class EnvironmentStep:
 class EnvironmentResponse:
     """The model's response to one :class:`EnvironmentStep`.
 
-    ``action`` is a harness-defined payload, not pinned to any device. The
-    environment harness decides its shape. The DROID instantiation uses a compact
-    7-D action (6 joint velocities + 1 gripper position); other environments use
-    their own. ``action_dict`` carries an optional structured form and
-    ``metadata`` carries telemetry (value estimate, attention maps, predicted
-    reward) without growing the schema.
+    A policy adapter defines the action's meaning. EnvironmentSession accepts
+    one command per step; an external evaluator may accept a predicted chunk.
+    Chunk responses declare scheduler ownership and prediction/execution horizons
+    in metadata. A response alone is not proof that an environment applied it.
+
+    OpenPI DROID uses seven joint commands plus a gripper command. LIBERO uses
+    six end-effector commands plus a gripper command. Their conventions differ.
+    action_dict can carry a structured form; metadata carries telemetry.
     """
     action: Any  # numpy.ndarray (action_dim,) float64
     action_dict: Optional[Dict[str, Any]] = None  # DROID-style structured action

@@ -154,7 +154,7 @@ class TestEnvironmentStepShape:
         assert terminal.reward == 1.0
 
     def test_environment_response_compact_action(self):
-        """DROID's compact action is (7,): 6 joint vel + 1 gripper pos."""
+        """The envelope accepts a seven-value synthetic action."""
         resp = EnvironmentResponse(action=np.zeros(7, dtype=np.float64))
         assert resp.action.shape == (7,)
         assert resp.action_dict is None
