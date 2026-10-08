@@ -1,8 +1,6 @@
 name: Release
-# Reusable: vision and language call this with
-#   uses: brain-score/core/.github/workflows/release.yml@main
-#   with: { release-paths: '<regex>' }
-#   secrets: inherit
+# Reusable: vision and language call this, then publish dist/ in their own
+# job (PyPI trusted publishing does not work inside a reusable workflow).
 # A merge releases only if it changes a file matching release-paths (or the
 # [project] dependencies); the PR title then picks the level.
 on:
@@ -20,6 +18,13 @@ on:
         description: Regex; a changed file matching it can release
         type: string
         required: true
+      level:
+        description: Release level to force (patch, minor or major); empty lets the gate decide
+        type: string
+        default: ""
+    outputs:
+      released:
+        value: ${{ jobs.release.outputs.released }}
 concurrency:
   group: release
   cancel-in-progress: false
@@ -94,7 +99,8 @@ jobs:
           path: dist/
   publish:
     needs: release
-    if: needs.release.outputs.released == 'true'
+    # Callers publish themselves; github.repository is the caller's repo there.
+    if: needs.release.outputs.released == 'true' && github.repository == 'brain-score/core'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
