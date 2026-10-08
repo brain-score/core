@@ -253,26 +253,37 @@ class TestModelMetadataIntegration:
         assert self.model_name in model_list
 
     def test_real_model_metadata_extraction(self):
-        """Test metadata extraction from real vision models."""
-        # Write to a scratch folder: the installed plugin's own metadata file must stay untouched.
+        """Scoring a real model merges into a copy of its metadata without changing curated values."""
+        import shutil
+        from brainscore_core.plugin_management.generate_model_metadata import metadata_file_path
+        # Work on a copy: the installed plugin's metadata file must stay untouched.
         self.output_dir = tempfile.mkdtemp()
-        model_list = self.generator.find_registered_models(self.model_path)
-        ModelMetadataGenerator(self.output_dir, self.vision_plugin)(model_list)
+        plugin_copy = os.path.join(self.output_dir, self.model_name)
+        shutil.copytree(self.model_path, plugin_copy)
+        yaml_path = metadata_file_path(plugin_copy)
+        before = yaml.safe_load(open(yaml_path)) if os.path.exists(yaml_path) else {}
 
-        yaml_path = Path(self.output_dir) / "metadata.yml"
-        with open(yaml_path, 'r') as f:
-            metadata = yaml.safe_load(f)
-        
-        model_meta = metadata['models'][self.model_name]
-        
-        # Verify real ResNet50 values
-        assert model_meta["architecture"] == "DCNN"
-        assert model_meta['model_family'] == "resnet"
-        assert model_meta["total_parameter_count"] == 25557032
-        assert model_meta["trainable_parameter_count"] == 25557032
-        assert model_meta["total_layers"] == 151
-        assert model_meta["trainable_layers"] == 54
-        assert model_meta["model_size_mb"] == 102.23
+        generator = ModelMetadataGenerator(plugin_copy, self.vision_plugin)
+        generator(generator.find_registered_models(plugin_copy))
+
+        after = yaml.safe_load(open(metadata_file_path(plugin_copy)))
+        entry = after["models"][self.model_name]
+        computed = entry.get("legacy", entry) if after.get("schema_version") == "2.0" else entry
+        assert computed["architecture"] == "DCNN"
+        assert computed["model_family"] == "resnet"
+        assert computed["total_parameter_count"] == 25557032
+        assert computed["trainable_parameter_count"] == 25557032
+        assert computed["total_layers"] == 151
+        assert computed["trainable_layers"] == 54
+        assert computed["model_size_mb"] == 102.23
+        if before.get("schema_version") == "2.0":
+            old = before["models"][self.model_name]
+            # Curated v2 fields, sources and assertions are unchanged; only empty fields may be filled.
+            for key in set(old) - {"legacy"}:
+                assert entry[key] == old[key], key
+            expected = old.get("model", {}).get("parameter_count") or 25557032
+            assert entry["model"]["parameter_count"] == expected
+        assert not os.path.exists(os.path.join(self.model_path, "metadata.yml"))
 
 
 if __name__ == "__main__":
