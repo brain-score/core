@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import quote
 from .contract import load, MetadataError, MAX_BYTES
 from .policy import protected_changes
+from .vocabularies import vocabulary_warnings
 
 
 def api(path):
@@ -117,6 +118,9 @@ def check_pr(repository, number, domain, root, head_sha=None):
                         "migration": "legacy-to-v2 conversion requires a merged PR",
                     }
                 )
+        warnings = vocabulary_warnings(after)
+        if warnings:
+            findings.append({"path": path, "vocabulary_warnings": warnings})
         findings.append(
             {"path": path, "models": list(after["models"]), "status": "valid"}
         )

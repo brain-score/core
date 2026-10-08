@@ -90,9 +90,12 @@ def validate_metadata_file(metadata_path):
 
     if data.get('schema_version') == '2.0':
         try:
-            from brainscore_core.metadata import load
+            from brainscore_core.metadata import load, vocabulary_warnings
             with open(metadata_path) as stream:
-                return [], load(stream.read())
+                document = load(stream.read())
+            for warning in vocabulary_warnings(document):
+                print(f"WARNING: {warning}", file=sys.stderr)
+            return [], document
         except (ImportError, ValueError) as exc:
             return [f"Metadata v2 validation failed: {exc}"], None
 
