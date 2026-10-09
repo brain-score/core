@@ -1,0 +1,96 @@
+name: PR title
+# Reusable: vision and language call this with
+#   uses: brain-score/core/.github/workflows/pr-title.yml@main
+# Keep the releasing types in step with TYPE_BUMPS in release.yml.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+  workflow_call:
+permissions:
+  pull-requests: write
+env:
+  TYPE_BUMPS: |
+    feat=minor
+    fix=patch
+    perf=patch
+    refactor=no release
+    docs=no release
+    test=no release
+    ci=no release
+    chore=no release
+    build=no release
+    plugin=no release
+    model=no release
+    benchmark=no release
+    data=no release
+    metric=no release
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      # No checkout: pull_request_target has write access, so PR code never runs here.
+      - name: List allowed types
+        id: types
+        run: |
+          {
+            echo 'list<<EOF'; cut -d= -f1 <<< "$TYPE_BUMPS" | sed '/^$/d'; echo EOF
+            echo 'table<<EOF'; sed '/^$/d; s/^\([^=]*\)=\(.*\)$/| `\1` | \2 |/' <<< "$TYPE_BUMPS"; echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: amannn/action-semantic-pull-request@v6.1.1
+        id: lint
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: ${{ steps.types.outputs.list }}
+      - name: Explain the failing title
+        if: steps.lint.outcome == 'failure'
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          header: pr-title
+          message: |
+            The PR title does not follow `type(scope): subject`, so it cannot be merged. The squash-merge title decides the release version.
+
+            Current title: `${{ github.event.pull_request.title }}`
+
+            | Type | Release |
+            |---|---|
+            ${{ steps.types.outputs.table }}
+            | `feat!:` or a `BREAKING CHANGE:` footer, plus the `major update` label | major (minor without the label) |
+
+            Only changes to shipped files release. Changes under tests, docs, `.github` or plugin folders never release, whatever the type.
+
+            The scope is optional. Examples:
+            - `feat(metadata): add dataset vocabularies`
+            - `fix(submission): handle empty score files`
+            - `plugin(models): add resnet50 variant`
+
+            Edit the title and this check re-runs. This comment disappears once the title passes.
+      - name: Remove the explanation once the title passes
+        if: steps.lint.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          header: pr-title
+          delete: true
+      - name: Warn when a breaking change lacks the major label
+        if: >-
+          steps.lint.outcome == 'success'
+          && (contains(github.event.pull_request.title, '!:') || contains(github.event.pull_request.body, 'BREAKING CHANGE'))
+          && !contains(github.event.pull_request.labels.*.name, 'major update')
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          header: pr-major
+          message: |
+            This PR is marked as a breaking change, but it has no `major update` label, so it will release as a **minor** version. Add the `major update` label if a major release is intended.
+      - name: Remove the major warning when it no longer applies
+        if: >-
+          steps.lint.outcome != 'success'
+          || !(contains(github.event.pull_request.title, '!:') || contains(github.event.pull_request.body, 'BREAKING CHANGE'))
+          || contains(github.event.pull_request.labels.*.name, 'major update')
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          header: pr-major
+          delete: true
+      - name: Fail on an invalid title
+        if: steps.lint.outcome == 'failure'
+        run: exit 1
