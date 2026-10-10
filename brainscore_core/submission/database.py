@@ -92,7 +92,7 @@ def modelentry_from_model(model_identifier: str, public: bool, competition: Unio
                                                    'public': public,
                                                    'submission': submission,
                                                    'competition': competition})
-    if bibtex and created:  # model entry was just created and we can add bibtex
+    if bibtex and model_entry.reference_id is None:  # also fills models created before their bibtex was known
         reference = reference_from_bibtex(bibtex)
         model_entry.reference = reference
         model_entry.save()
@@ -397,7 +397,8 @@ def reference_from_bibtex(bibtex_string: str) -> Union[Reference, None]:
 
     try:
         entry = parse_bib(bibtex_string)
-        ref, created = Reference.get_or_create(url=entry.fields['url'],
+        url = entry.fields.get('url') or f"https://doi.org/{entry.fields['doi']}"
+        ref, created = Reference.get_or_create(url=url,
                                                defaults={'bibtex': bibtex_string,
                                                          'author': entry.persons["author"][0].last()[0],
                                                          'year': entry.fields['year']})

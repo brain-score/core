@@ -81,6 +81,26 @@ class TestModel(SchemaTest):
                                       submission=submission_entry, public=True, competition=None, bibtex=SAMPLE_BIBTEX)
         assert entry.reference.year == '2013'
 
+    def test_existing_model_gains_reference(self):
+        submission_entry = _mock_submission_entry()
+        params = dict(model_identifier='dummy', domain='test', public=True, competition=None)
+        modelentry_from_model(**params, submission=submission_entry)
+        entry = modelentry_from_model(**params, submission=submission_entry, bibtex=SAMPLE_BIBTEX)
+        assert entry.reference.url == 'https://doi.org/10.1038/nn.3402'
+
+    def test_existing_reference_is_kept(self):
+        submission_entry = _mock_submission_entry()
+        params = dict(model_identifier='dummy', domain='test', public=True, competition=None)
+        first = modelentry_from_model(**params, submission=submission_entry, bibtex=SAMPLE_BIBTEX)
+        other = SAMPLE_BIBTEX.replace('https://doi.org/10.1038/nn.3402', 'https://example.com/other')
+        entry = modelentry_from_model(**params, submission=submission_entry, bibtex=other)
+        assert entry.reference.id == first.reference.id
+
+    def test_bibtex_without_url_uses_doi(self):
+        bibtex = '\n'.join(line for line in SAMPLE_BIBTEX.splitlines() if 'url=' not in line)
+        reference = reference_from_bibtex(bibtex)
+        assert reference.url == 'https://doi.org/10.1038/nn.3402'
+
     def test_resubmission(self):  # make model entry from user 1, then retrieve model entry from user 2 ("resubmit")
         submission_entry = _mock_submission_entry()
         params = dict(model_identifier='dummy', domain='test', public=True, competition=None, bibtex=SAMPLE_BIBTEX)
