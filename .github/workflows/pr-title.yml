@@ -38,6 +38,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - uses: amannn/action-semantic-pull-request@v6.1.1
         id: lint
+        # Website submissions keep their fixed title (other workflows match on it); plugin merges never release.
+        if: ${{ !(startsWith(github.event.pull_request.head.ref, 'web_submission_') && github.event.pull_request.head.repo.full_name == github.repository) }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -67,7 +69,7 @@ jobs:
 
             Edit the title and this check re-runs. This comment disappears once the title passes.
       - name: Remove the explanation once the title passes
-        if: steps.lint.outcome == 'success'
+        if: steps.lint.outcome != 'failure'
         uses: marocchino/sticky-pull-request-comment@v3.0.5
         with:
           header: pr-title
