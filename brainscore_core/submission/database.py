@@ -397,7 +397,8 @@ def reference_from_bibtex(bibtex_string: str) -> Union[Reference, None]:
 
     try:
         entry = parse_bib(bibtex_string)
-        url = entry.fields.get('url') or f"https://doi.org/{entry.fields['doi']}"
+        url = entry.fields.get('url') or \
+            f"https://doi.org/{entry.fields['doi'].split('doi.org/')[-1].removeprefix('doi:')}"
         ref, created = Reference.get_or_create(url=url,
                                                defaults={'bibtex': bibtex_string,
                                                          'author': entry.persons["author"][0].last()[0],

@@ -101,6 +101,12 @@ class TestModel(SchemaTest):
         reference = reference_from_bibtex(bibtex)
         assert reference.url == 'https://doi.org/10.1038/nn.3402'
 
+    def test_doi_prefix_is_not_doubled(self):
+        for doi in ['https://doi.org/10.1038/nn.3402', 'doi:10.1038/nn.3402']:
+            bibtex = '\n'.join(line for line in SAMPLE_BIBTEX.splitlines() if 'url=' not in line) \
+                .replace('doi={10.1038/nn.3402}', f'doi={{{doi}}}')
+            assert reference_from_bibtex(bibtex).url == 'https://doi.org/10.1038/nn.3402'
+
     def test_resubmission(self):  # make model entry from user 1, then retrieve model entry from user 2 ("resubmit")
         submission_entry = _mock_submission_entry()
         params = dict(model_identifier='dummy', domain='test', public=True, competition=None, bibtex=SAMPLE_BIBTEX)
