@@ -88,6 +88,11 @@ class DummyDomainPlugins(DomainPlugins):
         return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
 
 
+class BibtexDomainPlugins(DummyDomainPlugins):
+    def load_model_bibtex(self, model_identifier: str):
+        return """@article{Dummy2020, author={Dummy, Ann}, title={Dummy}, year={2020}, doi={10.1000/dummy}}"""
+
+
 class TestRunScoring:
     test_database = None
 
@@ -171,6 +176,18 @@ class TestRunScoring:
         assert len(score_entries) == 1
         score_entry = score_entries[0]
         assert score_entry.score_raw == 0.8
+
+    def test_score_links_model_reference(self):
+        endpoint = RunScoringEndpoint(domain_plugins=BibtexDomainPlugins(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        assert Model.get(name='dummymodel1').reference.url == 'https://doi.org/10.1000/dummy'
+
+    def test_score_without_bibtex_hook(self):
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        assert Model.get(name='dummymodel1').reference is None
 
     def test_full_scoring(self):
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC

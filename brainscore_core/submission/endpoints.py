@@ -121,6 +121,10 @@ class DomainPlugins(ABC):
     def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
         raise NotImplementedError()
 
+    def load_model_bibtex(self, model_identifier: str) -> Union[str, None]:
+        """ bibtex used to link the model to its database reference; domains opt in by overriding """
+        return None
+
 class MetadataEndpoint:
     """
     Endpoint for processing metadata submissions. This endpoint is used when only
@@ -279,10 +283,10 @@ class RunScoringEndpoint:
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
         logger.info(f'Model database entry')
-        model = self.domain_plugins.load_model(model_identifier)
+        self.domain_plugins.load_model(model_identifier)  # fail before creating database entries if the model breaks
         model_entry = modelentry_from_model(model_identifier=model_identifier, domain=domain,
                                             submission=submission_entry, public=public, competition=competition,
-                                            bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
+                                            bibtex=self.domain_plugins.load_model_bibtex(model_identifier))
 
         logger.info(f'Benchmark database entry')
         benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
