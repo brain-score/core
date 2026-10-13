@@ -11,6 +11,7 @@ from brainscore_core.metrics import Score as ScoreObject
 from brainscore_core.submission.database_models import (database_proxy, \
     Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, PeeweeBase)
 from brainscore_core.submission.utils import get_secret
+from brainscore_core.submission.eligibility import require_leaderboard_eligible
 from brainscore_core.plugin_management.metadata_utils import (get_existing_meta_ids, process_stimuli_metadata,
                                                               process_data_metadata, process_metric_metadata,
                                                               update_benchmark_instances, BenchmarkMetaResult)
@@ -294,6 +295,7 @@ def create_benchmark_meta_entry(benchmark: Benchmark, domain: str, metadata: dic
     :param metadata: Dictionary containing benchmark metadata
     :return: A BenchmarkMetaResult object with the IDs of the created metadata entries
     """
+    require_leaderboard_eligible(getattr(benchmark, 'leaderboard_eligible', True))
     benchmark_identifier = benchmark.identifier
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
 
@@ -334,6 +336,7 @@ def create_benchmark_meta_entry(benchmark: Benchmark, domain: str, metadata: dic
 
 
 def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> BenchmarkInstance:
+    require_leaderboard_eligible(getattr(benchmark, 'leaderboard_eligible', True))
     benchmark_identifier = benchmark.identifier
     benchmark_type, created = BenchmarkType.get_or_create(identifier=benchmark_identifier,
                                                           defaults=dict(domain=domain, order=999, owner_id=2))
@@ -387,6 +390,8 @@ def reference_from_bibtex(bibtex_string: str) -> Union[Reference, None]:
 
 
 def update_score(score: ScoreObject, entry: Score):
+    # Check before mutating an existing entry, including already published scores.
+    require_leaderboard_eligible(score.attrs.get('leaderboard_eligible', True))
     if 'ceiling' not in score.attrs:  # many engineering benchmarks do not have a primate ceiling
         # only store raw (unceiled) value
         entry.score_raw = _retrieve_score_center(score)
