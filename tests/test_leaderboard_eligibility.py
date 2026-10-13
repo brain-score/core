@@ -67,6 +67,16 @@ def test_direct_upload_cannot_bypass_score_guard():
     endpoint._is_production.assert_not_called()
 
 
+@pytest.mark.parametrize('flag', [False, 'false', None, 0])
+def test_metadata_preserves_eligibility_error_before_database_lookup(monkeypatch, flag):
+    lookup = Mock(side_effect=AssertionError('Must reject before database lookup'))
+    monkeypatch.setattr(database, 'benchmarkinstance_from_benchmark', lookup)
+    benchmark = SimpleNamespace(identifier='local-only', version=1, leaderboard_eligible=flag)
+    with pytest.raises((ValueError, TypeError), match='^leaderboard_eligible'):
+        database.create_benchmark_meta_entry(benchmark, domain='vision', metadata={})
+    lookup.assert_not_called()
+
+
 @pytest.mark.parametrize('excluded', [False, True])
 def test_submission_checks_returned_score_before_upload(monkeypatch, excluded):
     score = Score(0.25)

@@ -295,6 +295,7 @@ def create_benchmark_meta_entry(benchmark: Benchmark, domain: str, metadata: dic
     :param metadata: Dictionary containing benchmark metadata
     :return: A BenchmarkMetaResult object with the IDs of the created metadata entries
     """
+    require_leaderboard_eligible(getattr(benchmark, 'leaderboard_eligible', True))
     benchmark_identifier = benchmark.identifier
     logger.info(f"Processing benchmark metadata for {benchmark_identifier}")
 
