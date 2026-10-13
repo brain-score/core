@@ -39,6 +39,7 @@ from brainscore_core.submission.database import (
 
 # Scoring imports
 from brainscore_core.submission.database import update_score
+from brainscore_core.submission.eligibility import require_leaderboard_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,7 @@ class RunScoringEndpoint:
 
     def _upload_score_to_s3(self, score_result: Score, model_identifier: str,
                             benchmark_identifier: str, domain: str) -> None:
+        require_leaderboard_eligible(score_result.attrs.get('leaderboard_eligible', True))
         if not self._is_production():
             return
 
@@ -273,6 +275,9 @@ class RunScoringEndpoint:
     def _score_model_on_benchmark(self, model_identifier: str, benchmark_identifier: str,
                                   submission_entry: database_models.Submission, domain: str,
                                   public: bool, competition: Union[None, str]):
+        # Check publication policy before model loading, scoring, or entry creation.
+        benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
+        require_leaderboard_eligible(getattr(benchmark, 'leaderboard_eligible', True))
         # TODO: the following is somewhat ugly because we're afterwards loading model and benchmark again
         #  in the `score` method.
         logger.info(f'Model database entry')
@@ -282,7 +287,6 @@ class RunScoringEndpoint:
                                             bibtex=model.bibtex if hasattr(model, 'bibtex') else None)
 
         logger.info(f'Benchmark database entry')
-        benchmark = self.domain_plugins.load_benchmark(benchmark_identifier)
         benchmark_entry = benchmarkinstance_from_benchmark(benchmark, domain=domain)
 
         # Check if the model is already scored on the benchmark
