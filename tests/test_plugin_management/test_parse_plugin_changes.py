@@ -179,7 +179,13 @@ class TestRunChangedPlugins:
         assert "Running tests for new or modified plugins: [" \
                f"'{self.domain_root}/benchmarks/dummy_benchmark_2/test.py']" in output
 
-    def test_run_changed_plugin_tests_one_model(self, mocker):
+    def test_run_changed_plugin_tests_one_model(self, mocker, monkeypatch, tmp_path):
+        # This checks the command we construct, without running or finding Conda.
+        monkeypatch.setenv('PATH', str(tmp_path))
+        conda_base = mocker.patch(
+            'brainscore_core.plugin_management.environment_manager.EnvironmentManager.get_conda_base',
+            return_value=str(tmp_path / 'conda'),
+        )
         plugin_info_dict_mock = mocker.patch(
             "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
         plugin_info_dict_mock.return_value = {
@@ -214,6 +220,7 @@ class TestRunChangedPlugins:
         generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'generic_plugin_tests.py')
         assert command_parts == ['bash', script_path,
                                  plugin_directory, plugin_name, single_test, library_path, generic_plugin_test]
+        conda_base.assert_called_once_with()
 
     def test_run_changed_plugin_tests_all_models_benchmarks_data(self, mocker):
         plugin_info_dict_mock = mocker.patch(
