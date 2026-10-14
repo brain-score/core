@@ -25,6 +25,8 @@ dependencies = [
     "peewee",
     "pybtex",
     "requests",
+    "result-caching", # activation extraction and scoring cache
+    "psutil", # CPU memory checks before scoring
 ]
 
 [project.optional-dependencies]
