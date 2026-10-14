@@ -372,6 +372,30 @@ def test_collect_packages_raw_neural_events_as_neuroid_assembly():
     assert list(collected["region"].values) == ["IT", "IT"]
 
 
+@pytest.mark.parametrize('regions', ['IT', ['V4', 'IT']])
+@pytest.mark.parametrize('kind', ['batch', 'streaming', 'windowed'])
+def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
+    from brainscore_core.streaming_helpers import (
+        StimulusSetSession, StreamingStimulusSetSession, WindowedStreamSession,
+    )
+    if kind == 'windowed':
+        session = WindowedStreamSession(iter([]), fps=30, window_ms=1000, record=regions)
+    else:
+        session_type = StimulusSetSession if kind == 'batch' else StreamingStimulusSetSession
+        session = session_type(_stimulus_set(), record=regions)
+    expected = {}
+    for channel in session.requested_output_channels:
+        expected[channel] = _assembly()
+        session.emit(StreamEvent(channel=channel, payload=expected[channel], t_ms=0))
+    collected = session.collect()
+    if isinstance(regions, str):
+        xr.testing.assert_identical(collected, expected['neural:IT'])
+    else:
+        assert collected.keys() == expected.keys()
+        for channel, assembly in collected.items():
+            xr.testing.assert_identical(assembly, session.collect(channel=channel))
+
+
 def test_neural_response_matches_process_assembly_exactly():
     expected = _assembly()
     subject = _SyntheticSubject(expected)

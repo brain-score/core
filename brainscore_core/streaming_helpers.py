@@ -69,8 +69,16 @@ class StimulusSetSession(InMemorySession):
                           time_bins=None):
         return cls(stimulus_set, record=record, time_bins=time_bins)
 
-    def collect(self, channel: str) -> NeuroidAssembly:
-        """Collect emitted neural events into a NeuroidAssembly."""
+    def collect(
+        self, channel: Optional[str] = None,
+    ) -> Union[NeuroidAssembly, dict[str, NeuroidAssembly]]:
+        """Collect one channel, or all requested channels when omitted.
+
+        A single requested channel returns its assembly. Multiple requested
+        channels return a dictionary keyed by channel name.
+        """
+        if channel is None:
+            return _collect_requested_channels(self)
         matching = [event for event in self.emitted if event.channel == channel]
         if not matching:
             raise ValueError(f"No emitted events for channel {channel!r}.")
@@ -96,7 +104,7 @@ class BehavioralSession(InMemorySession):
     def from_task_context(cls, task_context):
         return cls(task_context)
 
-    def collect(self, channel: str) -> BehavioralAssembly:
+    def collect(self, channel: str = "behavior") -> BehavioralAssembly:
         if channel != "behavior":
             raise ValueError(
                 f"BehavioralSession.collect only supports 'behavior'; "
@@ -731,6 +739,14 @@ def _reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
 
 
+def _collect_requested_channels(session):
+    """Keep single-output collection simple without dropping other regions."""
+    channels = session.requested_output_channels
+    if len(channels) == 1:
+        return session.collect(channel=channels[0])
+    return {channel: session.collect(channel=channel) for channel in channels}
+
+
 def _neural_channels(record) -> tuple:
     """Build the requested neural channel names for a ``record`` target.
 
@@ -972,8 +988,12 @@ class StreamingStimulusSetSession(Session):
             raise TypeError("event must be a StreamEvent")
         self.emitted.append(event)
 
-    def collect(self, channel: str):
-        """Concatenate the per-stimulus outputs emitted on ``channel``."""
+    def collect(
+        self, channel: Optional[str] = None,
+    ) -> Union[NeuroidAssembly, dict[str, NeuroidAssembly]]:
+        """Collect per-stimulus outputs; omitted channel collects all requests."""
+        if channel is None:
+            return _collect_requested_channels(self)
         payloads = [e.payload for e in self.emitted if e.channel == channel]
         if not payloads:
             raise ValueError(f"No emitted events for channel {channel!r}.")
@@ -1066,7 +1086,12 @@ class WindowedStreamSession(Session):
             raise TypeError("event must be a StreamEvent")
         self.emitted.append(event)
 
-    def collect(self, channel: str):
+    def collect(
+        self, channel: Optional[str] = None,
+    ) -> Union[NeuroidAssembly, dict[str, NeuroidAssembly]]:
+        """Collect window outputs; omitted channel collects all requests."""
+        if channel is None:
+            return _collect_requested_channels(self)
         payloads = [e.payload for e in self.emitted if e.channel == channel]
         if not payloads:
             raise ValueError(f"No emitted events for channel {channel!r}.")
