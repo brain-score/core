@@ -5,6 +5,7 @@ from collections import namedtuple
 from pathlib import Path
 
 import pytest
+import brainscore_core
 
 from brainscore_core.plugin_management.parse_plugin_changes import separate_plugin_files, get_plugin_paths, \
     plugin_types_to_test_all, get_plugin_ids, parse_plugin_changes, get_scoring_info, get_testing_info, is_plugin_only, \
@@ -211,8 +212,10 @@ class TestRunChangedPlugins:
         command = run_mock.call_args[0][0]
         print(command)
         command_parts = command
-        script_path = str(Path(__file__).parent.parent.parent /
-                          'brainscore_core' / 'plugin_management' / 'test_plugin.sh')
+        # Check the script shipped with the package, including wheel installs.
+        script = Path(brainscore_core.__file__).parent / 'plugin_management' / 'test_plugin.sh'
+        assert script.is_file()
+        script_path = str(script)
         plugin_directory = str(Path(self.domain_root) / 'models' / 'dummy_model')
         plugin_name = 'models__dummy_model'
         single_test = 'False'
