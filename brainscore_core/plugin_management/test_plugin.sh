@@ -4,11 +4,18 @@ PLUGIN_PATH=$1
 PLUGIN_NAME=$2
 PLUGIN_SETUP_PATH=$PLUGIN_PATH/setup.py
 PLUGIN_REQUIREMENTS_PATH=$PLUGIN_PATH/requirements.txt
-PLUGIN_TEST_PATH=$PLUGIN_PATH/test.py
+PLUGIN_TEST_PATH=${6:-$PLUGIN_PATH/test.py}
 SINGLE_TEST=$3
 CONDA_ENV_PATH=$PLUGIN_PATH/environment.yml
 LIBRARY_PATH=$4
 GENERIC_TEST_PATH=$5
+SCRIPT_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+run_pytest() {
+  # Load the guard shipped beside this script, even if the plugin environment
+  # installs an older Core dependency. Do not expose a package source checkout.
+  PYTHONPATH="$SCRIPT_DIRECTORY${PYTHONPATH:+:$PYTHONPATH}" pytest "$@" -p required_plugin_tests
+}
 
 PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 
@@ -67,9 +74,9 @@ pip install junitparser || exit 3
 ### RUN GENERIC TESTING
 if [ "$GENERIC_TEST_PATH" != False ]; then
   if [ "${OPENMIND}" ]; then
-    pytest -m "$PYTEST_SETTINGS" "-vv" "$GENERIC_TEST_PATH" "--plugin_directory" "$PLUGIN_PATH" "--log-cli-level=INFO" "--junitxml" "$XML_FILE";
+    run_pytest -m "$PYTEST_SETTINGS" "-vv" "$GENERIC_TEST_PATH" "--plugin_directory" "$PLUGIN_PATH" "--log-cli-level=INFO" "--junitxml" "$XML_FILE";
   else
-    pytest -m "$PYTEST_SETTINGS" "-vv" "$GENERIC_TEST_PATH" "--plugin_directory" "$PLUGIN_PATH" "--log-cli-level=INFO";
+    run_pytest -m "$PYTEST_SETTINGS" "-vv" "$GENERIC_TEST_PATH" "--plugin_directory" "$PLUGIN_PATH" "--log-cli-level=INFO";
   fi
   GENERIC_TEST_SUCCESS=$?
 fi
@@ -77,17 +84,17 @@ fi
 ### RUN TESTING
 if [ "$SINGLE_TEST" != False ]; then
   echo "Running ${SINGLE_TEST}"
-  pytest -m "$PYTEST_SETTINGS" "-vv" "$PLUGIN_TEST_PATH" "-k" "$SINGLE_TEST" "--log-cli-level=INFO"
+  run_pytest -m "$PYTEST_SETTINGS" "-vv" "$PLUGIN_TEST_PATH" "-k" "$SINGLE_TEST" "--log-cli-level=INFO"
   PLUGIN_TEST_SUCCESS=$?
 else
   if [ "${TRAVIS}" ]; then
     if [ "$PRIVATE_ACCESS" = 1 ]; then
-      pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" "$PLUGIN_TEST_PATH";
+      run_pytest -m "private_access and $TRAVIS_PYTEST_SETTINGS" "$PLUGIN_TEST_PATH";
     elif [ "$PRIVATE_ACCESS" != 1 ]; then 
-      pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" "$PLUGIN_TEST_PATH";
+      run_pytest -m "not private_access and $TRAVIS_PYTEST_SETTINGS" "$PLUGIN_TEST_PATH";
     fi
   else
-    pytest -m "$PYTEST_SETTINGS" "$PLUGIN_TEST_PATH" "--junitxml" "$PLUGIN_XML_FILE" "-s" "-o log_cli=true";
+    run_pytest -m "$PYTEST_SETTINGS" "$PLUGIN_TEST_PATH" "--junitxml" "$PLUGIN_XML_FILE" "-s" "-o log_cli=true";
   fi 
   PLUGIN_TEST_SUCCESS=$?
   if [ "${OPENMIND}" ]; then
@@ -97,7 +104,7 @@ else
 fi
 
 (($GENERIC_TEST_SUCCESS == 0)) && echo "Generic tests succeeded" || echo "Generic tests failed, return code $GENERIC_TEST_SUCCESS"
-(($PLUGIN_TEST_SUCCESS == 0 || $PLUGIN_TEST_SUCCESS == 5)) && echo "Plugin-specific tests succeeded" || echo "Plugin-specific tests failed, return code $PLUGIN_TEST_SUCCESS"
+(($PLUGIN_TEST_SUCCESS == 0)) && echo "Plugin-specific tests succeeded" || echo "Plugin-specific tests failed, return code $PLUGIN_TEST_SUCCESS"
 
 if [ $GENERIC_TEST_SUCCESS -ne 0 ]; then
   exit "$GENERIC_TEST_SUCCESS"
