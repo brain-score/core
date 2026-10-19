@@ -86,20 +86,20 @@ def check_channel_compatibility(subject: Subject, benchmark) -> None:
     bench_accepted = benchmark_accepted_input_channels(benchmark)
     bench_requested = benchmark_requested_output_channels(benchmark)
 
-    _validate_channel_set(
+    validate_channels(
         subject_in, io_catalog.INPUT, f"subject '{subject.identifier}' in_channels")
-    _validate_channel_set(
+    validate_channels(
         subject_out, io_catalog.OUTPUT, f"subject '{subject.identifier}' out_channels")
-    _validate_channel_set(
+    validate_channels(
         subject_required, io_catalog.INPUT,
         f"subject '{subject.identifier}' required_channels")
-    _validate_channel_set(
+    validate_channels(
         bench_required, io_catalog.INPUT,
         f"benchmark '{_benchmark_identifier(benchmark)}' required_input_channels")
-    _validate_channel_set(
+    validate_channels(
         bench_accepted, io_catalog.INPUT,
         f"benchmark '{_benchmark_identifier(benchmark)}' accepted_input_channels")
-    _validate_channel_set(
+    validate_channels(
         bench_requested, io_catalog.OUTPUT,
         f"benchmark '{_benchmark_identifier(benchmark)}' requested_output_channels")
 
@@ -180,7 +180,14 @@ def benchmark_requested_output_channels(benchmark) -> Set[str]:
     return {f"neural:{region}"}
 
 
-def _validate_channel_set(channels: Set[str], direction: str, owner: str) -> None:
+def validate_channels(channels: Set[str], direction: str, owner: str, *,
+                      allow_unregistered: bool = False) -> None:
+    """Validate channel names and direction against the shared catalog.
+
+    Exploratory experiments may allow unregistered families with a warning.
+    Benchmark scoring requires registration. Invalid syntax or direction always
+    raises CompatibilityError.
+    """
     for channel in sorted(channels, key=repr):
         try:
             family, address = parse_channel(channel)
@@ -192,6 +199,13 @@ def _validate_channel_set(channels: Set[str], direction: str, owner: str) -> Non
         try:
             entry = io_catalog.get(family)
         except KeyError as error:
+            if allow_unregistered:
+                warnings.warn(
+                    f"{owner} declares unregistered channel '{channel}'. "
+                    'This experiment may run, but benchmark scoring requires '
+                    'a catalog channel or register_channel() registration.',
+                    CompatibilityWarning, stacklevel=2)
+                continue
             raise CompatibilityError(
                 f"{owner} declares unknown channel '{channel}'."
             ) from error
