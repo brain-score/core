@@ -162,3 +162,25 @@ def test_common_session_collects_batch_and_streamed_assemblies(streaming):
     )
     model.interact(session)
     assert session.collect().shape == (2, 4)
+
+
+
+def test_external_selector_routing_does_not_require_a_dataclass():
+    from brainscore_core.model_interface import UnitSelector
+    class ExternalSelector(UnitSelector):
+        @property
+        def layer_path(self):
+            return 'custom.layer'
+    selector = ExternalSelector()
+    model = BrainScoreModel(
+        identifier='external',
+        region_layer_map={'region': selector},
+        region_modality_map={'region': 'text'},
+        activations_model={'text': Extractor()},
+    )
+    assert selector.modality is None
+    assert isinstance(model.region_layer_map['region'], ExternalSelector)
+    model.region_layer_map = model.region_layer_map
+    assert model._region_modality_map == {'region': 'text'}
+    model.start_recording('region')
+    assert model.process(StimulusSet({'sentence': ['x']})).shape == (1, 4)

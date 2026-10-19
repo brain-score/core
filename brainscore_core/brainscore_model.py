@@ -1,8 +1,9 @@
 """Concrete Brain-Score subject implementation."""
 
+from copy import copy
 from dataclasses import replace
 from types import MappingProxyType
-from typing import cast, Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from .behavioral import BehavioralReadout
 from .capability_config import normalize_capability_config
@@ -18,7 +19,7 @@ from .events import (
 )
 from .perturbation import PerturbationManager
 from .recording import Recorder
-from .selection import LayerSelector, UnitSelector, _promote_to_selector
+from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
@@ -249,7 +250,14 @@ class BrainScoreModel(UnifiedModel):
             if modality is not None:
                 if canonical_modality(modality) not in self.supported_modalities:
                     raise ValueError(f"Region {region!r} references modalities with no preprocessor or extractor: {modality!r}")
-                selectors[region] = replace(cast(Any, selector), modality=modality)
+                if isinstance(selector, (LayerSelector, CompositeSelector)):
+                    selectors[region] = replace(selector, modality=modality)
+                elif selector.modality != modality:
+                    # External selectors need only the UnitSelector contract,
+                    # not a dataclass constructor accepting our optional field.
+                    routed = copy(selector)
+                    routed.modality = modality
+                    selectors[region] = routed
         self._region_layer_selectors = selectors
         self._region_layer_map_dict = {r: sel.layer_path for r, sel in selectors.items()}
         self._region_modality_map = {
