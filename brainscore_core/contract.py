@@ -2,13 +2,14 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
 from .io_catalog import modalities_to_input_channels
 
 if TYPE_CHECKING:
     from .streaming import Session
+    from .selection import UnitSelector
 
 
 @dataclass
@@ -105,7 +106,7 @@ class UnifiedModel(Subject):
 
     @property
     @abstractmethod
-    def region_layer_map(self) -> Dict[str, str]:
+    def region_layer_map(self) -> Mapping[str, Union[str, "UnitSelector"]]:
         ...
 
     @property

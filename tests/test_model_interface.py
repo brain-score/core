@@ -350,7 +350,7 @@ class TestRegionLayerMapSelectors:
             region_layer_map={'V1': sel},
             preprocessors={'vision': lambda m, s, **kw: None},
         )
-        assert m.region_layer_map['V1'] == 'l.2'
+        assert m.region_layer_map['V1'] is sel
         assert m.region_layer_selectors['V1'] is sel
 
 
@@ -860,8 +860,8 @@ class TestMultiRegionStartRecording:
         assert act.call_args['layers'] == ['layer.8']
         assert 'V4|IT' in assembly['region'].values.tolist()
 
-    def test_unknown_region_in_list_raises(self):
-        """Unknown region in a list-form call raises clearly before any compute."""
+    def test_unknown_name_in_list_records_raw_layer(self):
+        """Wrapping a layer name in a list keeps its meaning."""
         m = BrainScoreModel(
             identifier='test',
             model=None,
@@ -869,8 +869,9 @@ class TestMultiRegionStartRecording:
             preprocessors={'vision': make_stub_preprocessor()},
             activations_model=_XArrayActivationsModel(),
         )
-        with pytest.raises(ValueError, match="not in region_layer_map"):
+        with pytest.warns(UserWarning, match="raw layer"):
             m.start_recording(['V4', 'NotARegion'])
+        assert m._recording_layers == ['layer.8', 'NotARegion']
 
     def test_reset_clears_multi_region_state(self):
         """reset() clears the multi-region attributes alongside the singular one."""

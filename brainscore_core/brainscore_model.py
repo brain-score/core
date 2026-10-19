@@ -1,5 +1,7 @@
 """Concrete Brain-Score subject implementation."""
 
+from copy import copy
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -17,7 +19,7 @@ from .events import (
 )
 from .perturbation import PerturbationManager
 from .recording import Recorder
-from .selection import UnitSelector, _promote_to_selector
+from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
@@ -80,19 +82,20 @@ class BrainScoreModel(UnifiedModel):
         """A model (or, in principle, a human) evaluated through the unified interface.
 
         Only ``identifier`` is always required; a feature-extraction model also
-        needs ``region_layer_map`` plus a ``preprocessors`` / ``activations_model``
-        pair. The four capability functions are optional and each enables an extra
-        evaluation path.
+        needs ``region_layer_map`` and an ``activations_model`` mapping.
+        Capability functions are optional; each enables another evaluation path.
 
         :param identifier: unique model name (also the activation-cache key).
         :param model: the object perturbation hooks / generation run against (e.g.
             the torch module); may be ``None`` for a feature-extraction model whose
             wrapper holds its own module.
         :param region_layer_map: brain region -> layer path (or a ``UnitSelector``).
-        :param preprocessors: modality -> callable. For ``vision``: a resize/normalize
-            callable paired with ``activations_model``. For ``text``/``audio``/``video``:
-            the whole extraction wrapper, with ``activations_model=None``. See EXTENDING.
-        :param activations_model: the vision extraction wrapper (e.g. PytorchWrapper).
+        :param preprocessors: input preparation callables, declared by modality.
+            Configure each wrapper with its preparation function or tokenizer.
+        :param activations_model: extraction callable ``(stimuli, layers=...)``,
+            shared across declared modalities, or a modality -> extractor mapping.
+            Image, text, audio and video wrappers use this same slot. A mapping
+            declares its modalities without needing placeholder preprocessors.
         :param visual_degrees: vision field-of-view; ignored by non-vision models.
         :param behavioral_readout_layer: layer on which to fit a behavioral readout.
         :param generation_fn: generate-and-parse callable for instruction-following
@@ -104,7 +107,8 @@ class BrainScoreModel(UnifiedModel):
         :param required_modalities: input modalities the model cannot run without.
         :param backbone_id: shared cache key so registrations with identical weights
             reuse one activation cache.
-        :param region_modality_map: region -> modality routing for multi-tower models.
+        :param region_modality_map: compatibility routing map. Prefer the modality
+            field on LayerSelector or CompositeSelector in region_layer_map.
 
         Note: passing capability functions POSITIONALLY (via the legacy tail) is
         deprecated and error-prone; always pass them by keyword.
@@ -142,28 +146,16 @@ class BrainScoreModel(UnifiedModel):
         self._model = model
         region_layer_map = region_layer_map or {}
         preprocessors = preprocessors or {}
-        self._install_region_layer_map(region_layer_map)
-        self._region_modality_map: Dict[str, str] = dict(
-            region_modality_map or {})
-        if self._region_modality_map:
-            unknown_regions = (set(self._region_modality_map.keys())
-                               - set(region_layer_map.keys()))
-            if unknown_regions:
-                raise ValueError(
-                    f"region_modality_map references regions not in "
-                    f"region_layer_map: {sorted(unknown_regions)}."
-                )
-            unknown_modalities = (
-                {canonical_modality(m) for m in self._region_modality_map.values()}
-                - {canonical_modality(k) for k in preprocessors.keys()})
-            if unknown_modalities:
-                raise ValueError(
-                    f"region_modality_map references modalities with no "
-                    f"preprocessor: {sorted(unknown_modalities)}. Available "
-                    f"modalities: {sorted(preprocessors.keys())}."
-                )
-        self._preprocessors = preprocessors
+        # Normalize compatibility inputs once; dispatch always calls an extractor.
+        from .dispatch import normalize_extractors
+        self._preprocessors: Dict[str, Optional[Callable]] = dict(preprocessors)
         self._activations_model = activations_model
+        self._extractors, self._layer_extractors = normalize_extractors(
+            self, preprocessors, activations_model)
+        for modality in self._extractors:
+            self._preprocessors.setdefault(modality, None)
+        self._region_modality_map: Dict[str, str] = {}
+        self._install_region_layer_map(region_layer_map, region_modality_map)
         self._visual_degrees_val = visual_degrees
         self._capability_config = capability_values
         self._behavioral_readout_layer = capability_values.get(
@@ -181,7 +173,7 @@ class BrainScoreModel(UnifiedModel):
 
         required = ({canonical_modality(m) for m in required_modalities}
                     if required_modalities else set())
-        available = {canonical_modality(k) for k in preprocessors.keys()}
+        available = self.supported_modalities
         if not required.issubset(available):
             raise ValueError(
                 f"required_modalities {required} must be a subset of the "
@@ -210,6 +202,8 @@ class BrainScoreModel(UnifiedModel):
             *(set(c.input_channels) for c in self._declared_capabilities()))
         if self._action_fn is not None:
             channels.add('observation')
+        if self._generation_fn is not None:
+            channels.add('instruction')
         return channels
 
     @property
@@ -236,43 +230,58 @@ class BrainScoreModel(UnifiedModel):
     def identifier(self) -> str:
         return self._identifier_str
 
-    def _install_region_layer_map(self, region_layer_map) -> None:
-        """Rebuild both region->selector and region->layer-path from one mapping.
-
-        The two are derived from the same source and must not drift, which is
-        why callers cannot edit either directly.
-        """
-        self._region_layer_selectors: Dict[str, UnitSelector] = {
-            region: _promote_to_selector(value)
-            for region, value in dict(region_layer_map).items()
-        }
-        self._region_layer_map_dict: Dict[str, str] = {
-            region: selector.layer_path
-            for region, selector in self._region_layer_selectors.items()
-        }
+    def _install_region_layer_map(self, region_layer_map, routing=None) -> None:
+        """Validate and install one lossless region configuration atomically."""
+        selectors = {region: _promote_to_selector(value)
+                     for region, value in dict(region_layer_map).items()}
+        legacy_routing = (dict(routing) if routing is not None else
+                          {r: m for r, m in self._region_modality_map.items()
+                           if r in selectors})
+        unknown = set(legacy_routing) - set(selectors)
+        if unknown:
+            raise ValueError(f"region_modality_map references regions not in region_layer_map: {sorted(unknown)}")
+        for region, selector in selectors.items():
+            modality = getattr(selector, 'modality', None)
+            old_modality = legacy_routing.get(region)
+            if routing is not None and modality and old_modality and (
+                    canonical_modality(modality) != canonical_modality(old_modality)):
+                raise ValueError(f"Conflicting modality routing for region {region!r}")
+            modality = modality or old_modality
+            if modality is not None:
+                if canonical_modality(modality) not in self.supported_modalities:
+                    raise ValueError(f"Region {region!r} references modalities with no preprocessor or extractor: {modality!r}")
+                if isinstance(selector, (LayerSelector, CompositeSelector)):
+                    selectors[region] = replace(selector, modality=modality)
+                elif selector.modality != modality:
+                    # External selectors need only the UnitSelector contract,
+                    # not a dataclass constructor accepting our optional field.
+                    routed = copy(selector)
+                    routed.modality = modality
+                    selectors[region] = routed
+        self._region_layer_selectors = selectors
+        self._region_layer_map_dict = {r: sel.layer_path for r, sel in selectors.items()}
+        self._region_modality_map = {
+            r: sel.modality for r, sel in selectors.items()
+            if sel.modality is not None}
 
     @property
-    def region_layer_map(self) -> Mapping[str, str]:
-        """Read-only view of region -> layer path.
+    def region_layer_map(self) -> Mapping[str, Union[str, UnitSelector]]:
+        """Read-only, lossless recording configuration.
 
-        Returned read-only on purpose. This used to hand back a fresh ``dict``,
-        so ``model.region_layer_map['IT'] = 'h.3'`` edited a throwaway copy and
-        did nothing — no error, no effect. That silently produced a whole layer
-        sweep in which every layer scored identically, because every run was
-        really reading the same layer.
-
-        Mutating the view now raises. Assign a complete mapping, or use
-        :meth:`set_region_layer` for one region; either keeps the selector and
-        layer-path forms in step.
+        Simple entries remain layer strings. Composite units and modality routing
+        remain selectors, so assigning this mapping back preserves every setting.
         """
-        return MappingProxyType(self._region_layer_map_dict)
+        return MappingProxyType({
+            region: (selector.name if isinstance(selector, LayerSelector)
+                     and selector.modality is None else selector)
+            for region, selector in self._region_layer_selectors.items()})
 
     @region_layer_map.setter
     def region_layer_map(self, region_layer_map) -> None:
         self._install_region_layer_map(region_layer_map)
 
     def set_region_layer(self, region: str, value) -> None:
-        """Point one region at a layer path (or ``UnitSelector``)."""
+        """Replace one region's layer or selector, keeping its existing routing."""
         updated = dict(self._region_layer_selectors)
         updated[region] = value
         self._install_region_layer_map(updated)
@@ -517,7 +526,7 @@ class BrainScoreModel(UnifiedModel):
         # Callable capabilities and extractors may own episode/history state.
         # Reset each provider once, including bound-method registrations.
         providers = [self._action_fn, self._generation_fn, self._activations_model,
-                     *self._preprocessors.values()]
+                     *self._preprocessors.values(), *self._extractors.values()]
         seen = set()
         from .capabilities import capability_registry
         for identifier, state in self._capability_state.items():

@@ -18,6 +18,7 @@ class _FakeActivationsModel:
 class _FakeOwner:
     def __init__(self, perturbed):
         self._activations_model = _FakeActivationsModel()
+        self._extractors = {'vision': self._activations_model}
         self._active_perturbations = {'h1': (lambda: None)} if perturbed else {}
         self._preprocessors = {}
         self._model = None

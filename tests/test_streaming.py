@@ -72,10 +72,11 @@ def test_parse_channel_rejects_non_string():
         parse_channel(None)
 
 
-def test_session_minimal_contract_excludes_collect():
+def test_session_has_optional_collection_without_new_abstract_methods():
     assert "next_input" in Session.__dict__
     assert "emit" in Session.__dict__
-    assert "collect" not in Session.__dict__
+    assert callable(Session.collect)
+    assert Session.__abstractmethods__ == {"next_input", "emit"}
 
 
 def test_in_memory_session_drives_inputs_and_records_emits():
