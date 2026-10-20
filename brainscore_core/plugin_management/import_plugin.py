@@ -1,6 +1,7 @@
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -85,18 +86,14 @@ class ImportPlugin:
         
         if setup_file.is_file():
             subprocess.run(
-                f"pip install {self.plugins_dir / self.plugin_dirname}",
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                [sys.executable, '-m', 'pip', 'install', str(setup_file.parent)],
+                check=True,
             )
 
         if requirements_file.is_file():
             subprocess.run(
-                f"pip install -r {requirements_file}",
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                [sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file)],
+                check=True,
             )
 
 

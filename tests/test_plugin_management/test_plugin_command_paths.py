@@ -188,3 +188,38 @@ def test_plugin_guard_requires_an_executed_passing_test(tmp_path, body, succeeds
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert (run.returncode == 0) is succeeds, run.stdout + run.stderr
+
+
+@pytest.mark.parametrize('filename', ['setup.py', 'requirements.txt'])
+def test_plugin_install_uses_current_python_and_literal_paths(tmp_path, monkeypatch, filename):
+    from brainscore_core.plugin_management.import_plugin import ImportPlugin
+
+    plugin = tmp_path / "plugin with spaces and 'quotes'"
+    plugin.mkdir()
+    (plugin / filename).touch()
+    installer = ImportPlugin.__new__(ImportPlugin)
+    installer.plugins_dir = tmp_path
+    installer.plugin_dirname = plugin.name
+    calls = []
+    monkeypatch.setattr(subprocess, 'run', lambda *args, **kwargs: calls.append((args, kwargs)))
+    installer.install_requirements()
+    command = calls[0][0][0]
+    assert command[:4] == [sys.executable, '-m', 'pip', 'install']
+    assert command[4:] == ([str(plugin)] if filename == 'setup.py' else ['-r', str(plugin / filename)])
+    assert calls[0][1] == {'check': True}
+
+
+def test_failed_plugin_install_stops_before_import(tmp_path, monkeypatch):
+    from brainscore_core.plugin_management.import_plugin import ImportPlugin
+
+    (tmp_path / 'requirements.txt').touch()
+    installer = ImportPlugin.__new__(ImportPlugin)
+    installer.plugins_dir = tmp_path.parent
+    installer.plugin_dirname = tmp_path.name
+
+    def fail(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(subprocess, 'run', fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        installer.install_requirements()
