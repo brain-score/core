@@ -45,7 +45,11 @@ def _activation_cache_disabled():
 
 def register_input_handler(cls, event_type: type, handler_name: str,
                            before: Optional[type] = None) -> None:
-    """Register a handler for an input-event type on ``cls``."""
+    """Compatibility hook; new integrations should register a Capability."""
+    import warnings
+    warnings.warn(
+        'register_input_handler is deprecated; register a Capability instead.',
+        DeprecationWarning, stacklevel=3)
     if '_INPUT_HANDLERS' not in cls.__dict__:
         cls._INPUT_HANDLERS = list(cls._INPUT_HANDLERS)
     entry = (event_type, handler_name)
@@ -107,8 +111,20 @@ def normalize_extractors(owner, preprocessors, activations_model):
                 accepts_legacy_call = False
             if modality in extractors and not accepts_legacy_call:
                 continue
+            import warnings
+            warnings.warn(
+                'Extraction callbacks in preprocessors are deprecated. Use '
+                'activations_model={modality: extractor}, where extractor accepts '
+                '(stimuli, layers=...).',
+                DeprecationWarning, stacklevel=3)
             def extract(stimuli, *, layers, function=preprocessor):
-                return function(owner._model, stimuli, recording_layer=owner._recording_layer)
+                if len(layers) > 1:
+                    raise ValueError(
+                        'This compatibility extraction callback accepts one layer. '
+                        'For multiple layers, use activations_model={modality: '
+                        'extractor} with an extractor accepting (stimuli, layers=...).')
+                return function(owner._model, stimuli,
+                                recording_layer=layers[0] if layers else None)
             extractors[modality] = extract
             layer_extractors.discard(modality)
     return extractors, layer_extractors
@@ -227,7 +243,10 @@ class InputDispatcher:
         for key, extractor in owner._extractors.items():
             if canonical_modality(key) == modality:
                 return extractor(stimuli, layers=layers)
-        raise KeyError(modality)
+        raise NotImplementedError(
+            f"Model '{owner.identifier}' declares {modality!r} input but has no "
+            'activation extractor for it. Configure activations_model to record '
+            'internal activity, or use a behavioral task for an output-only model.')
 
     def process_multi_modality(self, stimuli, detected: Set[str],
                                layers: List[str]):

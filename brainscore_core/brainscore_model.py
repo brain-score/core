@@ -73,6 +73,7 @@ class BrainScoreModel(UnifiedModel):
         generation_fn: Optional[Callable] = None,
         action_fn: Optional[Callable] = None,
         state_change_fn: Optional[Callable] = None,
+        supported_modalities: Optional[Set[str]] = None,
         required_modalities: Optional[Set[str]] = None,
         backbone_id: Optional[str] = None,
         region_modality_map: Optional[Dict[str, str]] = None,
@@ -104,6 +105,9 @@ class BrainScoreModel(UnifiedModel):
             closed-loop / embodied evaluation.
         :param state_change_fn: ``StateChange -> (PerturbationApplied, cleanup)`` for
             lesion / stimulation evaluation.
+        :param supported_modalities: inputs accepted without an extraction wrapper,
+            for example by a closed-weight generation function. Extractor mappings
+            already declare their inputs; do not repeat them here.
         :param required_modalities: input modalities the model cannot run without.
         :param backbone_id: shared cache key so registrations with identical weights
             reuse one activation cache.
@@ -152,6 +156,8 @@ class BrainScoreModel(UnifiedModel):
         self._activations_model = activations_model
         self._extractors, self._layer_extractors = normalize_extractors(
             self, preprocessors, activations_model)
+        for modality in supported_modalities or ():
+            self._preprocessors.setdefault(modality, None)
         for modality in self._extractors:
             self._preprocessors.setdefault(modality, None)
         self._region_modality_map: Dict[str, str] = {}
@@ -177,8 +183,8 @@ class BrainScoreModel(UnifiedModel):
         if not required.issubset(available):
             raise ValueError(
                 f"required_modalities {required} must be a subset of the "
-                f"available preprocessors {available}. A model cannot require "
-                f"a modality for which it has no preprocessor."
+                f"supported modalities {available}. A model cannot require "
+                f"an input it does not declare."
         )
         self._required_modalities = required
         self._backbone_id = backbone_id or identifier

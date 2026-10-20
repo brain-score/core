@@ -184,3 +184,89 @@ def test_external_selector_routing_does_not_require_a_dataclass():
     assert model._region_modality_map == {'region': 'text'}
     model.start_recording('region')
     assert model.process(StimulusSet({'sentence': ['x']})).shape == (1, 4)
+
+
+def test_generation_inputs_need_no_placeholder_extractors():
+    from brainscore_core.model_interface import TaskContext
+    model = BrainScoreModel(
+        identifier='output-only', supported_modalities={'text'},
+        generation_fn=lambda stimulus_row, instruction, label_set: label_set[0],
+    )
+    assert model.supported_modalities == {'text'}
+    assert model.region_layer_map == {}
+    model.start_task(TaskContext(
+        task_type='probabilities', instruction='Choose yes.', label_set=['yes'],
+        prefer_path='generation',
+    ))
+    result = model.process(StimulusSet({'stimulus_id': ['s0'], 'sentence': ['hello']}))
+    assert result.values.tolist() == [[1.0]]
+    model.reset()
+    with pytest.raises(NotImplementedError, match='no activation extractor'):
+        model.process(StimulusSet({'stimulus_id': ['s0'], 'sentence': ['hello']}))
+
+
+@pytest.mark.parametrize('prefer_path', ['auto', 'generation', 'readout'])
+def test_behavioral_path_choice_is_explicit_or_warns(monkeypatch, prefer_path):
+    import warnings
+    from brainscore_core.model_interface import TaskContext
+    model = BrainScoreModel(
+        identifier='dual-path', supported_modalities={'text'},
+        generation_fn=lambda **kwargs: 'yes',
+    )
+    fitted = []
+    monkeypatch.setattr(model, '_fit_behavioral_readout', lambda stimuli: fitted.append(stimuli))
+    stimuli = StimulusSet({'sentence': ['hello']})
+    with warnings.catch_warnings(record=True) as notices:
+        warnings.simplefilter('always')
+        model.start_task(TaskContext(
+            task_type='probabilities', instruction='Choose yes.', label_set=['yes'],
+            fitting_stimuli=stimuli, prefer_path=prefer_path,
+        ))
+    assert len(notices) == (1 if prefer_path == 'auto' else 0)
+    if notices:
+        assert 'does not fit' in str(notices[0].message)
+    assert bool(fitted) == (prefer_path == 'readout')
+    assert model._use_generation_for_task == (prefer_path != 'readout')
+
+
+def test_single_layer_compatibility_callback_rejects_multiple_layers():
+    calls = []
+    def old_extract(model, stimuli, recording_layer):
+        calls.append(recording_layer)
+        return Extractor()(stimuli, layers=[recording_layer])
+    with pytest.warns(DeprecationWarning, match='Extraction callbacks'):
+        model = BrainScoreModel(
+            identifier='old-callback', preprocessors={'text': old_extract},
+            region_layer_map={'A': 'first', 'B': 'second'},
+        )
+    stimuli = StimulusSet({'sentence': ['hello']})
+    model.start_recording('A')
+    model.process(stimuli)
+    assert calls == ['first']
+    model.start_recording(['A', 'B'])
+    with pytest.raises(ValueError, match='accepts one layer'):
+        model.process(stimuli)
+    assert calls == ['first']
+
+
+def test_channel_registration_policy_differs_only_for_exploration():
+    from brainscore_core.compatibility import (
+        validate_channels, CompatibilityError, CompatibilityWarning,
+    )
+    with pytest.warns(CompatibilityWarning, match='register_channel'):
+        validate_channels({'custom_signal'}, 'input', 'experiment', allow_unregistered=True)
+    with pytest.raises(CompatibilityError, match='unknown channel'):
+        validate_channels({'custom_signal'}, 'input', 'benchmark')
+    with pytest.raises(CompatibilityError, match='registry marks'):
+        validate_channels({'behavior'}, 'input', 'experiment', allow_unregistered=True)
+
+
+def test_deprecated_input_handler_remains_usable():
+    class CustomModel(BrainScoreModel):
+        def custom(self, event):
+            return 'handled'
+    class Event:
+        pass
+    with pytest.warns(DeprecationWarning, match='Capability'):
+        CustomModel.register_input_handler(Event, 'custom')
+    assert CustomModel(identifier='compatibility').process(Event()) == 'handled'
