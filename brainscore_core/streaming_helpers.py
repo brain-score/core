@@ -97,6 +97,7 @@ class BehavioralSession(InMemorySession):
     def __init__(self, task_context):
         self.task_context = task_context
         self.scoring_stimuli = _behavior_stimuli_to_score(task_context)
+        self.stimulus_set = self.scoring_stimuli
         self.requested_output_channels = ("behavior",)
         super().__init__(_behavior_events(task_context, self.scoring_stimuli))
 
@@ -687,7 +688,7 @@ def _drain_stream_events(session) -> list[StreamEvent]:
 
 
 def _stimuli_from_stream_session(session, events: list[StreamEvent]):
-    if hasattr(session, "stimulus_set"):
+    if getattr(session, "stimulus_set", None) is not None:
         return session.stimulus_set
     return _reconstruct_stimulus_set_from_events(events)
 
@@ -871,6 +872,14 @@ def _drive_behavior_via_process(subject, session: BehavioralSession,
     )
 
 
+def _behavior_stimuli_from_session(session, task_context):
+    events = [event for event in _drain_stream_events(session)
+              if event.channel != 'instruction' and event.meta.get('role') != 'fitting']
+    if events or getattr(session, 'stimulus_set', None) is not None:
+        return _stimuli_from_stream_session(session, events)
+    return _behavior_stimuli_to_score(task_context)
+
+
 def _drive_behavior_session_via_process(
     subject, session: BehavioralSession, task_context=None,
     driver: str = "interact"
@@ -883,7 +892,7 @@ def _drive_behavior_session_via_process(
             "behavior interact requires a session.task_context to drive."
         )
     subject.start_task(task_context)
-    stimuli = _behavior_stimuli_to_score(task_context)
+    stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
         raise ValueError(
             "behavioral_response requires stimuli to elicit a response. Provide "
@@ -920,7 +929,7 @@ def _drive_behavior_session_streaming(
             "behavior interact requires a session.task_context to drive."
         )
     subject.start_task(task_context)              # once, before any trial
-    stimuli = _behavior_stimuli_to_score(task_context)
+    stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
         raise ValueError(
             "behavioral_response requires stimuli to elicit a response. Provide "

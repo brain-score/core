@@ -25,6 +25,11 @@ class Selection:
         model object.
     :param indices: Optional list of unit indices within the layer to
         perturb. ``None`` means ALL units at the layer.
+    :param axis: Tensor axis addressed by indices; -1 keeps the last-axis
+        convention. None flattens all axes after the batch axis in row-major
+        order, matching unpooled activation extraction.
+    :param expected_shape: Optional non-batch tensor shape, checked before use.
+        Localizers set this when coordinates describe a flattened output.
     :param metadata: Free-form bag for selection criteria the
         ``state_change_fn`` can interpret (e.g., a localizer mask, a
         functional contrast specification).
@@ -32,6 +37,17 @@ class Selection:
     layer: str
     indices: Optional[List[int]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    axis: Optional[int] = -1
+    expected_shape: Optional[tuple[int, ...]] = None
+
+    def __post_init__(self) -> None:
+        if self.axis is not None and (isinstance(self.axis, bool) or not isinstance(self.axis, int)):
+            raise TypeError('Selection.axis must be an integer or None (flatten non-batch axes).')
+        if self.axis == 0:
+            raise ValueError('Selection cannot index the batch axis.')
+        if self.expected_shape is not None:
+            self.expected_shape = tuple(self.expected_shape)
+
 
 
 @dataclass

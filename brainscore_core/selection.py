@@ -15,6 +15,8 @@ class UnitSelector(ABC):
     ``Selection`` instead describes a concrete recording/intervention target.
     """
 
+    modality: Optional[str] = None
+
     @property
     @abstractmethod
     def layer_path(self) -> str:
@@ -25,6 +27,7 @@ class UnitSelector(ABC):
 class LayerSelector(UnitSelector):
     """Select one layer for a region mapping; ``name`` is its layer path."""
     name: str
+    modality: Optional[str] = None
 
     @property
     def layer_path(self) -> str:
@@ -46,6 +49,11 @@ class CompositeSelector(UnitSelector):
         unit of the layer.
     """
     layers: Tuple[Tuple[str, Optional[Tuple[int, ...]]], ...]
+    modality: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if not self.layers:
+            raise ValueError("A composite selector needs at least one layer.")
 
     @property
     def layer_path(self) -> str:
@@ -118,6 +126,8 @@ class RandomSelection(UnitSelection):
     n_total: int
     seed: int = 0
     population: Optional[List[int]] = None
+    axis: Optional[int] = -1
+    expected_shape: Optional[Tuple[int, ...]] = None
 
     def resolve(self, model) -> 'Selection':
         import numpy as np
@@ -128,7 +138,8 @@ class RandomSelection(UnitSelection):
         if len(population) != self.n_total:
             raise ValueError('n_total must match the declared unit population.')
         idx = sorted(int(i) for i in rng.choice(population, size=k, replace=False))
-        return Selection(layer=self.layer, indices=idx,
+        return Selection(layer=self.layer, indices=idx, axis=self.axis,
+                         expected_shape=self.expected_shape,
                          metadata={'selector': 'random', 'seed': self.seed,
                                    'n_total': self.n_total,
                                    'unit_population': population.tolist()})
@@ -251,11 +262,49 @@ class FunctionalSelection(UnitSelection):
                     f"recording {self.recording_target!r} spans {len(uniq)} layers "
                     f"{uniq}; functional localization across a composite region "
                     f"isn't supported yet — record a single-layer region.")
+        if isinstance(layer_path, UnitSelector):
+            layer_path = layer_path.layer_path
         population = selection_unit_indices(asm, model, self.recording_target)
+        axis, expected_shape = selection_coordinates(asm)
+
         idx = sorted(int(i) for i in population[order])
-        return Selection(layer=layer_path, indices=idx,
+        return Selection(layer=layer_path, indices=idx, axis=axis, expected_shape=expected_shape,
                          metadata={'selector': 'functional', 'sign': self.sign,
                                    'contrast': self.contrast,
                                    'n_recorded': int(vals.shape[1]),
                                    'unit_population': population.tolist(),
                                    'n_selected': len(idx)})
+
+
+def selection_coordinates(assembly: Any) -> Tuple[Optional[int], Optional[Tuple[int, ...]]]:
+    """Recover tensor coordinates from unpooled extraction, without guessing axes.
+
+    Vision extraction publishes the original non-batch coordinates. Text and
+    feature-vector extraction use the last feature axis. Custom extractors can
+    declare unit_axis and unit_shape attributes when their layout differs.
+    """
+    import numpy as np
+    if 'unit_axis' in assembly.attrs:
+        axis = assembly.attrs['unit_axis']
+        return (None if axis == 'flattened' else int(axis),
+                assembly.attrs.get('unit_shape'))
+    coordinate_sets = (
+        ('channel_temporal', 'channel_x', 'channel_y', 'channel'),
+        ('channel', 'channel_x', 'channel_y'),
+        ('channel', 'embedding'),
+    )
+    for names in coordinate_sets:
+        try:
+            coordinates = [assembly[name].values for name in names]
+        except KeyError:
+            continue
+        if coordinates:
+            shape = tuple(int(np.nanmax(values)) + 1
+                          for values in coordinates if np.isfinite(values).any())
+            # Subset coordinates cannot establish the original shape. Fail closed
+            # rather than reinterpret these positions as last-axis indices.
+            count = int(np.prod(shape))
+            if count != assembly.sizes['neuroid']:
+                raise ValueError('Subset spatial recordings require unit_axis and unit_shape metadata.')
+            return None, shape
+    return -1, None

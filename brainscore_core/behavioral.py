@@ -81,6 +81,14 @@ class BehavioralReadout:
             return
 
         if gen_viable:
+            if readout_viable:
+                import warnings
+                warnings.warn(
+                    'Both generation and fitted readout are available; '
+                    "prefer_path='auto' selects generation and does not fit on "
+                    'fitting_stimuli. Set TaskContext.prefer_path to '
+                    "'generation' or 'readout' to choose explicitly.",
+                    UserWarning, stacklevel=3)
             self.use_generation_for_task = True
             self.readout_classifier = None
             return

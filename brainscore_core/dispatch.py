@@ -45,7 +45,11 @@ def _activation_cache_disabled():
 
 def register_input_handler(cls, event_type: type, handler_name: str,
                            before: Optional[type] = None) -> None:
-    """Register a handler for an input-event type on ``cls``."""
+    """Compatibility hook; new integrations should register a Capability."""
+    import warnings
+    warnings.warn(
+        'register_input_handler is deprecated; register a Capability instead.',
+        DeprecationWarning, stacklevel=3)
     if '_INPUT_HANDLERS' not in cls.__dict__:
         cls._INPUT_HANDLERS = list(cls._INPUT_HANDLERS)
     entry = (event_type, handler_name)
@@ -55,6 +59,75 @@ def register_input_handler(cls, event_type: type, handler_name: str,
                 cls._INPUT_HANDLERS.insert(i, entry)
                 return
     cls._INPUT_HANDLERS.append(entry)
+
+
+def normalize_extractors(owner, preprocessors, activations_model):
+    """Adapt registration forms once to ``extractor(stimuli, layers=...)``.
+
+    Explicit extractors never use attribute-based capability discovery. Older
+    registrations that put extraction functions in preprocessors are adapted by
+    their callable signature at this compatibility boundary.
+    """
+    from collections.abc import Mapping
+    import inspect
+
+    if isinstance(activations_model, Mapping):
+        extractors = dict(activations_model)
+    elif activations_model is not None:
+        if not preprocessors:
+            raise ValueError('A shared activations_model requires declared preprocessors/modalities.')
+        extractors = {key: activations_model for key in preprocessors}
+    else:
+        extractors = {}
+    if any(not callable(value) for value in extractors.values()):
+        raise TypeError('Every activations_model extractor must be callable.')
+    layer_extractors = set(extractors)
+    for modality, preprocessor in preprocessors.items():
+        if modality in extractors:
+            # Historically the single wrapper applied only to vision; an
+            # extractor supplied in another modality takes precedence there.
+            if isinstance(activations_model, Mapping) or canonical_modality(modality) == 'vision':
+                continue
+        if not callable(preprocessor):
+            continue
+        try:
+            signature = inspect.signature(preprocessor)
+        except (TypeError, ValueError) as error:
+            if modality in extractors:
+                continue
+            raise TypeError('Declare this callable explicitly in activations_model.') from error
+        variadic_wrapper = (not inspect.isfunction(preprocessor) and
+                            bool(signature.parameters) and all(
+                                p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+                                for p in signature.parameters.values()))
+        if 'layers' in signature.parameters or variadic_wrapper:
+            extractors[modality] = preprocessor
+            layer_extractors.add(modality)
+        else:
+            try:
+                signature.bind(owner._model, object(), recording_layer=None)
+                accepts_legacy_call = True
+            except TypeError:
+                accepts_legacy_call = False
+            if modality in extractors and not accepts_legacy_call:
+                continue
+            import warnings
+            warnings.warn(
+                'Extraction callbacks in preprocessors are deprecated. Use '
+                'activations_model={modality: extractor}, where extractor accepts '
+                '(stimuli, layers=...).',
+                DeprecationWarning, stacklevel=3)
+            def extract(stimuli, *, layers, function=preprocessor):
+                if len(layers) > 1:
+                    raise ValueError(
+                        'This compatibility extraction callback accepts one layer. '
+                        'For multiple layers, use activations_model={modality: '
+                        'extractor} with an extractor accepting (stimuli, layers=...).')
+                return function(owner._model, stimuli,
+                                recording_layer=layers[0] if layers else None)
+            extractors[modality] = extract
+            layer_extractors.discard(modality)
+    return extractors, layer_extractors
 
 
 class InputDispatcher:
@@ -151,13 +224,8 @@ class InputDispatcher:
         return sorted(detected)[0]
 
     def supports_layer_extraction(self, modality: str) -> bool:
-        owner = self.owner
-        modality = canonical_modality(modality)
-        if modality == 'vision' and owner._activations_model is not None:
-            return True
-        if not self._has_preprocessor_for(modality):
-            return False
-        return hasattr(self._preprocessor_for(modality), 'identifier')
+        return any(canonical_modality(key) == canonical_modality(modality)
+                   for key in self.owner._layer_extractors)
 
     def extract_for_modality(self, stimuli, modality: str, layers: List[str]):
         # A perturbation (lesion/stimulation) is a mutable forward-hook that the
@@ -172,16 +240,13 @@ class InputDispatcher:
     def _extract_for_modality_inner(self, stimuli, modality: str, layers: List[str]):
         owner = self.owner
         modality = canonical_modality(modality)
-        if modality == 'vision' and owner._activations_model is not None:
-            return owner._activations_model(stimuli, layers=layers)
-
-        preprocessor = self._preprocessor_for(modality)
-        if hasattr(preprocessor, 'identifier'):
-            return preprocessor(stimuli, layers=layers)
-        return preprocessor(
-            owner._model, stimuli,
-            recording_layer=owner._recording_layer,
-        )
+        for key, extractor in owner._extractors.items():
+            if canonical_modality(key) == modality:
+                return extractor(stimuli, layers=layers)
+        raise NotImplementedError(
+            f"Model '{owner.identifier}' declares {modality!r} input but has no "
+            'activation extractor for it. Configure activations_model to record '
+            'internal activity, or use a behavioral task for an output-only model.')
 
     def process_multi_modality(self, stimuli, detected: Set[str],
                                layers: List[str]):
