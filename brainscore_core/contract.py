@@ -45,8 +45,8 @@ class Subject(ABC):
     """Minimal contract for a subject evaluated through a session.
 
     Declare identity and supported channels, then implement ``interact`` to
-    consume inputs with ``session.next_input()`` and emit responses with
-    ``session.emit(event)``. A subject need not expose layers, modalities, or
+    consume inputs with ``session.next_input()`` and submit responses with
+    ``session.respond(event)``. A subject need not expose layers, modalities, or
     legacy model methods. Declarations may be properties or class attributes.
 
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects

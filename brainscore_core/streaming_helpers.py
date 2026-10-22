@@ -14,7 +14,7 @@ import numpy as np
 
 from .contract import Subject, UnifiedModel
 from .io_catalog import modalities_to_input_channels
-from .streaming import InMemorySession, Session, StreamEvent, parse_channel
+from .streaming import BufferedSession, Session, StreamEvent, parse_channel
 from .events import (
     EnvironmentResponse,
     EnvironmentStep,
@@ -54,52 +54,27 @@ _STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
 )
 
 
-class StimulusSetSession(InMemorySession):
-    """Buffered open-loop session built from a StimulusSet-like table."""
+class StimulusSetSession(BufferedSession):
+    """Compatibility convenience; configure BufferedSession for new experiments."""
 
     def __init__(self, stimulus_set, record: Union[str, Sequence[str]] = "IT", time_bins=None):
-        self.stimulus_set = stimulus_set
         self.record = record
-        self.time_bins = time_bins
-        self.requested_output_channels = _neural_channels(record)
-        super().__init__(_stimulus_events(stimulus_set))
+        super().__init__(stimulus_set=stimulus_set,
+                         requested_output_channels=_neural_channels(record),
+                         time_bins=time_bins)
 
     @classmethod
     def from_stimulus_set(cls, stimulus_set, record: Union[str, Sequence[str]] = "IT",
                           time_bins=None):
         return cls(stimulus_set, record=record, time_bins=time_bins)
 
-    def collect(
-        self, channel: Optional[str] = None,
-    ) -> Union[NeuroidAssembly, dict[str, NeuroidAssembly]]:
-        """Collect one channel, or all requested channels when omitted.
 
-        A single requested channel returns its assembly. Multiple requested
-        channels return a dictionary keyed by channel name.
-        """
-        if channel is None:
-            return _collect_requested_channels(self)
-        matching = [event for event in self.emitted if event.channel == channel]
-        if not matching:
-            raise ValueError(f"No emitted events for channel {channel!r}.")
-
-        if len(matching) == 1 and _is_neural_assembly_payload(
-            matching[0].payload
-        ):
-            return matching[0].payload
-
-        return _collect_neural_events(channel, matching)
-
-
-class BehavioralSession(InMemorySession):
-    """Buffered session for open-loop behavioral scoring."""
+class BehavioralSession(BufferedSession):
+    """Compatibility convenience; configure BufferedSession(task_context=...)."""
 
     def __init__(self, task_context):
-        self.task_context = task_context
-        self.scoring_stimuli = _behavior_stimuli_to_score(task_context)
-        self.stimulus_set = self.scoring_stimuli
-        self.requested_output_channels = ("behavior",)
-        super().__init__(_behavior_events(task_context, self.scoring_stimuli))
+        super().__init__(task_context=task_context, requested_output_channels=('behavior',))
+        self.scoring_stimuli = self.stimulus_set
 
     @classmethod
     def from_task_context(cls, task_context):
@@ -107,47 +82,28 @@ class BehavioralSession(InMemorySession):
 
     def collect(self, channel: str = "behavior") -> BehavioralAssembly:
         if channel != "behavior":
-            raise ValueError(
-                f"BehavioralSession.collect only supports 'behavior'; "
-                f"got {channel!r}."
-            )
-        matching = [event for event in self.emitted if event.channel == channel]
-        if not matching:
-            raise ValueError(f"No emitted events for channel {channel!r}.")
-
-        if len(matching) == 1 and isinstance(
-            matching[0].payload, BehavioralAssembly
-        ):
-            return matching[0].payload
-
-        return _collect_behavior_events(matching)
+            raise ValueError(f"BehavioralSession.collect only supports 'behavior'; got {channel!r}.")
+        return super().collect(channel)
 
 
-class StateChangeSession(InMemorySession):
-    """Buffered session for perturbation apply/reset interactions."""
+class StateChangeSession(BufferedSession):
+    """Compatibility convenience for a single intervention event."""
 
     def __init__(self, state_change: StateChange):
         self.state_change = state_change
-        self.requested_output_channels = ("perturbation",)
-        super().__init__([_state_change_event(state_change)])
+        super().__init__([_state_change_event(state_change)],
+                         requested_output_channels=('perturbation',))
 
     @classmethod
     def from_state_change(cls, state_change: StateChange):
         return cls(state_change)
 
     def collect(self, channel: str = "perturbation"):
-        matching = [event for event in self.emitted if event.channel == channel]
-        if not matching:
-            raise ValueError(f"No emitted events for channel {channel!r}.")
+        matching = super().collect(channel)
         if len(matching) != 1:
-            raise ValueError(
-                f"Expected one emitted event for channel {channel!r}; "
-                f"got {len(matching)}."
-            )
-        payload = matching[0].payload
-        if payload is None:
-            return matching[0].meta.get("handle_id")
-        return payload
+            raise ValueError(f"Expected one emitted event for channel {channel!r}; got {len(matching)}.")
+        event = matching[0]
+        return event.payload if event.payload is not None else event.meta.get("handle_id")
 
 
 class EnvironmentSession(Session):

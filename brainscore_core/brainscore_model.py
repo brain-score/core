@@ -69,6 +69,10 @@ class BrainScoreModel(UnifiedModel):
         activations_model: Any = None,
         visual_degrees: int = 8,
         *legacy_tail_args: Any,
+        extractor: Any = None,
+        answer: Optional[Callable] = None,
+        policy: Optional[Callable] = None,
+        intervention: Optional[Callable] = None,
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
         action_fn: Optional[Callable] = None,
@@ -99,6 +103,12 @@ class BrainScoreModel(UnifiedModel):
             declares its modalities without needing placeholder preprocessors.
         :param visual_degrees: vision field-of-view; ignored by non-vision models.
         :param behavioral_readout_layer: layer on which to fit a behavioral readout.
+        :param extractor: extraction callable or modality-to-extractor mapping.
+            Prepare inputs inside each extractor. Preferred over activations_model.
+        :param answer: generate and parse a behavioral answer.
+        :param policy: choose an action from an EnvironmentStep.
+        :param intervention: apply a StateChange and return its cleanup function.
+            The return value is (PerturbationApplied, cleanup).
         :param generation_fn: generate-and-parse callable for instruction-following
             behavioral evaluation.
         :param action_fn: ``EnvironmentStep -> EnvironmentResponse`` policy for
@@ -117,6 +127,21 @@ class BrainScoreModel(UnifiedModel):
         Note: passing capability functions POSITIONALLY (via the legacy tail) is
         deprecated and error-prone; always pass them by keyword.
         """
+        # Translate the public vocabulary once; existing plugins keep their
+        # callback names and the internal capability contract stays unchanged.
+        if extractor is not None:
+            if activations_model is not None:
+                raise TypeError("Use extractor or activations_model, not both")
+            activations_model = extractor
+        for public_name, value, old_name, old_value in (
+            ('answer', answer, 'generation_fn', generation_fn),
+            ('policy', policy, 'action_fn', action_fn),
+            ('intervention', intervention, 'state_change_fn', state_change_fn),
+        ):
+            if value is not None:
+                if old_value is not None or old_name in legacy_capability_config:
+                    raise TypeError(f"Use {public_name} or {old_name}, not both")
+                legacy_capability_config[old_name] = value
         if legacy_tail_args:
             import warnings
             warnings.warn(
