@@ -59,7 +59,7 @@ def parse_channel(name: str) -> tuple[str, str | None]:
 class Session(ABC):
     """Input delivery, requested outputs, task settings, and result collection.
 
-    Sources implement next_input and emit. The optional settings below are the
+    Sources implement next_input and respond. The optional settings below are the
     common configuration consumed by BrainScoreModel and experiment replay.
     """
     requested_output_channels: Optional[tuple[str, ...]] = None
@@ -82,13 +82,28 @@ class Session(ABC):
         This is a synchronous contract. A live source waits for its next event
         or raises on timeout; temporary unavailability must not return None."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # Old source implementations fulfill the same response contract. Adapt
+        # their method at class creation, before ABC checks abstract methods.
+        if 'emit' in cls.__dict__ and 'respond' not in cls.__dict__:
+            cls.respond = cls.__dict__['emit']
+        elif 'respond' in cls.__dict__ and 'emit' not in cls.__dict__:
+            # Bind the alias to this implementation, so super().emit() in an
+            # existing subclass does not re-enter that subclass's override.
+            cls.emit = cls.__dict__['respond']
+        super().__init_subclass__(**kwargs)
+
     @abstractmethod
+    def respond(self, event: StreamEvent) -> None:
+        """Accept a subject response; environments may advance in response."""
+
     def emit(self, event: StreamEvent) -> None:
-        """Record an output event emitted by the subject."""
+        """Compatibility spelling of respond for existing subjects."""
+        self.respond(event)
 
 
-class InMemorySession(Session):
-    """Buffered session for local tests and open-loop synthetic interactions."""
+class BufferedSession(Session):
+    """Deliver fixed inputs and collect responses without environment feedback."""
 
     def __init__(self, inputs: Iterable[StreamEvent] = (), *,
                  requested_output_channels: Optional[Iterable[str]] = None,
@@ -150,7 +165,11 @@ class InMemorySession(Session):
             return None
         return self._inputs.popleft()
 
-    def emit(self, event: StreamEvent) -> None:
+    def respond(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
         self.emitted.append(event)
+
+
+# Compatibility import; BufferedSession is the name used in new examples.
+InMemorySession = BufferedSession

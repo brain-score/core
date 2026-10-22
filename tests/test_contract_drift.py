@@ -89,7 +89,7 @@ def test_stream_event_field_contract_is_pinned():
 
 
 def test_session_abc_contract_is_minimal():
-    assert Session.__abstractmethods__ == {"next_input", "emit"}
+    assert Session.__abstractmethods__ == {"next_input", "respond"}
     assert callable(Session.collect)
 
 

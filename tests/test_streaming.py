@@ -76,7 +76,7 @@ def test_session_has_optional_collection_without_new_abstract_methods():
     assert "next_input" in Session.__dict__
     assert "emit" in Session.__dict__
     assert callable(Session.collect)
-    assert Session.__abstractmethods__ == {"next_input", "emit"}
+    assert Session.__abstractmethods__ == {"next_input", "respond"}
 
 
 def test_in_memory_session_drives_inputs_and_records_emits():
