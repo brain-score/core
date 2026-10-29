@@ -7,7 +7,9 @@ import pytest
 from brainscore_core.environment import ActionSpec, ArraySpec, DiscreteSpec, MappingSpec, TextSpec
 from brainscore_core.events import EnvironmentResponse, EnvironmentStep
 from brainscore_core.streaming import StreamEvent
-from brainscore_core.streaming_helpers import EnvironmentSession, run_environment
+from brainscore_core.streaming_helpers import (
+    EnvironmentSession, _drive_environment_via_process, run_environment,
+)
 
 
 class Environment:
@@ -234,3 +236,117 @@ def test_native_session_rejects_an_unscheduled_chunk():
             np.ones((2, 3)), metadata={'action_kind': 'chunk'},
         ), None))
     assert env.actions == []
+
+
+class LongEnvironment:
+    """Model-free episode of `length` actions, then a terminal observation."""
+
+    def __init__(self, length, error=None):
+        self.length, self.error, self.actions = length, error, []
+
+    def observation(self):
+        last = len(self.actions) >= self.length
+        return EnvironmentStep(observation={'n': len(self.actions)}, step_num=len(self.actions),
+                               is_last=last, is_terminal=last,
+                               context={'t_ms': 10. * len(self.actions)})
+
+    def reset(self, *, seed=None, options=None):
+        return self.observation()
+
+    def step(self, action):
+        self.actions.append(action)
+        if self.error and len(self.actions) == self.length:
+            raise self.error
+        return self.observation()
+
+
+def _run_long(history_limit, length=50, error=None):
+    env = LongEnvironment(length, error)
+    seen, observed = [], []
+    subject = SimpleNamespace(process=lambda step: seen.append(step) or EnvironmentResponse(
+        np.array([step.step_num])))
+    session = EnvironmentSession(env, seed=3, history_limit=history_limit)
+    with session, session.observe_actions(observed.append):
+        _drive_environment_via_process(subject, session)
+    return env, session, seen, observed
+
+
+def test_history_limit_default_is_unchanged():
+    _, default, _, _ = _run_long(None)
+    assert len(default.input_events) == 51 and len(default.emitted) == 50
+    assert len(default.action_events) == 100
+    assert 'history_limit' not in default.describe()
+    assert 'history_limit' not in default.input_events[0].payload.context['environment_session']
+    assert [r.action[0] for r in default.collect()] == list(range(50))
+
+
+@pytest.mark.parametrize('limit', [0, 1, 7])
+def test_history_limit_bounds_lists_without_hiding_events(limit):
+    env, session, seen, observed = _run_long(limit)
+    assert session.complete and len(env.actions) == 50
+    assert len(session.input_events) == len(session.emitted) == len(session.action_events) == limit
+    assert type(session.input_events) is type(session.emitted) is type(session.action_events) is list
+    if limit:
+        assert session.input_events[-1].payload.is_terminal
+        assert session.emitted[-1].payload.action[0] == 49
+        assert session.input_events[-1].t_ms == 500.
+    # Model and observers saw every event, in order.
+    assert [s.step_num for s in seen] == list(range(50))
+    assert [e.meta['action_status'] for e in observed] == ['proposed', 'applied'] * 50
+    assert [e.meta['step_num'] for e in observed[1::2]] == list(range(50))
+    # Session metadata goes on the first observation only, even with nothing retained.
+    described = [s for s in seen if 'environment_session' in s.context]
+    assert described == [seen[0]]
+    assert described[0].context['environment_session']['history_limit'] == limit
+    assert described[0].context['environment_session']['reset'] == {'seed': 3}
+    with pytest.raises(RuntimeError, match='dropped'):
+        session.collect()
+
+
+def test_history_limit_large_enough_still_collects():
+    _, session, _, _ = _run_long(200)
+    assert [r.action[0] for r in session.collect()] == list(range(50))
+
+
+def test_zero_history_terminal_reset_collects_empty():
+    env = Environment(terminal_on_reset=True)
+    session = EnvironmentSession(env, history_limit=0)
+    assert session.next_input().is_terminal and session.next_input() is None
+    assert session.complete and session.collect() == [] and session.input_events == []
+
+
+@pytest.mark.parametrize('limit', [0, 1])
+def test_history_limit_keeps_failure_receipts_observable(limit):
+    observed = []
+    env = Environment()
+    session = EnvironmentSession(env, history_limit=limit)
+    with session.observe_actions(observed.append):
+        session.next_input()
+        with pytest.raises(ValueError):
+            session.emit(StreamEvent('motor', 5, None))
+    assert [e.meta['action_status'] for e in observed] == ['proposed', 'rejected']
+    assert [e.meta['action_status'] for e in session.action_events] == ['rejected'][:limit]
+    assert session.next_input() is None and not session.complete
+
+    observed = []
+    env = LongEnvironment(3, error=RuntimeError('lost'))
+    env.closed = 0
+    env.close = lambda: setattr(env, 'closed', env.closed + 1)
+    subject = SimpleNamespace(process=lambda step: EnvironmentResponse(np.array([0])))
+    with EnvironmentSession(env, history_limit=limit) as session, \
+            session.observe_actions(observed.append):
+        with pytest.raises(RuntimeError, match='lost'):
+            _drive_environment_via_process(subject, session)
+    assert [e.meta['action_status'] for e in observed] == ['proposed', 'applied'] * 2 + [
+        'proposed', 'execution_unknown']
+    assert session.next_input() is None and not session.complete and env.closed == 1
+
+
+@pytest.mark.parametrize('limit, error', [(-1, ValueError), (True, TypeError),
+                                          (1.0, TypeError), ('3', TypeError)])
+def test_invalid_history_limit_fails_before_reset(limit, error):
+    calls = []
+    env = SimpleNamespace(reset=lambda: calls.append('reset'), step=lambda action: None)
+    with pytest.raises(error, match='history_limit'):
+        EnvironmentSession(env, history_limit=limit)
+    assert calls == []
