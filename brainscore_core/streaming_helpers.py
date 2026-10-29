@@ -113,11 +113,25 @@ class EnvironmentSession(Session):
     untyped wrappers remain usable unless require_specs=True. Use as a context
     manager to close the environment; subject reset belongs to the trial owner.
     Terminal observations are delivered once, without requesting another action.
+
+    history_limit bounds memory for long episodes: input_events, action_events
+    and emitted each keep only their latest N entries (0 keeps none; None, the
+    default, keeps everything). The model and observe_actions() callbacks still
+    see every event. collect() refuses once an applied action has been dropped,
+    so a truncated history is never returned as a whole episode.
     """
     records_action_execution = True
 
     def __init__(self, environment, *, action_validator=None, seed=None,
-                 options=None, require_specs=False):
+                 options=None, require_specs=False, history_limit: Optional[int] = None):
+        if history_limit is not None and (
+                isinstance(history_limit, bool) or not isinstance(history_limit, int)):
+            raise TypeError("history_limit must be an int or None")
+        if history_limit is not None and history_limit < 0:
+            raise ValueError("history_limit must be >= 0")
+        self.history_limit = history_limit
+        self._dropped_actions = 0
+        self._described = False
         self.environment = environment
         self.action_validator = action_validator
         self.reset_kwargs = {}
@@ -165,6 +179,7 @@ class EnvironmentSession(Session):
             'reset': deepcopy(self.reset_kwargs),
             'execution': 'turn_based',
             'scheduler': 'one_action_per_step',
+            **({} if self.history_limit is None else {'history_limit': self.history_limit}),
         }
 
     @contextmanager
@@ -180,8 +195,17 @@ class EnvironmentSession(Session):
         finally:
             self._action_observers.remove(callback)
 
+    def _retain(self, history, event) -> bool:
+        """Append within history_limit; return True if an older entry was dropped."""
+        history.append(event)
+        if self.history_limit is None or len(history) <= self.history_limit:
+            return False
+        # Keep the public history attributes as lists; trimming costs O(history_limit).
+        del history[0]
+        return True
+
     def _record_action(self, event):
-        self.action_events.append(event)
+        self._retain(self.action_events, event)
         try:
             for callback in tuple(self._action_observers):
                 callback(event)
@@ -231,13 +255,15 @@ class EnvironmentSession(Session):
             if t_ms is not None:
                 self._previous_t_ms = t_ms
             context = {**step.context, **timing, 't_ms': t_ms}
-            if not self.input_events:
+            if not self._described:
+                self._described = True
                 context['environment_session'] = self.describe()
             step = replace(step, context=context)
             self._last_step = step
             self._done = self.complete = _environment_step_terminates(step)
             self._awaiting_emit = not self._done
-            self.input_events.append(deepcopy(_environment_step_event(step)))
+            if self.history_limit != 0:
+                self._retain(self.input_events, deepcopy(_environment_step_event(step)))
             return step
         except BaseException:
             self._done = True
@@ -284,7 +310,7 @@ class EnvironmentSession(Session):
             }))
             raise
         receipt = replace(proposal, payload=payload, meta={**meta, 'action_status': 'applied'})
-        self.emitted.append(receipt)
+        self._dropped_actions += self._retain(self.emitted, receipt)
         self._record_action(receipt)
         self._awaiting_emit = False
         try:
@@ -298,6 +324,11 @@ class EnvironmentSession(Session):
     def collect(self, channel: str = "motor") -> list:
         if channel != "motor":
             raise ValueError(f"EnvironmentSession.collect only supports 'motor'; got {channel!r}.")
+        if self._dropped_actions:
+            raise RuntimeError(
+                f"history_limit={self.history_limit} dropped {self._dropped_actions} applied "
+                "action(s); stream them with observe_actions() instead of collect()"
+            )
         return [event.payload for event in self.emitted]
 
 
@@ -317,10 +348,11 @@ def state_change_session(state_change: StateChange) -> StateChangeSession:
 
 
 def environment_session(environment, *, action_validator=None, seed=None,
-                        options=None, require_specs=False) -> EnvironmentSession:
+                        options=None, require_specs=False,
+                        history_limit: Optional[int] = None) -> EnvironmentSession:
     return EnvironmentSession(
         environment, action_validator=action_validator, seed=seed,
-        options=options, require_specs=require_specs,
+        options=options, require_specs=require_specs, history_limit=history_limit,
     )
 
 
