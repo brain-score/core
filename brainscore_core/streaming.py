@@ -61,7 +61,12 @@ class Session(ABC):
 
     Sources implement next_input and respond. The optional settings below are the
     common configuration consumed by BrainScoreModel and experiment replay.
+
+    ``complete`` says whether the inputs ran to the end of the episode. Fixed
+    inputs are always complete; an environment session stays False until a
+    terminal step. Runners must not accept an incomplete session as a measurement.
     """
+    complete: bool = True
     requested_output_channels: Optional[tuple[str, ...]] = None
     stimulus_set: Any = None
     task_context: Any = None

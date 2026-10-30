@@ -350,3 +350,11 @@ def test_invalid_history_limit_fails_before_reset(limit, error):
     with pytest.raises(error, match='history_limit'):
         EnvironmentSession(env, history_limit=limit)
     assert calls == []
+
+
+def test_completion_is_declared_on_every_session():
+    from brainscore_core.streaming import BufferedSession, Session
+    assert Session.complete is True
+    assert BufferedSession().complete is True
+    with EnvironmentSession(Environment()) as session:
+        assert session.complete is False
