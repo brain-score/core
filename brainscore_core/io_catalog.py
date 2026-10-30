@@ -272,6 +272,11 @@ def validate(
 # pinning a device schema in core.
 # ----------------------------------------------------------------------------
 
+# A policy that answers in words keeps what it said and whether it was understood,
+# with the same names as a response trace. fallback_action is the action applied
+# when the answer could not be parsed.
+RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "provenance")
+
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
     # `vision` is the one visual channel: a still is a 1-frame clip, so it
@@ -348,6 +353,7 @@ _SEED = [
     CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",
                  "harness-defined continuous action / control vector",
                  "the model's action_fn, decoded by the environment harness",
+                 meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
                  materializers=("EnvironmentResponse",)),
     # --- outputs: physiological readouts (reserved for human harnesses) ---
