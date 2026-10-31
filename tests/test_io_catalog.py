@@ -34,6 +34,10 @@ class TestSeedCatalog:
             assert e.payload_contract, f"{e.name} has no payload contract"
             assert e.handled_by, f"{e.name} has no handler"
 
+    def test_motor_lists_policy_response_metadata(self):
+        keys = io_catalog.get("motor").meta_keys
+        assert {"answer", "valid", "parse_error", "fallback_action", "provenance"} <= set(keys)
+
 
 class TestLookup:
     def test_plain_label_resolves(self):

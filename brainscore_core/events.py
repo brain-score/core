@@ -273,6 +273,8 @@ class EnvironmentResponse:
     OpenPI DROID uses seven joint commands plus a gripper command. LIBERO uses
     six end-effector commands plus a gripper command. Their conventions differ.
     action_dict can carry a structured form; metadata carries telemetry.
+    Its recognized keys are io_catalog.RESPONSE_META_KEYS: a policy that answers
+    in words records answer/valid/parse_error, and provenance travels here.
     """
     action: Any  # numpy.ndarray (action_dim,) float64
     action_dict: Optional[Dict[str, Any]] = None  # DROID-style structured action
