@@ -89,8 +89,18 @@ class CatalogEntry:
 _CATALOG: Dict[str, CatalogEntry] = {}
 
 
-def register(entry: CatalogEntry) -> None:
-    """Add or replace a catalog entry, keyed by its family name."""
+def register(entry: CatalogEntry, *, replace: bool = False) -> None:
+    """Add a catalog entry, keyed by its family name.
+
+    Registering a family that already exists is an error unless
+    ``replace=True`` (Contract Rules v3, rule 3.5). Re-registering the same
+    entry object is a no-op.
+    """
+    existing = _CATALOG.get(entry.name)
+    if existing is not None and existing is not entry and not replace:
+        raise ValueError(
+            f"Channel family {entry.name!r} is already registered "
+            f"(owner {existing.owner!r}); pass replace=True to replace it.")
     _CATALOG[entry.name] = entry
 
 
