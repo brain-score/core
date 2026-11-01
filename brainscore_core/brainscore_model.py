@@ -533,9 +533,6 @@ class BrainScoreModel(UnifiedModel):
     def _process_composite_regions(self, stimuli, modality):
         return self._recorder.process_composite_regions(stimuli, modality)
 
-    def _gather_composite_units(self, assembly, selector):
-        return self._recorder.gather_composite_units(assembly, selector)
-
     def start_recording(self,
                         recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
@@ -590,19 +587,8 @@ class BrainScoreModel(UnifiedModel):
         if failures:
             raise RuntimeError('A model provider failed to reset; the model is not clean.') from failures[0]
 
-    def _resolve_selection(self, state_change: 'StateChange') -> 'StateChange':
-        return self._perturbations.resolve_selection(state_change)
-
     def _dispatch_state_change(self, state_change: 'StateChange') -> Any:
         return self._dispatcher.dispatch_state_change(state_change)
-
-    @staticmethod
-    def _drain_stream_events(session) -> List[StreamEvent]:
-        return _drain_neural_stream_events(session)
-
-    @staticmethod
-    def _stimuli_from_stream_session(session, events: List[StreamEvent]):
-        return _neural_stimuli_from_stream_session(session, events)
 
     @staticmethod
     def _reconstruct_stimulus_set_from_events(events: List[StreamEvent]):
@@ -615,20 +601,12 @@ class BrainScoreModel(UnifiedModel):
         """
         return _reconstruct_neural_stimulus_set(events)
 
-    @staticmethod
-    def _requested_output_channels(session) -> List[str]:
-        return _requested_output_channels(session)
-
     @classmethod
     def _requires_behavioral_readout(cls, task_type: str) -> bool:
         return BehavioralReadout.requires_behavioral_readout(task_type)
 
     def _fit_behavioral_readout(self, fitting_stimuli) -> None:
         self._behavioral.fit_behavioral_readout(fitting_stimuli)
-
-    @staticmethod
-    def _extract_labels(stimuli):
-        return BehavioralReadout.extract_labels(stimuli)
 
     def _extract_behavioral_features(self, stimuli):
         return self._behavioral.extract_behavioral_features(stimuli)

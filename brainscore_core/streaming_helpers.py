@@ -432,12 +432,18 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
 
 
 def _drive_neural_session_via_process(
-    subject, session, driver: str = "interact"
+    subject, session, driver: str = "interact", allow_multi_modality: bool = False
 ) -> None:
+    """Run a neural session through ``start_recording`` + ``process``.
+
+    ``allow_multi_modality`` is the subject's own statement that its
+    ``process`` combines several input modalities; when several are present
+    it is called with ``multi_modality=True``.
+    """
     input_events = _drain_stream_events(session)
     stimuli = _stimuli_from_stream_session(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0
-    use_multi_modality = _should_use_multi_modality(subject, input_events)
+    use_multi_modality = allow_multi_modality and _spans_several_inputs(input_events)
     time_bins = getattr(session, "time_bins", None)
 
     channel_regions = []
@@ -668,9 +674,7 @@ def _stimuli_from_stream_session(session, events: list[StreamEvent]):
     return _reconstruct_stimulus_set_from_events(events)
 
 
-def _should_use_multi_modality(subject, events: list[StreamEvent]) -> bool:
-    if not hasattr(subject, "_process_multi_modality"):
-        return False
+def _spans_several_inputs(events: list[StreamEvent]) -> bool:
     families = set()
     for event in events:
         family, _ = parse_channel(event.channel)

@@ -42,7 +42,8 @@ class NeuralSessions(_SessionCapability):
         if getattr(session, 'streaming', False):
             _drivers._drive_neural_session_streaming(model, session)
         else:
-            _drivers._drive_neural_session_via_process(model, session)
+            _drivers._drive_neural_session_via_process(model, session,
+                                                       allow_multi_modality=True)
 
 
 class BehaviorSessions(_SessionCapability):

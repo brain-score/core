@@ -106,3 +106,34 @@ def test_brainscore_model_gets_channel_identity_from_preprocessors():
 def test_unifiedmodel_remains_a_subject():
     assert issubclass(UnifiedModel, Subject)
     assert UnifiedModel is not Subject
+
+
+def test_typed_model_without_multi_modality_runs_multimodal_session():
+    """The driver asks for multi-modality only when the subject says it combines
+    inputs; no private method is probed (Contract v3 rule 2.2)."""
+    import pandas as pd
+    from brainscore_core.streaming_helpers import neural_response
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+
+    class TwoInputModel(_ChannelSubject):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def start_recording(self, recording_target, time_bins=None, recording_type=None):
+            pass
+
+        def process(self, input_event):  # no multi_modality keyword
+            self.calls.append(len(input_event))
+            import numpy as np
+            from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+            return NeuroidAssembly(np.zeros((len(input_event), 2)), dims=['presentation', 'neuroid'],
+                                   coords={'stimulus_id': ('presentation', list(input_event['stimulus_id'])),
+                                           'neuroid_id': ('neuroid', [0, 1])})
+
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a'], 'image_path': ['/tmp/a.png'],
+                                        'sentence': ['a sentence']}))
+    stimuli.identifier = 'two-inputs'
+    model = TwoInputModel()
+    neural_response(model, stimuli, record='IT')
+    assert model.calls == [1]
