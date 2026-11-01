@@ -114,8 +114,8 @@ def _validate_inputs(inputs) -> None:
     fails at construction, not at the first event the subject reads. A wrong
     direction, a bad address or a failed family validator is an error. An
     unregistered family (allowed in exploratory experiments; benchmark scoring
-    rejects it at pre-flight) and the catalog's documented ndim/dtype hints
-    only warn.
+    rejects it at pre-flight), the catalog's documented ndim/dtype hints and a
+    payload whose type differs from the family's ``payload_type`` only warn.
     """
     import warnings
     from . import io_catalog
@@ -127,6 +127,7 @@ def _validate_inputs(inputs) -> None:
         if not io_catalog.has(family):
             notes.append(f"{event.channel}: unregistered channel family")
             continue
+        notes.extend(io_catalog.payload_type_notes(event.channel, event.payload))
         found = io_catalog.validate(event.channel, event.payload,
                                     direction=io_catalog.INPUT)
         if not found:

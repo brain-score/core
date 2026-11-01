@@ -109,3 +109,29 @@ class TestRegister:
             io_catalog.register(clash)
         assert io_catalog.get("pupil") is original
         io_catalog.register(original)  # same object: allowed, no change
+
+
+class TestPayloadTypes:
+    """Contract v3 rule 3.2: a family declares its payload type; mismatches warn first."""
+
+    def test_seeded_families_declare_payload_types(self):
+        from pathlib import Path
+        import numpy as np
+        from brainscore_core.events import EnvironmentStep, StateChange
+        assert io_catalog.get("text").payload_type is str
+        assert io_catalog.get("vision").payload_type == (str, Path, np.ndarray)
+        assert io_catalog.get("lesion").payload_type is StateChange
+        assert io_catalog.get("observation").payload_type is EnvironmentStep
+        assert io_catalog.get("pupil").payload_type is None  # unchecked families stay unchecked
+
+    def test_payload_type_notes_report_a_mismatch_and_nothing_else(self):
+        assert io_catalog.payload_type_notes("text", "a sentence") == []
+        assert io_catalog.payload_type_notes("vision:left", "/tmp/a.png") == []
+        assert io_catalog.payload_type_notes("pupil", object()) == []
+        notes = io_catalog.payload_type_notes("text", 42)
+        assert notes == ["text: payload is int, not str (a Python str)"]
+
+    def test_type_mismatch_never_enters_validate_failures(self):
+        # Warn-first: validate() stays as it was, so callers that raise on its
+        # failures do not start rejecting payloads of an unexpected type.
+        assert io_catalog.validate("text", 42, direction=INPUT) == []

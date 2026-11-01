@@ -109,3 +109,12 @@ def test_buffered_session_warns_on_unregistered_family():
     from brainscore_core.streaming import BufferedSession, StreamEvent
     with pytest.warns(UserWarning, match="unregistered channel family"):
         BufferedSession([StreamEvent("not_a_family", 1, 0.0)])
+
+
+def test_buffered_session_warns_on_payload_type_mismatch_and_still_delivers():
+    """Payload types are checked warn-first: a mismatch is reported, not rejected."""
+    import pytest
+    from brainscore_core.streaming import BufferedSession, StreamEvent
+    with pytest.warns(UserWarning, match="payload is int, not str"):
+        session = BufferedSession([StreamEvent("text", 42, 0.0)])
+    assert session.next_input().payload == 42

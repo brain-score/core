@@ -71,6 +71,7 @@ class CatalogEntry:
     shape_validator: Optional[ShapeValidator] = None
     owner: str = "core"
     materializers: Tuple[str, ...] = ()
+    payload_type: Any = None            # type or tuple of types a payload must be; None means unchecked
 
     def __post_init__(self):
         if self.kind not in _DIRECTIONS:
@@ -387,6 +388,52 @@ _SEED = [
 
 for _entry in _SEED:
     register(_entry)
+
+
+def payload_type_notes(label: str, payload) -> List[str]:
+    """Report a payload whose type does not match its family's ``payload_type``.
+
+    Warn-first (Contract Rules v3, rule 3.2): a mismatch is a note, never a
+    failure, so sessions that run today keep running while the catalog's
+    types are checked against the notebooks and examples. Promote to an error
+    by moving this check into :func:`validate` once that review is done.
+    """
+    entry = get(label)
+    if entry.payload_type is None or isinstance(payload, entry.payload_type):
+        return []
+    expected = entry.payload_type
+    names = (expected.__name__ if isinstance(expected, type)
+             else ', '.join(t.__name__ for t in expected))
+    return [f"{label}: payload is {type(payload).__name__}, not {names} "
+            f"({entry.payload_contract})"]
+
+
+def _declare_payload_types() -> None:
+    """Attach the payload type of each seeded family.
+
+    Done after seeding, with local imports, so the catalog module itself keeps
+    no import-time dependency on the event and assembly modules.
+    """
+    from dataclasses import replace as _replace
+    from pathlib import Path
+    import numpy as np
+    from .events import EnvironmentResponse, EnvironmentStep, PerturbationApplied, StateChange
+    from .supported_data_standards.brainio.assemblies import DataAssembly
+
+    sensory = (str, Path, np.ndarray)
+    payload_types = {
+        'vision': sensory, 'video': sensory, 'audio': sensory,
+        'text': str, 'instruction': str,
+        'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
+        'observation': EnvironmentStep,
+        'neural': DataAssembly, 'behavior': DataAssembly,
+        'motor': EnvironmentResponse, 'perturbation': PerturbationApplied,
+    }
+    for family, payload_type in payload_types.items():
+        register(_replace(get(family), payload_type=payload_type), replace=True)
+
+
+_declare_payload_types()
 
 
 _STIMULUS_COLUMNS: Dict[str, str] = {}
