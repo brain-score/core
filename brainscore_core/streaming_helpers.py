@@ -12,7 +12,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .contract import Subject, UnifiedModel
+from .contract import Subject, UnifiedModel  # noqa: F401  (re-exported)
 from .io_catalog import modalities_to_input_channels
 from .streaming import BufferedSession, Session, StreamEvent, parse_channel
 from .events import (
@@ -375,11 +375,7 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
             "    subject.start_recording(['V4', 'IT']); assembly = subject.process(stimuli)")
     session = stimulus_session(stimulus_set, record=record,
                                time_bins=time_bins)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_via_process(subject, session, stimulus_set, record=record,
-                           time_bins=time_bins)
+    subject.interact(session)
     return session.collect(f"neural:{record}")
 
 
@@ -388,19 +384,13 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
     ``BehavioralAssembly`` -- the model's output, not a Score.
     """
     session = behavior_session(task_context)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_behavior_via_process(subject, session, task_context)
+    subject.interact(session)
     return session.collect("behavior")
 
 
 def apply_state_change(subject, state_change: StateChange):
     session = state_change_session(state_change)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_state_change_via_process(subject, session, state_change)
+    subject.interact(session)
     return session.collect("perturbation")
 
 
@@ -422,10 +412,7 @@ def run_environment(subject, environment, *, seed=None, options=None,
             close()
         raise
     with session:
-        if _has_native_interact(subject):
-            subject.interact(session)
-        else:
-            _drive_environment_via_process(subject, session)
+        subject.interact(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
         return session.collect("motor")
@@ -775,9 +762,40 @@ def _requested_output_channels(session) -> list[str]:
     )
 
 
-def _has_native_interact(subject) -> bool:
-    interact = getattr(type(subject), "interact", None)
-    return callable(interact) and interact not in (Subject.interact, UnifiedModel.interact)
+def drive_typed_session(subject, session) -> None:
+    """Run a session through a typed model's ``process`` / ``start_*`` paths.
+
+    Routes on the session's requested output channels: ``behavior``,
+    ``perturbation``, ``motor``, or any set of ``neural:<region>`` channels.
+    """
+    requested_channels = _requested_output_channels(session)
+    streaming = getattr(session, "streaming", False)
+    if requested_channels == ["behavior"]:
+        if streaming:
+            _drive_behavior_session_streaming(subject, session)
+        else:
+            _drive_behavior_session_via_process(subject, session)
+        return
+    if requested_channels == ["perturbation"]:
+        _drive_state_change_session_via_process(subject, session)
+        return
+    if requested_channels == ["motor"]:
+        _drive_environment_session_via_process(subject, session)
+        return
+    if requested_channels and all(channel.startswith("neural:")
+                                  for channel in requested_channels):
+        # A session may ask to be consumed one input at a time (inputs generated
+        # on demand rather than known up front). Same scores, different arrival.
+        if streaming:
+            _drive_neural_session_streaming(subject, session)
+        else:
+            _drive_neural_session_via_process(subject, session)
+        return
+    raise NotImplementedError(
+        f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
+        "runs sessions requesting neural:<region>, behavior, perturbation, or "
+        f"motor output channels; got {requested_channels!r}."
+    )
 
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:

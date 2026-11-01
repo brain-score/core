@@ -66,9 +66,17 @@ def test_terminal_observation_is_retained_without_a_policy_call():
         session.emit(StreamEvent('motor', 1, None))
 
 
+def _typed_subject(process):
+    """A minimal typed subject: process() plus the shared typed session driver."""
+    from brainscore_core.streaming_helpers import drive_typed_session
+    subject = SimpleNamespace(process=process)
+    subject.interact = lambda session: drive_typed_session(subject, session)
+    return subject
+
+
 def test_terminal_reset_does_not_call_policy():
     env = Environment(terminal_on_reset=True)
-    subject = SimpleNamespace(process=lambda step: pytest.fail('Terminal input reached policy'))
+    subject = _typed_subject(lambda step: pytest.fail('Terminal input reached policy'))
     assert run_environment(subject, env) == []
     assert env.actions == [] and env.closed == 1
 
@@ -101,7 +109,7 @@ def test_failed_step_is_unknown_execution_never_success(error):
 def test_bad_observation_fails_before_inference_and_closes():
     env = Environment()
     env.observation = lambda **kwargs: EnvironmentStep(observation={'image': [1], 'task': 'move'})
-    subject = SimpleNamespace(process=lambda step: pytest.fail('Bad observation reached policy'))
+    subject = _typed_subject(lambda step: pytest.fail('Bad observation reached policy'))
     with pytest.raises(ValueError, match='image'):
         run_environment(subject, env)
     assert env.actions == [] and env.closed == 1

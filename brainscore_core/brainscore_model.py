@@ -23,12 +23,7 @@ from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
-    _drive_behavior_session_streaming,
-    _drive_behavior_session_via_process,
-    _drive_environment_session_via_process,
-    _drive_neural_session_streaming,
-    _drive_neural_session_via_process,
-    _drive_state_change_session_via_process,
+    drive_typed_session,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels,
     _stimuli_from_stream_session as _neural_stimuli_from_stream_session,
@@ -239,7 +234,12 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def out_channels(self):
-        return super().out_channels | set().union(
+        channels = super().out_channels
+        if self._behavioral_readout_layer is not None or self._generation_fn is not None:
+            channels.add('behavior')
+        if self._action_fn is not None:
+            channels.add('motor')
+        return channels | set().union(
             *(set(c.output_channels) for c in self._declared_capabilities()))
 
     def check_session_support(self, channels):
@@ -454,7 +454,7 @@ class BrainScoreModel(UnifiedModel):
         return self._dispatcher.process(input_event, multi_modality)
 
     def interact(self, session) -> None:
-        """Drive a v2 streaming session through existing model paths."""
+        """Run a session: a registered capability if one claims it, else the typed paths."""
         requested_channels = _requested_output_channels(session)
         custom = self.check_session_support(requested_channels)
         if custom is not None:
@@ -462,32 +462,7 @@ class BrainScoreModel(UnifiedModel):
             _setup_once(self, custom)
             custom.interact(self, session)
             return
-        if requested_channels == ["behavior"]:
-            if getattr(session, "streaming", False):
-                _drive_behavior_session_streaming(self, session)
-            else:
-                _drive_behavior_session_via_process(self, session)
-            return
-        if requested_channels == ["perturbation"]:
-            _drive_state_change_session_via_process(self, session)
-            return
-        if requested_channels == ["motor"]:
-            _drive_environment_session_via_process(self, session)
-            return
-        if all(channel.startswith("neural:") for channel in requested_channels):
-            # A session may ask to be consumed one input at a time (inputs generated
-            # on demand rather than known up front). Same scores, different arrival.
-            if getattr(session, "streaming", False):
-                _drive_neural_session_streaming(self, session)
-            else:
-                _drive_neural_session_via_process(self, session)
-            return
-        raise NotImplementedError(
-            "BrainScoreModel.interact currently supports requested "
-            "neural:<region>, behavior, perturbation, or motor output "
-            "channels; got "
-            f"{requested_channels!r}."
-        )
+        drive_typed_session(self, session)
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)

@@ -87,16 +87,15 @@ class Subject(ABC):
 
 
 class UnifiedModel(Subject):
-    """Subject base with task, recording, and process methods.
+    """Subject base for models evaluated through typed paths.
 
-    Existing implementations retain ``process``, ``start_task``,
-    ``start_recording``, layer maps, and modality declarations. Channel defaults
-    are derived from those declarations. ``BrainScoreModel`` and domain adapters
-    provide session drivers over their existing computation paths.
+    Implementations provide ``process``, ``start_task``, ``start_recording``,
+    a layer map and modality declarations. ``interact`` (the evaluation
+    method of the contract) runs a session through those typed paths, so a
+    typed model needs no session code of its own. ``process`` is a typed
+    convenience of this base, not part of the subject contract.
 
     New session-native implementations should inherit ``Subject`` directly.
-    ``UnifiedModel`` remains a ``Subject`` subclass, but is no longer an alias
-    for it: the legacy requirements must not constrain the native contract.
     """
 
     @property
@@ -137,43 +136,31 @@ class UnifiedModel(Subject):
 
     @property
     def in_channels(self) -> Set[str]:
-        """Input stream channels this subject can consume.
-
-        Defaults to the v1.5 modality declarations so existing subjects get a
-        conservative v2 channel identity without overriding this property.
-        """
-        return self._modalities_to_input_channels(
-            self._declared_input_modalities()
-        )
+        """Input channels: the declared modalities as channel families."""
+        return modalities_to_input_channels(self.available_modalities)
 
     @property
     def out_channels(self) -> Set[str]:
-        """Output stream channels this subject can emit."""
-        channels = {
-            f"neural:{region}"
-            for region in self.region_layer_map
-        }
-        if self._has_behavioral_output_path():
-            channels.add("behavior")
-        if self._has_action_output_path():
-            channels.add("motor")
-        return channels
+        """Output channels: ``neural:<region>`` for every mapped region.
+
+        Typed models that also answer tasks or act override this to add
+        ``behavior`` or ``motor``; nothing is discovered from attribute names.
+        """
+        return {f"neural:{region}" for region in self.region_layer_map}
 
     @property
     def required_channels(self) -> Set[str]:
         """Input stream channels this subject hard-requires."""
-        return self._modalities_to_input_channels(self.required_modalities)
+        return modalities_to_input_channels(self.required_modalities)
 
     @abstractmethod
     def process(self, input_event: InputEvent) -> OutputEvent:
         ...
 
-    def interact(self, session) -> None:
-        identifier = self._safe_identifier()
-        raise NotImplementedError(
-            f"Subject {identifier} has no v2 interact() path yet; use "
-            f"process()/start_recording()."
-        )
+    def interact(self, session: "Session") -> None:
+        """Run ``session`` through this model's typed paths."""
+        from .streaming_helpers import drive_typed_session
+        drive_typed_session(self, session)
 
     def start_task(self, task_context: TaskContext) -> None:
         self._task_context: Optional[TaskContext] = task_context
@@ -186,52 +173,3 @@ class UnifiedModel(Subject):
 
     def reset(self) -> None:
         pass
-
-    def _declared_input_modalities(self) -> Set[str]:
-        for attr in ("available_modalities", "supported_modalities"):
-            try:
-                modalities = getattr(self, attr)
-            except (AttributeError, NotImplementedError):
-                continue
-            if modalities is not None:
-                return set(modalities)
-
-        preprocessors = getattr(self, "_preprocessors", None)
-        if hasattr(preprocessors, "keys"):
-            return set(preprocessors.keys())
-        return set()
-
-    @staticmethod
-    def _modalities_to_input_channels(modalities) -> Set[str]:
-        return modalities_to_input_channels(modalities)
-
-    def _has_behavioral_output_path(self) -> bool:
-        for attr in (
-            "_behavioral_readout_layer",
-            "_generation_fn",
-            "behavioral_readout_layer",
-            "generation_fn",
-        ):
-            try:
-                value = getattr(self, attr)
-            except Exception:
-                continue
-            if value is not None:
-                return True
-        return False
-
-    def _has_action_output_path(self) -> bool:
-        for attr in ("_action_fn", "action_fn"):
-            try:
-                value = getattr(self, attr)
-            except Exception:
-                continue
-            if value is not None:
-                return True
-        return False
-
-    def _safe_identifier(self) -> str:
-        try:
-            return str(self.identifier)
-        except Exception:
-            return type(self).__name__

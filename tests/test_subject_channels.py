@@ -31,7 +31,9 @@ def test_subject_derives_channel_identity_from_v1_contract():
     subject = _ChannelSubject()
 
     assert subject.in_channels == {"vision", "text"}
-    assert subject.out_channels == {"neural:V1", "neural:IT", "behavior"}
+    # Contract v3 rule 2.2: outputs come from declarations, never from private
+    # attribute names. The fixture's ``_behavioral_readout_layer`` declares nothing.
+    assert subject.out_channels == {"neural:V1", "neural:IT"}
     assert subject.required_channels == {"text"}
 
 
@@ -56,11 +58,12 @@ def test_subject_channel_properties_are_overridable():
     assert subject.required_channels == {"instruction"}
 
 
-def test_legacy_interact_default_is_non_abstract_and_clear():
-    subject = _ChannelSubject()
+def test_typed_interact_default_runs_sessions_and_rejects_unknown_outputs():
+    from brainscore_core.streaming import BufferedSession
 
-    with pytest.raises(NotImplementedError, match="no v2 interact\\(\\) path yet"):
-        subject.interact(session=None)
+    subject = _ChannelSubject()
+    with pytest.raises(NotImplementedError, match="runs sessions requesting"):
+        subject.interact(BufferedSession(requested_output_channels=["pupil"]))
 
 
 def test_legacy_subclass_still_instantiates_without_interact():
