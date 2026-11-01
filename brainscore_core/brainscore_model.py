@@ -29,6 +29,29 @@ from .streaming_helpers import (
 )
 
 
+_PREFERRED_NAMES = {
+    'preprocessors': "extractor={modality: extractor} (configure input preparation "
+                     "on the extractor; declare extractor-less inputs with "
+                     "supported_modalities=)",
+    'activations_model': 'extractor=',
+    'generation_fn': 'answer=',
+    'action_fn': 'policy=',
+    'state_change_fn': 'intervention=',
+}
+
+
+def _warn_old_names(**given) -> None:
+    """Deprecation warning for each older constructor name that was used."""
+    import warnings
+    for name, value in given.items():
+        if value is None or (name == 'preprocessors' and not value):
+            continue
+        warnings.warn(
+            f"BrainScoreModel({name}=...) is deprecated; use "
+            f"{_PREFERRED_NAMES[name]}. It keeps working.",
+            DeprecationWarning, stacklevel=3)
+
+
 class BrainScoreModel(UnifiedModel):
     """The one concrete subject, assembled from parts (extractors, region map,
     answer, policy, intervention, capabilities). Evaluated through ``interact``;
@@ -124,6 +147,15 @@ class BrainScoreModel(UnifiedModel):
         Note: passing capability functions POSITIONALLY (via the legacy tail) is
         deprecated and error-prone; always pass them by keyword.
         """
+        # One name per part (Contract Rules v3): extractor, answer, policy,
+        # intervention. The older names keep working with a deprecation warning.
+        _warn_old_names(preprocessors=preprocessors,
+                        activations_model=activations_model,
+                        generation_fn=generation_fn, action_fn=action_fn,
+                        state_change_fn=state_change_fn,
+                        **{k: legacy_capability_config[k] for k in
+                           ('generation_fn', 'action_fn', 'state_change_fn')
+                           if k in legacy_capability_config})
         # Translate the public vocabulary once; existing plugins keep their
         # callback names and the internal capability contract stays unchanged.
         if extractor is not None:
@@ -145,8 +177,7 @@ class BrainScoreModel(UnifiedModel):
                 "Passing capability functions positionally to BrainScoreModel is "
                 "deprecated and error-prone: a mis-counted positional silently lands "
                 "in the wrong capability slot. Pass them by keyword instead "
-                "(behavioral_readout_layer=, generation_fn=, action_fn=, "
-                "state_change_fn=).",
+                "(behavioral_readout_layer=, answer=, policy=, intervention=).",
                 DeprecationWarning, stacklevel=2)
         # Fold the now-explicit capability kwargs into the config the normalizer
         # sees, so they are visible in the signature/help() yet routed uniformly.

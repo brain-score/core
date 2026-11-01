@@ -146,3 +146,25 @@ def test_single_time_bin_in_any_benchmark_form_leaves_response_unchanged(time_bi
     model, _ = _model()
     model.start_recording('IT', time_bins=time_bins)
     assert 'time_bin' not in model.process(_images()).dims
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'activations_model': {'vision': _Extractor()}},
+    {'extractor': {'vision': _Extractor()}, 'generation_fn': lambda *a: None},
+    {'extractor': {'vision': _Extractor()}, 'action_fn': lambda step: None},
+    {'extractor': {'vision': _Extractor()}, 'state_change_fn': lambda c: (None, lambda: None)},
+])
+def test_older_constructor_names_warn_and_keep_working(kwargs):
+    with pytest.warns(DeprecationWarning, match='is deprecated; use'):
+        model = BrainScoreModel('old-names', region_layer_map={'IT': 'layer'}, **kwargs)
+    assert 'neural:IT' in model.out_channels
+
+
+def test_preferred_names_do_not_warn():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', DeprecationWarning)
+        BrainScoreModel('new-names', region_layer_map={'IT': 'layer'},
+                        extractor={'vision': _Extractor()},
+                        answer=lambda *a: None, policy=lambda step: None,
+                        intervention=lambda c: (None, lambda: None))
