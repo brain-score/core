@@ -94,6 +94,18 @@ class TestRegister:
             payload_contract="(time,) float diameter in mm",
             handled_by="an eye-tracker harness",
         )
-        io_catalog.register(entry)
+        io_catalog.register(entry, replace=True)  # 'pupil' is a seeded family
         assert io_catalog.get("pupil") is entry
         assert io_catalog.get("pupil:left").name == "pupil"
+
+    def test_register_rejects_silent_overwrite(self, monkeypatch):
+        monkeypatch.setattr(io_catalog, "_CATALOG", dict(io_catalog._CATALOG))
+        original = io_catalog.get("pupil")
+        clash = CatalogEntry(
+            name="pupil", kind=OUTPUT, carried_by="x", payload_contract="x",
+            handled_by="another harness",
+        )
+        with pytest.raises(ValueError, match="already registered"):
+            io_catalog.register(clash)
+        assert io_catalog.get("pupil") is original
+        io_catalog.register(original)  # same object: allowed, no change

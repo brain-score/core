@@ -35,4 +35,5 @@ from .selection import (
     _promote_to_selector,
 )
 from .contract import Subject, TaskContext, UnifiedModel
+from .extractor import Extractor  # noqa: F401  (public protocol)
 from .brainscore_model import BrainScoreModel

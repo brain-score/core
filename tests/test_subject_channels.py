@@ -31,7 +31,9 @@ def test_subject_derives_channel_identity_from_v1_contract():
     subject = _ChannelSubject()
 
     assert subject.in_channels == {"vision", "text"}
-    assert subject.out_channels == {"neural:V1", "neural:IT", "behavior"}
+    # Contract v3 rule 2.2: outputs come from declarations, never from private
+    # attribute names. The fixture's ``_behavioral_readout_layer`` declares nothing.
+    assert subject.out_channels == {"neural:V1", "neural:IT"}
     assert subject.required_channels == {"text"}
 
 
@@ -56,11 +58,12 @@ def test_subject_channel_properties_are_overridable():
     assert subject.required_channels == {"instruction"}
 
 
-def test_legacy_interact_default_is_non_abstract_and_clear():
-    subject = _ChannelSubject()
+def test_typed_interact_default_runs_sessions_and_rejects_unknown_outputs():
+    from brainscore_core.streaming import BufferedSession
 
-    with pytest.raises(NotImplementedError, match="no v2 interact\\(\\) path yet"):
-        subject.interact(session=None)
+    subject = _ChannelSubject()
+    with pytest.raises(NotImplementedError, match="runs sessions requesting"):
+        subject.interact(BufferedSession(requested_output_channels=["pupil"]))
 
 
 def test_legacy_subclass_still_instantiates_without_interact():
@@ -103,3 +106,34 @@ def test_brainscore_model_gets_channel_identity_from_preprocessors():
 def test_unifiedmodel_remains_a_subject():
     assert issubclass(UnifiedModel, Subject)
     assert UnifiedModel is not Subject
+
+
+def test_typed_model_without_multi_modality_runs_multimodal_session():
+    """The driver asks for multi-modality only when the subject says it combines
+    inputs; no private method is probed (Contract v3 rule 2.2)."""
+    import pandas as pd
+    from brainscore_core.streaming_helpers import neural_response
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+
+    class TwoInputModel(_ChannelSubject):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def start_recording(self, recording_target, time_bins=None, recording_type=None):
+            pass
+
+        def process(self, input_event):  # no multi_modality keyword
+            self.calls.append(len(input_event))
+            import numpy as np
+            from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+            return NeuroidAssembly(np.zeros((len(input_event), 2)), dims=['presentation', 'neuroid'],
+                                   coords={'stimulus_id': ('presentation', list(input_event['stimulus_id'])),
+                                           'neuroid_id': ('neuroid', [0, 1])})
+
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a'], 'image_path': ['/tmp/a.png'],
+                                        'sentence': ['a sentence']}))
+    stimuli.identifier = 'two-inputs'
+    model = TwoInputModel()
+    neural_response(model, stimuli, record='IT')
+    assert model.calls == [1]

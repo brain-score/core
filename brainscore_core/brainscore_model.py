@@ -23,20 +23,40 @@ from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
-    _drive_behavior_session_streaming,
-    _drive_behavior_session_via_process,
-    _drive_environment_session_via_process,
-    _drive_neural_session_streaming,
-    _drive_neural_session_via_process,
-    _drive_state_change_session_via_process,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels,
     _stimuli_from_stream_session as _neural_stimuli_from_stream_session,
 )
 
 
+_PREFERRED_NAMES = {
+    'preprocessors': "extractor={modality: extractor} (configure input preparation "
+                     "on the extractor; declare extractor-less inputs with "
+                     "supported_modalities=)",
+    'activations_model': 'extractor=',
+    'generation_fn': 'answer=',
+    'action_fn': 'policy=',
+    'state_change_fn': 'intervention=',
+}
+
+
+def _warn_old_names(**given) -> None:
+    """Deprecation warning for each older constructor name that was used."""
+    import warnings
+    for name, value in given.items():
+        if value is None or (name == 'preprocessors' and not value):
+            continue
+        warnings.warn(
+            f"BrainScoreModel({name}=...) is deprecated; use "
+            f"{_PREFERRED_NAMES[name]}. It keeps working.",
+            DeprecationWarning, stacklevel=3)
+
+
 class BrainScoreModel(UnifiedModel):
-    """Compositional subject with session and legacy typed evaluation paths."""
+    """The one concrete subject, assembled from parts (extractors, region map,
+    answer, policy, intervention, capabilities). Evaluated through ``interact``;
+    ``process`` is a typed convenience and the legacy benchmark methods forward
+    to :class:`~brainscore_core.legacy_facade.LegacyBenchmarkFacade`."""
 
     COLUMN_TO_MODALITY: Dict[str, str] = {
         'image_file_name': 'vision',
@@ -127,6 +147,15 @@ class BrainScoreModel(UnifiedModel):
         Note: passing capability functions POSITIONALLY (via the legacy tail) is
         deprecated and error-prone; always pass them by keyword.
         """
+        # One name per part (Contract Rules v3): extractor, answer, policy,
+        # intervention. The older names keep working with a deprecation warning.
+        _warn_old_names(preprocessors=preprocessors,
+                        activations_model=activations_model,
+                        generation_fn=generation_fn, action_fn=action_fn,
+                        state_change_fn=state_change_fn,
+                        **{k: legacy_capability_config[k] for k in
+                           ('generation_fn', 'action_fn', 'state_change_fn')
+                           if k in legacy_capability_config})
         # Translate the public vocabulary once; existing plugins keep their
         # callback names and the internal capability contract stays unchanged.
         if extractor is not None:
@@ -148,8 +177,7 @@ class BrainScoreModel(UnifiedModel):
                 "Passing capability functions positionally to BrainScoreModel is "
                 "deprecated and error-prone: a mis-counted positional silently lands "
                 "in the wrong capability slot. Pass them by keyword instead "
-                "(behavioral_readout_layer=, generation_fn=, action_fn=, "
-                "state_change_fn=).",
+                "(behavioral_readout_layer=, answer=, policy=, intervention=).",
                 DeprecationWarning, stacklevel=2)
         # Fold the now-explicit capability kwargs into the config the normalizer
         # sees, so they are visible in the signature/help() yet routed uniformly.
@@ -229,33 +257,33 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        channels = super().in_channels | set().union(
-            *(set(c.input_channels) for c in self._declared_capabilities()))
-        if self._action_fn is not None:
-            channels.add('observation')
-        if self._generation_fn is not None:
-            channels.add('instruction')
-        return channels
+        return super().in_channels | set().union(
+            *(c.declared_input_channels(self) for c in self._declared_capabilities()))
 
     @property
     def out_channels(self):
-        return super().out_channels | set().union(
-            *(set(c.output_channels) for c in self._declared_capabilities()))
+        # Every output comes from a registered part; nothing is found by name.
+        return set().union(
+            *(c.declared_output_channels(self) for c in self._declared_capabilities()))
 
     def check_session_support(self, channels):
-        """Reject unsupported or ambiguous output combinations before consuming input."""
+        """The one capability that runs a session requesting ``channels``.
+
+        Raises before any input is consumed when no capability, or more than
+        one at the same priority, claims the combination.
+        """
         channels = frozenset(channels)
         if not channels:
             raise ValueError('A session must request at least one output channel.')
-        custom = [c for c in self._declared_capabilities()
+        claims = [c for c in self._declared_capabilities()
                   if c.supports_session(self, channels)]
-        if len(custom) > 1:
-            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in custom]}')
-        stock = (channels in ({'behavior'}, {'motor'}, {'perturbation'})
-                 or all(c.startswith('neural:') for c in channels))
-        if not custom and not stock:
+        if not claims:
             raise NotImplementedError(f'No session handler for {sorted(channels)}')
-        return custom[0] if custom else None
+        first = min(c.order for c in claims)
+        winners = [c for c in claims if c.order == first]
+        if len(winners) > 1:
+            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in winners]}')
+        return winners[0]
 
     @property
     def identifier(self) -> str:
@@ -440,7 +468,8 @@ class BrainScoreModel(UnifiedModel):
                 multi_modality: bool = False) -> OutputEvent:
         """Evaluate one input event and return the corresponding output event.
 
-        The legacy typed evaluation entry point; dispatch is by ``input_event`` type:
+        A typed convenience, not part of the subject contract (``interact`` is
+        the evaluation method). Dispatch is by ``input_event`` type:
         a ``StimulusSet`` / ``MultimodalStimulusSet`` -> ``NeuroidAssembly`` of
         recorded activations (call ``start_recording`` first); a ``StateChange``
         -> ``PerturbationApplied`` (apply) or ``None`` (reset); an
@@ -451,43 +480,22 @@ class BrainScoreModel(UnifiedModel):
             modality and concat along the neuroid axis; default routes a single
             modality by ``MODALITY_PRIORITY``.
         """
-        return self._dispatcher.process(input_event, multi_modality)
+        output = self._dispatcher.process(input_event, multi_modality)
+        time_bins = self._recorder.time_bins
+        if time_bins is not None and len(time_bins) > 1 and not isinstance(
+                input_event, (StateChange, EnvironmentStep, Message)):
+            # Honor every requested time bin: a static response is repeated
+            # across several bins, as legacy vision models do.
+            from .legacy_facade import repeat_over_time_bins
+            output = repeat_over_time_bins(output, time_bins)
+        return output
 
     def interact(self, session) -> None:
-        """Drive a v2 streaming session through existing model paths."""
-        requested_channels = _requested_output_channels(session)
-        custom = self.check_session_support(requested_channels)
-        if custom is not None:
-            from .capabilities.registry import _setup_once
-            _setup_once(self, custom)
-            custom.interact(self, session)
-            return
-        if requested_channels == ["behavior"]:
-            if getattr(session, "streaming", False):
-                _drive_behavior_session_streaming(self, session)
-            else:
-                _drive_behavior_session_via_process(self, session)
-            return
-        if requested_channels == ["perturbation"]:
-            _drive_state_change_session_via_process(self, session)
-            return
-        if requested_channels == ["motor"]:
-            _drive_environment_session_via_process(self, session)
-            return
-        if all(channel.startswith("neural:") for channel in requested_channels):
-            # A session may ask to be consumed one input at a time (inputs generated
-            # on demand rather than known up front). Same scores, different arrival.
-            if getattr(session, "streaming", False):
-                _drive_neural_session_streaming(self, session)
-            else:
-                _drive_neural_session_via_process(self, session)
-            return
-        raise NotImplementedError(
-            "BrainScoreModel.interact currently supports requested "
-            "neural:<region>, behavior, perturbation, or motor output "
-            "channels; got "
-            f"{requested_channels!r}."
-        )
+        """Run a session through the one registered capability that claims it."""
+        handler = self.check_session_support(_requested_output_channels(session))
+        from .capabilities.registry import _setup_once
+        _setup_once(self, handler)
+        handler.interact(self, session)
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -524,9 +532,6 @@ class BrainScoreModel(UnifiedModel):
 
     def _process_composite_regions(self, stimuli, modality):
         return self._recorder.process_composite_regions(stimuli, modality)
-
-    def _gather_composite_units(self, assembly, selector):
-        return self._recorder.gather_composite_units(assembly, selector)
 
     def start_recording(self,
                         recording_target: Union[str, List[str]],
@@ -582,19 +587,8 @@ class BrainScoreModel(UnifiedModel):
         if failures:
             raise RuntimeError('A model provider failed to reset; the model is not clean.') from failures[0]
 
-    def _resolve_selection(self, state_change: 'StateChange') -> 'StateChange':
-        return self._perturbations.resolve_selection(state_change)
-
     def _dispatch_state_change(self, state_change: 'StateChange') -> Any:
         return self._dispatcher.dispatch_state_change(state_change)
-
-    @staticmethod
-    def _drain_stream_events(session) -> List[StreamEvent]:
-        return _drain_neural_stream_events(session)
-
-    @staticmethod
-    def _stimuli_from_stream_session(session, events: List[StreamEvent]):
-        return _neural_stimuli_from_stream_session(session, events)
 
     @staticmethod
     def _reconstruct_stimulus_set_from_events(events: List[StreamEvent]):
@@ -607,20 +601,12 @@ class BrainScoreModel(UnifiedModel):
         """
         return _reconstruct_neural_stimulus_set(events)
 
-    @staticmethod
-    def _requested_output_channels(session) -> List[str]:
-        return _requested_output_channels(session)
-
     @classmethod
     def _requires_behavioral_readout(cls, task_type: str) -> bool:
         return BehavioralReadout.requires_behavioral_readout(task_type)
 
     def _fit_behavioral_readout(self, fitting_stimuli) -> None:
         self._behavioral.fit_behavioral_readout(fitting_stimuli)
-
-    @staticmethod
-    def _extract_labels(stimuli):
-        return BehavioralReadout.extract_labels(stimuli)
 
     def _extract_behavioral_features(self, stimuli):
         return self._behavioral.extract_behavioral_features(stimuli)
@@ -631,40 +617,32 @@ class BrainScoreModel(UnifiedModel):
     def _generate_predictions(self, stimuli):
         return self._behavioral.generate_predictions(stimuli)
 
-    def look_at(self, stimuli, number_of_trials=1, **kwargs):
-        """Vision benchmark compatibility. Delegates to process()."""
-        return self.process(stimuli)
+    # --- Legacy benchmark surface ------------------------------------------
+    # Permanent: legacy benchmarks are never removed. Behavior lives in
+    # LegacyBenchmarkFacade; these are one-line forwards to a facade around self.
+
+    @property
+    def _legacy_facade(self):
+        from .legacy_facade import LegacyBenchmarkFacade
+        return LegacyBenchmarkFacade(self, visual_degrees=self._visual_degrees_val)
+
+    def look_at(self, stimuli, number_of_trials=1, require_variance=False, **kwargs):
+        """Vision benchmark compatibility (see LegacyBenchmarkFacade.look_at)."""
+        return self._legacy_facade.look_at(stimuli, number_of_trials,
+                                           require_variance, **kwargs)
 
     def visual_degrees(self) -> int:
         """Vision benchmark compatibility."""
-        return self._visual_degrees_val
+        return self._legacy_facade.visual_degrees()
 
     def digest_text(self, text) -> Dict[str, Any]:
-        """Language benchmark compatibility."""
-        import hashlib
-        import pandas as pd
-        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-
-        import numpy as np
-        if isinstance(text, np.ndarray):
-            text = text.tolist()
-        if isinstance(text, (str, list)):
-            if isinstance(text, str):
-                text = [text]
-            stimuli = StimulusSet(pd.DataFrame({
-                'sentence': text,
-                'stimulus_id': list(range(len(text))),
-                'context_id': ['passage'] * len(text),
-            }))
-            content_hash = hashlib.md5(
-                '|'.join(text).encode('utf-8')).hexdigest()[:12]
-            stimuli.identifier = f'text_stimuli_{len(text)}_{content_hash}'
-        else:
-            stimuli = text
-
-        result = self.process(stimuli)
-        return {'neural': result}
+        """Language benchmark compatibility (see LegacyBenchmarkFacade.digest_text)."""
+        return self._legacy_facade.digest_text(text)
 
     def start_neural_recording(self, recording_target, recording_type='fMRI'):
         """Language benchmark compatibility."""
-        self.start_recording(recording_target, recording_type=recording_type)
+        self._legacy_facade.start_neural_recording(recording_target, recording_type)
+
+    def start_behavioral_task(self, task):
+        """Language benchmark compatibility; raises for unsupported legacy tasks."""
+        self._legacy_facade.start_behavioral_task(task)

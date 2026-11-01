@@ -7,10 +7,11 @@ from brainscore_core.metrics import Score
 
 
 class _Model:
+    # Compatibility reads declarations only (Contract v3 rule 2.1).
     identifier = "text-model"
-    available_modalities = {"text"}
-    required_modalities = set()
-    region_layer_map = {}
+    in_channels = {"text"}
+    out_channels = set()
+    required_channels = set()
 
 
 class _Benchmark:
