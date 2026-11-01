@@ -440,16 +440,7 @@ def _drive_neural_session_via_process(
     ``process`` combines several input modalities; when several are present
     it is called with ``multi_modality=True``.
     """
-    settings = getattr(getattr(session, "task_context", None), "metadata", {}) or {}
-    if settings.get("require_variance"):
-        # A legacy look_at(require_variance=True) asks for repeated noisy
-        # presentations. The typed path is deterministic, so it fails instead
-        # of returning identical trials.
-        raise NotImplementedError(
-            f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
-            "cannot produce trial-to-trial variance (look_at(require_variance=True, "
-            f"number_of_trials={settings.get('number_of_trials', 1)})). Legacy models "
-            "add it with microsaccades; this subject has no equivalent.")
+    _refuse_variance(subject, session)
     input_events = _drain_stream_events(session)
     stimuli = _stimuli_from_stream_session(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0
@@ -900,6 +891,28 @@ def _behavior_stimuli_from_session(session, task_context):
     return _behavior_stimuli_to_score(task_context)
 
 
+def measurement_settings(session) -> dict:
+    """Per-measurement settings a legacy facade attached to ``session`` (trial count, variance request)."""
+    return dict(getattr(session, "settings", None) or {})
+
+
+def _refuse_variance(subject, session) -> None:
+    """The typed paths are deterministic: a request for trial-to-trial variance fails.
+
+    A legacy ``look_at(require_variance=True)`` asks for repeated noisy
+    presentations. Returning identical trials would be a silently corrected
+    response (rule 6.2), so both the neural and the behavioral typed drivers
+    refuse it before any compute.
+    """
+    settings = measurement_settings(session)
+    if settings.get("require_variance"):
+        raise NotImplementedError(
+            f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
+            "cannot produce trial-to-trial variance (look_at(require_variance=True, "
+            f"number_of_trials={settings.get('number_of_trials', 1)})). Legacy models "
+            "add it with microsaccades; this subject has no equivalent.")
+
+
 def _drive_behavior_session_via_process(
     subject, session: BehavioralSession, task_context=None,
     driver: str = "interact"
@@ -911,6 +924,7 @@ def _drive_behavior_session_via_process(
         raise ValueError(
             "behavior interact requires a session.task_context to drive."
         )
+    _refuse_variance(subject, session)
     subject.start_task(task_context)
     stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:

@@ -559,8 +559,31 @@ class BrainScoreModel(UnifiedModel):
 
     def start_task(self, task_context, fitting_stimuli=None,
                    **kwargs) -> None:
-        self._behavioral.start_task(task_context, fitting_stimuli,
+        """Configure the behavioral task.
+
+        Fitting stimuli reach the readout with only the input modalities this
+        model declares (rule 5.5); the caller's table is never changed. The
+        same TaskContext object sent again, as a facade session does for every
+        measurement, keeps the fitted readout; a new context, or any context
+        after a state change, fits anew.
+        """
+        from dataclasses import replace
+        from .session_view import declared_only
+        if isinstance(task_context, TaskContext):
+            if self._behavioral.is_configured_for(task_context):
+                return
+            fitting = task_context.fitting_stimuli
+            projected = declared_only(fitting, self.in_channels)
+            context = (task_context if projected is fitting
+                       else replace(task_context, fitting_stimuli=projected))
+            self._behavioral.start_task(context, **kwargs)
+            self._behavioral.mark_configured(task_context)
+            return
+        self._behavioral.start_task(task_context,
+                                    declared_only(fitting_stimuli, self.in_channels),
                                     **kwargs)
+        # The context built from (task, fitting) is what a facade sends back.
+        self._behavioral.mark_configured(self._behavioral.task_context)
 
     def reset(self) -> None:
         failures = []
@@ -598,7 +621,12 @@ class BrainScoreModel(UnifiedModel):
             raise RuntimeError('A model provider failed to reset; the model is not clean.') from failures[0]
 
     def _dispatch_state_change(self, state_change: 'StateChange') -> Any:
-        return self._dispatcher.dispatch_state_change(state_change)
+        try:
+            return self._dispatcher.dispatch_state_change(state_change)
+        finally:
+            # The model changed under the readout: the next start_task fits
+            # again even when the task object is the one already configured.
+            self._behavioral.invalidate()
 
     @staticmethod
     def _reconstruct_stimulus_set_from_events(events: List[StreamEvent]):

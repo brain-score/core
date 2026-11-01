@@ -17,10 +17,32 @@ class BehavioralReadout:
         self.task_context: Optional[TaskContext] = None
         self.readout_classifier: Any = None
         self.use_generation_for_task = False
+        # The TaskContext object the current configuration came from, so a
+        # repeated send of the same task keeps the fitted readout.
+        self.configured_from: Optional[TaskContext] = None
+        self._stale = False
 
     @classmethod
     def requires_behavioral_readout(cls, task_type: str) -> bool:
         return task_type in cls.BEHAVIORAL_TASK_TYPES
+
+    def is_configured_for(self, task_context: TaskContext) -> bool:
+        """Whether ``task_context`` is the task already configured, unchanged since.
+
+        True for the object the configuration came from and for the context
+        this component holds (the same task after input projection).
+        """
+        if self._stale or self.task_context is None:
+            return False
+        return task_context is self.configured_from or task_context is self.task_context
+
+    def mark_configured(self, task_context: Optional[TaskContext]) -> None:
+        self.configured_from = task_context
+        self._stale = False
+
+    def invalidate(self) -> None:
+        """The model changed (a state change was applied or undone): fit again next time."""
+        self._stale = True
 
     def start_task(self, task_context_or_task, fitting_stimuli=None,
                    **kwargs) -> None:
@@ -108,6 +130,8 @@ class BehavioralReadout:
         self.task_context = None
         self.readout_classifier = None
         self.use_generation_for_task = False
+        self.configured_from = None
+        self._stale = False
 
     def fit_behavioral_readout(self, fitting_stimuli) -> None:
         """Extract readout-layer features and fit a probabilities classifier."""

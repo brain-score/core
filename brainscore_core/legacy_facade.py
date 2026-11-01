@@ -17,7 +17,6 @@ state, so direct calls keep working too.
 """
 
 import hashlib
-from dataclasses import replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .contract import TaskContext
@@ -67,9 +66,21 @@ class LegacyBenchmarkFacade:
         return self._visual_degrees
 
     def start_task(self, task, fitting_stimuli=None, **settings) -> None:
-        """Record the task; it reaches the subject with the next measurement."""
-        self._task = (task if isinstance(task, TaskContext) else TaskContext(
-            task_type=task, fitting_stimuli=fitting_stimuli, metadata=dict(settings)))
+        """Record the task; it reaches the subject with the next measurement.
+
+        Keyword settings a benchmark passes to ``start_task`` (Malania2007
+        sends ``number_of_trials`` and ``require_variance``) are fitting
+        settings. They travel as ``metadata['task_settings']``, apart from the
+        measurement settings of each ``look_at``, which may use the same names.
+        The one TaskContext object is sent with every measurement, so a subject
+        can tell a repeated task from a new one and keep its fitted state.
+        """
+        if isinstance(task, TaskContext):
+            self._task = task
+            return
+        metadata = {'task_settings': dict(settings)} if settings else {}
+        self._task = TaskContext(task_type=task, fitting_stimuli=fitting_stimuli,
+                                 metadata=metadata)
 
     def start_recording(self, recording_target, time_bins=None,
                         recording_type=None) -> None:
@@ -81,9 +92,9 @@ class LegacyBenchmarkFacade:
                 require_variance: bool = False, **settings):
         """Legacy ``BrainModel.look_at``: one session requesting the configured output.
 
-        ``number_of_trials`` and ``require_variance`` travel in the session's
-        task settings. A subject that cannot produce trial-to-trial variance
-        fails instead of returning identical trials.
+        ``number_of_trials`` and ``require_variance`` travel as the session's
+        measurement ``settings``. A subject that cannot produce trial-to-trial
+        variance fails instead of returning identical trials.
         """
         if settings:
             raise TypeError(f'look_at got unsupported settings {sorted(settings)}')
@@ -133,11 +144,22 @@ class LegacyBenchmarkFacade:
     def reset(self) -> None:
         self._subject.reset()
         self._record = self._time_bins = self._recording_type = self._task = None
+        self._passive = None
 
     # --- internals --------------------------------------------------------
 
+    _passive: Optional[TaskContext] = None
+
     def _behavior_requested(self) -> bool:
         return self._task is not None and self._task.task_type != PASSIVE
+
+    def _task_context(self) -> TaskContext:
+        """The task sent with each measurement: the recorded one, else one passive context."""
+        if self._task is not None:
+            return self._task
+        if self._passive is None:
+            self._passive = TaskContext(task_type=PASSIVE)
+        return self._passive
 
     def _neural_channel(self, method: str) -> str:
         if self._record is None:
@@ -150,13 +172,14 @@ class LegacyBenchmarkFacade:
         return f'neural:{self._record}'
 
     def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
+        """One session: the recorded task object, the time bins and the measurement settings."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        context = self._task or TaskContext(task_type=PASSIVE)
-        context = replace(context, metadata={**context.metadata, **settings})
         session = BufferedSession(stimulus_set=stimuli,
                                   requested_output_channels=channels,
-                                  task_context=context, time_bins=self._time_bins)
+                                  task_context=self._task_context(),
+                                  time_bins=self._time_bins)
+        session.settings = dict(settings)
         self._subject.interact(session)
         return {channel: session.collect(channel) for channel in channels}
 
@@ -217,7 +240,10 @@ def text_stimulus_set(text):
         'stimulus_id': list(range(len(text))),
         'context_id': ['passage'] * len(text),
     }))
-    content_hash = hashlib.md5('|'.join(text).encode('utf-8')).hexdigest()[:12]
+    # Length prefixes keep different segmentations of the same characters
+    # (['a|b', 'c'] and ['a', 'b|c']) from sharing one cache entry.
+    content = ''.join(f'{len(part)}:{part}' for part in text).encode('utf-8')
+    content_hash = hashlib.md5(content).hexdigest()[:12]
     stimuli.identifier = f'text_stimuli_{len(text)}_{content_hash}'
     return stimuli
 

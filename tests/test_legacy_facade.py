@@ -22,9 +22,11 @@ class _Extractor:
 
     def __init__(self):
         self.calls = []
+        self.seen = []
 
     def __call__(self, stimuli, layers=None, **kwargs):
         self.calls.append(list(stimuli['stimulus_id']))
+        self.seen.append(stimuli)
         n = len(stimuli)
         return NeuroidAssembly(
             np.arange(n * 3, dtype=float).reshape(n, 3),
@@ -214,7 +216,7 @@ def test_facade_runs_an_interact_only_subject_on_vision_calls():
     session, = subject.sessions
     assert session.requested_output_channels == ('neural:IT',)
     assert session.time_bins == [(70, 170), (170, 270)]
-    assert session.task_context.metadata['number_of_trials'] == 7
+    assert session.settings['number_of_trials'] == 7
     assert facade.visual_degrees() == 12
     assert facade.identifier == 'recording-subject'
 
@@ -230,8 +232,8 @@ def test_facade_runs_language_neural_and_behavior_in_one_session():
     session, = subject.sessions
     assert set(session.requested_output_channels) == {'neural:IT', 'behavior'}
     assert session.task_context.task_type == 'reading_times'
-    assert session.task_context.metadata['recording_type'] == 'spikes'
-    assert session.task_context.metadata['legacy_text'] is text
+    assert session.settings['recording_type'] == 'spikes'
+    assert session.settings['legacy_text'] is text
 
 
 def test_facade_passes_a_text_stimulus_set_unchanged():
@@ -336,3 +338,117 @@ def test_declared_visual_degrees_reads_the_legacy_vision_setting_or_none():
     model, _ = _model()
     assert declared_visual_degrees(model) == 10
     assert declared_visual_degrees(_Recorder()) is None
+
+
+# --- setup once, measure many times (review findings 1 to 4) ---------------
+
+from brainscore_core.model_interface import TaskContext
+
+def _labelled_images(n=4, with_text=False):
+    frame = {'stimulus_id': [f'f{i}' for i in range(n)],
+             'image_path': [f'/tmp/f{i}.png' for i in range(n)],
+             'image_label': ['cat', 'dog'] * (n // 2)}
+    if with_text:
+        frame['sentence'] = [f'caption {i}' for i in range(n)]
+    stimuli = StimulusSet(pd.DataFrame(frame))
+    stimuli.identifier = 'fitting-images'
+    return stimuli
+
+
+def _readout_model():
+    extractor = _Extractor()
+    model = BrainScoreModel('readout', region_layer_map={'IT': 'layer'},
+                            extractor={'vision': extractor},
+                            behavioral_readout_layer='layer')
+    return model, extractor
+
+
+def _fits(extractor):
+    """How many times the fitting stimuli were extracted (one per readout fit)."""
+    return sum(1 for ids in extractor.calls if ids and str(ids[0]).startswith('f'))
+
+
+def test_fitting_settings_stay_apart_from_measurement_settings():
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject)
+    fitting = _labelled_images()
+    facade.start_task('probabilities', fitting_stimuli=fitting,
+                      number_of_trials=2, require_variance=True)
+    facade.look_at(_images(), number_of_trials=1)
+    facade.look_at(_images(), number_of_trials=3)
+    first, second = subject.sessions
+    assert first.task_context is second.task_context  # one task object, sent each time
+    assert first.task_context.metadata['task_settings'] == {
+        'number_of_trials': 2, 'require_variance': True}
+    assert first.task_context.fitting_stimuli is fitting
+    assert first.settings == {'number_of_trials': 1, 'require_variance': False}
+    assert second.settings == {'number_of_trials': 3, 'require_variance': False}
+
+
+def test_typed_behavioral_look_at_fits_the_readout_once():
+    model, extractor = _readout_model()
+    model.start_task('probabilities', fitting_stimuli=_labelled_images())
+    assert _fits(extractor) == 1
+    model.look_at(_images())
+    model.look_at(_images())
+    assert _fits(extractor) == 1
+
+
+def test_scored_facade_fits_the_readout_once_across_measurements():
+    model, extractor = _readout_model()
+    facade = LegacyBenchmarkFacade(model, visual_degrees=8)
+    facade.start_task('probabilities', fitting_stimuli=_labelled_images())
+    facade.look_at(_images())
+    facade.look_at(_images())
+    assert _fits(extractor) == 1
+    facade.start_task('probabilities', fitting_stimuli=_labelled_images())  # a new task
+    facade.look_at(_images())
+    assert _fits(extractor) == 2
+
+
+def test_repeated_task_refits_after_a_state_change():
+    from brainscore_core.events import PerturbationApplied, Perturbation, Selection, StateChange
+    from brainscore_core.streaming_helpers import apply_state_change, behavioral_response
+    extractor = _Extractor()
+    model = BrainScoreModel(
+        'lesioned', region_layer_map={'IT': 'layer'}, extractor={'vision': extractor},
+        behavioral_readout_layer='layer',
+        intervention=lambda change: (
+            PerturbationApplied(handle_id='h', target=change.target,
+                                perturbation=change.perturbation),
+            lambda: None))
+    task = TaskContext(task_type='probabilities', fitting_stimuli=_labelled_images(),
+                       metadata={'stimulus_set': _images()})
+    behavioral_response(model, task)
+    behavioral_response(model, task)
+    assert _fits(extractor) == 1
+    apply_state_change(model, StateChange(kind='lesion', target=Selection(layer='layer'),
+                                          perturbation=Perturbation(kind='zero')))
+    behavioral_response(model, task)
+    assert _fits(extractor) == 2  # the model changed under the readout
+
+
+def test_fitting_stimuli_reach_the_readout_with_declared_inputs_only():
+    model, extractor = _readout_model()
+    fitting = _labelled_images(with_text=True)
+    model.start_task(TaskContext(task_type='probabilities', fitting_stimuli=fitting))
+    seen = extractor.seen[-1]
+    assert 'sentence' not in seen.columns
+    assert list(seen['image_label']) == list(fitting['image_label'])
+    assert 'sentence' in fitting.columns  # the benchmark's table is untouched
+    assert seen.identifier == fitting.identifier
+
+
+def test_typed_behavioral_variance_request_fails_before_compute():
+    model, extractor = _readout_model()
+    model.start_task('probabilities', fitting_stimuli=_labelled_images())
+    calls = len(extractor.calls)
+    with pytest.raises(NotImplementedError, match='trial-to-trial variance'):
+        model.look_at(_images(), number_of_trials=3, require_variance=True)
+    assert len(extractor.calls) == calls
+
+
+def test_text_identifiers_do_not_collide_on_the_delimiter():
+    first = text_stimulus_set(['a|b', 'c'])
+    second = text_stimulus_set(['a', 'b|c'])
+    assert first.identifier != second.identifier
