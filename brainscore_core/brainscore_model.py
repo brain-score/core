@@ -491,11 +491,17 @@ class BrainScoreModel(UnifiedModel):
         return output
 
     def interact(self, session) -> None:
-        """Run a session through the one registered capability that claims it."""
+        """Run a session through the one registered capability that claims it.
+
+        The handler sees only the streams this model declares in
+        ``in_channels``; every other stream the experiment sends is skipped
+        before it reaches any part (Contract Rules v3, rule 5.5).
+        """
         handler = self.check_session_support(_requested_output_channels(session))
         from .capabilities.registry import _setup_once
+        from .session_view import DeclaredInputSession
         _setup_once(self, handler)
-        handler.interact(self, session)
+        handler.interact(self, DeclaredInputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
