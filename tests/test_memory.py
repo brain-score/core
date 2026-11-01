@@ -17,15 +17,20 @@ from brainscore_core.memory import (
     SAFETY_FACTORS,
 )
 from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-class FakeResult:
-    """Mimics a DataAssembly with nbytes and shape."""
-    def __init__(self, nbytes=8000, n_features=1000):
-        self.nbytes = nbytes
-        self.shape = (1, n_features)
+def FakeResult(nbytes=8000, n_features=1000):
+    """A one-presentation NeuroidAssembly of the given width (nbytes is unused)."""
+    import numpy as np
+    del nbytes
+    return NeuroidAssembly(np.zeros((1, n_features), dtype='float32'),
+                           dims=['presentation', 'neuroid'],
+                           coords={'stimulus_id': ('presentation', [0]),
+                                   'neuroid_id': ('neuroid', list(range(n_features)))})
 
 
 class FakeModel(UnifiedModel):
@@ -35,8 +40,10 @@ class FakeModel(UnifiedModel):
                  activation_nbytes=8000, n_features=1000):
         self._id = identifier
         self._modalities = modalities or {'vision'}
-        self._rlm = region_layer_map or {}
-        self._process_result = process_result or FakeResult(nbytes=activation_nbytes, n_features=n_features)
+        # A model that records somewhere; the probe reads it from the declared output.
+        self._rlm = region_layer_map if region_layer_map is not None else {'IT': 'layer'}
+        self._process_result = (process_result if process_result is not None
+                                else FakeResult(nbytes=activation_nbytes, n_features=n_features))
 
     @property
     def identifier(self) -> str:
@@ -90,24 +97,16 @@ class MultiRegionProbeModel(FakeModel):
             raise RuntimeError("recording not started")
         if 'A1' in self._recorded:
             raise RuntimeError("audio layer not available on this wrapper")
-        return type('R', (), {'shape': (1, self._per * len(self._recorded))})()
+        return FakeResult(n_features=self._per * len(self._recorded))
 
 
-class FakeStimulusSet:
-    """Minimal stimulus set with iloc support."""
-
-    def __init__(self, n=10):
-        self._n = n
-
-    def __len__(self):
-        return self._n
-
-    @property
-    def iloc(self):
-        return self
-
-    def __getitem__(self, key):
-        return FakeStimulusSet(n=1)
+def FakeStimulusSet(n=10):
+    """A real n-row stimulus table, since the probe runs through a session."""
+    import pandas as pd
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': [f's{i}' for i in range(n)],
+                                        'image_path': [f'/tmp/s{i}.png' for i in range(n)]}))
+    stimuli.identifier = f'fake-{n}'
+    return stimuli
 
 
 class FakeAssembly:
@@ -544,19 +543,22 @@ class TestCheckMemory:
         from brainscore_core.execution_plan import ExecutionPlan
         recorded = {}
 
+        one_frame = FakeStimulusSet(n=1)
+        one_frame.identifier = 'one-frame'
+
         class _FrameOnlyModel(FakeModel):
             def start_recording(self, target, time_bins=None, recording_type=None):
                 recorded['target'] = target
             def process(self, stimuli):
-                if stimuli != 'ONE_FRAME':
+                if getattr(stimuli, 'identifier', None) != 'one-frame':
                     raise RuntimeError("image-only model can't process a video row")
-                return type('R', (), {'shape': (1, 4321)})()
+                return FakeResult(n_features=4321)
 
         model = _FrameOnlyModel(region_layer_map={'V1': 'a', 'IT': 'b'})
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)  # raw = videos
         bench.execution_plan = ExecutionPlan(
             n_extraction_presentations=100000,
-            recording_target='IT', probe_stimuli='ONE_FRAME')
+            recording_target='IT', probe_stimuli=one_frame)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=1_000_000_000), \
              _mock_memory(200_000_000):
             with pytest.raises(MemoryError, match=r"n_features: 4321"):
@@ -622,7 +624,7 @@ class TestCheckMemory:
         import logging
         # A degenerate (1, 0) probe result must be treated as unresolved (skip
         # loudly), not a zero-width, zero-memory pass.
-        model = FakeModel(process_result=type('R', (), {'shape': (1, 0)})())
+        model = FakeModel(process_result=FakeResult(n_features=0))
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
              _mock_memory(200_000_000):
@@ -702,8 +704,12 @@ class TestCheckMemory:
 
     def test_shapeless_probe_result_warns_and_skips(self, caplog):
         import logging
-        # process() returns a 1-D result -> feature width unreadable -> skip loudly.
-        model = FakeModel(process_result=type('R', (), {'shape': (5,)})())
+        # process() returns a response with no presentation axis -> the session
+        # cannot carry it as a neural response -> feature width unreadable -> skip loudly.
+        import numpy as np
+        model = FakeModel(process_result=NeuroidAssembly(
+            np.zeros((5, 3)), dims=['time', 'neuroid'],
+            coords={'time': ('time', list(range(5))), 'neuroid_id': ('neuroid', [0, 1, 2])}))
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
              _mock_memory(200_000_000):
@@ -829,3 +835,75 @@ class TestProbeCacheIsolation:
         from brainscore_core.memory import _isolate_probe_identifier
         parent = self._stimulus_set()
         assert _isolate_probe_identifier(parent, parent).identifier == 'hvm-public'
+
+
+class TestProbeThroughInteract:
+    """The feature-width probe runs one session through interact for every subject."""
+
+    def _stimuli(self):
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b'],
+                                            'image_path': ['/tmp/a.png', '/tmp/b.png']}))
+        stimuli.identifier = 'probe-images'
+        return stimuli
+
+    def test_interact_only_subject_is_probed_from_its_declarations(self):
+        from types import SimpleNamespace
+        import numpy as np
+        from brainscore_core.memory import _probe_feature_dim, _probe_regions
+        from brainscore_core.model_interface import Subject
+        from brainscore_core.streaming import StreamEvent
+        from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+
+        class Native(Subject):
+            identifier = 'native'
+            in_channels = {'vision'}
+            out_channels = {'neural:IT'}
+            required_channels = set()
+
+            def interact(self, session):
+                n = 0
+                while session.next_input() is not None:
+                    n += 1
+                session.respond(StreamEvent('neural:IT', NeuroidAssembly(
+                    np.zeros((n, 7)), dims=['presentation', 'neuroid'],
+                    coords={'stimulus_id': ('presentation', list(range(n))),
+                            'neuroid_id': ('neuroid', list(range(7)))}), None))
+
+        benchmark = SimpleNamespace(identifier='bench')
+        assert _probe_regions(Native(), benchmark) == ['IT']
+        width, region = _probe_feature_dim(Native(), benchmark, self._stimuli())
+        assert (width, region) == (7, 'IT')
+
+    def test_typed_model_is_probed_the_same_way(self):
+        from types import SimpleNamespace
+        import numpy as np
+        from brainscore_core.memory import _probe_feature_dim, _probe_regions
+        from brainscore_core.model_interface import BrainScoreModel
+        from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+
+        def extractor(stimuli, layers=None, **kwargs):
+            n = len(stimuli)
+            return NeuroidAssembly(np.zeros((n, 5)), dims=['presentation', 'neuroid'],
+                                   coords={'stimulus_id': ('presentation', list(stimuli['stimulus_id'])),
+                                           'neuroid_id': ('neuroid', list(range(5))),
+                                           'layer': ('neuroid', [layers[0]] * 5)})
+
+        model = BrainScoreModel('typed', region_layer_map={'V4': 'early', 'IT': 'late'},
+                                extractor={'vision': extractor})
+        benchmark = SimpleNamespace(identifier='bench')
+        assert _probe_regions(model, benchmark) == ['V4', 'IT']  # region map order kept
+        width, region = _probe_feature_dim(model, benchmark, self._stimuli())
+        assert (width, region) == (5, 'V4')
+        width, region = _probe_feature_dim(model, SimpleNamespace(identifier='it', region='IT'),
+                                           self._stimuli())
+        assert (width, region) == (5, 'IT')
+
+    def test_no_neural_output_means_no_probe(self):
+        from types import SimpleNamespace
+        from brainscore_core.memory import _probe_feature_dim, _probe_regions
+        from brainscore_core.model_interface import BrainScoreModel
+        behavioral = BrainScoreModel('policy', policy=lambda step: None)
+        assert _probe_regions(behavioral, SimpleNamespace(identifier='b')) == [None]
+        assert _probe_feature_dim(behavioral, SimpleNamespace(identifier='b'), self._stimuli()) == (None, None)
