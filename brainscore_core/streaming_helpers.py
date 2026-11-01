@@ -440,6 +440,16 @@ def _drive_neural_session_via_process(
     ``process`` combines several input modalities; when several are present
     it is called with ``multi_modality=True``.
     """
+    settings = getattr(getattr(session, "task_context", None), "metadata", {}) or {}
+    if settings.get("require_variance"):
+        # A legacy look_at(require_variance=True) asks for repeated noisy
+        # presentations. The typed path is deterministic, so it fails instead
+        # of returning identical trials.
+        raise NotImplementedError(
+            f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
+            "cannot produce trial-to-trial variance (look_at(require_variance=True, "
+            f"number_of_trials={settings.get('number_of_trials', 1)})). Legacy models "
+            "add it with microsaccades; this subject has no equivalent.")
     input_events = _drain_stream_events(session)
     stimuli = _stimuli_from_stream_session(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0

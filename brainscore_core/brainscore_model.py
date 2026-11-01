@@ -619,12 +619,21 @@ class BrainScoreModel(UnifiedModel):
 
     # --- Legacy benchmark surface ------------------------------------------
     # Permanent: legacy benchmarks are never removed. Behavior lives in
-    # LegacyBenchmarkFacade; these are one-line forwards to a facade around self.
+    # LegacyBenchmarkFacade, which runs each legacy call as a session through
+    # ``interact``; these forwards seed a facade with this model's current
+    # recording and task state so direct calls keep working.
 
     @property
     def _legacy_facade(self):
         from .legacy_facade import LegacyBenchmarkFacade
-        return LegacyBenchmarkFacade(self, visual_degrees=self._visual_degrees_val)
+        facade = LegacyBenchmarkFacade(self, visual_degrees=self._visual_degrees_val)
+        regions = self._recorder.recording_regions
+        if regions:
+            facade.start_recording(regions[0] if len(regions) == 1 else list(regions),
+                                   time_bins=self._recorder.time_bins)
+        if self._behavioral.task_context is not None:
+            facade.start_task(self._behavioral.task_context)
+        return facade
 
     def look_at(self, stimuli, number_of_trials=1, require_variance=False, **kwargs):
         """Vision benchmark compatibility (see LegacyBenchmarkFacade.look_at)."""
@@ -633,7 +642,7 @@ class BrainScoreModel(UnifiedModel):
 
     def visual_degrees(self) -> int:
         """Vision benchmark compatibility."""
-        return self._legacy_facade.visual_degrees()
+        return self._visual_degrees_val
 
     def digest_text(self, text) -> Dict[str, Any]:
         """Language benchmark compatibility (see LegacyBenchmarkFacade.digest_text)."""
@@ -641,8 +650,12 @@ class BrainScoreModel(UnifiedModel):
 
     def start_neural_recording(self, recording_target, recording_type='fMRI'):
         """Language benchmark compatibility."""
-        self._legacy_facade.start_neural_recording(recording_target, recording_type)
+        self.start_recording(recording_target, recording_type=recording_type)
 
     def start_behavioral_task(self, task):
-        """Language benchmark compatibility; raises for unsupported legacy tasks."""
-        self._legacy_facade.start_behavioral_task(task)
+        """Language benchmark compatibility; typed models have no legacy language task path."""
+        raise NotImplementedError(
+            f"Subject {self.identifier!r} has no path for the legacy language "
+            f"behavioral task {getattr(task, 'value', task)!r} (reading times / "
+            f"next-word prediction). Legacy language behavioral benchmarks need "
+            f"a subject that implements that task.")

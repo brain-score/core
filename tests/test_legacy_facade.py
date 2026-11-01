@@ -168,3 +168,171 @@ def test_preferred_names_do_not_warn():
                         extractor={'vision': _Extractor()},
                         answer=lambda *a: None, policy=lambda step: None,
                         intervention=lambda c: (None, lambda: None))
+
+
+# --- the facade runs any subject through interact ------------------------
+
+from brainscore_core.model_interface import Subject
+from brainscore_core.streaming import StreamEvent
+from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+
+
+class _Recorder(Subject):
+    """An interact-only subject: no process, look_at or start_recording."""
+
+    identifier = 'recording-subject'
+    in_channels = {'text', 'vision'}
+    out_channels = {'neural:IT', 'behavior'}
+    required_channels = set()
+
+    def __init__(self):
+        self.sessions = []
+        self.resets = 0
+
+    def interact(self, session):
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        n = len(session.stimulus_set)
+        for channel in session.requested_output_channels:
+            neural = channel.startswith('neural:')
+            cls = NeuroidAssembly if neural else BehavioralAssembly
+            payload = cls(np.arange(n)[:, None],
+                          dims=['presentation', 'neuroid' if neural else 'choice'])
+            session.respond(StreamEvent(channel, payload, None))
+
+    def reset(self):
+        self.resets += 1
+
+
+def test_facade_runs_an_interact_only_subject_on_vision_calls():
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject, visual_degrees=12)
+    facade.start_recording('IT', time_bins=[(70, 170), (170, 270)])
+    out = facade.look_at(_images(), number_of_trials=7)
+    np.testing.assert_array_equal(out.values, [[0], [1]])
+    session, = subject.sessions
+    assert session.requested_output_channels == ('neural:IT',)
+    assert session.time_bins == [(70, 170), (170, 270)]
+    assert session.task_context.metadata['number_of_trials'] == 7
+    assert facade.visual_degrees() == 12
+    assert facade.identifier == 'recording-subject'
+
+
+def test_facade_runs_language_neural_and_behavior_in_one_session():
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_neural_recording('IT', recording_type='spikes')
+    facade.start_behavioral_task('reading_times')
+    text = np.array(['one', 'two'])
+    out = facade.digest_text(text)
+    assert set(out) == {'neural', 'behavior'}
+    session, = subject.sessions
+    assert set(session.requested_output_channels) == {'neural:IT', 'behavior'}
+    assert session.task_context.task_type == 'reading_times'
+    assert session.task_context.metadata['recording_type'] == 'spikes'
+    assert session.task_context.metadata['legacy_text'] is text
+
+
+def test_facade_passes_a_text_stimulus_set_unchanged():
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_neural_recording('IT')
+    text = StimulusSet({'sentence': ['a', 'b'], 'stimulus_id': ['x', 'y'],
+                        'context_id': ['p', 'p']})
+    facade.digest_text(text)
+    session, = subject.sessions
+    assert session.stimulus_set is text
+    assert 'legacy_text' not in session.task_context.metadata
+
+
+def test_behavioral_task_needs_a_declared_behavior_output():
+    class Neural(_Recorder):
+        out_channels = {'neural:IT'}
+
+    with pytest.raises(NotImplementedError, match="declares no 'behavior' output"):
+        LegacyBenchmarkFacade(Neural()).start_behavioral_task('reading_times')
+
+
+def test_facade_without_visual_field_fails_instead_of_inventing_one():
+    with pytest.raises(NotImplementedError, match='declares no visual field'):
+        LegacyBenchmarkFacade(_Recorder()).visual_degrees()
+
+
+def test_look_at_needs_a_recording_and_one_region():
+    facade = LegacyBenchmarkFacade(_Recorder())
+    with pytest.raises(ValueError, match='start_recording'):
+        facade.look_at(_images())
+    facade.start_recording(['IT', 'V4'])
+    with pytest.raises(ValueError, match='one region'):
+        facade.look_at(_images())
+    with pytest.raises(TypeError, match='unsupported settings'):
+        facade.look_at(_images(), fixation=True)
+
+
+def test_facade_reset_clears_settings_and_resets_subject():
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_recording('IT')
+    facade.reset()
+    assert subject.resets == 1
+    with pytest.raises(ValueError, match='start_recording'):
+        facade.look_at(_images())
+
+
+def test_typed_look_at_runs_through_interact():
+    model, extractor = _model()
+    sessions = []
+    original = model.interact
+    model.interact = lambda session: (sessions.append(session), original(session))[1]
+    model.start_recording('IT', time_bins=[(70, 170)])
+    via_legacy = model.look_at(_images())
+    assert len(sessions) == 1
+    assert sessions[0].requested_output_channels == ('neural:IT',)
+    np.testing.assert_array_equal(via_legacy.values, model.process(_images()).values)
+
+
+def test_typed_behavioral_look_at_matches_process():
+    extractor = _Extractor()
+    model = BrainScoreModel('facade-behavior', region_layer_map={'IT': 'layer'},
+                            extractor={'vision': extractor},
+                            behavioral_readout_layer='layer')
+    fitting = StimulusSet(pd.DataFrame({
+        'stimulus_id': ['f0', 'f1', 'f2', 'f3'],
+        'image_path': ['/tmp/f0.png', '/tmp/f1.png', '/tmp/f2.png', '/tmp/f3.png'],
+        'image_label': ['cat', 'dog', 'cat', 'dog'],
+    }))
+    fitting.identifier = 'fitting'
+    model.start_task('probabilities', fitting_stimuli=fitting)
+    via_legacy = model.look_at(_images())
+    via_process = model.process(_images())
+    assert isinstance(via_legacy, BehavioralAssembly)
+    np.testing.assert_array_equal(via_legacy.values, via_process.values)
+
+
+# --- applying the facade at the scoring boundary --------------------------
+
+def test_domain_loaders_mark_legacy_benchmarks_and_scoring_wraps_them():
+    from types import SimpleNamespace
+    from brainscore_core.legacy_facade import mark_legacy_benchmark, subject_for_benchmark
+
+    legacy = SimpleNamespace(identifier='legacy')
+    assert mark_legacy_benchmark(legacy).subject_api == 'legacy'
+    session_native = SimpleNamespace(identifier='native', required_input_channels={'vision'})
+    assert mark_legacy_benchmark(session_native).subject_api == 'session'
+    typed = SimpleNamespace(identifier='typed', subject_api='typed')
+    assert mark_legacy_benchmark(typed).subject_api == 'typed'
+
+    subject = _Recorder()
+    facade = subject_for_benchmark(subject, legacy, visual_degrees=8)
+    assert isinstance(facade, LegacyBenchmarkFacade)
+    assert facade.subject is subject and facade.visual_degrees() == 8
+    assert subject_for_benchmark(subject, session_native) is subject
+    assert subject_for_benchmark(subject, typed) is subject
+
+
+def test_declared_visual_degrees_reads_the_legacy_vision_setting_or_none():
+    from brainscore_core.legacy_facade import declared_visual_degrees
+    model, _ = _model()
+    assert declared_visual_degrees(model) == 10
+    assert declared_visual_degrees(_Recorder()) is None
