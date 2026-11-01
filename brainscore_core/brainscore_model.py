@@ -31,7 +31,10 @@ from .streaming_helpers import (
 
 
 class BrainScoreModel(UnifiedModel):
-    """Compositional subject with session and legacy typed evaluation paths."""
+    """The one concrete subject, assembled from parts (extractors, region map,
+    answer, policy, intervention, capabilities). Evaluated through ``interact``;
+    ``process`` is a typed convenience and the legacy benchmark methods forward
+    to :class:`~brainscore_core.legacy_facade.LegacyBenchmarkFacade`."""
 
     COLUMN_TO_MODALITY: Dict[str, str] = {
         'image_file_name': 'vision',
@@ -440,7 +443,8 @@ class BrainScoreModel(UnifiedModel):
                 multi_modality: bool = False) -> OutputEvent:
         """Evaluate one input event and return the corresponding output event.
 
-        The legacy typed evaluation entry point; dispatch is by ``input_event`` type:
+        A typed convenience, not part of the subject contract (``interact`` is
+        the evaluation method). Dispatch is by ``input_event`` type:
         a ``StimulusSet`` / ``MultimodalStimulusSet`` -> ``NeuroidAssembly`` of
         recorded activations (call ``start_recording`` first); a ``StateChange``
         -> ``PerturbationApplied`` (apply) or ``None`` (reset); an
@@ -451,7 +455,15 @@ class BrainScoreModel(UnifiedModel):
             modality and concat along the neuroid axis; default routes a single
             modality by ``MODALITY_PRIORITY``.
         """
-        return self._dispatcher.process(input_event, multi_modality)
+        output = self._dispatcher.process(input_event, multi_modality)
+        time_bins = self._recorder.time_bins
+        if time_bins is not None and len(time_bins) > 1 and not isinstance(
+                input_event, (StateChange, EnvironmentStep, Message)):
+            # Honor every requested time bin: a static response is repeated
+            # across several bins, as legacy vision models do.
+            from .legacy_facade import repeat_over_time_bins
+            output = repeat_over_time_bins(output, time_bins)
+        return output
 
     def interact(self, session) -> None:
         """Run a session: a registered capability if one claims it, else the typed paths."""
@@ -606,40 +618,32 @@ class BrainScoreModel(UnifiedModel):
     def _generate_predictions(self, stimuli):
         return self._behavioral.generate_predictions(stimuli)
 
-    def look_at(self, stimuli, number_of_trials=1, **kwargs):
-        """Vision benchmark compatibility. Delegates to process()."""
-        return self.process(stimuli)
+    # --- Legacy benchmark surface ------------------------------------------
+    # Permanent: legacy benchmarks are never removed. Behavior lives in
+    # LegacyBenchmarkFacade; these are one-line forwards to a facade around self.
+
+    @property
+    def _legacy_facade(self):
+        from .legacy_facade import LegacyBenchmarkFacade
+        return LegacyBenchmarkFacade(self, visual_degrees=self._visual_degrees_val)
+
+    def look_at(self, stimuli, number_of_trials=1, require_variance=False, **kwargs):
+        """Vision benchmark compatibility (see LegacyBenchmarkFacade.look_at)."""
+        return self._legacy_facade.look_at(stimuli, number_of_trials,
+                                           require_variance, **kwargs)
 
     def visual_degrees(self) -> int:
         """Vision benchmark compatibility."""
-        return self._visual_degrees_val
+        return self._legacy_facade.visual_degrees()
 
     def digest_text(self, text) -> Dict[str, Any]:
-        """Language benchmark compatibility."""
-        import hashlib
-        import pandas as pd
-        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-
-        import numpy as np
-        if isinstance(text, np.ndarray):
-            text = text.tolist()
-        if isinstance(text, (str, list)):
-            if isinstance(text, str):
-                text = [text]
-            stimuli = StimulusSet(pd.DataFrame({
-                'sentence': text,
-                'stimulus_id': list(range(len(text))),
-                'context_id': ['passage'] * len(text),
-            }))
-            content_hash = hashlib.md5(
-                '|'.join(text).encode('utf-8')).hexdigest()[:12]
-            stimuli.identifier = f'text_stimuli_{len(text)}_{content_hash}'
-        else:
-            stimuli = text
-
-        result = self.process(stimuli)
-        return {'neural': result}
+        """Language benchmark compatibility (see LegacyBenchmarkFacade.digest_text)."""
+        return self._legacy_facade.digest_text(text)
 
     def start_neural_recording(self, recording_target, recording_type='fMRI'):
         """Language benchmark compatibility."""
-        self.start_recording(recording_target, recording_type=recording_type)
+        self._legacy_facade.start_neural_recording(recording_target, recording_type)
+
+    def start_behavioral_task(self, task):
+        """Language benchmark compatibility; raises for unsupported legacy tasks."""
+        self._legacy_facade.start_behavioral_task(task)
