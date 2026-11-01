@@ -137,3 +137,16 @@ def test_typed_model_without_multi_modality_runs_multimodal_session():
     model = TwoInputModel()
     neural_response(model, stimuli, record='IT')
     assert model.calls == [1]
+
+
+def test_region_map_without_extractor_declares_no_neural_output():
+    """Rule 2.4: a declared channel must work; a map alone cannot record."""
+    from brainscore_core.model_interface import BrainScoreModel
+    model = BrainScoreModel('unwired', region_layer_map={'IT': 'layer'})
+    assert 'neural:IT' not in model.out_channels
+    with pytest.raises(NotImplementedError, match='No session handler'):
+        model.check_session_support({'neural:IT'})
+    wired = BrainScoreModel('wired', region_layer_map={'IT': 'layer'},
+                            extractor={'vision': lambda stimuli, layers=None, **k: None})
+    assert 'neural:IT' in wired.out_channels
+

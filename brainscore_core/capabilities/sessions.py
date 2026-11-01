@@ -30,7 +30,9 @@ class NeuralSessions(_SessionCapability):
     identifier = 'neural-sessions'
 
     def enabled_for(self, model) -> bool:
-        return bool(model.region_layer_map)
+        # A region map names where to record; only a wired extractor can
+        # record there, so a map without one declares nothing (rule 2.4).
+        return bool(model.region_layer_map) and bool(model._extractors)
 
     def declared_output_channels(self, model):
         return {f'neural:{region}' for region in model.region_layer_map}

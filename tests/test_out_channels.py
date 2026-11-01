@@ -10,7 +10,9 @@ def test_motor_advertised_when_action_fn_present():
 
 
 def test_motor_absent_without_action_fn():
-    m = BrainScoreModel('feat', None, {'IT': 'layer4'}, {})
+    # A neural output is declared only with a wired extractor (rule 2.4).
+    m = BrainScoreModel('feat', None, {'IT': 'layer4'},
+                        extractor={'vision': lambda stimuli, layers=None, **k: None})
     assert 'motor' not in m.out_channels
     assert 'neural:IT' in m.out_channels
 
