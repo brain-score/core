@@ -32,6 +32,8 @@ def _stimulus_set(n=4):
 class _CountingSubject:
     """Records how many times process() was called and with how many rows each time."""
 
+    in_channels = {'text'}
+
     def __init__(self):
         self.call_sizes = []
         self.recorded_regions = []
@@ -54,6 +56,8 @@ class _CountingSubject:
 
 class _MultiRegionSubject:
     """Returns every active region in one assembly, as list recording requires."""
+
+    in_channels = {'text'}
 
     def __init__(self):
         self.recording_calls = []

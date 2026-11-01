@@ -138,6 +138,15 @@ class BufferedSession(Session):
             self.time_bins = time_bins
         if streaming:
             self.streaming = True
+        # Buffered inputs are already available, so reject the entire batch
+        # before the subject can compute on its first item.
+        from .io_catalog import validate, INPUT
+        for event in inputs:
+            if not isinstance(event, StreamEvent):
+                raise TypeError('Session inputs must be StreamEvent objects')
+            failures = validate(event.channel, event.payload, direction=INPUT)
+            if failures:
+                raise ValueError('Invalid session input: ' + '; '.join(failures))
         self._inputs: Deque[StreamEvent] = deque(inputs)
         self.emitted: list[StreamEvent] = []
 

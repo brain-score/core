@@ -31,7 +31,7 @@ def test_subject_derives_channel_identity_from_v1_contract():
     subject = _ChannelSubject()
 
     assert subject.in_channels == {"vision", "text"}
-    assert subject.out_channels == {"neural:V1", "neural:IT", "behavior"}
+    assert subject.out_channels == {"neural:V1", "neural:IT"}
     assert subject.required_channels == {"text"}
 
 
@@ -96,7 +96,7 @@ def test_brainscore_model_gets_channel_identity_from_preprocessors():
     )
 
     assert model.in_channels == {"vision"}
-    assert model.out_channels == {"neural:IT", "behavior"}
+    assert model.out_channels == {"neural:IT", "neural:all", "behavior"}
     assert model.required_channels == set()
 
 

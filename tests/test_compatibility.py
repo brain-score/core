@@ -73,19 +73,21 @@ class TestRequiredModalities:
     def test_missing_required_raises(self):
         model = FakeModel(modalities={'text'})
         bench = FakeBenchmark(required_modalities={'vision'})
-        with pytest.raises(CompatibilityError, match="does not support modalities required"):
+        with pytest.raises(CompatibilityError, match="no overlapping input channels"):
             check_compatibility(model, bench)
 
-    def test_missing_one_of_multiple_required_raises(self):
+    def test_one_of_multiple_inputs_is_a_partial_match(self):
         model = FakeModel(modalities={'vision'})
         bench = FakeBenchmark(required_modalities={'vision', 'text'})
-        with pytest.raises(CompatibilityError, match="'text'"):
-            check_compatibility(model, bench)
+        match = check_compatibility(model, bench)
+        assert match.kind == "partial"
+        assert match.dropped_inputs == {"text"}
 
     def test_no_required_modalities_on_benchmark(self):
         model = FakeModel(modalities={'vision'})
-        bench = FakeBenchmark()  # no required_modalities attribute
-        check_compatibility(model, bench)  # should not raise
+        bench = FakeBenchmark()
+        with pytest.raises(CompatibilityError, match="no overlapping"):
+            check_compatibility(model, bench)
 
 
 # ── Accepted modalities (any-of gate) ───────────────────────────────
@@ -99,7 +101,7 @@ class TestAcceptedModalities:
 
     def test_none_accepted_raises(self):
         bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
-        with pytest.raises(CompatibilityError, match="provides none of the input formats"):
+        with pytest.raises(CompatibilityError, match="no overlapping input channels"):
             check_compatibility(FakeModel(modalities={'text'}), bench)
 
     def test_required_plus_accepted_combo(self):
@@ -108,10 +110,9 @@ class TestAcceptedModalities:
                               accepted_modalities={'video', 'vision'})
         check_compatibility(FakeModel(modalities={'audio', 'video'}), bench)
         check_compatibility(FakeModel(modalities={'audio', 'vision'}), bench)
-        with pytest.raises(CompatibilityError, match="does not support modalities required"):
-            check_compatibility(FakeModel(modalities={'video'}), bench)   # missing audio
-        with pytest.raises(CompatibilityError, match="provides none of the input formats"):
-            check_compatibility(FakeModel(modalities={'audio'}), bench)   # neither video nor vision
+        assert check_compatibility(FakeModel(modalities={'video'}), bench).kind == 'partial'
+        assert check_compatibility(FakeModel(modalities={'audio'}), bench).kind == 'partial'
+
 
     def test_model_hard_requires_accepted_format_passes(self):
         # Check-2 fix: a model hard-requiring video isn't rejected when the
@@ -148,7 +149,7 @@ class TestDeprecatedBenchmarkAvailableModalities:
             required_modalities={'vision'},
             available_modalities={'audio'},
         )
-        with pytest.warns(DeprecationWarning, match="deprecated as of the April 30"):
+        with pytest.warns(DeprecationWarning, match="deprecated"):
             check_compatibility(model, bench)
 
     def test_redundant_available_no_warning(self):
@@ -159,9 +160,9 @@ class TestDeprecatedBenchmarkAvailableModalities:
             required_modalities={'vision'},
             available_modalities={'vision'},
         )
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
-            check_compatibility(model, bench)  # no warning
+        with pytest.warns(DeprecationWarning):
+            check_compatibility(model, bench)
+
 
     def test_no_available_modalities_no_warning(self):
         model = FakeModel(modalities={'vision'})
@@ -209,7 +210,7 @@ class TestRegionMapping:
     def test_region_missing_raises(self):
         model = FakeModel(modalities={'vision'}, region_layer_map={'V1': 'layer1'})
         bench = FakeBenchmark(required_modalities={'vision'}, region='IT')
-        with pytest.raises(CompatibilityError, match="no layer mapping for region 'IT'"):
+        with pytest.raises(CompatibilityError, match="neural:IT"):
             check_compatibility(model, bench)
 
     def test_no_region_on_benchmark(self):
@@ -242,7 +243,7 @@ class TestCombinedScenarios:
             required_modalities={'vision'},
             region='IT',
         )
-        with pytest.raises(CompatibilityError, match="does not support modalities required"):
+        with pytest.raises(CompatibilityError, match="no overlapping input channels"):
             check_compatibility(model, bench)
 
     def test_error_message_includes_identifiers(self):

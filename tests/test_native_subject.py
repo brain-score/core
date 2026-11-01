@@ -146,13 +146,12 @@ def test_native_preflight_rejects_incompatible_pair_before_interaction(overrides
     assert subject.seen == []
 
 
-def test_optional_model_specific_probe_is_still_honored():
+def test_compatibility_depends_on_declarations_not_optional_probes():
     class Restricted(TextSubject):
         def check_session_support(self, channels):
             raise ValueError("unsupported combination")
 
-    with pytest.raises(CompatibilityError, match="unsupported combination"):
-        check_compatibility(Restricted(), benchmark())
+    assert check_compatibility(Restricted(), benchmark()).kind == "full"
 
 
 def test_memory_feature_probe_uses_native_session_without_layer_map():

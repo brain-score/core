@@ -145,29 +145,29 @@ class BehavioralReadout:
     def extract_behavioral_features(self, stimuli):
         """Run the model once at the behavioral readout layer."""
         owner = self.owner
-        saved_layer = owner._recording_layer
-        saved_layers = owner._recording_layers
-        saved_regions = owner._recording_regions
-        saved_multi = owner._is_multi_region
-        saved_composite = owner._composite_recording
+        saved_layer = owner._recorder.recording_layer
+        saved_layers = owner._recorder.recording_layers
+        saved_regions = owner._recorder.recording_regions
+        saved_multi = owner._recorder.is_multi_region
+        saved_composite = owner._recorder.composite_recording
         saved_classifier = self.readout_classifier
-        owner._recording_layer = owner._behavioral_readout_layer
-        owner._recording_layers = (
+        owner._recorder.recording_layer = owner._behavioral_readout_layer
+        owner._recorder.recording_layers = (
             [owner._behavioral_readout_layer]
             if owner._behavioral_readout_layer else []
         )
-        owner._recording_regions = []
-        owner._is_multi_region = False
-        owner._composite_recording = False
+        owner._recorder.recording_regions = []
+        owner._recorder.is_multi_region = False
+        owner._recorder.composite_recording = False
         self.readout_classifier = None
         try:
             features = owner.process(stimuli)
         finally:
-            owner._recording_layer = saved_layer
-            owner._recording_layers = saved_layers
-            owner._recording_regions = saved_regions
-            owner._is_multi_region = saved_multi
-            owner._composite_recording = saved_composite
+            owner._recorder.recording_layer = saved_layer
+            owner._recorder.recording_layers = saved_layers
+            owner._recorder.recording_regions = saved_regions
+            owner._recorder.is_multi_region = saved_multi
+            owner._recorder.composite_recording = saved_composite
             self.readout_classifier = saved_classifier
 
         if 'presentation' in features.dims and 'neuroid' in features.dims:

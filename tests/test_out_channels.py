@@ -12,10 +12,10 @@ def test_motor_advertised_when_action_fn_present():
 def test_motor_absent_without_action_fn():
     m = BrainScoreModel('feat', None, {'IT': 'layer4'}, {})
     assert 'motor' not in m.out_channels
-    assert 'neural:IT' in m.out_channels
+    assert 'neural:IT' not in m.out_channels
 
 
-def test_behavior_still_advertised_with_readout():
+def test_readout_without_extractor_is_not_advertised():
     m = BrainScoreModel('clf', None, {'IT': 'layer4'}, {},
                         behavioral_readout_layer='layer4')
-    assert 'behavior' in m.out_channels
+    assert 'behavior' not in m.out_channels

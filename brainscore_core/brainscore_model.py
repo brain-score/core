@@ -8,6 +8,7 @@ from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Uni
 from .behavioral import BehavioralReadout
 from .capability_config import normalize_capability_config
 from .contract import UnifiedModel, TaskContext
+from .legacy_benchmark import LegacyModelMethods
 from .dispatch import InputDispatcher, register_input_handler
 from .io_catalog import canonical_modality
 from .events import (
@@ -35,7 +36,7 @@ from .streaming_helpers import (
 )
 
 
-class BrainScoreModel(UnifiedModel):
+class BrainScoreModel(LegacyModelMethods, UnifiedModel):
     """Compositional subject with session and legacy typed evaluation paths."""
 
     COLUMN_TO_MODALITY: Dict[str, str] = {
@@ -87,7 +88,7 @@ class BrainScoreModel(UnifiedModel):
         """A model (or, in principle, a human) evaluated through the unified interface.
 
         Only ``identifier`` is always required; a feature-extraction model also
-        needs ``region_layer_map`` and an ``activations_model`` mapping.
+        needs ``region_layer_map`` and an ``extractor`` mapping.
         Capability functions are optional; each enables another evaluation path.
 
         :param identifier: unique model name (also the activation-cache key).
@@ -95,8 +96,8 @@ class BrainScoreModel(UnifiedModel):
             the torch module); may be ``None`` for a feature-extraction model whose
             wrapper holds its own module.
         :param region_layer_map: brain region -> layer path (or a ``UnitSelector``).
-        :param preprocessors: input preparation callables, declared by modality.
-            Configure each wrapper with its preparation function or tokenizer.
+        :param preprocessors: deprecated compatibility arguments. Configure input
+            preparation on each extractor instead.
         :param activations_model: extraction callable ``(stimuli, layers=...)``,
             shared across declared modalities, or a modality -> extractor mapping.
             Image, text, audio and video wrappers use this same slot. A mapping
@@ -127,6 +128,12 @@ class BrainScoreModel(UnifiedModel):
         Note: passing capability functions POSITIONALLY (via the legacy tail) is
         deprecated and error-prone; always pass them by keyword.
         """
+        if preprocessors is not None or activations_model is not None:
+            import warnings
+            warnings.warn(
+                'preprocessors and activations_model are deprecated. Configure '
+                'input preparation on each extractor and pass extractor={modality: extractor}.',
+                DeprecationWarning, stacklevel=2)
         # Translate the public vocabulary once; existing plugins keep their
         # callback names and the internal capability contract stays unchanged.
         if extractor is not None:
@@ -176,11 +183,20 @@ class BrainScoreModel(UnifiedModel):
         region_layer_map = region_layer_map or {}
         preprocessors = preprocessors or {}
         # Normalize compatibility inputs once; dispatch always calls an extractor.
-        from .dispatch import normalize_extractors
         self._preprocessors: Dict[str, Optional[Callable]] = dict(preprocessors)
         self._activations_model = activations_model
-        self._extractors, self._layer_extractors = normalize_extractors(
-            self, preprocessors, activations_model)
+        if extractor is not None and not preprocessors:
+            from collections.abc import Mapping
+            if not isinstance(extractor, Mapping):
+                raise TypeError('extractor must map input modalities to extraction callables')
+            if any(not callable(value) for value in extractor.values()):
+                raise TypeError('Every extractor must be callable')
+            self._extractors = dict(extractor)
+            self._layer_extractors = set(extractor)
+        else:
+            from .legacy_extractors import adapt_legacy_extractors
+            self._extractors, self._layer_extractors = adapt_legacy_extractors(
+                self, preprocessors, activations_model)
         for modality in supported_modalities or ():
             self._preprocessors.setdefault(modality, None)
         for modality in self._extractors:
@@ -188,6 +204,8 @@ class BrainScoreModel(UnifiedModel):
         self._region_modality_map: Dict[str, str] = {}
         self._install_region_layer_map(region_layer_map, region_modality_map)
         self._visual_degrees_val = visual_degrees
+        from .legacy_benchmark import register_visual_field
+        register_visual_field(self, lambda: visual_degrees)
         self._capability_config = capability_values
         self._behavioral_readout_layer = capability_values.get(
             'behavioral_readout_layer')
@@ -229,33 +247,53 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        channels = super().in_channels | set().union(
+        channels = self._modalities_to_input_channels(self.supported_modalities) | set().union(
             *(set(c.input_channels) for c in self._declared_capabilities()))
         if self._action_fn is not None:
             channels.add('observation')
         if self._generation_fn is not None:
             channels.add('instruction')
+        if self._state_change_fn is not None:
+            channels.update({'lesion', 'stimulation', 'pharmacological'})
         return channels
 
     @property
-    def out_channels(self):
-        return super().out_channels | set().union(
-            *(set(c.output_channels) for c in self._declared_capabilities()))
+    def out_channels(self) -> Set[str]:
+        channels = set()
+        if self._extractors:
+            channels.update(f"neural:{region}" for region in self.region_layer_map)
+            if self.region_layer_map:
+                channels.add("neural:all")
+        if self._generation_fn is not None or (
+                self._behavioral_readout_layer is not None and self._extractors):
+            channels.add('behavior')
+        if self._action_fn is not None:
+            channels.add('motor')
+        if self._state_change_fn is not None:
+            channels.add('perturbation')
+        for capability in self._declared_capabilities():
+            channels.update(capability.output_channels)
+        return channels
 
     def check_session_support(self, channels):
-        """Reject unsupported or ambiguous output combinations before consuming input."""
+        """Select one handler before any session input is consumed."""
         channels = frozenset(channels)
         if not channels:
             raise ValueError('A session must request at least one output channel.')
-        custom = [c for c in self._declared_capabilities()
-                  if c.supports_session(self, channels)]
-        if len(custom) > 1:
-            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in custom]}')
-        stock = (channels in ({'behavior'}, {'motor'}, {'perturbation'})
-                 or all(c.startswith('neural:') for c in channels))
-        if not custom and not stock:
-            raise NotImplementedError(f'No session handler for {sorted(channels)}')
-        return custom[0] if custom else None
+        missing = channels - self.out_channels
+        if missing:
+            raise ValueError(f'Undeclared requested output channels: {sorted(missing)}')
+        handlers = list(self._declared_capabilities())
+        matches = [handler for handler in handlers
+                   if handler.supports_session(self, channels)]
+        if len(matches) != 1:
+            raise ValueError(
+                f'Expected one session handler for {sorted(channels)}, '
+                f'found {[handler.identifier for handler in matches]}')
+        handler = matches[0]
+        from .capabilities.registry import _setup_once
+        _setup_once(self, handler)
+        return handler
 
     @property
     def identifier(self) -> str:
@@ -351,86 +389,6 @@ class BrainScoreModel(UnifiedModel):
     def backbone_id(self) -> str:
         return self._backbone_id
 
-    @property
-    def _recording_layer(self) -> Optional[str]:
-        return self._recorder.recording_layer
-
-    @_recording_layer.setter
-    def _recording_layer(self, value: Optional[str]) -> None:
-        self._recorder.recording_layer = value
-
-    @property
-    def _recording_regions(self) -> List[str]:
-        return self._recorder.recording_regions
-
-    @_recording_regions.setter
-    def _recording_regions(self, value: List[str]) -> None:
-        self._recorder.recording_regions = value
-
-    @property
-    def _recording_layers(self) -> List[str]:
-        return self._recorder.recording_layers
-
-    @_recording_layers.setter
-    def _recording_layers(self, value: List[str]) -> None:
-        self._recorder.recording_layers = value
-
-    @property
-    def _is_multi_region(self) -> bool:
-        return self._recorder.is_multi_region
-
-    @_is_multi_region.setter
-    def _is_multi_region(self, value: bool) -> None:
-        self._recorder.is_multi_region = value
-
-    @property
-    def _time_bins(self) -> Optional[List[Tuple[int, int]]]:
-        return self._recorder.time_bins
-
-    @_time_bins.setter
-    def _time_bins(self, value: Optional[List[Tuple[int, int]]]) -> None:
-        self._recorder.time_bins = value
-
-    @property
-    def _composite_recording(self) -> bool:
-        return self._recorder.composite_recording
-
-    @_composite_recording.setter
-    def _composite_recording(self, value: bool) -> None:
-        self._recorder.composite_recording = value
-
-    @property
-    def _task_context(self) -> Optional[TaskContext]:
-        return self._behavioral.task_context
-
-    @_task_context.setter
-    def _task_context(self, value: Optional[TaskContext]) -> None:
-        self._behavioral.task_context = value
-
-    @property
-    def _readout_classifier(self):
-        return self._behavioral.readout_classifier
-
-    @_readout_classifier.setter
-    def _readout_classifier(self, value) -> None:
-        self._behavioral.readout_classifier = value
-
-    @property
-    def _use_generation_for_task(self) -> bool:
-        return self._behavioral.use_generation_for_task
-
-    @_use_generation_for_task.setter
-    def _use_generation_for_task(self, value: bool) -> None:
-        self._behavioral.use_generation_for_task = value
-
-    @property
-    def _active_perturbations(self):
-        return self._perturbations.active_perturbations
-
-    @_active_perturbations.setter
-    def _active_perturbations(self, value) -> None:
-        self._perturbations.active_perturbations = value
-
     @classmethod
     def register_input_handler(cls, event_type: type, handler_name: str,
                                before: Optional[type] = None) -> None:
@@ -454,40 +412,10 @@ class BrainScoreModel(UnifiedModel):
         return self._dispatcher.process(input_event, multi_modality)
 
     def interact(self, session) -> None:
-        """Drive a v2 streaming session through existing model paths."""
-        requested_channels = _requested_output_channels(session)
-        custom = self.check_session_support(requested_channels)
-        if custom is not None:
-            from .capabilities.registry import _setup_once
-            _setup_once(self, custom)
-            custom.interact(self, session)
-            return
-        if requested_channels == ["behavior"]:
-            if getattr(session, "streaming", False):
-                _drive_behavior_session_streaming(self, session)
-            else:
-                _drive_behavior_session_via_process(self, session)
-            return
-        if requested_channels == ["perturbation"]:
-            _drive_state_change_session_via_process(self, session)
-            return
-        if requested_channels == ["motor"]:
-            _drive_environment_session_via_process(self, session)
-            return
-        if all(channel.startswith("neural:") for channel in requested_channels):
-            # A session may ask to be consumed one input at a time (inputs generated
-            # on demand rather than known up front). Same scores, different arrival.
-            if getattr(session, "streaming", False):
-                _drive_neural_session_streaming(self, session)
-            else:
-                _drive_neural_session_via_process(self, session)
-            return
-        raise NotImplementedError(
-            "BrainScoreModel.interact currently supports requested "
-            "neural:<region>, behavior, perturbation, or motor output "
-            "channels; got "
-            f"{requested_channels!r}."
-        )
+        """Run a session through the same registry for built-in and added parts."""
+        handler = self.check_session_support(_requested_output_channels(session))
+        from .session_view import InputSession
+        handler.interact(self, InputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -630,41 +558,3 @@ class BrainScoreModel(UnifiedModel):
 
     def _generate_predictions(self, stimuli):
         return self._behavioral.generate_predictions(stimuli)
-
-    def look_at(self, stimuli, number_of_trials=1, **kwargs):
-        """Vision benchmark compatibility. Delegates to process()."""
-        return self.process(stimuli)
-
-    def visual_degrees(self) -> int:
-        """Vision benchmark compatibility."""
-        return self._visual_degrees_val
-
-    def digest_text(self, text) -> Dict[str, Any]:
-        """Language benchmark compatibility."""
-        import hashlib
-        import pandas as pd
-        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-
-        import numpy as np
-        if isinstance(text, np.ndarray):
-            text = text.tolist()
-        if isinstance(text, (str, list)):
-            if isinstance(text, str):
-                text = [text]
-            stimuli = StimulusSet(pd.DataFrame({
-                'sentence': text,
-                'stimulus_id': list(range(len(text))),
-                'context_id': ['passage'] * len(text),
-            }))
-            content_hash = hashlib.md5(
-                '|'.join(text).encode('utf-8')).hexdigest()[:12]
-            stimuli.identifier = f'text_stimuli_{len(text)}_{content_hash}'
-        else:
-            stimuli = text
-
-        result = self.process(stimuli)
-        return {'neural': result}
-
-    def start_neural_recording(self, recording_target, recording_type='fMRI'):
-        """Language benchmark compatibility."""
-        self.start_recording(recording_target, recording_type=recording_type)

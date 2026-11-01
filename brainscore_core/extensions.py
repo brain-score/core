@@ -8,8 +8,7 @@ from .streaming import StreamEvent
 def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
     """Register a schema and optional stimulus columns without editing core.
 
-    Existing registrations require explicit replacement. The legacy catalog
-    register() function retains its historical replacement behavior.
+    Existing registrations require explicit replacement. Both catalog entry points follow the same replacement rule.
     """
     from .streaming import parse_channel
     from .brainscore_model import BrainScoreModel
@@ -27,7 +26,7 @@ def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
         existing = {**BrainScoreModel.COLUMN_TO_MODALITY, **io_catalog.stimulus_columns()}.get(column)
         if existing is not None and existing != entry.name and not replace:
             raise ValueError(f'Column {column!r} already belongs to {existing!r}')
-    io_catalog.register(entry)
+    io_catalog.register(entry, replace=replace)
     io_catalog._STIMULUS_COLUMNS.update({column: entry.name for column in columns})
     return entry
 

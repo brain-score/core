@@ -1,23 +1,9 @@
-"""The Input/Output Catalog: documented, queryable contracts for the allowable
-inputs and outputs of a Brain-Score subject.
+"""Channel families and their input/output payload contracts.
 
-v1.5 keeps the typed events (``StimulusSet``, ``StateChange``,
-``EnvironmentStep``) and the lightweight methods (``process``,
-``start_recording``, ``start_task``). The catalog is documentation layered over
-them, not a dispatch mechanism. It records, for every allowable input and
-output: what carries it, what its payload contains, which harness interprets it,
-and what metadata it recognizes.
-
-The channel-style names (e.g. ``'neural:IT'``, ``'motor'``) are labels for
-readability and alignment with how the field talks. They are NOT a dispatch
-contract: dispatch is still by typed event and measurement method. A name with a
-colon has a family and an address (``family:address``); the family carries the
-payload contract and the address is interpreted by the relevant harness.
-
-The catalog also offers an optional, best-effort ``check_payload`` for a
-documentation-backed pre-flight check. It is deliberately loose (duck-typed on
-``.ndim`` / ``.dtype``) so ``core`` stays free of heavy dependencies; it never
-replaces the type system, it only flags obvious payload mismatches early.
+A family declares direction, payload type, validation, addressing and metadata.
+Sessions use these entries to reject invalid inputs before model execution.
+Addresses identify targets within a family; the corresponding harness interprets
+those targets. Adding a family does not change the Subject contract.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -28,7 +14,7 @@ from .streaming import parse_channel
 INPUT = "input"
 OUTPUT = "output"
 BOTH = "both"
-REGISTRY_VERSION = "2.0"
+REGISTRY_VERSION = "3.0"
 # ``video`` is a temporal sub-kind of ``vision`` (a still image is a 1-frame
 # clip). The contract exposes a single visual channel, ``vision``, that covers
 # static and dynamic input; ``video`` is kept as a recognized alias so existing
@@ -71,6 +57,7 @@ class CatalogEntry:
     shape_validator: Optional[ShapeValidator] = None
     owner: str = "core"
     materializers: Tuple[str, ...] = ()
+    payload_type: Any = None
 
     def __post_init__(self):
         if self.kind not in _DIRECTIONS:
@@ -89,8 +76,13 @@ class CatalogEntry:
 _CATALOG: Dict[str, CatalogEntry] = {}
 
 
-def register(entry: CatalogEntry) -> None:
-    """Add or replace a catalog entry, keyed by its family name."""
+def register(entry: CatalogEntry, *, replace: bool = False) -> None:
+    """Register one family; replacement must be explicit."""
+    _, address = parse_channel(entry.name)
+    if address is not None:
+        raise ValueError("Register a channel family, not an addressed instance")
+    if entry.name in _CATALOG and not replace:
+        raise ValueError(f"Channel {entry.name!r} already registered; use replace=True")
     _CATALOG[entry.name] = entry
 
 
@@ -253,6 +245,8 @@ def validate(
                 f"not requested {direction!r}"
             )
 
+    if entry.payload_type is not None and not isinstance(payload, entry.payload_type):
+        warnings.append(f"{channel}: payload does not match {entry.payload_type!r}")
     warnings.extend(check_payload(channel, payload))
 
     if entry.shape_validator is not None:
@@ -368,6 +362,33 @@ _SEED = [
                  meta_keys=("signal_type",),
                  owner="human harness"),
 ]
+
+# Types stay at the catalog boundary; adding a family does not edit Subject.
+from dataclasses import replace as _replace
+from pathlib import Path as _Path
+import numpy as _np
+from .events import StateChange as _StateChange, EnvironmentStep as _EnvironmentStep
+from .events import EnvironmentResponse as _EnvironmentResponse, PerturbationApplied as _PerturbationApplied
+from .supported_data_standards.brainio.assemblies import DataAssembly as _DataAssembly
+
+_PAYLOAD_TYPES = {
+    'vision': (str, _Path, _np.ndarray),
+    'video': (str, _Path, _np.ndarray),
+    'audio': (str, _Path, _np.ndarray),
+    'text': str,
+    'instruction': str,
+    'lesion': _StateChange,
+    'stimulation': _StateChange,
+    'pharmacological': _StateChange,
+    'observation': _EnvironmentStep,
+    'neural': _DataAssembly,
+    'behavior': _DataAssembly,
+    'motor': _EnvironmentResponse,
+}
+_SEED = [_replace(entry, payload_type=_PAYLOAD_TYPES.get(entry.name)) for entry in _SEED]
+_SEED.append(CatalogEntry(
+    'perturbation', OUTPUT, 'StreamEvent', 'intervention receipt',
+    'intervention handler', payload_type=(_PerturbationApplied, type(None))))
 
 for _entry in _SEED:
     register(_entry)

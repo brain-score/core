@@ -375,11 +375,7 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
             "    subject.start_recording(['V4', 'IT']); assembly = subject.process(stimuli)")
     session = stimulus_session(stimulus_set, record=record,
                                time_bins=time_bins)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_via_process(subject, session, stimulus_set, record=record,
-                           time_bins=time_bins)
+    subject.interact(session)
     return session.collect(f"neural:{record}")
 
 
@@ -388,19 +384,13 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
     ``BehavioralAssembly`` -- the model's output, not a Score.
     """
     session = behavior_session(task_context)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_behavior_via_process(subject, session, task_context)
+    subject.interact(session)
     return session.collect("behavior")
 
 
 def apply_state_change(subject, state_change: StateChange):
     session = state_change_session(state_change)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_state_change_via_process(subject, session, state_change)
+    subject.interact(session)
     return session.collect("perturbation")
 
 
@@ -422,10 +412,7 @@ def run_environment(subject, environment, *, seed=None, options=None,
             close()
         raise
     with session:
-        if _has_native_interact(subject):
-            subject.interact(session)
-        else:
-            _drive_environment_via_process(subject, session)
+        subject.interact(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
         return session.collect("motor")
@@ -439,7 +426,7 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
     session.emit(StreamEvent(
         channel=f"neural:{record}",
         payload=output,
-        t_ms=0.0,
+        t_ms=None,
         meta={"driver": "process", "record": record},
     ))
 
@@ -449,7 +436,7 @@ def _drive_neural_session_via_process(
 ) -> None:
     input_events = _drain_stream_events(session)
     stimuli = _stimuli_from_stream_session(session, input_events)
-    output_t_ms = input_events[-1].t_ms if input_events else 0.0
+    output_t_ms = input_events[-1].t_ms if input_events else None
     use_multi_modality = _should_use_multi_modality(subject, input_events)
     time_bins = getattr(session, "time_bins", None)
 
@@ -682,12 +669,10 @@ def _stimuli_from_stream_session(session, events: list[StreamEvent]):
 
 
 def _should_use_multi_modality(subject, events: list[StreamEvent]) -> bool:
-    if not hasattr(subject, "_process_multi_modality"):
-        return False
     families = set()
     for event in events:
         family, _ = parse_channel(event.channel)
-        if family in _STIMULUS_INPUT_CHANNEL_FAMILIES:
+        if family in _STIMULUS_INPUT_CHANNEL_FAMILIES and family in subject.in_channels:
             families.add(family)
     return len(families) > 1
 
@@ -775,9 +760,6 @@ def _requested_output_channels(session) -> list[str]:
     )
 
 
-def _has_native_interact(subject) -> bool:
-    interact = getattr(type(subject), "interact", None)
-    return callable(interact) and interact not in (Subject.interact, UnifiedModel.interact)
 
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
@@ -789,8 +771,11 @@ def _drive_environment_session_via_process(
     subject, session: EnvironmentSession, driver: str = "interact"
 ) -> None:
     """Drive a live environment session through existing EnvironmentStep dispatch."""
-    step = session.next_input()
-    while step is not None and not _environment_step_terminates(step):
+    while (event := session.next_input()) is not None:
+        # Old EnvironmentSession records carry the typed step directly.
+        step = event.payload if isinstance(event, StreamEvent) else event
+        if _environment_step_terminates(step):
+            break
         start = time.perf_counter()
         response = subject.process(step)
         latency_ms = (time.perf_counter() - start) * 1000
@@ -802,7 +787,6 @@ def _drive_environment_session_via_process(
             meta={"driver": driver, **timing, "step_num": step.step_num,
                   "latency_ms": latency_ms, "action_status": "proposed"},
         ))
-        step = session.next_input()
 
 
 def _drive_state_change_via_process(subject, session: StateChangeSession,
@@ -843,7 +827,7 @@ def _drive_state_change_session_via_process(
     session.emit(StreamEvent(
         channel="perturbation",
         payload=result,
-        t_ms=0.0,
+        t_ms=None,
         meta={
             "driver": driver,
             "kind": state_change.kind,
@@ -890,7 +874,7 @@ def _drive_behavior_session_via_process(
     session.emit(StreamEvent(
         channel="behavior",
         payload=output,
-        t_ms=0.0,
+        t_ms=None,
         meta={"driver": driver, "task_type": task_context.task_type},
     ))
 
@@ -929,7 +913,7 @@ def _drive_behavior_session_streaming(
         session.emit(StreamEvent(
             channel="behavior",
             payload=output,
-            t_ms=float(trial_index),
+            t_ms=None,
             meta={"driver": driver, "task_type": task_context.task_type,
                   "trial_index": trial_index, "streaming": True},
         ))
@@ -970,7 +954,8 @@ class StreamingStimulusSetSession(Session):
             except StopIteration:
                 return None
             stimulus_id = _row_value(row, "stimulus_id", default=row_index)
-            t_ms = float(_row_value(row, "t_ms", default=0.0))
+            t_ms = _row_value(row, "t_ms", default=None)
+            t_ms = None if t_ms is None else float(t_ms)
             for column, channel in self._columns:
                 self._pending.append(StreamEvent(
                     channel=channel, payload=row[column], t_ms=t_ms,
@@ -1230,7 +1215,8 @@ def _stimulus_events(stimulus_set) -> list[StreamEvent]:
 
     for row_index, row in stimulus_set.iterrows():
         stimulus_id = _row_value(row, "stimulus_id", default=row_index)
-        t_ms = float(_row_value(row, "t_ms", default=0.0))
+        t_ms = _row_value(row, "t_ms", default=None)
+        t_ms = None if t_ms is None else float(t_ms)
         for column, channel in input_columns:
             events.append(StreamEvent(
                 channel=channel,
@@ -1251,7 +1237,7 @@ def _behavior_events(task_context, scoring_stimuli) -> list[StreamEvent]:
         events.append(StreamEvent(
             channel="instruction",
             payload=task_context.instruction,
-            t_ms=0.0,
+            t_ms=None,
             meta={"task_type": task_context.task_type, "role": "instruction"},
         ))
 
@@ -1349,7 +1335,7 @@ def _state_change_event(state_change: StateChange) -> StreamEvent:
     return StreamEvent(
         channel=channel,
         payload=state_change,
-        t_ms=0.0,
+        t_ms=None,
         meta=meta,
     )
 

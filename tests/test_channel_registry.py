@@ -5,7 +5,7 @@ from brainscore_core.io_catalog import INPUT, OUTPUT, CatalogEntry
 
 
 def test_registry_version_and_seed_entry_fields_are_queryable():
-    assert io_catalog.REGISTRY_VERSION == "2.0"
+    assert io_catalog.REGISTRY_VERSION == "3.0"
 
     vision = io_catalog.get("vision")
     assert vision.kind == INPUT
@@ -55,7 +55,8 @@ def test_channels_can_be_listed_and_filtered_by_direction():
 
 def test_validate_accepts_valid_payload_and_direction():
     image = np.zeros((224, 224, 3), dtype=np.uint8)
-    neural = np.zeros((10, 5), dtype=np.float32)
+    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+    neural = NeuroidAssembly(np.zeros((10, 5), dtype=np.float32), dims=["presentation", "neuroid"])
 
     assert io_catalog.validate("vision", image, direction=INPUT) == []
     assert io_catalog.validate("neural:IT", neural, direction=OUTPUT) == []
