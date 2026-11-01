@@ -48,7 +48,8 @@ def _warn_old_names(**given) -> None:
             continue
         warnings.warn(
             f"BrainScoreModel({name}=...) is deprecated; use "
-            f"{_PREFERRED_NAMES[name]}. It keeps working.",
+            f"{_PREFERRED_NAMES[name]}. It keeps working until the public release, "
+            "when the old names are removed together with the interact-to-participate rename.",
             DeprecationWarning, stacklevel=3)
 
 
@@ -379,6 +380,9 @@ class BrainScoreModel(UnifiedModel):
     def backbone_id(self) -> str:
         return self._backbone_id
 
+    # Compatibility surface for tests and notebooks that read recording,
+    # task and perturbation state off the model. Core components read the
+    # owning component (_recorder, _behavioral, _perturbations) directly.
     @property
     def _recording_layer(self) -> Optional[str]:
         return self._recorder.recording_layer

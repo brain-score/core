@@ -12,9 +12,9 @@ class BehavioralReadoutCapability(Capability):
 
     def enabled_for(self, model) -> bool:
         return (
-            model._readout_classifier is not None
-            and model._task_context is not None
-            and model._requires_behavioral_readout(model._task_context.task_type)
+            model._behavioral.readout_classifier is not None
+            and model._behavioral.task_context is not None
+            and model._requires_behavioral_readout(model._behavioral.task_context.task_type)
         )
 
     def handles(self, model, event, **kwargs) -> bool:
