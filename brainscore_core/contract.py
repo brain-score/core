@@ -153,9 +153,11 @@ class UnifiedModel(Subject):
         """Input stream channels this subject hard-requires."""
         return modalities_to_input_channels(self.required_modalities)
 
-    @abstractmethod
     def process(self, input_event: InputEvent) -> OutputEvent:
-        ...
+        """Typed convenience used by the default ``interact``; not part of the contract."""
+        raise NotImplementedError(
+            f"{type(self).__name__} defines no process(); implement interact(session) "
+            "or process(input_event) for the typed session driver.")
 
     def interact(self, session: "Session") -> None:
         """Run ``session`` through this model's typed paths."""
