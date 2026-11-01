@@ -94,3 +94,18 @@ def test_in_memory_session_drives_inputs_and_records_emits():
     session.emit(output)
 
     assert session.emitted == [output]
+
+
+def test_buffered_session_rejects_wrong_direction_at_construction():
+    """Contract v3 rule 3.4: known inputs are validated before delivery."""
+    import pytest
+    from brainscore_core.streaming import BufferedSession, StreamEvent
+    with pytest.raises(ValueError, match="registry direction"):
+        BufferedSession([StreamEvent("behavior", "x", 0.0)])
+
+
+def test_buffered_session_warns_on_unregistered_family():
+    import pytest
+    from brainscore_core.streaming import BufferedSession, StreamEvent
+    with pytest.warns(UserWarning, match="unregistered channel family"):
+        BufferedSession([StreamEvent("not_a_family", 1, 0.0)])

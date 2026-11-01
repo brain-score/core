@@ -107,6 +107,43 @@ class Session(ABC):
         self.respond(event)
 
 
+def _validate_inputs(inputs) -> None:
+    """Check known inputs against the channel catalog before any is delivered.
+
+    Contract Rules v3, rule 3.4: a session whose inputs are known up front
+    fails at construction, not at the first event the subject reads. A wrong
+    direction, a bad address or a failed family validator is an error. An
+    unregistered family (allowed in exploratory experiments; benchmark scoring
+    rejects it at pre-flight) and the catalog's documented ndim/dtype hints
+    only warn.
+    """
+    import warnings
+    from . import io_catalog
+    problems, notes = [], []
+    for event in inputs:
+        if not isinstance(event, StreamEvent):
+            continue  # e.g. replayed EnvironmentSteps; validated by their harness
+        family = event.channel.split(":", 1)[0]
+        if not io_catalog.has(family):
+            notes.append(f"{event.channel}: unregistered channel family")
+            continue
+        found = io_catalog.validate(event.channel, event.payload,
+                                    direction=io_catalog.INPUT)
+        if not found:
+            continue
+        documented = io_catalog.check_payload(event.channel, event.payload)
+        notes.extend(m for m in found if m in documented)
+        problems.extend(m for m in found if m not in documented)
+    if problems:
+        shown = sorted(set(problems))
+        more = f" (+{len(shown) - 5} more)" if len(shown) > 5 else ""
+        raise ValueError("Session inputs failed catalog validation: "
+                         + "; ".join(shown[:5]) + more)
+    if notes:
+        warnings.warn("Session inputs not fully covered by the channel catalog: "
+                      + "; ".join(sorted(set(notes))[:5]), stacklevel=3)
+
+
 class BufferedSession(Session):
     """Deliver fixed inputs and collect responses without environment feedback."""
 
@@ -123,6 +160,7 @@ class BufferedSession(Session):
         elif task_context is not None and not inputs:
             stimulus_set = _behavior_stimuli_to_score(task_context)
             inputs = _behavior_events(task_context, stimulus_set)
+        _validate_inputs(inputs)
         if requested_output_channels is not None:
             if isinstance(requested_output_channels, str):
                 raise TypeError('requested_output_channels must be a sequence of channel names.')
