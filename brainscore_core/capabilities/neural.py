@@ -37,7 +37,7 @@ class NeuralEncodingCapability(Capability):
         layers = model._recorder.current_layers()
         modality = model._pick_modality(detected)
         requested_modalities = {
-            model._region_modality_map[r] for r in model._recording_regions
+            model._region_modality_map[r] for r in model._recorder.recording_regions
             if r in model._region_modality_map}
         requested_modalities = {canonical_modality(m) for m in requested_modalities}
         missing = requested_modalities - detected
@@ -56,7 +56,7 @@ class NeuralEncodingCapability(Capability):
         # false-positive the selected plain-callable path.
         will_run = detected if (multi_modality and len(detected) > 1) else {modality}
         if (not layers and model._region_layer_map_dict
-                and not model._composite_recording
+                and not model._recorder.composite_recording
                 and any(model._supports_layer_extraction(m) for m in will_run)):
             raise ValueError(
                 f"No active recording layer for model '{model.identifier}': "
@@ -80,12 +80,12 @@ class NeuralEncodingCapability(Capability):
                 UserWarning,
                 stacklevel=2,
             )
-        if (model._composite_recording
+        if (model._recorder.composite_recording
                 and model._supports_layer_extraction(modality)):
             return model._process_composite_regions(stimuli, modality)
         layers = model._filter_layers_for_modality(layers, modality)
         assembly = model._extract_for_modality(stimuli, modality, layers)
-        if model._is_multi_region and model._supports_layer_extraction(modality):
+        if model._recorder.is_multi_region and model._supports_layer_extraction(modality):
             assembly = model._tag_neuroids_with_regions(assembly, modality)
         return assembly
 

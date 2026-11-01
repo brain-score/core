@@ -1,6 +1,7 @@
 """A2: activation extraction must bypass result_caching while a perturbation is
 active, so a lesioned run never returns cached UNperturbed activations."""
 import os
+from types import SimpleNamespace
 
 from brainscore_core.dispatch import InputDispatcher
 
@@ -19,7 +20,8 @@ class _FakeOwner:
     def __init__(self, perturbed):
         self._activations_model = _FakeActivationsModel()
         self._extractors = {'vision': self._activations_model}
-        self._active_perturbations = {'h1': (lambda: None)} if perturbed else {}
+        self._perturbations = SimpleNamespace(
+            active_perturbations={'h1': (lambda: None)} if perturbed else {})
         self._preprocessors = {}
         self._model = None
         self._recording_layer = None

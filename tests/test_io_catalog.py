@@ -94,6 +94,6 @@ class TestRegister:
             payload_contract="(time,) float diameter in mm",
             handled_by="an eye-tracker harness",
         )
-        io_catalog.register(entry)
+        io_catalog.register(entry, replace=True)
         assert io_catalog.get("pupil") is entry
         assert io_catalog.get("pupil:left").name == "pupil"

@@ -42,7 +42,7 @@ def test_positional_capability_tail_warns():
 def test_keyword_calls_do_not_warn():
     with warnings.catch_warnings():
         warnings.simplefilter('error', DeprecationWarning)
-        BrainScoreModel('id', None, {}, {}, None, action_fn=_f)  # must not raise
+        BrainScoreModel(identifier='id', policy=_f)
 
 
 def test_identifier_only_construction_works():

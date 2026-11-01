@@ -164,16 +164,17 @@ class UnifiedModel(Subject):
         """Input stream channels this subject hard-requires."""
         return self._modalities_to_input_channels(self.required_modalities)
 
-    @abstractmethod
     def process(self, input_event: InputEvent) -> OutputEvent:
-        ...
+        """Optional typed convenience for existing implementations."""
+        raise NotImplementedError("This subject evaluates through interact(session)")
 
     def interact(self, session) -> None:
-        identifier = self._safe_identifier()
-        raise NotImplementedError(
-            f"Subject {identifier} has no v2 interact() path yet; use "
-            f"process()/start_recording()."
-        )
+        # Permanent adapter for implementations of the old typed interface.
+        # Helpers call interact directly; they never inspect the subject's class.
+        if session is None:
+            raise NotImplementedError(f"Subject {self.identifier} has no v2 interact() path yet")
+        from .legacy_sessions import interact_through_process
+        interact_through_process(self, session)
 
     def start_task(self, task_context: TaskContext) -> None:
         self._task_context: Optional[TaskContext] = task_context
@@ -188,46 +189,17 @@ class UnifiedModel(Subject):
         pass
 
     def _declared_input_modalities(self) -> Set[str]:
-        for attr in ("available_modalities", "supported_modalities"):
-            try:
-                modalities = getattr(self, attr)
-            except (AttributeError, NotImplementedError):
-                continue
-            if modalities is not None:
-                return set(modalities)
-
-        preprocessors = getattr(self, "_preprocessors", None)
-        if hasattr(preprocessors, "keys"):
-            return set(preprocessors.keys())
-        return set()
+        return set(self.available_modalities)
 
     @staticmethod
     def _modalities_to_input_channels(modalities) -> Set[str]:
         return modalities_to_input_channels(modalities)
 
     def _has_behavioral_output_path(self) -> bool:
-        for attr in (
-            "_behavioral_readout_layer",
-            "_generation_fn",
-            "behavioral_readout_layer",
-            "generation_fn",
-        ):
-            try:
-                value = getattr(self, attr)
-            except Exception:
-                continue
-            if value is not None:
-                return True
+        """Compatibility subclasses explicitly declare additional output paths."""
         return False
 
     def _has_action_output_path(self) -> bool:
-        for attr in ("_action_fn", "action_fn"):
-            try:
-                value = getattr(self, attr)
-            except Exception:
-                continue
-            if value is not None:
-                return True
         return False
 
     def _safe_identifier(self) -> str:

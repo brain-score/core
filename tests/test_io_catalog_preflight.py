@@ -1,9 +1,4 @@
-"""Tests for the v1.5 Input/Output Catalog wiring into pre-flight.
-
-``check_compatibility`` calls ``check_io_catalog`` as a warn-only documentation
-conformance check: it surfaces inputs or neural outputs not documented in the
-catalog, without changing the pass/fail result.
-"""
+"""Pre-flight rejects declarations that have no registered channel family."""
 import warnings
 
 import pytest
@@ -11,7 +6,7 @@ import pytest
 from brainscore_core.model_interface import UnifiedModel
 from brainscore_core.compatibility import (
     check_compatibility,
-    CompatibilityWarning,
+    CompatibilityWarning, CompatibilityError,
 )
 
 
@@ -55,19 +50,18 @@ class TestIOCatalogPreflight:
             warnings.simplefilter("error", CompatibilityWarning)
             check_compatibility(m, b)  # vision is documented; must not warn
 
-    def test_undocumented_input_warns(self):
+    def test_unregistered_input_is_rejected(self):
         m = _Model({"vision", "telepathy"})
         b = _Bench({"telepathy"})
-        with pytest.warns(CompatibilityWarning, match="not in the Input/Output Catalog"):
+        with pytest.raises(CompatibilityError, match="unknown channel"):
             check_compatibility(m, b)
 
-    def test_catalog_check_is_warn_only(self):
+    def test_catalog_check_rejects_unknown_payload_contract(self):
         # An undocumented modality must NOT raise CompatibilityError; it only warns.
         m = _Model({"telepathy"})
         b = _Bench({"telepathy"})
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            check_compatibility(m, b)  # no exception
+        with pytest.raises(CompatibilityError, match="unknown channel"):
+            check_compatibility(m, b)
 
     def test_neural_region_is_documented(self):
         m = _Model({"vision"}, region_map={"IT": "layer.10"})

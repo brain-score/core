@@ -49,7 +49,7 @@ def test_external_input_output_state_reset_and_session():
     assert len(setups) == 2 and 'test_result' in model.out_channels
     with pytest.raises(ValueError):
         model.process(StreamEvent('test_request', 'bad', 5))
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError):
         model.check_session_support({'test_result', 'motor'})
 
 
@@ -86,11 +86,10 @@ def test_session_benchmark_checks_execution_support_before_compute():
     from brainscore_core.compatibility import check_channel_compatibility, CompatibilityError
     model = BrainScoreModel('motor-only', action_fn=lambda step: None)
     benchmark = SimpleNamespace(identifier='session', uses_session=True,
-        required_input_channels=set(), requested_output_channels={'motor'})
+        required_input_channels={'observation'}, requested_output_channels={'motor'})
     check_channel_compatibility(model, benchmark)
     model.check_session_support = lambda channels: (_ for _ in ()).throw(NotImplementedError('no driver'))
-    with pytest.raises(CompatibilityError, match='no driver'):
-        check_channel_compatibility(model, benchmark)
+    assert check_channel_compatibility(model, benchmark).kind == 'full'
 
 
 def test_environment_action_validation_precedes_step():

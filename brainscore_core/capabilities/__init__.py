@@ -13,3 +13,5 @@ from . import behavioral_readout as _behavioral_readout  # noqa: F401
 from . import embodied_action as _embodied_action  # noqa: F401
 from . import neural as _neural  # noqa: F401
 from . import state_change as _state_change  # noqa: F401
+
+from .. import session_handlers as _session_handlers  # noqa: F401

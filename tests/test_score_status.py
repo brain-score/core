@@ -8,6 +8,9 @@ from brainscore_core.metrics import Score
 
 class _Model:
     identifier = "text-model"
+    in_channels = {"text"}
+    out_channels = set()
+    required_channels = set()
     available_modalities = {"text"}
     required_modalities = set()
     region_layer_map = {}

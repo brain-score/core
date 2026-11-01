@@ -30,10 +30,6 @@ def enabled_capabilities(model) -> Iterable[Capability]:
 
 
 def _setup_once(model, capability: Capability) -> None:
-    if not hasattr(model, '_capability_state'):
-        model._capability_state = {}
-    if not hasattr(model, '_capability_setup_done'):
-        model._capability_setup_done = set()
     if capability.identifier in model._capability_setup_done:
         return
     state = capability.setup(model)

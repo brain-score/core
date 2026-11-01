@@ -24,7 +24,7 @@ from .model_interface import (
     output_event_kind,
     dispatch_metric,
 )
-from .compatibility import CompatibilityError, CompatibilityWarning, check_compatibility, check_io_catalog
+from .compatibility import CompatibilityMatch, CompatibilityError, CompatibilityWarning, check_compatibility, check_io_catalog
 from .score_status import STATUS_NA, na_score, score_or_na
 from .memory import MemoryError, check_memory, get_available_memory
 from . import io_catalog
@@ -36,3 +36,6 @@ from . import nulls
 from ._env_check import warn_on_drift as _warn_on_drift
 _warn_on_drift()
 del _warn_on_drift
+
+from .legacy_benchmark import LegacyBenchmarkFacade
+from .extractors import Extractor, ResettableExtractor

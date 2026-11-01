@@ -21,6 +21,7 @@ PINNED_SEED_CHANNELS = {
     "motor": (io_catalog.OUTPUT, "environment harness"),
     "neural": (io_catalog.OUTPUT, "core"),
     "observation": (io_catalog.INPUT, "environment harness"),
+    "perturbation": (io_catalog.OUTPUT, "core"),
     "pharmacological": (io_catalog.INPUT, "core"),
     "proprioception": (io_catalog.INPUT, "environment harness"),
     "pupil": (io_catalog.OUTPUT, "human harness"),

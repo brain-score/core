@@ -80,7 +80,7 @@ def test_channel_compatible_pair_passes():
     check_channel_compatibility(subject, benchmark)
 
 
-def test_missing_required_input_channel_raises_with_channel_name():
+def test_unused_input_is_reported_as_partial():
     subject = _Subject(
         in_channels={"vision"},
         out_channels={"neural:IT"},
@@ -90,8 +90,9 @@ def test_missing_required_input_channel_raises_with_channel_name():
         requested_output_channels={"neural:IT"},
     )
 
-    with pytest.raises(CompatibilityError, match="text"):
-        check_channel_compatibility(subject, benchmark)
+    match = check_channel_compatibility(subject, benchmark)
+    assert match.kind == "partial"
+    assert match.dropped_inputs == {"text"}
 
 
 def test_missing_requested_output_channel_raises_with_channel_name():
