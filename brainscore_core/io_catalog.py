@@ -366,6 +366,12 @@ _SEED = [
                  meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
                  materializers=("EnvironmentResponse",)),
+    # --- outputs: perturbation record (carried by PerturbationApplied) ---
+    CatalogEntry("perturbation", OUTPUT, "PerturbationApplied",
+                 "PerturbationApplied record with a handle_id for undoing one change",
+                 "the model's intervention (state_change_fn)",
+                 owner="core",
+                 materializers=("PerturbationApplied",)),
     # --- outputs: physiological readouts (reserved for human harnesses) ---
     CatalogEntry("pupil", OUTPUT, "human harness recording",
                  "(t,) float pupil diameter time series, or scalar diameter",

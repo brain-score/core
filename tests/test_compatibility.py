@@ -356,3 +356,31 @@ class TestAvailableModalitiesDefault:
     def test_legacy_model_required_defaults_to_empty(self):
         model = FakeModel(modalities={'vision'})
         assert model.required_modalities == set()
+
+
+class TestDeclaredChannelsRun:
+    """Contract v3 rule 2.4: every declared channel passes pre-flight and runs."""
+
+    def _model(self):
+        from brainscore_core.model_interface import BrainScoreModel
+        return BrainScoreModel(
+            'all-parts', region_layer_map={'IT': 'layer'},
+            extractor={'vision': lambda stimuli, layers: None},
+            behavioral_readout_layer='layer',
+            action_fn=lambda step: None,
+            state_change_fn=lambda change: (None, lambda: None))
+
+    def test_every_part_declares_registered_channels(self):
+        model = self._model()
+        assert model.out_channels == {'neural:IT', 'behavior', 'motor', 'perturbation'}
+        assert {'vision', 'observation', 'lesion', 'stimulation'} <= model.in_channels
+        for output in sorted(model.out_channels):
+            bench = FakeBenchmark(identifier=output)
+            bench.requested_output_channels = {output}
+            bench.required_input_channels = {'vision'}
+            check_compatibility(model, bench)  # registered and produced
+
+    def test_every_declared_output_has_one_session_handler(self):
+        model = self._model()
+        for output in sorted(model.out_channels):
+            assert model.check_session_support({output}) is not None

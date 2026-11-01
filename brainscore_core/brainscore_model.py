@@ -23,7 +23,6 @@ from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_
 from .streaming import StreamEvent
 from .streaming_helpers import (
     _drain_stream_events as _drain_neural_stream_events,
-    drive_typed_session,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels,
     _stimuli_from_stream_session as _neural_stimuli_from_stream_session,
@@ -227,38 +226,33 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        channels = super().in_channels | set().union(
-            *(set(c.input_channels) for c in self._declared_capabilities()))
-        if self._action_fn is not None:
-            channels.add('observation')
-        if self._generation_fn is not None:
-            channels.add('instruction')
-        return channels
+        return super().in_channels | set().union(
+            *(c.declared_input_channels(self) for c in self._declared_capabilities()))
 
     @property
     def out_channels(self):
-        channels = super().out_channels
-        if self._behavioral_readout_layer is not None or self._generation_fn is not None:
-            channels.add('behavior')
-        if self._action_fn is not None:
-            channels.add('motor')
-        return channels | set().union(
-            *(set(c.output_channels) for c in self._declared_capabilities()))
+        # Every output comes from a registered part; nothing is found by name.
+        return set().union(
+            *(c.declared_output_channels(self) for c in self._declared_capabilities()))
 
     def check_session_support(self, channels):
-        """Reject unsupported or ambiguous output combinations before consuming input."""
+        """The one capability that runs a session requesting ``channels``.
+
+        Raises before any input is consumed when no capability, or more than
+        one at the same priority, claims the combination.
+        """
         channels = frozenset(channels)
         if not channels:
             raise ValueError('A session must request at least one output channel.')
-        custom = [c for c in self._declared_capabilities()
+        claims = [c for c in self._declared_capabilities()
                   if c.supports_session(self, channels)]
-        if len(custom) > 1:
-            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in custom]}')
-        stock = (channels in ({'behavior'}, {'motor'}, {'perturbation'})
-                 or all(c.startswith('neural:') for c in channels))
-        if not custom and not stock:
+        if not claims:
             raise NotImplementedError(f'No session handler for {sorted(channels)}')
-        return custom[0] if custom else None
+        first = min(c.order for c in claims)
+        winners = [c for c in claims if c.order == first]
+        if len(winners) > 1:
+            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in winners]}')
+        return winners[0]
 
     @property
     def identifier(self) -> str:
@@ -466,15 +460,11 @@ class BrainScoreModel(UnifiedModel):
         return output
 
     def interact(self, session) -> None:
-        """Run a session: a registered capability if one claims it, else the typed paths."""
-        requested_channels = _requested_output_channels(session)
-        custom = self.check_session_support(requested_channels)
-        if custom is not None:
-            from .capabilities.registry import _setup_once
-            _setup_once(self, custom)
-            custom.interact(self, session)
-            return
-        drive_typed_session(self, session)
+        """Run a session through the one registered capability that claims it."""
+        handler = self.check_session_support(_requested_output_channels(session))
+        from .capabilities.registry import _setup_once
+        _setup_once(self, handler)
+        handler.interact(self, session)
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
