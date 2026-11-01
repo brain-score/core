@@ -73,14 +73,25 @@ class TestRequiredModalities:
     def test_missing_required_raises(self):
         model = FakeModel(modalities={'text'})
         bench = FakeBenchmark(required_modalities={'vision'})
-        with pytest.raises(CompatibilityError, match="does not support modalities required"):
+        with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
             check_compatibility(model, bench)
 
-    def test_missing_one_of_multiple_required_raises(self):
+    def test_missing_one_of_multiple_required_runs_as_partial(self):
+        # Contract v3 rule 5: a subject that takes in some of the inputs runs;
+        # the rest never enter it, and the match says so.
         model = FakeModel(modalities={'vision'})
         bench = FakeBenchmark(required_modalities={'vision', 'text'})
-        with pytest.raises(CompatibilityError, match="'text'"):
-            check_compatibility(model, bench)
+        match = check_compatibility(model, bench)
+        assert match.kind == 'partial'
+        assert match.consumed_inputs == {'vision'}
+        assert match.dropped_inputs == {'text'}
+
+    def test_full_match_reports_full(self):
+        match = check_compatibility(FakeModel(modalities={'vision', 'text'}),
+                                    FakeBenchmark(required_modalities={'vision'}))
+        assert match.kind == 'full'
+        assert match.dropped_inputs == frozenset()
+        assert match.as_attrs()['match'] == 'full'
 
     def test_no_required_modalities_on_benchmark(self):
         model = FakeModel(modalities={'vision'})
@@ -99,7 +110,7 @@ class TestAcceptedModalities:
 
     def test_none_accepted_raises(self):
         bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
-        with pytest.raises(CompatibilityError, match="provides none of the input formats"):
+        with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
             check_compatibility(FakeModel(modalities={'text'}), bench)
 
     def test_required_plus_accepted_combo(self):
@@ -108,10 +119,11 @@ class TestAcceptedModalities:
                               accepted_modalities={'video', 'vision'})
         check_compatibility(FakeModel(modalities={'audio', 'video'}), bench)
         check_compatibility(FakeModel(modalities={'audio', 'vision'}), bench)
-        with pytest.raises(CompatibilityError, match="does not support modalities required"):
-            check_compatibility(FakeModel(modalities={'video'}), bench)   # missing audio
-        with pytest.raises(CompatibilityError, match="provides none of the input formats"):
-            check_compatibility(FakeModel(modalities={'audio'}), bench)   # neither video nor vision
+        # Missing audio or missing both visual formats: partial, still runs.
+        assert check_compatibility(FakeModel(modalities={'video'}), bench).dropped_inputs == {'audio'}
+        assert check_compatibility(FakeModel(modalities={'audio'}), bench).dropped_inputs == {'vision'}
+        with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
+            check_compatibility(FakeModel(modalities={'text'}), bench)
 
     def test_model_hard_requires_accepted_format_passes(self):
         # Check-2 fix: a model hard-requiring video isn't rejected when the
@@ -235,14 +247,14 @@ class TestCombinedScenarios:
             warnings.simplefilter('error')
             check_compatibility(model, bench)
 
-    def test_required_fails_before_region_check(self):
-        """Required modality failure should be raised even if region is also bad."""
+    def test_missing_output_reported_before_inputs(self):
+        """A missing requested output is reported first, even if inputs also fail."""
         model = FakeModel(modalities={'text'}, region_layer_map={})
         bench = FakeBenchmark(
             required_modalities={'vision'},
             region='IT',
         )
-        with pytest.raises(CompatibilityError, match="does not support modalities required"):
+        with pytest.raises(CompatibilityError, match="no layer mapping for region 'IT'"):
             check_compatibility(model, bench)
 
     def test_error_message_includes_identifiers(self):

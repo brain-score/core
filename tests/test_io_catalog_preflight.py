@@ -11,6 +11,7 @@ import pytest
 from brainscore_core.model_interface import UnifiedModel
 from brainscore_core.compatibility import (
     check_compatibility,
+    CompatibilityError,
     CompatibilityWarning,
 )
 
@@ -55,19 +56,19 @@ class TestIOCatalogPreflight:
             warnings.simplefilter("error", CompatibilityWarning)
             check_compatibility(m, b)  # vision is documented; must not warn
 
-    def test_undocumented_input_warns(self):
+    def test_undocumented_input_is_rejected(self):
+        # Contract v3 rule 3.2: every channel family is registered. An
+        # undocumented input is a compatibility error, not a warning.
         m = _Model({"vision", "telepathy"})
         b = _Bench({"telepathy"})
-        with pytest.warns(CompatibilityWarning, match="not in the Input/Output Catalog"):
+        with pytest.raises(CompatibilityError, match="unknown channel 'telepathy'"):
             check_compatibility(m, b)
 
-    def test_catalog_check_is_warn_only(self):
-        # An undocumented modality must NOT raise CompatibilityError; it only warns.
-        m = _Model({"telepathy"})
-        b = _Bench({"telepathy"})
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            check_compatibility(m, b)  # no exception
+    def test_catalog_documentation_check_is_warn_only(self):
+        # check_io_catalog itself only warns; it never raises.
+        from brainscore_core.compatibility import check_io_catalog
+        with pytest.warns(CompatibilityWarning, match="not in the Input/Output Catalog"):
+            check_io_catalog(_Model({"telepathy"}), _Bench({"telepathy"}))
 
     def test_neural_region_is_documented(self):
         m = _Model({"vision"}, region_map={"IT": "layer.10"})

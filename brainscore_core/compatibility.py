@@ -1,52 +1,37 @@
 """
-Pre-flight compatibility checker for Brain-Score.
+Pre-flight compatibility checker for Brain-Score (Contract Rules v3, rule 5).
 
-Single-direction modality validation (post April 30, 2026 design decision):
+Compatibility is decided from declarations alone: what the benchmark sends
+and asks for, and what the subject says it takes in, produces and requires.
+A subject is compatible with a benchmark when all three hold:
 
-- Benchmark declares ``required_modalities`` — the modalities its stimuli
-  provide. Each leaderboard benchmark declares **exactly one** input format;
-  multiple input formats become separate registered variants.
-- Model declares ``available_modalities`` (everything it can consume) and
-  optionally ``required_modalities`` (hard requirement — model cannot run
-  without these in the stimulus set, e.g. a locked-fusion model).
+1. every requested output is in ``subject.out_channels``;
+2. at least one benchmark input is in ``subject.in_channels``;
+3. every channel in ``subject.required_channels`` is among the benchmark's
+   inputs.
 
-A pairing is valid when:
+The benchmark declares the inputs its human participants received. A subject
+that takes in only some of them still runs: the streams it cannot take in
+never enter it. :func:`check_compatibility` returns the match as data
+(:class:`CompatibilityMatch`) so the score records which inputs were used.
+An incompatible pair raises :class:`CompatibilityError` and is scored N/A.
 
-- ``benchmark.required ⊆ model.available`` — model can process ALL of the
-  benchmark's required modalities (all-of).
-- ``benchmark.accepted ∩ model.available ≠ ∅`` (if ``accepted_modalities`` is
-  set) — the model provides AT LEAST ONE accepted input format (any-of). This
-  is for benchmarks that adapt to the candidate, e.g. a naturalistic video
-  benchmark that runs native-video models and falls back to frame-aggregation
-  for still-image (vision) models, so it accepts ``{video, vision}``.
-- ``benchmark.region ∈ model.region_layer_map`` (if the benchmark targets a
-  neural region).
-
-The earlier symmetric check ``model.required ⊆ benchmark.required ∪
-benchmark.available`` was dropped: ``benchmark.available_modalities`` is
-deprecated. A locked-fusion model whose required modalities aren't present
-in the benchmark's single input format is caught by check #1 (its required
-set is a superset of the benchmark's required set, so the benchmark's
-required set isn't a subset of the model's available set unless it
-exactly matches).
-
-For models with required_modalities that don't include the benchmark's
-required modality, the symmetric check is still useful — e.g. a model that
-hard-requires text + vision but the benchmark only provides vision. We keep
-that case via a tightened check on model_required: the model's required set
-must be a subset of the benchmark's required set (the benchmark's only
-input format).
+Benchmark inputs are ``required_input_channels`` when declared, otherwise the
+channels of ``required_modalities`` plus ``accepted_modalities``. Requested
+outputs are ``requested_output_channels`` when declared, otherwise
+``neural:<region>`` for a benchmark with a ``region``.
 
 Benchmarks that still set ``available_modalities`` emit a
 ``DeprecationWarning`` directing the maintainer to register separate variants.
 """
 
 import warnings
-from typing import Optional, Set
+from dataclasses import dataclass
+from typing import Dict, FrozenSet, Optional, Set
 
 from . import io_catalog
 from .io_catalog import canonical_modality, modalities_to_input_channels
-from .model_interface import Subject, UnifiedModel
+from .model_interface import Subject
 from .streaming import parse_channel
 
 
@@ -69,87 +54,111 @@ def ensure_legacy_benchmark_modalities(benchmark, modalities):
     return benchmark
 
 
-def check_channel_compatibility(subject: Subject, benchmark) -> None:
-    """Check the UMI v2.0 channel compatibility contract.
+@dataclass(frozen=True)
+class CompatibilityMatch:
+    """How a subject matches a benchmark, returned by pre-flight.
 
-    Raises :class:`CompatibilityError` before compute when any of the three
-    channel-set conditions fail:
+    ``consumed_inputs`` are the benchmark inputs the subject takes in and
+    ``dropped_inputs`` the ones it cannot, which never enter it. ``kind`` is
+    ``'full'`` when nothing is dropped, otherwise ``'partial'``.
+    """
+    subject: str
+    benchmark: str
+    consumed_inputs: FrozenSet[str]
+    dropped_inputs: FrozenSet[str]
+    requested_outputs: FrozenSet[str]
 
-    1. ``benchmark.required_input_channels <= subject.in_channels``
-    2. ``benchmark.requested_output_channels <= subject.out_channels``
-    3. ``subject.required_channels <= benchmark.required_input_channels``
+    @property
+    def kind(self) -> str:
+        return 'partial' if self.dropped_inputs else 'full'
+
+    def as_attrs(self) -> Dict[str, object]:
+        """Plain-data form for ``score.attrs['compatibility']``."""
+        return {
+            'match': self.kind,
+            'consumed_inputs': sorted(self.consumed_inputs),
+            'dropped_inputs': sorted(self.dropped_inputs),
+            'requested_outputs': sorted(self.requested_outputs),
+        }
+
+
+def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMatch:
+    """Check the three compatibility conditions and return the match.
+
+    Raises :class:`CompatibilityError` before compute when a condition fails.
+    Every declared channel must be registered in the catalog with the right
+    direction.
     """
     subject_in = set(subject.in_channels)
     subject_out = set(subject.out_channels)
     subject_required = set(subject.required_channels)
-    bench_required = benchmark_required_input_channels(benchmark)
-    bench_accepted = benchmark_accepted_input_channels(benchmark)
+    bench_inputs = benchmark_input_channels(benchmark)
     bench_requested = benchmark_requested_output_channels(benchmark)
+    subject_id = subject.identifier
+    benchmark_id = _benchmark_identifier(benchmark)
 
-    validate_channels(
-        subject_in, io_catalog.INPUT, f"subject '{subject.identifier}' in_channels")
-    validate_channels(
-        subject_out, io_catalog.OUTPUT, f"subject '{subject.identifier}' out_channels")
-    validate_channels(
-        subject_required, io_catalog.INPUT,
-        f"subject '{subject.identifier}' required_channels")
-    validate_channels(
-        bench_required, io_catalog.INPUT,
-        f"benchmark '{_benchmark_identifier(benchmark)}' required_input_channels")
-    validate_channels(
-        bench_accepted, io_catalog.INPUT,
-        f"benchmark '{_benchmark_identifier(benchmark)}' accepted_input_channels")
-    validate_channels(
-        bench_requested, io_catalog.OUTPUT,
-        f"benchmark '{_benchmark_identifier(benchmark)}' requested_output_channels")
-
-    missing_inputs = bench_required - subject_in
-    if missing_inputs:
-        raise CompatibilityError(
-            f"Subject '{subject.identifier}' is missing required input "
-            f"channels for benchmark '{_benchmark_identifier(benchmark)}': "
-            f"{_format_channels(missing_inputs)}. Subject in_channels: "
-            f"{_format_channels(subject_in)}."
-        )
-
-    if bench_accepted and not (bench_accepted & subject_in):
-        raise CompatibilityError(
-            f"Subject '{subject.identifier}' provides none of the accepted "
-            f"input channels for benchmark '{_benchmark_identifier(benchmark)}': "
-            f"{_format_channels(bench_accepted)}. Subject in_channels: "
-            f"{_format_channels(subject_in)}."
-        )
+    validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
+    validate_channels(subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels")
+    validate_channels(subject_required, io_catalog.INPUT,
+                      f"subject '{subject_id}' required_channels")
+    validate_channels(bench_inputs, io_catalog.INPUT,
+                      f"benchmark '{benchmark_id}' input channels")
+    validate_channels(bench_requested, io_catalog.OUTPUT,
+                      f"benchmark '{benchmark_id}' requested_output_channels")
 
     missing_outputs = bench_requested - subject_out
     if missing_outputs:
+        message = (
+            f"Subject '{subject_id}' cannot produce output channels requested by "
+            f"benchmark '{benchmark_id}': {_format_channels(missing_outputs)}. "
+            f"Subject out_channels: {_format_channels(subject_out)}."
+        )
+        regions = sorted(address for family, address in map(parse_channel, missing_outputs)
+                         if family == 'neural' and address is not None)
+        if regions:
+            message += (
+                f" It has no layer mapping for region '{regions[0]}'. Use the "
+                f"layer-mapping explorer (brainscore_vision.tools.layer_mapping_explorer) "
+                f"to find and commit a region-to-layer mapping."
+            )
+        raise CompatibilityError(message)
+
+    consumed = bench_inputs & subject_in
+    if bench_inputs and not consumed:
         raise CompatibilityError(
-            f"Subject '{subject.identifier}' cannot emit requested output "
-            f"channels for benchmark '{_benchmark_identifier(benchmark)}': "
-            f"{_format_channels(missing_outputs)}. Subject out_channels: "
-            f"{_format_channels(subject_out)}."
+            f"Subject '{subject_id}' takes in none of the inputs benchmark "
+            f"'{benchmark_id}' sends: {_format_channels(bench_inputs)}. "
+            f"Subject in_channels: {_format_channels(subject_in)}."
         )
 
-    unmet_requirements = subject_required - (bench_required | bench_accepted)
+    unmet_requirements = subject_required - bench_inputs
     if unmet_requirements:
         raise CompatibilityError(
-            f"Subject '{subject.identifier}' hard-requires input channels "
+            f"Subject '{subject_id}' hard-requires input channels "
             f"{_format_channels(unmet_requirements)} but benchmark "
-            f"'{_benchmark_identifier(benchmark)}' provides "
-            f"{_format_channels(bench_required | bench_accepted)}."
+            f"'{benchmark_id}' sends {_format_channels(bench_inputs)}."
         )
 
     if getattr(benchmark, "uses_session", False):
         probe = getattr(subject, "check_session_support", None)
-        if not callable(probe):
-            # Native subjects implement the session contract directly. The
-            # optional probe belongs to configurable compatibility wrappers.
-            if not (isinstance(subject, Subject) and not isinstance(subject, UnifiedModel)):
-                raise CompatibilityError("Session benchmark requires a session-support probe")
-        else:
+        if callable(probe):
             try:
                 probe(bench_requested)
             except (ValueError, NotImplementedError) as error:
                 raise CompatibilityError(str(error)) from error
+
+    return CompatibilityMatch(
+        subject=subject_id,
+        benchmark=benchmark_id,
+        consumed_inputs=frozenset(consumed),
+        dropped_inputs=frozenset(bench_inputs - subject_in),
+        requested_outputs=frozenset(bench_requested),
+    )
+
+
+def benchmark_input_channels(benchmark) -> Set[str]:
+    """Every input channel the benchmark sends."""
+    return benchmark_required_input_channels(benchmark) | benchmark_accepted_input_channels(benchmark)
 
 
 def benchmark_required_input_channels(benchmark) -> Set[str]:
@@ -235,36 +244,23 @@ def _benchmark_identifier(benchmark) -> str:
     return getattr(benchmark, "identifier", "?")
 
 
-def check_compatibility(model: Subject, benchmark) -> None:
-    """Fast pre-flight check (see module docstring for the full contract).
+def check_compatibility(model: Subject, benchmark) -> CompatibilityMatch:
+    """Fast pre-flight check; returns the match or raises CompatibilityError.
 
-    Raises :class:`CompatibilityError` for hard mismatches.
-    Emits :class:`DeprecationWarning` if the benchmark still sets the
-    deprecated ``available_modalities`` field.
+    One rule for every subject (see the module docstring). Emits a
+    :class:`DeprecationWarning` if the benchmark still sets the deprecated
+    ``available_modalities`` field, before any compatibility error.
     """
-    # Native subjects declare channels, not modality names or layer maps.
-    # Keep the legacy checks unchanged for typed models and domain adapters.
-    if isinstance(model, Subject) and not isinstance(model, UnifiedModel):
-        check_channel_compatibility(model, benchmark)
-        return
-
-    # canonicalize so aliases match (e.g. a benchmark requiring 'video' is
-    # satisfied by a model reporting the canonical 'vision')
-    model_available: Set[str] = {canonical_modality(m) for m in model.available_modalities}
-    model_required: Set[str] = {canonical_modality(m) for m in model.required_modalities}
     bench_required: Set[str] = {canonical_modality(m)
                                 for m in getattr(benchmark, 'required_modalities', set())}
-
-    # Deprecation warning — must fire before any short-circuit error so
-    # benchmark maintainers see it even when the pairing is incompatible.
     bench_available_attr = getattr(benchmark, 'available_modalities', None)
     if bench_available_attr is not None:
         bench_available: Set[str] = {canonical_modality(m) for m in bench_available_attr}
-        # Only warn if it actually adds something beyond required (otherwise
-        # it's a redundant declaration not a multi-input claim).
+        # Only warn if it adds something beyond required (otherwise it is a
+        # redundant declaration, not a multi-input claim).
         if bench_available - bench_required:
             warnings.warn(
-                f"Benchmark '{benchmark.identifier}' sets "
+                f"Benchmark '{_benchmark_identifier(benchmark)}' sets "
                 f"`available_modalities={bench_available}` — this field is "
                 f"deprecated as of the April 30, 2026 design decision. "
                 f"Benchmarks now declare exactly one input format via "
@@ -275,58 +271,10 @@ def check_compatibility(model: Subject, benchmark) -> None:
                 stacklevel=2,
             )
 
-    # Check 1: Hard gate — benchmark's required modalities must ALL be
-    # consumable by the model.
-    missing_required = bench_required - model_available
-    if missing_required:
-        raise CompatibilityError(
-            f"Model '{model.identifier}' does not support modalities required by "
-            f"benchmark '{benchmark.identifier}': {missing_required}. "
-            f"Model available modalities: {model_available}."
-        )
-
-    # Check 1b: Any-of gate — some benchmarks accept ANY ONE of several input
-    # formats (e.g. a naturalistic benchmark that runs native-video models AND
-    # falls back to frame-aggregation for still-image models). Declared as
-    # `accepted_modalities`; the model must provide at least one. Distinct from
-    # `required_modalities` (all-of); empty/absent means no any-of constraint.
-    bench_accepted: Set[str] = {canonical_modality(m)
-                                for m in getattr(benchmark, 'accepted_modalities', set())}
-    if bench_accepted and not (bench_accepted & model_available):
-        raise CompatibilityError(
-            f"Model '{model.identifier}' provides none of the input formats "
-            f"benchmark '{benchmark.identifier}' accepts; needs at least one of "
-            f"{bench_accepted}, model available: {model_available}."
-        )
-
-    # Check 2: Hard gate — model's required modalities must be a subset of the
-    # modalities the benchmark can provide (its required set plus any any-of
-    # accepted formats). A locked-fusion model that needs modalities the
-    # benchmark never provides cannot run.
-    model_missing = model_required - (bench_required | bench_accepted)
-    if model_missing:
-        raise CompatibilityError(
-            f"Model '{model.identifier}' hard-requires modalities "
-            f"{model_missing} but benchmark '{benchmark.identifier}' does not "
-            f"provide them. Benchmark provides: "
-            f"{(bench_required | bench_accepted) or '{}'}."
-        )
-
-    # Check 3: Region mapping.
-    required_region: Optional[str] = getattr(benchmark, 'region', None)
-    if required_region and required_region not in model.region_layer_map:
-        raise CompatibilityError(
-            f"Model '{model.identifier}' has no layer mapping for region "
-            f"'{required_region}'. Mapped regions: {set(model.region_layer_map.keys())}. "
-            f"Use the layer-mapping explorer "
-            f"(brainscore_vision.tools.layer_mapping_explorer) to find and commit "
-            f"a region-to-layer mapping."
-        )
-
-    # Check 4 (v1.5): Input/Output Catalog documentation conformance. Warn-only;
-    # never changes pass/fail. Surfaces inputs or outputs that are not documented
-    # in the catalog so undocumented channels are flagged at pre-flight.
+    match = check_channel_compatibility(model, benchmark)
+    # Warn-only documentation conformance; never changes the result.
     check_io_catalog(model, benchmark)
+    return match
 
 
 def check_io_catalog(model: Subject, benchmark) -> None:
