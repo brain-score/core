@@ -35,13 +35,17 @@ class Capability(ABC):
         """Opt into a complete requested output combination before execution."""
         return False
 
-    def interact(self, model, session) -> None:
+    def participate(self, model, session) -> None:
         """Execute a session accepted by supports_session."""
         raise NotImplementedError(self.identifier)
 
 
     def setup(self, model) -> Dict[str, Any]:
-        """Return per-model state stored under ``model._capability_state``."""
+        """Return this capability's initial per-model state.
+
+        The registry stores it before dispatch; read it back in ``handles`` /
+        ``process`` with ``model.capability_state(self.identifier)``.
+        """
         del model
         return {}
 

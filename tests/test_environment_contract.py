@@ -70,7 +70,7 @@ def _typed_subject(process):
     """A minimal typed subject: process() plus the shared typed session driver."""
     from brainscore_core.streaming_helpers import drive_typed_session
     subject = SimpleNamespace(process=process)
-    subject.interact = lambda session: drive_typed_session(subject, session)
+    subject.participate = lambda session: drive_typed_session(subject, session)
     return subject
 
 

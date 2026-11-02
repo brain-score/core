@@ -64,9 +64,11 @@ def register_input_handler(cls, event_type: type, handler_name: str,
 def normalize_extractors(owner, preprocessors, activations_model):
     """Adapt registration forms once to ``extractor(stimuli, layers=...)``.
 
-    Explicit extractors never use attribute-based capability discovery. Older
-    registrations that put extraction functions in preprocessors are adapted by
-    their callable signature at this compatibility boundary.
+    ``activations_model`` here is the normalized ``extractor`` argument (the
+    compatibility spelling is the same slot). Explicit extractors never use
+    attribute-based capability discovery. Older registrations that put
+    extraction functions in preprocessors are adapted by their callable
+    signature at this compatibility boundary.
     """
     from collections.abc import Mapping
     import inspect
@@ -75,12 +77,16 @@ def normalize_extractors(owner, preprocessors, activations_model):
         extractors = dict(activations_model)
     elif activations_model is not None:
         if not preprocessors:
-            raise ValueError('A shared activations_model requires declared preprocessors/modalities.')
+            raise ValueError(
+                'A single shared extractor needs its input modalities declared. '
+                'Pass extractor={modality: extractor} instead.')
         extractors = {key: activations_model for key in preprocessors}
     else:
         extractors = {}
     if any(not callable(value) for value in extractors.values()):
-        raise TypeError('Every activations_model extractor must be callable.')
+        raise TypeError(
+            'Every extractor must be callable as extractor(stimuli, layers=...). '
+            'Check the values passed in extractor={modality: extractor}.')
     layer_extractors = set(extractors)
     for modality, preprocessor in preprocessors.items():
         if modality in extractors:
@@ -95,7 +101,9 @@ def normalize_extractors(owner, preprocessors, activations_model):
         except (TypeError, ValueError) as error:
             if modality in extractors:
                 continue
-            raise TypeError('Declare this callable explicitly in activations_model.') from error
+            raise TypeError(
+                'Cannot inspect this preprocessor. Declare it explicitly as '
+                'extractor={modality: extractor}.') from error
         variadic_wrapper = (not inspect.isfunction(preprocessor) and
                             bool(signature.parameters) and all(
                                 p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
@@ -115,14 +123,14 @@ def normalize_extractors(owner, preprocessors, activations_model):
             warnings.warn(
                 'Extraction callbacks in preprocessors are deprecated and are removed at '
                 'the public release. Use '
-                'activations_model={modality: extractor}, where extractor accepts '
+                'extractor={modality: extractor}, where extractor accepts '
                 '(stimuli, layers=...).',
                 DeprecationWarning, stacklevel=3)
             def extract(stimuli, *, layers, function=preprocessor):
                 if len(layers) > 1:
                     raise ValueError(
                         'This compatibility extraction callback accepts one layer. '
-                        'For multiple layers, use activations_model={modality: '
+                        'For multiple layers, use extractor={modality: '
                         'extractor} with an extractor accepting (stimuli, layers=...).')
                 return function(owner._model, stimuli,
                                 recording_layer=layers[0] if layers else None)
@@ -246,8 +254,8 @@ class InputDispatcher:
                 return extractor(stimuli, layers=layers)
         raise NotImplementedError(
             f"Model '{owner.identifier}' declares {modality!r} input but has no "
-            'activation extractor for it. Configure activations_model to record '
-            'internal activity, or use a behavioral task for an output-only model.')
+            'activation extractor for it. Pass extractor={modality: extractor} to '
+            'record internal activity, or use a behavioral task for an output-only model.')
 
     def process_multi_modality(self, stimuli, detected: Set[str],
                                layers: List[str]):
@@ -280,11 +288,12 @@ class InputDispatcher:
                    owner._extract_for_modality(stimuli, modality, modality_layers))
             if not hasattr(sub, 'dims') or 'neuroid' not in sub.dims:
                 raise TypeError(
-                    f"multi_modality dispatch requires every preprocessor "
+                    f"multi_modality dispatch requires every extractor "
                     f"to return an xarray-shaped assembly with a 'neuroid' "
                     f"dim; modality '{modality}' returned "
-                    f"{type(sub).__name__}. Upgrade the preprocessor to a "
-                    f"layer-aware extractor (TextWrapper / VLMVisionWrapper)."
+                    f"{type(sub).__name__}. Pass a layer-aware extractor "
+                    f"(TextWrapper / VLMVisionWrapper) via "
+                    f"extractor={{modality: extractor}}."
                 )
             if owner._recorder.is_multi_region and not owner._recorder.composite_recording:
                 sub = owner._tag_neuroids_with_regions(sub, modality)

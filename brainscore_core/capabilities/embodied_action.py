@@ -7,7 +7,7 @@ from ..io_catalog import check_payload
 
 
 class EmbodiedActionCapability(Capability):
-    """Dispatch EnvironmentStep and Message events through ``action_fn``."""
+    """Dispatch EnvironmentStep and Message events through the model's ``policy``."""
 
     identifier = 'embodied-action'
     order = 300
@@ -51,10 +51,10 @@ class EmbodiedActionCapability(Capability):
             )
         if model._action_fn is None:
             raise NotImplementedError(
-                f"Model '{model.identifier}' has no action_fn registered. "
-                f"Embodied evaluation requires the model to declare an "
-                f"action_fn(env_step) -> EnvironmentResponse callable at "
-                f"BrainScoreModel construction time. Received: "
+                f"Model '{model.identifier}' has no policy (no action_fn registered "
+                f"under the compatibility name). Embodied evaluation requires "
+                f"BrainScoreModel(policy=...), a callable "
+                f"policy(env_step) -> EnvironmentResponse. Received: "
                 f"EnvironmentStep(step_num={input_event.step_num})."
             )
         response = model._action_fn(input_event)
@@ -70,10 +70,10 @@ class EmbodiedActionCapability(Capability):
     def _process_message(self, model, input_event: Message):
         if model._action_fn is None:
             raise NotImplementedError(
-                f"Model '{model.identifier}' has no action_fn registered; "
-                f"process(Message) routes to the agent's responder. Declare "
-                f"action_fn(env_step) -> EnvironmentResponse|Message at "
-                f"BrainScoreModel construction time."
+                f"Model '{model.identifier}' has no policy (no action_fn registered "
+                f"under the compatibility name); a Message routes to the agent's "
+                f"policy. Pass BrainScoreModel(policy=...), a callable "
+                f"policy(env_step) -> EnvironmentResponse|Message."
             )
         response = model._action_fn(EnvironmentStep(observation=input_event))
         if not isinstance(response, (Message, EnvironmentResponse)):

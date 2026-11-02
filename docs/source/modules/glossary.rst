@@ -29,7 +29,7 @@ Glossary
 
     Subject (UMI)
         The interface through which an experiment or benchmark uses a model.
-        A native Subject declares its channels and implements interact(session).
+        A native Subject declares its channels and implements participate(session).
         BrainScoreModel implements Subject with extraction and task helpers.
 
     ArtificialSubject

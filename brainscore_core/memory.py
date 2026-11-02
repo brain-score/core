@@ -448,7 +448,7 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
                else _probe_regions(model, benchmark))
     last_error = None
     for region in regions:
-        # One session through interact, the same way every subject is
+        # One session through participate, the same way every subject is
         # evaluated; no probing of the subject's methods or class.
         try:
             if region is None:

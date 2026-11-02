@@ -12,7 +12,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .contract import Subject, UnifiedModel  # noqa: F401  (re-exported)
+from .contract import Subject, TaskContext, UnifiedModel  # noqa: F401  (re-exported)
 from .io_catalog import modalities_to_input_channels
 from .streaming import BufferedSession, Session, StreamEvent, parse_channel
 from .events import (
@@ -369,13 +369,13 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
             "neural_response returns a single assembly and therefore takes a single "
             f"region; got {record!r}. To record several regions, use the session API:\n"
             "    session = stimulus_session(stimuli, record=['V4', 'IT'])\n"
-            "    subject.interact(session)\n"
+            "    subject.participate(session)\n"
             "    v4, it = session.collect('neural:V4'), session.collect('neural:IT')\n"
             "Or record them in one pass and split on the region coord:\n"
             "    subject.start_recording(['V4', 'IT']); assembly = subject.process(stimuli)")
     session = stimulus_session(stimulus_set, record=record,
                                time_bins=time_bins)
-    subject.interact(session)
+    subject.participate(session)
     return session.collect(f"neural:{record}")
 
 
@@ -384,13 +384,13 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
     ``BehavioralAssembly`` -- the model's output, not a Score.
     """
     session = behavior_session(task_context)
-    subject.interact(session)
+    subject.participate(session)
     return session.collect("behavior")
 
 
 def apply_state_change(subject, state_change: StateChange):
     session = state_change_session(state_change)
-    subject.interact(session)
+    subject.participate(session)
     return session.collect("perturbation")
 
 
@@ -412,7 +412,7 @@ def run_environment(subject, environment, *, seed=None, options=None,
             close()
         raise
     with session:
-        subject.interact(session)
+        subject.participate(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
         return session.collect("motor")
@@ -420,7 +420,7 @@ def run_environment(subject, environment, *, seed=None, options=None,
 
 def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
                        record: Union[str, Sequence[str]] = "IT", time_bins=None) -> None:
-    """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    """Interim Phase 2 bridge; Phase 3 swaps this for native participate()."""
     _start_recording(subject, record, time_bins=time_bins)
     output = subject.process(stimulus_set)
     session.emit(StreamEvent(
@@ -431,18 +431,31 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
     ))
 
 
-def _drive_neural_session_via_process(
-    subject, session, driver: str = "interact", allow_multi_modality: bool = False
+# The ``driver`` values below ("interact", "interact_streaming") are stable
+# record-format labels written into response meta, not callable API names. They
+# predate the participate rename and stay as-is so saved records still compare
+# equal under compare_outputs.
+def drive_neural_session(
+    subject: Any, session: Any, driver: str = "interact",
+    allow_multi_modality: bool = False,
 ) -> None:
-    """Run a neural session through ``start_recording`` + ``process``.
+    """Answer a session's ``neural:<region>`` requests with one ``process`` call.
 
-    ``allow_multi_modality`` is the subject's own statement that its
-    ``process`` combines several input modalities; when several are present
-    it is called with ``multi_modality=True``.
+    For typed subjects such as legacy adapters and ``BrainScoreModel``, which
+    already implement ``start_recording(target, time_bins=...)`` and
+    ``process(stimuli)``. The contract does not require ``process``: an
+    arbitrary ``Subject`` only implements ``participate`` and never needs this.
+
+    Reads every input from ``session``, records all requested regions in one
+    pass using the session's ``time_bins``, and responds once per requested
+    channel. A request for trial-to-trial variance in the session settings is
+    refused before any compute. ``allow_multi_modality`` is the subject's own
+    statement that its ``process`` combines several input modalities; when
+    several are present it is called with ``multi_modality=True``.
     """
     _refuse_variance(subject, session)
-    input_events = _drain_stream_events(session)
-    stimuli = _stimuli_from_stream_session(session, input_events)
+    input_events = drain_session_inputs(session)
+    stimuli = session_stimuli(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0
     use_multi_modality = allow_multi_modality and _spans_several_inputs(input_events)
     time_bins = getattr(session, "time_bins", None)
@@ -452,7 +465,7 @@ def _drive_neural_session_via_process(
         family, region = parse_channel(channel)
         if family != "neural" or region is None:
             raise NotImplementedError(
-                "neural interact currently supports requested "
+                "neural participate currently supports requested "
                 f"neural:<region> output channels; got {channel!r}."
             )
         channel_regions.append((channel, region))
@@ -577,7 +590,7 @@ def _drive_neural_session_streaming(
         family, region = parse_channel(channel)
         if family != "neural" or region is None:
             raise NotImplementedError(
-                "streaming neural interact supports requested neural:<region> "
+                "streaming neural participate supports requested neural:<region> "
                 f"output channels; got {channel!r}."
             )
         channel_regions.append((channel, region))
@@ -591,7 +604,7 @@ def _drive_neural_session_streaming(
     while event is not None:
         if not isinstance(event, StreamEvent):
             raise TypeError(
-                "streaming neural interact expects StreamEvent inputs; got "
+                "streaming neural participate expects StreamEvent inputs; got "
                 f"{type(event).__name__}."
             )
         stimuli = _one_row_stimuli(session, event, stream_index)
@@ -655,7 +668,13 @@ def _preserve_stimulus_set_type(original, sliced):
     return sliced
 
 
-def _drain_stream_events(session) -> list[StreamEvent]:
+def drain_session_inputs(session: Any) -> list[StreamEvent]:
+    """Read every input event from ``session`` until it returns ``None``.
+
+    Events come back in the order the session sent them. Anything that is not
+    a ``StreamEvent`` raises ``TypeError``. Use this when a subject answers the
+    whole session at once rather than one input at a time.
+    """
     events: list[StreamEvent] = []
     while True:
         event = session.next_input()
@@ -663,13 +682,20 @@ def _drain_stream_events(session) -> list[StreamEvent]:
             return events
         if not isinstance(event, StreamEvent):
             raise TypeError(
-                "neural interact expects StreamEvent inputs; got "
+                "neural participate expects StreamEvent inputs; got "
                 f"{type(event).__name__}."
             )
         events.append(event)
 
 
-def _stimuli_from_stream_session(session, events: list[StreamEvent]):
+def session_stimuli(session: Any, events: list[StreamEvent]) -> Any:
+    """The stimulus table a session presented.
+
+    Returns the session's own ``stimulus_set`` object unchanged when it has
+    one, so presentation metadata (``object_name`` and friends) survives. When
+    it has none, rebuilds a minimal ``StimulusSet`` from ``events`` that keeps
+    only the input columns and ``stimulus_id``.
+    """
     if getattr(session, "stimulus_set", None) is not None:
         return session.stimulus_set
     return _reconstruct_stimulus_set_from_events(events)
@@ -694,7 +720,7 @@ def _reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     """
     if not events:
         raise ValueError(
-            "neural interact received no input events and no session.stimulus_set "
+            "neural participate received no input events and no session.stimulus_set "
             "context to reconstruct."
         )
 
@@ -762,7 +788,7 @@ def _requested_output_channels(session) -> list[str]:
         return list(_neural_channels(record))
 
     raise ValueError(
-        "streaming interact requires the session to declare "
+        "streaming participate requires the session to declare "
         "requested_output_channels or record."
     )
 
@@ -779,7 +805,7 @@ def drive_typed_session(subject, session) -> None:
         if streaming:
             _drive_behavior_session_streaming(subject, session)
         else:
-            _drive_behavior_session_via_process(subject, session)
+            drive_behavior_session(subject, session)
         return
     if requested_channels == ["perturbation"]:
         _drive_state_change_session_via_process(subject, session)
@@ -794,7 +820,7 @@ def drive_typed_session(subject, session) -> None:
         if streaming:
             _drive_neural_session_streaming(subject, session)
         else:
-            _drive_neural_session_via_process(subject, session)
+            drive_neural_session(subject, session)
         return
     raise NotImplementedError(
         f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
@@ -830,7 +856,7 @@ def _drive_environment_session_via_process(
 
 def _drive_state_change_via_process(subject, session: StateChangeSession,
                                     state_change: StateChange) -> None:
-    """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
+    """Interim Phase 2 bridge; Phase 3 swaps this for native participate()."""
     _drive_state_change_session_via_process(
         subject, session, state_change=state_change, driver="process"
     )
@@ -846,12 +872,12 @@ def _drive_state_change_session_via_process(
         if event is not None:
             if not isinstance(event, StreamEvent):
                 raise TypeError(
-                    "perturbation interact expects StreamEvent inputs; got "
+                    "perturbation participate expects StreamEvent inputs; got "
                     f"{type(event).__name__}."
                 )
             if not isinstance(event.payload, StateChange):
                 raise TypeError(
-                    "perturbation interact expects StateChange payloads; got "
+                    "perturbation participate expects StateChange payloads; got "
                     f"{type(event.payload).__name__}."
                 )
             state_change = event.payload
@@ -859,7 +885,7 @@ def _drive_state_change_session_via_process(
             state_change = getattr(session, "state_change", None)
     if state_change is None:
         raise ValueError(
-            "perturbation interact requires a StateChange input event."
+            "perturbation participate requires a StateChange input event."
         )
     result = subject.process(state_change)
     handle_id = _state_change_handle_id(state_change, result)
@@ -877,17 +903,17 @@ def _drive_state_change_session_via_process(
 
 def _drive_behavior_via_process(subject, session: BehavioralSession,
                                 task_context) -> None:
-    """Interim Phase 2 bridge; Phase 3 swaps this for native interact()."""
-    _drive_behavior_session_via_process(
+    """Interim Phase 2 bridge; Phase 3 swaps this for native participate()."""
+    drive_behavior_session(
         subject, session, task_context=task_context, driver="process"
     )
 
 
 def _behavior_stimuli_from_session(session, task_context):
-    events = [event for event in _drain_stream_events(session)
+    events = [event for event in drain_session_inputs(session)
               if event.channel != 'instruction' and event.meta.get('role') != 'fitting']
     if events or getattr(session, 'stimulus_set', None) is not None:
-        return _stimuli_from_stream_session(session, events)
+        return session_stimuli(session, events)
     return _behavior_stimuli_to_score(task_context)
 
 
@@ -913,16 +939,28 @@ def _refuse_variance(subject, session) -> None:
             "add it with microsaccades; this subject has no equivalent.")
 
 
-def _drive_behavior_session_via_process(
-    subject, session: BehavioralSession, task_context=None,
-    driver: str = "interact"
+def drive_behavior_session(
+    subject: Any, session: Any, task_context: Optional[TaskContext] = None,
+    driver: str = "interact",
 ) -> None:
-    """Drive a behavioral session through existing start_task/process logic."""
+    """Answer a session's ``behavior`` request with ``start_task`` then one ``process`` call.
+
+    For typed subjects such as legacy adapters and ``BrainScoreModel``, which
+    already implement ``start_task(task_context)`` and ``process(stimuli)``.
+    The contract does not require ``process``: an arbitrary ``Subject`` only
+    implements ``participate`` and never needs this.
+
+    Uses ``task_context`` when given, otherwise the session's. Fitting inputs
+    and instructions are not scored; the scored trials are the session's
+    ``stimulus_set``, or the task's own stimuli when the session sends none.
+    A request for trial-to-trial variance is refused before any compute. The
+    single response is sent on the ``behavior`` channel.
+    """
     if task_context is None:
         task_context = getattr(session, "task_context", None)
     if task_context is None:
         raise ValueError(
-            "behavior interact requires a session.task_context to drive."
+            "behavior participate requires a session.task_context to drive."
         )
     _refuse_variance(subject, session)
     subject.start_task(task_context)
@@ -939,6 +977,14 @@ def _drive_behavior_session_via_process(
         t_ms=0.0,
         meta={"driver": driver, "task_type": task_context.task_type},
     ))
+
+
+# Former private names, kept for existing callers. Each is the same function
+# object as its public name.
+_drain_stream_events = drain_session_inputs
+_stimuli_from_stream_session = session_stimuli
+_drive_neural_session_via_process = drive_neural_session
+_drive_behavior_session_via_process = drive_behavior_session
 
 
 def _drive_behavior_session_streaming(
@@ -960,7 +1006,7 @@ def _drive_behavior_session_streaming(
         task_context = getattr(session, "task_context", None)
     if task_context is None:
         raise ValueError(
-            "behavior interact requires a session.task_context to drive."
+            "behavior participate requires a session.task_context to drive."
         )
     subject.start_task(task_context)              # once, before any trial
     stimuli = _behavior_stimuli_from_session(session, task_context)
@@ -989,7 +1035,7 @@ class StreamingStimulusSetSession(Session):
     row iterator, so event buffering stays bounded. Truly generated feeds that do
     not already exist as a table use ``WindowedStreamSession`` instead.
 
-    ``streaming = True`` is what routes ``interact`` to the one-at-a-time driver.
+    ``streaming = True`` is what routes ``participate`` to the one-at-a-time driver.
     """
 
     streaming = True

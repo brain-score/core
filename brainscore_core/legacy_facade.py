@@ -6,9 +6,9 @@ Legacy benchmarks call ``look_at`` / ``visual_degrees`` / ``start_task`` /
 this facade is permanent (Contract Rules v3, rule 11.2). It records each
 legacy setting, presents the stimuli as a ``BufferedSession`` that carries
 those settings (time bins, trial count, task, recording type) and runs the
-session through the subject's ``interact``. Nothing here depends on what kind
+session through the subject's ``participate``. Nothing here depends on what kind
 of subject is wrapped: a ``BrainScoreModel``, a domain adapter and an
-interact-only ``Subject`` all take part the same way.
+participate-only ``Subject`` all take part the same way.
 
 ``subject_for_benchmark`` applies the facade at the scoring boundary to
 benchmarks a domain loader marked as legacy. ``BrainScoreModel`` forwards its
@@ -26,13 +26,13 @@ PASSIVE = 'passive'
 
 LEGACY_API = 'legacy'     # calls look_at / digest_text and friends
 TYPED_API = 'typed'       # calls start_recording + process on the candidate
-SESSION_API = 'session'   # declares channels and drives interact itself
+SESSION_API = 'session'   # declares channels and drives participate itself
 
 
 class LegacyBenchmarkFacade:
     """Present a subject as a legacy ``BrainModel`` / ``ArtificialSubject``.
 
-    :param subject: any subject with ``interact``, ``reset``, ``identifier``
+    :param subject: any subject with ``participate``, ``reset``, ``identifier``
         and ``out_channels``.
     :param visual_degrees: field of view reported to vision benchmarks, or
         ``None`` when the subject declares none.
@@ -180,7 +180,7 @@ class LegacyBenchmarkFacade:
                                   task_context=self._task_context(),
                                   time_bins=self._time_bins)
         session.settings = dict(settings)
-        self._subject.interact(session)
+        self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
 
 

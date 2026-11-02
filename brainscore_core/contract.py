@@ -20,17 +20,19 @@ class TaskContext:
     Benchmarks populate all relevant fields. Models consume whichever
     fields match their paradigm:
     - Feature models use fitting_stimuli + label_set to train a readout
-    - Instruction-following models use instruction + label_set to build a prompt
+      (``BrainScoreModel(behavioral_readout_layer=...)``)
+    - Instruction-following models use instruction + label_set with their
+      ``answer`` function (``BrainScoreModel(answer=...)``)
     - Models that support both can choose their preferred approach
 
     ``prefer_path`` lets a benchmark (or an experimenting user) pin which
     behavioral dispatch path is selected when a model supports more than
     one. Accepts ``'auto'`` (default — generation if available, else
-    readout), ``'generation'`` (force generation, error if generation_fn
-    is missing or instruction is empty), or ``'readout'`` (force readout,
-    error if behavioral_readout_layer is missing or fitting_stimuli is
-    empty). This is the public API replacement for the legacy monkey-patch
-    pattern of setting ``model._generation_fn = None`` to force readout.
+    readout), ``'generation'`` (force generation through the model's
+    ``answer``; error if no answer is registered or instruction/label_set
+    is empty), or ``'readout'`` (force readout, error if
+    behavioral_readout_layer is missing or fitting_stimuli is empty). Use
+    it instead of disabling a model's answer function to force readout.
     """
     task_type: str
     label_set: Optional[List[str]] = None
@@ -44,7 +46,7 @@ class TaskContext:
 class Subject(ABC):
     """Minimal contract for a subject evaluated through a session.
 
-    Declare identity and supported channels, then implement ``interact`` to
+    Declare identity and supported channels, then implement ``participate`` to
     consume inputs with ``session.next_input()`` and submit responses with
     ``session.respond(event)``. A subject need not expose layers, modalities, or
     legacy model methods. Declarations may be properties or class attributes.
@@ -77,7 +79,7 @@ class Subject(ABC):
         return set()
 
     @abstractmethod
-    def interact(self, session: "Session") -> None:
+    def participate(self, session: "Session") -> None:
         """Consume session inputs and emit responses until the session ends."""
         ...
 
@@ -90,7 +92,7 @@ class UnifiedModel(Subject):
     """Subject base for models evaluated through typed paths.
 
     Implementations provide ``process``, ``start_task``, ``start_recording``,
-    a layer map and modality declarations. ``interact`` (the evaluation
+    a layer map and modality declarations. ``participate`` (the evaluation
     method of the contract) runs a session through those typed paths, so a
     typed model needs no session code of its own. ``process`` is a typed
     convenience of this base, not part of the subject contract.
@@ -154,12 +156,12 @@ class UnifiedModel(Subject):
         return modalities_to_input_channels(self.required_modalities)
 
     def process(self, input_event: InputEvent) -> OutputEvent:
-        """Typed convenience used by the default ``interact``; not part of the contract."""
+        """Typed convenience used by the default ``participate``; not part of the contract."""
         raise NotImplementedError(
-            f"{type(self).__name__} defines no process(); implement interact(session) "
+            f"{type(self).__name__} defines no process(); implement participate(session) "
             "or process(input_event) for the typed session driver.")
 
-    def interact(self, session: "Session") -> None:
+    def participate(self, session: "Session") -> None:
         """Run ``session`` through this model's typed paths."""
         from .streaming_helpers import drive_typed_session
         drive_typed_session(self, session)

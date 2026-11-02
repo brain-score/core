@@ -9,7 +9,7 @@ Brain-Score turns experimental data into quantitative benchmarks that evaluate
 subjects with compatible inputs, outputs and methods.
 
 > **UMI integration:** `Subject` defines session interaction through
-> `interact(session)`. `BrainScoreModel` implements it with extraction and task
+> `participate(session)`. `BrainScoreModel` implements it with extraction and task
 > helpers, including `process()`. Existing vision `BrainModel` and language
 > `ArtificialSubject` plugins remain supported through adapters. See
 > [the interface guide](docs/UMI_MIGRATION.md).

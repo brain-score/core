@@ -21,8 +21,8 @@ class Selection:
 
     :param layer: Dotted module path within the model, e.g.
         ``'language_model.layers.20'`` or ``'visual.transformer.blocks.10'``.
-        Resolved by the registered ``state_change_fn`` against the concrete
-        model object.
+        Resolved by the model's registered ``intervention`` against the
+        concrete model object.
     :param indices: Optional list of unit indices within the layer to
         perturb. ``None`` means ALL units at the layer.
     :param axis: Tensor axis addressed by indices; -1 keeps the last-axis
@@ -31,7 +31,7 @@ class Selection:
     :param expected_shape: Optional non-batch tensor shape, checked before use.
         Localizers set this when coordinates describe a flattened output.
     :param metadata: Free-form bag for selection criteria the
-        ``state_change_fn`` can interpret (e.g., a localizer mask, a
+        ``intervention`` can interpret (e.g., a localizer mask, a
         functional contrast specification).
     """
     layer: str
@@ -58,7 +58,7 @@ class Perturbation:
         ``scale``), ``'drive'`` (add ``amount`` — a stimulation / excitation
         analog), ``'replace'`` (replace with ``replacement`` tensor), or
         model-specific kinds (e.g., ``'noise'``) that the registered
-        ``state_change_fn`` knows how to interpret.
+        ``intervention`` knows how to interpret.
     :param scale: Multiplier for ``kind='scale'``. Ignored otherwise.
     :param amount: Additive offset for ``kind='drive'`` — inject activity into
         the selected units, the counterpart of ablation. Ignored otherwise.
@@ -76,15 +76,16 @@ class StateChange:
     """Apply or remove an intervention in the model.
 
     Used to simulate conditions like dyslexia, prosopagnosia, or pharmacological
-    effects. Passed to ``model.process()`` the same way stimuli are — the
-    interface is generic over input event type so benchmarks studying neural
+    effects. A session (or the typed ``apply_state_change`` helper) delivers it
+    to the subject; ``BrainScoreModel.process()`` also accepts it as a typed
+    convenience, the same way it accepts stimuli. Benchmarks studying neural
     dysfunction or drug effects do not need a separate model method.
 
     Two roles, distinguished by ``kind``:
 
     1. **Apply** a perturbation: ``kind`` names a perturbation class
        (``'ablation'``, ``'lesion'``, ``'pharmacological'``, ...). The
-       ``state_change_fn`` registered on the model installs the perturbation
+       ``intervention`` registered on the model installs the perturbation
        (e.g., a forward hook), and ``process(StateChange)`` returns a
        :class:`PerturbationApplied` confirmation containing a ``handle_id``.
     2. **Remove** a previously-applied perturbation: ``kind='reset'`` and
@@ -180,9 +181,10 @@ class EnvironmentStep:
     """Single step of an embodied environment.
 
     Used for interactive evaluation where the model observes, acts, and receives
-    the environment's response over multiple ticks. Passed to ``process()`` like
-    a stimulus — the interface generalizes over input type rather than adding
-    a separate agent method.
+    the environment's response over multiple ticks. A session delivers it to
+    the subject like a stimulus (``BrainScoreModel.process()`` accepts it as a
+    typed convenience); the model's ``policy`` answers it. The interface
+    generalizes over input type rather than adding a separate agent method.
 
     This is a device-agnostic envelope. The preferred field is
     ``observation`` (an environment-defined payload). The ``cameras`` and
@@ -197,8 +199,8 @@ class EnvironmentStep:
 
     Episode control signals (``is_first``, ``is_last``, ``is_terminal``,
     ``reward``, ``discount``) follow the RLDS convention so existing
-    DROID-format demonstration data can be replayed through ``process()``
-    one step at a time.
+    DROID-format demonstration data can be replayed through a session one
+    step at a time.
 
     Examples::
 
@@ -292,8 +294,8 @@ class Message:
     the next agent's stimulus, with no bespoke routing protocol and no ABC
     change.
 
-    ``process(Message)`` routes to the model's ``action_fn`` (an agent
-    *responds* to a message), and a responder may return either a ``Message`` or
+    A ``Message`` routes to the model's ``policy`` (an agent *responds* to a
+    message), and a responder may return either a ``Message`` or
     an :class:`EnvironmentResponse`. ``content`` is the payload (text, an action,
     a structured proposal); ``sender`` / ``recipient`` carry addressing for
     multi-party settings; ``metadata`` carries telemetry without growing the

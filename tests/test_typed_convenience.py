@@ -27,4 +27,4 @@ def test_typed_subclass_instantiates_without_process_and_fails_clearly():
     stimuli.identifier = 'one'
     session = BufferedSession(stimulus_set=stimuli, requested_output_channels=['neural:IT'])
     with pytest.raises(NotImplementedError, match='defines no process'):
-        subject.interact(session)
+        subject.participate(session)

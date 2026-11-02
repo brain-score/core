@@ -116,7 +116,8 @@ class BehavioralReadout:
                     f"Model '{owner.identifier}' cannot run task "
                     f"'{task_type}' via generation path "
                     f"(prefer_path='generation'): "
-                    f"requires model.generation_fn AND TaskContext.instruction "
+                    f"requires an answer function registered with "
+                    f"BrainScoreModel(answer=...) AND TaskContext.instruction "
                     f"AND TaskContext.label_set to be set."
                 )
             self.use_generation_for_task = True
@@ -155,8 +156,8 @@ class BehavioralReadout:
             raise ValueError(
                 f"Model '{owner.identifier}' cannot run behavioral task "
                 f"'{task_type}': TaskContext provides neither fitting_stimuli "
-                f"(needed for readout path) nor (instruction + label_set "
-                f"+ model.generation_fn) (needed for generation path)."
+                f"(needed for readout path) nor (instruction + label_set, "
+                f"with BrainScoreModel(answer=...)) (needed for generation path)."
             )
 
     def reset(self) -> None:
@@ -238,7 +239,7 @@ class BehavioralReadout:
         return self.readout_classifier.predict_proba(features)
 
     def generate_predictions(self, stimuli):
-        """Call generation_fn per-stimulus, return one-hot BehavioralAssembly."""
+        """Call the registered answer function per stimulus, return one-hot BehavioralAssembly."""
         import numpy as np
         from brainscore_core.supported_data_standards.brainio.assemblies import (
             BehavioralAssembly,
@@ -267,7 +268,7 @@ class BehavioralReadout:
             if predicted not in label_to_idx:
                 import warnings
                 warnings.warn(
-                    f"generation_fn returned {predicted!r}, not in "
+                    f"answer function returned {predicted!r}, not in "
                     f"label_set={label_set}. Defaulting to {label_set[0]!r}."
                 )
                 predicted = label_set[0]

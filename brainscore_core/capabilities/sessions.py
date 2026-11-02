@@ -3,7 +3,7 @@
 Each part of a BrainScoreModel (region map, answer or readout, policy,
 intervention) handles some channels. These capabilities declare those
 channels and run the matching sessions, registered the same way as any added
-capability, so ``interact``, ``check_session_support`` and the declared
+capability, so ``participate``, ``check_session_support`` and the declared
 channels all read one registry. They sort after added capabilities
 (``order`` 10000), so an added capability that claims the same outputs wins.
 """
@@ -40,12 +40,11 @@ class NeuralSessions(_SessionCapability):
     def supports_session(self, model, channels) -> bool:
         return bool(channels) and all(c.startswith('neural:') for c in channels)
 
-    def interact(self, model, session) -> None:
+    def participate(self, model, session) -> None:
         if getattr(session, 'streaming', False):
             _drivers._drive_neural_session_streaming(model, session)
         else:
-            _drivers._drive_neural_session_via_process(model, session,
-                                                       allow_multi_modality=True)
+            _drivers.drive_neural_session(model, session, allow_multi_modality=True)
 
 
 class BehaviorSessions(_SessionCapability):
@@ -64,11 +63,11 @@ class BehaviorSessions(_SessionCapability):
     def supports_session(self, model, channels) -> bool:
         return set(channels) == {'behavior'}
 
-    def interact(self, model, session) -> None:
+    def participate(self, model, session) -> None:
         if getattr(session, 'streaming', False):
             _drivers._drive_behavior_session_streaming(model, session)
         else:
-            _drivers._drive_behavior_session_via_process(model, session)
+            _drivers.drive_behavior_session(model, session)
 
 
 class MotorSessions(_SessionCapability):
@@ -86,7 +85,7 @@ class MotorSessions(_SessionCapability):
     def supports_session(self, model, channels) -> bool:
         return set(channels) == {'motor'}
 
-    def interact(self, model, session) -> None:
+    def participate(self, model, session) -> None:
         _drivers._drive_environment_session_via_process(model, session)
 
 
@@ -105,7 +104,7 @@ class PerturbationSessions(_SessionCapability):
     def supports_session(self, model, channels) -> bool:
         return set(channels) == {'perturbation'}
 
-    def interact(self, model, session) -> None:
+    def participate(self, model, session) -> None:
         _drivers._drive_state_change_session_via_process(model, session)
 
 

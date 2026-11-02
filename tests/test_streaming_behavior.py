@@ -31,7 +31,7 @@ def _stimuli(n=5):
 
 
 class _Session:
-    """Minimal behavioral session; `streaming` decides which driver interact picks."""
+    """Minimal behavioral session; `streaming` decides which driver participate picks."""
 
     def __init__(self, task_context, streaming=False):
         self.task_context = task_context

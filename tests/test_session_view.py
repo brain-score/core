@@ -70,7 +70,7 @@ def test_undeclared_events_are_skipped_and_declared_ones_delivered():
         StreamEvent('vision', '/tmp/a.png', 0.0,
                     meta={'stimulus_id': 'a', 'column': 'image_path'}),
     ], requested_output_channels=['neural:IT'])
-    model.interact(session)
+    model.participate(session)
     seen, = extractor.seen
     assert list(seen['stimulus_id']) == ['a']
     assert session.collect('neural:IT').sizes['presentation'] == 1
@@ -81,7 +81,7 @@ def test_environment_steps_pass_through_to_the_policy():
     model = BrainScoreModel('policy', policy=lambda step: steps.append(step) or EnvironmentResponse(action=1))
     step = EnvironmentStep(observation={'value': 1})
     session = BufferedSession([step], requested_output_channels=['motor'])
-    model.interact(session)
+    model.participate(session)
     assert steps == [step]
     assert session.emitted[0].payload.action == 1
 
