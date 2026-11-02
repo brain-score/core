@@ -1,0 +1,128 @@
+"""Runtime check that installed dependencies fall within UMI's compatibility bounds.
+
+Public API: ``check_env_bounds`` (drift messages only), ``describe_env`` (one
+row per checked package, passing or not) and ``warn_on_drift`` (the warning
+``import brainscore_core`` emits). ``python -m brainscore.doctor`` prints
+``describe_env`` as a table.
+
+These are the version ranges scoring is *verified against* — deliberately looser
+than any single install pin (that's the environment file's job). Drift outside
+them silently breaks scoring. This module warns loudly at import rather than
+letting a scored run be silently wrong.
+
+``scikit-learn`` moved from 1.5 to 1.7.2 on 2026-09-10, matching the version
+``language/environment_lock.yml`` already locked. The 1.5 pin had made four
+registered benchmarks unrunnable — ``Pereira2018.{243,384}sentences-ridge``,
+``Blank2014-ridge`` and ``Fedorenko2016-ridge`` all route through
+``kfold='group'``, and upstream calls ``GroupKFold(shuffle=..., random_state=...)``,
+parameters that only exist from 1.6.
+
+The bump is score-neutral, which was checked rather than assumed:
+``LogisticRegression(multi_class='multinomial')`` is still honoured in 1.7.2 and
+returns bit-identical probabilities to 1.5.1 for both binary and multiclass
+fits. sklearn's own warning says removal was planned for 1.7; it actually
+slipped to **1.8**, which is why the upper bound is ``<1.8``. At 1.8 the
+argument disappears and binary problems become proper binary logistic fits
+(as if ``multi_class='ovr'``), which does move probabilities — measured on a
+seeded 400x30 binary fit, mid-range values shift from 0.0019 to 0.0076.
+Multiclass is unaffected. Crossing into 1.8 therefore needs the behavioral
+readouts re-measured, and is a deliberate step rather than a version bump.
+
+``transformers`` 5 is now supported. The two things that blocked it are handled:
+``DynamicCache.to_legacy_cache`` was removed, so the KV sliding window selects a
+cache API by shape (``slice_kv_cache``), and the image-processor class names were
+rebound so the default moved from PIL to torchvision, which registrations pin
+explicitly (``hf_compat.pin_image_processor``). Both were checked against 5.14:
+GPT-2 features are bit-identical across the two majors, and the one model whose
+processor default actually moved shifts its score by 0.038%.
+
+Uses only ``importlib.metadata`` so ``brainscore_core`` stays free of heavy
+dependencies (no torch/transformers import).
+"""
+from importlib.metadata import version, PackageNotFoundError
+from typing import List, Optional, Tuple
+
+# (distribution name, ok(version_tuple) -> bool, human-readable bound)
+_BOUNDS = [
+    ("transformers", lambda v: (4, 57) <= (v[0], v[1]) < (6, 0), ">=4.57,<6"),
+    ("scikit-learn", lambda v: (1, 7) <= (v[0], v[1]) < (1, 8), ">=1.7,<1.8"),
+    ("numpy", lambda v: (1, 21) <= (v[0], v[1]) < (2, 0), ">=1.21,<2"),
+    ("xarray", lambda v: (v[0], v[1], v[2]) == (2022, 3, 0), "==2022.3.0"),
+]
+
+
+def _parse(s):
+    """Leading-numeric version tuple, padded to 3 fields. '5.5.0' -> (5, 5, 0)."""
+    parts = []
+    for field in s.split(".")[:3]:
+        num = ""
+        for ch in field:
+            if ch.isdigit():
+                num += ch
+            else:
+                break
+        parts.append(int(num) if num else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def check_env_bounds() -> List[str]:
+    """Return human-readable drift messages (empty if all bounds hold)."""
+    drift = []
+    for pkg, ok, expected in _BOUNDS:
+        try:
+            installed = version(pkg)
+        except PackageNotFoundError:
+            continue  # package not installed in this (e.g. core-only) env
+        try:
+            if not ok(_parse(installed)):
+                drift.append(
+                    f"{pkg}=={installed} is outside the UMI runtime "
+                    f"compatibility bound ({expected})")
+        except Exception:
+            continue  # unparseable version string: don't block import
+    return drift
+
+
+def warn_on_drift() -> None:
+    """Emit a RuntimeWarning if any dependency is outside its compatibility bound."""
+    drift = check_env_bounds()
+    if drift:
+        import warnings
+        warnings.warn(
+            "Installed dependencies are outside UMI's runtime compatibility "
+            "bounds (these are the versions scoring is verified against; the exact "
+            "install pin is the environment file's job):\n  - "
+            + "\n  - ".join(drift)
+            + "\nScoring may be SILENTLY WRONG (scikit-learn>=1.8 drops "
+            "LogisticRegression(multi_class=...), so binary behavioral-readout "
+            "scores move without erroring). Install the pinned environment "
+            "(environment-unified.yml) to fix.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
+def describe_env() -> List[Tuple[str, Optional[str], str, Optional[bool]]]:
+    """Per-dependency status, including the ones that are fine.
+
+    ``check_env_bounds`` reports only problems, which is what a warning needs.
+    A user asking "is my environment right?" needs to see the passing rows too,
+    otherwise silence is indistinguishable from nothing having been checked.
+
+    :return: rows of ``(package, installed or None, expected, ok)`` where ``ok``
+        is None for a package that is absent or has an unparseable version
+    """
+    rows = []
+    for pkg, ok, expected in _BOUNDS:
+        try:
+            installed = version(pkg)
+        except PackageNotFoundError:
+            rows.append((pkg, None, expected, None))
+            continue
+        try:
+            rows.append((pkg, installed, expected, bool(ok(_parse(installed)))))
+        except Exception:
+            rows.append((pkg, installed, expected, None))
+    return rows
