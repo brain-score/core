@@ -20,6 +20,7 @@ PINNED_SEED_CHANNELS = {
     "lesion": (io_catalog.INPUT, "core"),
     "motor": (io_catalog.OUTPUT, "environment harness"),
     "neural": (io_catalog.OUTPUT, "core"),
+    "perturbation": (io_catalog.OUTPUT, "core"),
     "observation": (io_catalog.INPUT, "environment harness"),
     "pharmacological": (io_catalog.INPUT, "core"),
     "proprioception": (io_catalog.INPUT, "environment harness"),

@@ -113,7 +113,8 @@ def normalize_extractors(owner, preprocessors, activations_model):
                 continue
             import warnings
             warnings.warn(
-                'Extraction callbacks in preprocessors are deprecated. Use '
+                'Extraction callbacks in preprocessors are deprecated and are removed at '
+                'the public release. Use '
                 'activations_model={modality: extractor}, where extractor accepts '
                 '(stimuli, layers=...).',
                 DeprecationWarning, stacklevel=3)
@@ -232,7 +233,7 @@ class InputDispatcher:
         # activation cache key does not fingerprint, so a cached UNperturbed
         # extraction would be wrongly returned for a perturbed run. Bypass the
         # cache while any perturbation is active.
-        if self.owner._active_perturbations:
+        if self.owner._perturbations.active_perturbations:
             with _activation_cache_disabled():
                 return self._extract_for_modality_inner(stimuli, modality, layers)
         return self._extract_for_modality_inner(stimuli, modality, layers)
@@ -272,10 +273,10 @@ class InputDispatcher:
                 layers, modality)
             if (owner._region_modality_map
                     and not modality_layers
-                    and owner._recording_regions):
+                    and owner._recorder.recording_regions):
                 continue
             sub = (owner._process_composite_regions(stimuli, modality)
-                   if owner._composite_recording else
+                   if owner._recorder.composite_recording else
                    owner._extract_for_modality(stimuli, modality, modality_layers))
             if not hasattr(sub, 'dims') or 'neuroid' not in sub.dims:
                 raise TypeError(
@@ -285,7 +286,7 @@ class InputDispatcher:
                     f"{type(sub).__name__}. Upgrade the preprocessor to a "
                     f"layer-aware extractor (TextWrapper / VLMVisionWrapper)."
                 )
-            if owner._is_multi_region and not owner._composite_recording:
+            if owner._recorder.is_multi_region and not owner._recorder.composite_recording:
                 sub = owner._tag_neuroids_with_regions(sub, modality)
             n_neuroid = sub.sizes['neuroid']
             sub = sub.assign_coords(

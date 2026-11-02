@@ -18,6 +18,7 @@ EXPECTED_PUBLIC_NAMES = {
     'Dict',
     'EnvironmentResponse',
     'EnvironmentStep',
+    'Extractor',
     'FunctionalSelection',
     'IndexSelection',
     'InputEvent',

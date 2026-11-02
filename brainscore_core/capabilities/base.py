@@ -17,6 +17,16 @@ class Capability(ABC):
     input_channels = frozenset()
     output_channels = frozenset()
 
+    def declared_input_channels(self, model):
+        """Input channels this capability adds for ``model``."""
+        del model
+        return set(self.input_channels)
+
+    def declared_output_channels(self, model):
+        """Output channels this capability adds for ``model``."""
+        del model
+        return set(self.output_channels)
+
     def reset(self, model, state) -> None:
         """Release experiment state. Retain configuration needed by later calls."""
         state.clear()

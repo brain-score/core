@@ -26,7 +26,7 @@ import warnings
 from typing import Optional
 
 from .execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
-from .contract import Subject, UnifiedModel
+from .contract import Subject
 
 logger = logging.getLogger(__name__)
 
@@ -368,25 +368,28 @@ def _get_execution_plan(benchmark) -> Optional[ExecutionPlan]:
 def _probe_regions(model, benchmark):
     """Regions to try recording for the probe, in order.
 
-    The benchmark's own ``.region`` if it exposes one; otherwise the model's
-    ``region_layer_map`` keys tried ONE AT A TIME (never all at once — recording
-    every region would sum several layers and inflate the feature width, and would
-    request a modality a single-tower wrapper can't serve). ``[None]`` means the
-    model has no recording concept (e.g. a behavioral candidate) — probe as-is.
+    The benchmark's own ``.region`` if it exposes one; otherwise the regions of
+    the neural output channels the benchmark requests, or that the subject
+    declares, tried ONE AT A TIME (never all at once — recording every region
+    would sum several layers and inflate the feature width, and would request a
+    modality a single-tower wrapper can't serve). A model's ``region_layer_map``
+    order is kept when it has one. ``[None]`` means no neural output is declared
+    (e.g. a behavioral candidate) — nothing to probe.
     """
     region = getattr(benchmark, 'region', None)
     if region is not None:
         return [region]
     region_map = getattr(model, 'region_layer_map', None)
+    channels = getattr(benchmark, 'requested_output_channels', None)
+    if channels is None:
+        channels = model.out_channels
+    regions = [channel.split(':', 1)[1] for channel in sorted(channels)
+               if channel.startswith('neural:')]
     if region_map:
-        return list(region_map.keys())
-    if isinstance(model, Subject) and not isinstance(model, UnifiedModel):
-        channels = getattr(benchmark, 'requested_output_channels', None)
-        if channels is None:
-            channels = model.out_channels
-        return [channel.split(':', 1)[1] for channel in sorted(channels)
-                if channel.startswith('neural:')] or [None]
-    return [None]
+        declared = set(regions)
+        regions = ([r for r in region_map if r in declared]
+                   + [r for r in regions if r not in region_map])
+    return regions or [None]
 
 
 
@@ -439,26 +442,19 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
         except Exception:
             one = stimulus_set
         one = _isolate_probe_identifier(one, stimulus_set)
-    can_record = hasattr(model, 'start_recording')
+    from .streaming_helpers import neural_response
     time_bins = getattr(benchmark, 'timebins', None)
     regions = ([recording_target] if recording_target is not None
                else _probe_regions(model, benchmark))
     last_error = None
     for region in regions:
-        if region is not None and can_record:
-            try:
-                model.start_recording(region, time_bins=time_bins)
-            except Exception as e:
-                last_error = e
-                continue
+        # One session through interact, the same way every subject is
+        # evaluated; no probing of the subject's methods or class.
         try:
-            if isinstance(model, Subject) and not isinstance(model, UnifiedModel):
-                from .streaming_helpers import neural_response
-                if region is None:
-                    raise ValueError('Feature-width probe requires a neural output channel')
-                result = neural_response(model, one, record=region, time_bins=time_bins)
-            else:
-                result = model.process(one)
+            if region is None:
+                raise ValueError('Feature-width probe requires a neural output '
+                                 'channel (neural:<region>)')
+            result = neural_response(model, one, record=region, time_bins=time_bins)
         except Exception as e:
             last_error = e
             continue
