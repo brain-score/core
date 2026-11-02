@@ -452,3 +452,21 @@ def test_text_identifiers_do_not_collide_on_the_delimiter():
     first = text_stimulus_set(['a|b', 'c'])
     second = text_stimulus_set(['a', 'b|c'])
     assert first.identifier != second.identifier
+
+
+def test_changed_fitting_data_in_the_same_task_object_refits():
+    """TaskContext is mutable: an explicit start_task after a change fits again."""
+    model, extractor = _readout_model()
+    task = TaskContext(task_type='probabilities', fitting_stimuli=_labelled_images())
+    model.start_task(task)
+    model.start_task(task)
+    assert _fits(extractor) == 1  # unchanged task sent again: no refit
+    task.fitting_stimuli = _labelled_images()  # a new table
+    task.fitting_stimuli['image_label'] = ['dog', 'cat', 'dog', 'cat']
+    model.start_task(task)
+    assert _fits(extractor) == 2
+    task.fitting_stimuli['image_label'] = ['cat', 'cat', 'dog', 'dog']  # relabelled in place
+    model.start_task(task)
+    assert _fits(extractor) == 3
+    model.look_at(_images())  # a measurement on the unchanged task: no refit
+    assert _fits(extractor) == 3
