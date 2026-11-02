@@ -80,7 +80,7 @@ def test_channel_compatible_pair_passes():
     check_channel_compatibility(subject, benchmark)
 
 
-def test_missing_required_input_channel_raises_with_channel_name():
+def test_partial_input_overlap_runs_and_no_overlap_raises():
     subject = _Subject(
         in_channels={"vision"},
         out_channels={"neural:IT"},
@@ -90,8 +90,17 @@ def test_missing_required_input_channel_raises_with_channel_name():
         requested_output_channels={"neural:IT"},
     )
 
+    # Contract v3 rule 5.5: partial matches run; the dropped stream is reported.
+    match = check_channel_compatibility(subject, benchmark)
+    assert match.kind == "partial"
+    assert match.dropped_inputs == {"text"}
+
+    no_overlap = _Benchmark(
+        required_input_channels={"text"},
+        requested_output_channels={"neural:IT"},
+    )
     with pytest.raises(CompatibilityError, match="text"):
-        check_channel_compatibility(subject, benchmark)
+        check_channel_compatibility(subject, no_overlap)
 
 
 def test_missing_requested_output_channel_raises_with_channel_name():

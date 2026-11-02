@@ -61,14 +61,22 @@ class Session(ABC):
 
     Sources implement next_input and respond. The optional settings below are the
     common configuration consumed by BrainScoreModel and experiment replay.
+
+    ``complete`` says whether the inputs ran to the end of the episode. Fixed
+    inputs are always complete; an environment session stays False until a
+    terminal step. Runners must not accept an incomplete session as a measurement.
     """
+    complete: bool = True
     requested_output_channels: Optional[tuple[str, ...]] = None
     stimulus_set: Any = None
     task_context: Any = None
     time_bins: Any = None
     streaming = False
+    # Per-measurement settings a legacy facade attaches (trial count, variance
+    # request, recording type, legacy text). None when the session has none.
+    settings: Any = None
     context_fields = ('requested_output_channels', 'stimulus_set', 'task_context',
-                      'time_bins', 'streaming')
+                      'time_bins', 'streaming', 'settings')
 
     def collect(self, channel: Optional[str] = None) -> Any:
         """Return emitted events; specialized sources may assemble their payloads."""
@@ -102,6 +110,44 @@ class Session(ABC):
         self.respond(event)
 
 
+def _validate_inputs(inputs) -> None:
+    """Check known inputs against the channel catalog before any is delivered.
+
+    Contract Rules v3, rule 3.4: a session whose inputs are known up front
+    fails at construction, not at the first event the subject reads. A wrong
+    direction, a bad address or a failed family validator is an error. An
+    unregistered family (allowed in exploratory experiments; benchmark scoring
+    rejects it at pre-flight), the catalog's documented ndim/dtype hints and a
+    payload whose type differs from the family's ``payload_type`` only warn.
+    """
+    import warnings
+    from . import io_catalog
+    problems, notes = [], []
+    for event in inputs:
+        if not isinstance(event, StreamEvent):
+            continue  # e.g. replayed EnvironmentSteps; validated by their harness
+        family = event.channel.split(":", 1)[0]
+        if not io_catalog.has(family):
+            notes.append(f"{event.channel}: unregistered channel family")
+            continue
+        notes.extend(io_catalog.payload_type_notes(event.channel, event.payload))
+        found = io_catalog.validate(event.channel, event.payload,
+                                    direction=io_catalog.INPUT)
+        if not found:
+            continue
+        documented = io_catalog.check_payload(event.channel, event.payload)
+        notes.extend(m for m in found if m in documented)
+        problems.extend(m for m in found if m not in documented)
+    if problems:
+        shown = sorted(set(problems))
+        more = f" (+{len(shown) - 5} more)" if len(shown) > 5 else ""
+        raise ValueError("Session inputs failed catalog validation: "
+                         + "; ".join(shown[:5]) + more)
+    if notes:
+        warnings.warn("Session inputs not fully covered by the channel catalog: "
+                      + "; ".join(sorted(set(notes))[:5]), stacklevel=3)
+
+
 class BufferedSession(Session):
     """Deliver fixed inputs and collect responses without environment feedback."""
 
@@ -118,6 +164,7 @@ class BufferedSession(Session):
         elif task_context is not None and not inputs:
             stimulus_set = _behavior_stimuli_to_score(task_context)
             inputs = _behavior_events(task_context, stimulus_set)
+        _validate_inputs(inputs)
         if requested_output_channels is not None:
             if isinstance(requested_output_channels, str):
                 raise TypeError('requested_output_channels must be a sequence of channel names.')

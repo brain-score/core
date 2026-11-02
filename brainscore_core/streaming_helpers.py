@@ -12,7 +12,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .contract import Subject, UnifiedModel
+from .contract import Subject, UnifiedModel  # noqa: F401  (re-exported)
 from .io_catalog import modalities_to_input_channels
 from .streaming import BufferedSession, Session, StreamEvent, parse_channel
 from .events import (
@@ -113,11 +113,25 @@ class EnvironmentSession(Session):
     untyped wrappers remain usable unless require_specs=True. Use as a context
     manager to close the environment; subject reset belongs to the trial owner.
     Terminal observations are delivered once, without requesting another action.
+
+    history_limit bounds memory for long episodes: input_events, action_events
+    and emitted each keep only their latest N entries (0 keeps none; None, the
+    default, keeps everything). The model and observe_actions() callbacks still
+    see every event. collect() refuses once an applied action has been dropped,
+    so a truncated history is never returned as a whole episode.
     """
     records_action_execution = True
 
     def __init__(self, environment, *, action_validator=None, seed=None,
-                 options=None, require_specs=False):
+                 options=None, require_specs=False, history_limit: Optional[int] = None):
+        if history_limit is not None and (
+                isinstance(history_limit, bool) or not isinstance(history_limit, int)):
+            raise TypeError("history_limit must be an int or None")
+        if history_limit is not None and history_limit < 0:
+            raise ValueError("history_limit must be >= 0")
+        self.history_limit = history_limit
+        self._dropped_actions = 0
+        self._described = False
         self.environment = environment
         self.action_validator = action_validator
         self.reset_kwargs = {}
@@ -165,6 +179,7 @@ class EnvironmentSession(Session):
             'reset': deepcopy(self.reset_kwargs),
             'execution': 'turn_based',
             'scheduler': 'one_action_per_step',
+            **({} if self.history_limit is None else {'history_limit': self.history_limit}),
         }
 
     @contextmanager
@@ -180,8 +195,17 @@ class EnvironmentSession(Session):
         finally:
             self._action_observers.remove(callback)
 
+    def _retain(self, history, event) -> bool:
+        """Append within history_limit; return True if an older entry was dropped."""
+        history.append(event)
+        if self.history_limit is None or len(history) <= self.history_limit:
+            return False
+        # Keep the public history attributes as lists; trimming costs O(history_limit).
+        del history[0]
+        return True
+
     def _record_action(self, event):
-        self.action_events.append(event)
+        self._retain(self.action_events, event)
         try:
             for callback in tuple(self._action_observers):
                 callback(event)
@@ -231,13 +255,15 @@ class EnvironmentSession(Session):
             if t_ms is not None:
                 self._previous_t_ms = t_ms
             context = {**step.context, **timing, 't_ms': t_ms}
-            if not self.input_events:
+            if not self._described:
+                self._described = True
                 context['environment_session'] = self.describe()
             step = replace(step, context=context)
             self._last_step = step
             self._done = self.complete = _environment_step_terminates(step)
             self._awaiting_emit = not self._done
-            self.input_events.append(deepcopy(_environment_step_event(step)))
+            if self.history_limit != 0:
+                self._retain(self.input_events, deepcopy(_environment_step_event(step)))
             return step
         except BaseException:
             self._done = True
@@ -284,7 +310,7 @@ class EnvironmentSession(Session):
             }))
             raise
         receipt = replace(proposal, payload=payload, meta={**meta, 'action_status': 'applied'})
-        self.emitted.append(receipt)
+        self._dropped_actions += self._retain(self.emitted, receipt)
         self._record_action(receipt)
         self._awaiting_emit = False
         try:
@@ -298,6 +324,11 @@ class EnvironmentSession(Session):
     def collect(self, channel: str = "motor") -> list:
         if channel != "motor":
             raise ValueError(f"EnvironmentSession.collect only supports 'motor'; got {channel!r}.")
+        if self._dropped_actions:
+            raise RuntimeError(
+                f"history_limit={self.history_limit} dropped {self._dropped_actions} applied "
+                "action(s); stream them with observe_actions() instead of collect()"
+            )
         return [event.payload for event in self.emitted]
 
 
@@ -317,10 +348,11 @@ def state_change_session(state_change: StateChange) -> StateChangeSession:
 
 
 def environment_session(environment, *, action_validator=None, seed=None,
-                        options=None, require_specs=False) -> EnvironmentSession:
+                        options=None, require_specs=False,
+                        history_limit: Optional[int] = None) -> EnvironmentSession:
     return EnvironmentSession(
         environment, action_validator=action_validator, seed=seed,
-        options=options, require_specs=require_specs,
+        options=options, require_specs=require_specs, history_limit=history_limit,
     )
 
 
@@ -343,11 +375,7 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
             "    subject.start_recording(['V4', 'IT']); assembly = subject.process(stimuli)")
     session = stimulus_session(stimulus_set, record=record,
                                time_bins=time_bins)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_via_process(subject, session, stimulus_set, record=record,
-                           time_bins=time_bins)
+    subject.interact(session)
     return session.collect(f"neural:{record}")
 
 
@@ -356,19 +384,13 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
     ``BehavioralAssembly`` -- the model's output, not a Score.
     """
     session = behavior_session(task_context)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_behavior_via_process(subject, session, task_context)
+    subject.interact(session)
     return session.collect("behavior")
 
 
 def apply_state_change(subject, state_change: StateChange):
     session = state_change_session(state_change)
-    if _has_native_interact(subject):
-        subject.interact(session)
-    else:
-        _drive_state_change_via_process(subject, session, state_change)
+    subject.interact(session)
     return session.collect("perturbation")
 
 
@@ -390,10 +412,7 @@ def run_environment(subject, environment, *, seed=None, options=None,
             close()
         raise
     with session:
-        if _has_native_interact(subject):
-            subject.interact(session)
-        else:
-            _drive_environment_via_process(subject, session)
+        subject.interact(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
         return session.collect("motor")
@@ -413,12 +432,19 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
 
 
 def _drive_neural_session_via_process(
-    subject, session, driver: str = "interact"
+    subject, session, driver: str = "interact", allow_multi_modality: bool = False
 ) -> None:
+    """Run a neural session through ``start_recording`` + ``process``.
+
+    ``allow_multi_modality`` is the subject's own statement that its
+    ``process`` combines several input modalities; when several are present
+    it is called with ``multi_modality=True``.
+    """
+    _refuse_variance(subject, session)
     input_events = _drain_stream_events(session)
     stimuli = _stimuli_from_stream_session(session, input_events)
     output_t_ms = input_events[-1].t_ms if input_events else 0.0
-    use_multi_modality = _should_use_multi_modality(subject, input_events)
+    use_multi_modality = allow_multi_modality and _spans_several_inputs(input_events)
     time_bins = getattr(session, "time_bins", None)
 
     channel_regions = []
@@ -649,9 +675,7 @@ def _stimuli_from_stream_session(session, events: list[StreamEvent]):
     return _reconstruct_stimulus_set_from_events(events)
 
 
-def _should_use_multi_modality(subject, events: list[StreamEvent]) -> bool:
-    if not hasattr(subject, "_process_multi_modality"):
-        return False
+def _spans_several_inputs(events: list[StreamEvent]) -> bool:
     families = set()
     for event in events:
         family, _ = parse_channel(event.channel)
@@ -743,9 +767,40 @@ def _requested_output_channels(session) -> list[str]:
     )
 
 
-def _has_native_interact(subject) -> bool:
-    interact = getattr(type(subject), "interact", None)
-    return callable(interact) and interact not in (Subject.interact, UnifiedModel.interact)
+def drive_typed_session(subject, session) -> None:
+    """Run a session through a typed model's ``process`` / ``start_*`` paths.
+
+    Routes on the session's requested output channels: ``behavior``,
+    ``perturbation``, ``motor``, or any set of ``neural:<region>`` channels.
+    """
+    requested_channels = _requested_output_channels(session)
+    streaming = getattr(session, "streaming", False)
+    if requested_channels == ["behavior"]:
+        if streaming:
+            _drive_behavior_session_streaming(subject, session)
+        else:
+            _drive_behavior_session_via_process(subject, session)
+        return
+    if requested_channels == ["perturbation"]:
+        _drive_state_change_session_via_process(subject, session)
+        return
+    if requested_channels == ["motor"]:
+        _drive_environment_session_via_process(subject, session)
+        return
+    if requested_channels and all(channel.startswith("neural:")
+                                  for channel in requested_channels):
+        # A session may ask to be consumed one input at a time (inputs generated
+        # on demand rather than known up front). Same scores, different arrival.
+        if streaming:
+            _drive_neural_session_streaming(subject, session)
+        else:
+            _drive_neural_session_via_process(subject, session)
+        return
+    raise NotImplementedError(
+        f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
+        "runs sessions requesting neural:<region>, behavior, perturbation, or "
+        f"motor output channels; got {requested_channels!r}."
+    )
 
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
@@ -836,6 +891,28 @@ def _behavior_stimuli_from_session(session, task_context):
     return _behavior_stimuli_to_score(task_context)
 
 
+def measurement_settings(session) -> dict:
+    """Per-measurement settings a legacy facade attached to ``session`` (trial count, variance request)."""
+    return dict(getattr(session, "settings", None) or {})
+
+
+def _refuse_variance(subject, session) -> None:
+    """The typed paths are deterministic: a request for trial-to-trial variance fails.
+
+    A legacy ``look_at(require_variance=True)`` asks for repeated noisy
+    presentations. Returning identical trials would be a silently corrected
+    response (rule 6.2), so both the neural and the behavioral typed drivers
+    refuse it before any compute.
+    """
+    settings = measurement_settings(session)
+    if settings.get("require_variance"):
+        raise NotImplementedError(
+            f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
+            "cannot produce trial-to-trial variance (look_at(require_variance=True, "
+            f"number_of_trials={settings.get('number_of_trials', 1)})). Legacy models "
+            "add it with microsaccades; this subject has no equivalent.")
+
+
 def _drive_behavior_session_via_process(
     subject, session: BehavioralSession, task_context=None,
     driver: str = "interact"
@@ -847,6 +924,7 @@ def _drive_behavior_session_via_process(
         raise ValueError(
             "behavior interact requires a session.task_context to drive."
         )
+    _refuse_variance(subject, session)
     subject.start_task(task_context)
     stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
