@@ -141,6 +141,21 @@ class TestProcessStateChangeDispatch:
         assert applied.target.indices == [1, 2, 3]
         assert applied.handle_id in state['installed']
 
+    def test_input_site_and_vector_amount_reach_state_change_fn_unchanged(self):
+        """Core does not interpret ':input' or the amount's type; the
+        registered state_change_fn receives exactly what was declared."""
+        import numpy as np
+        fn, _ = _counting_state_change_fn()
+        model = _make_model(state_change_fn=fn)
+        direction = np.arange(4.0)
+        applied = model.process(StateChange(
+            kind='steer',
+            target=Selection(layer='model.layers.14.mlp.down_proj:input'),
+            perturbation=Perturbation(kind='drive', amount=direction),
+        ))
+        assert applied.target.layer == 'model.layers.14.mlp.down_proj:input'
+        assert applied.perturbation.amount is direction
+
     def test_apply_tracks_handle_in_active_perturbations(self):
         fn, state = _counting_state_change_fn()
         model = _make_model(state_change_fn=fn)

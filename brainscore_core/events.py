@@ -22,7 +22,12 @@ class Selection:
     :param layer: Dotted module path within the model, e.g.
         ``'language_model.layers.20'`` or ``'visual.transformer.blocks.10'``.
         Resolved by the registered ``state_change_fn`` against the concrete
-        model object.
+        model object. A path names the module's output; add ``':input'`` to
+        name its first input instead, e.g.
+        ``'model.layers.14.mlp.down_proj:input'`` for a transformer's MLP
+        neurons, which are computed inline and output by no module. Recording
+        uses the same names, so a region and a perturbation that share a
+        string address the same tensor.
     :param indices: Optional list of unit indices within the layer to
         perturb. ``None`` means ALL units at the layer.
     :param axis: Tensor axis addressed by indices; -1 keeps the last-axis
@@ -61,14 +66,16 @@ class Perturbation:
         ``state_change_fn`` knows how to interpret.
     :param scale: Multiplier for ``kind='scale'``. Ignored otherwise.
     :param amount: Additive offset for ``kind='drive'`` — inject activity into
-        the selected units, the counterpart of ablation. Ignored otherwise.
+        the selected units, the counterpart of ablation. A number, or (with
+        ``indices=None``) an array or tensor broadcastable to the layer's
+        activations, e.g. a direction to push along. Ignored otherwise.
     :param replacement: Tensor or array to substitute in for ``kind='replace'``.
         Shape must match the selected units' activations.
     """
     kind: str
     scale: float = 0.0
     replacement: Optional[Any] = None
-    amount: float = 0.0  # appended last to preserve the (kind, scale, replacement) positional API
+    amount: Union[float, Any] = 0.0  # appended last to preserve the (kind, scale, replacement) positional API
 
 
 @dataclass
