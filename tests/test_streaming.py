@@ -118,3 +118,15 @@ def test_buffered_session_warns_on_payload_type_mismatch_and_still_delivers():
     with pytest.warns(UserWarning, match="payload is int, not str"):
         session = BufferedSession([StreamEvent("text", 42, 0.0)])
     assert session.next_input().payload == 42
+
+
+def test_measurement_settings_are_a_saved_session_context_field():
+    """A recorder that saves Session.context_fields keeps per-measurement settings."""
+    from brainscore_core.streaming import BufferedSession, Session, StreamEvent
+    assert 'settings' in Session.context_fields
+    assert Session.settings is None
+    session = BufferedSession([StreamEvent('text', 'hello', None)], requested_output_channels=['behavior'])
+    session.settings = {'number_of_trials': 7, 'require_variance': True}
+    saved = {name: getattr(session, name) for name in Session.context_fields
+             if getattr(session, name, None) is not None}
+    assert saved['settings'] == {'number_of_trials': 7, 'require_variance': True}

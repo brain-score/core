@@ -54,9 +54,8 @@ class DeclaredInputSession(Session):
         self._channels = frozenset(channels)
         for name in Session.context_fields:
             setattr(self, name, getattr(session, name, getattr(Session, name)))
-        # Typed session subclasses carry their request as an attribute too, and
-        # the legacy facade attaches per-measurement settings.
-        for name in ('record', 'state_change', 'settings'):
+        # Typed session subclasses carry their request as an attribute too.
+        for name in ('record', 'state_change'):
             value = getattr(session, name, None)
             if value is not None:
                 setattr(self, name, value)

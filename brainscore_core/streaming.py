@@ -72,8 +72,11 @@ class Session(ABC):
     task_context: Any = None
     time_bins: Any = None
     streaming = False
+    # Per-measurement settings a legacy facade attaches (trial count, variance
+    # request, recording type, legacy text). None when the session has none.
+    settings: Any = None
     context_fields = ('requested_output_channels', 'stimulus_set', 'task_context',
-                      'time_bins', 'streaming')
+                      'time_bins', 'streaming', 'settings')
 
     def collect(self, channel: Optional[str] = None) -> Any:
         """Return emitted events; specialized sources may assemble their payloads."""
