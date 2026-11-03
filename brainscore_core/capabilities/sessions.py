@@ -10,7 +10,7 @@ channels all read one registry. They sort after added capabilities
 
 from .base import Capability
 from .registry import register_capability
-from .. import streaming_helpers as _drivers
+from brainscore_core._sessions import helpers as _drivers
 
 
 class _SessionCapability(Capability):

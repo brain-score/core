@@ -163,7 +163,7 @@ class UnifiedModel(Subject):
 
     def participate(self, session: "Session") -> None:
         """Run ``session`` through this model's typed paths."""
-        from .streaming_helpers import drive_typed_session
+        from brainscore_core._sessions.helpers import drive_typed_session
         drive_typed_session(self, session)
 
     def start_task(self, task_context: TaskContext) -> None:
