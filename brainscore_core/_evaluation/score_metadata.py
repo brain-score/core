@@ -31,7 +31,7 @@ def requested_output_channels_for_score(benchmark) -> Set[str]:
     parent = _normalise_parent(_optional_attr(benchmark, "parent"))
     if _is_behavior_parent(parent):
         return {"behavior"}
-    if "embodied" in parent or "motor" in parent:
+    if "closed_loop" in parent or "embodied" in parent or "motor" in parent:
         return {"motor"}
     if "perturb" in parent:
         return {"perturbation"}
@@ -53,7 +53,7 @@ def infer_score_protocol(subject, benchmark, requested_channels: Iterable[str]) 
     parent = _normalise_parent(_optional_attr(benchmark, "parent"))
     if _is_behavior_parent(parent):
         return _behavior_protocol(subject)
-    if "embodied" in parent or "motor" in parent:
+    if "closed_loop" in parent or "embodied" in parent or "motor" in parent:
         return "motor"
     if "perturb" in parent:
         return "perturbation"

@@ -1,47 +1,28 @@
-"""A4: EnvironmentStep camera payloads are validated at the boundary, so a
-malformed frame is rejected with a clear error instead of failing in the policy."""
+"""Core is device-agnostic: it passes closed-loop observations to the policy
+without inspecting them. Robot camera checks live in the robotics harness."""
+import warnings
+
 import numpy as np
-import pytest
 
 from brainscore_core import BrainScoreModel
-from brainscore_core.events import EnvironmentStep, EnvironmentResponse, CameraFrame
+from brainscore_core.events import CameraFrame, EnvironmentResponse, EnvironmentStep
 
 
-def _agent():
-    return BrainScoreModel(
-        'agent', None, {}, {}, None,
-        action_fn=lambda step: EnvironmentResponse(action=np.zeros(7)),
-    )
+def _agent(seen):
+    return BrainScoreModel('agent', None, {}, {}, None,
+                           policy=lambda step: seen.append(step) or EnvironmentResponse(np.zeros(7)))
 
 
-def test_malformed_camera_payload_rejected():
-    step = EnvironmentStep(
-        cameras={'wrist': CameraFrame(rgb=np.zeros((2, 2), dtype='float64'))})
-    with pytest.raises(ValueError, match="failed validation"):
-        _agent().process(step)
+def test_core_passes_device_payloads_to_the_policy_unchecked():
+    seen = []
+    # A malformed frame core used to reject now reaches the policy untouched.
+    step = EnvironmentStep(observation={'cameras': {'wrist': CameraFrame(rgb=np.zeros((2, 2)))}})
+    assert isinstance(_agent(seen).process(step), EnvironmentResponse)
+    assert seen == [step]
 
 
-def test_valid_camera_payload_passes():
-    step = EnvironmentStep(
-        cameras={'wrist': CameraFrame(rgb=np.zeros((8, 8, 3), dtype='uint8'))})
-    resp = _agent().process(step)
-    assert isinstance(resp, EnvironmentResponse)
-
-
-def test_rgba_channel_layout_rejected():
-    step = EnvironmentStep(
-        cameras={'wrist': CameraFrame(rgb=np.zeros((8, 8, 4), dtype='uint8'))})
-    with pytest.raises(ValueError, match="H, W, 3"):
-        _agent().process(step)
-
-
-def test_channels_first_layout_rejected():
-    step = EnvironmentStep(
-        cameras={'wrist': CameraFrame(rgb=np.zeros((3, 8, 8), dtype='uint8'))})
-    with pytest.raises(ValueError, match="H, W, 3"):
-        _agent().process(step)
-
-
-def test_no_cameras_is_fine():
-    resp = _agent().process(EnvironmentStep(observation={'anything': 1}))
-    assert isinstance(resp, EnvironmentResponse)
+def test_deprecated_droid_fields_warn():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        EnvironmentStep(cameras={'wrist': CameraFrame(rgb=np.zeros((8, 8, 3), 'uint8'))})
+    assert any(issubclass(w.category, DeprecationWarning) for w in caught)

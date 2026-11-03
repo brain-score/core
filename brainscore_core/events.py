@@ -1,6 +1,7 @@
 """Input/output event dataclasses for the Brain-Score subject contract."""
 
 from .streaming import StreamEvent
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
@@ -261,6 +262,12 @@ class EnvironmentStep:
         # Bridge the deprecated DROID fields onto the generic observation so the
         # dispatch path is uniform: if no observation was given but the DROID
         # fields were, expose them as the observation.
+        if self.cameras is not None or self.proprioception is not None:
+            warnings.warn(
+                "EnvironmentStep(cameras=..., proprioception=...) is deprecated; "
+                "build robot steps with brainscore.harnesses.robotics."
+                "build_environment_step, which uses observation=.",
+                DeprecationWarning, stacklevel=3)
         if self.observation is None and (
             self.cameras is not None or self.proprioception is not None
         ):
