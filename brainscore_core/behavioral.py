@@ -265,20 +265,26 @@ class BehavioralReadout:
         n_labels = len(label_set)
         proba = np.zeros((n_stimuli, n_labels), dtype=np.float32)
 
+        raw_answers, valid = [], []
         for i, (_, row) in enumerate(stimuli.iterrows()):
             predicted = owner._generation_fn(
                 stimulus_row=row,
                 instruction=instruction,
                 label_set=label_set,
             )
-            if predicted not in label_to_idx:
+            raw_answers.append(str(predicted))
+            valid.append(predicted in label_to_idx)
+            if valid[-1]:
+                proba[i, label_to_idx[predicted]] = 1.0
+            else:
+                # No label is credited: a substituted label would bias accuracy toward it.
+                proba[i, :] = np.nan
                 import warnings
                 warnings.warn(
                     f"answer function returned {predicted!r}, not in "
-                    f"label_set={label_set}. Defaulting to {label_set[0]!r}."
+                    f"label_set={label_set}. The response is recorded as invalid "
+                    f"(NaN probabilities, answer_valid=False)."
                 )
-                predicted = label_set[0]
-            proba[i, label_to_idx[predicted]] = 1.0
 
         stimulus_ids = list(stimuli['stimulus_id'].values)
         presentation_coords = {
@@ -289,6 +295,8 @@ class BehavioralReadout:
                 continue
             presentation_coords[column] = (
                 'presentation', list(stimuli[column].values))
+        presentation_coords['raw_answer'] = ('presentation', raw_answers)
+        presentation_coords['answer_valid'] = ('presentation', valid)
 
         return BehavioralAssembly(
             proba,
