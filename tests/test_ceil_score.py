@@ -20,3 +20,10 @@ def test_aggregation_score_keeps_center_and_error():
     ceiling = Score([.8, .0], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
     ceiled = ceil_score(raw, ceiling)
     np.testing.assert_allclose(ceiled.values, [.5, .1])
+
+
+def test_scalar_score_with_center_error_ceiling_uses_center():
+    ceiling = Score([.8, .1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+    ceiled = ceil_score(Score(.4), ceiling)
+    assert ceiled.dims == ()
+    assert float(ceiled) == pytest.approx(.5)
