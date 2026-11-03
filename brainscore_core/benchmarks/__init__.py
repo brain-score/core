@@ -152,6 +152,14 @@ def score_benchmark(benchmark: Benchmark, candidate) -> Score:
 
 
 def ceil_score(score, ceiling):
+    if 'aggregation' not in score.dims:
+        # Scalar Score, as most benchmarks return; matches brainscore_vision's ceil_score.
+        ceiled_score = score / ceiling
+        if 'error' in score.attrs:
+            ceiled_score.attrs['error'] = score.attrs['error']
+        ceiled_score.attrs[Score.RAW_VALUES_KEY] = score
+        ceiled_score.attrs['ceiling'] = ceiling
+        return ceiled_score
     ceiled_center = score.sel(aggregation='center').values / ceiling.sel(aggregation='center').values
     ceiled_score = type(score)([ceiled_center, score.sel(aggregation='error').values],
                                coords=score.coords, dims=score.dims)
