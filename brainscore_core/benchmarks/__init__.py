@@ -22,10 +22,11 @@ class Benchmark(ABC):
         Typically this involves reproducing the experiment on the model and then comparing model measurements
         (e.g. neural/behavioral) against experimental recordings from biological subjects (e.g. primates)
         using a :class:`~brainscore_core.metrics.Metric`.
-        The output of this method is a normalized score between 0 and 1 where 0 means the model does not match the
+        The output of this method is a ceiling-normalized score where 0 means the model does not match the
         measurements at all and 1 means the model matches the measurements at ceiling level
         (e.g. if the model obtains a score of 0.8 and the data ceiling is also 0.8,
-        the score output by this method should be 1).
+        the score output by this method should be 1). A model can exceed the estimated ceiling,
+        so the score is not clipped to 1.
 
         :param candidate: a candidate model implementing the `BrainModel` interface. Benchmarks are agnostic of the
                 exact implementation and only interact with models through the methods defined in the interface.
