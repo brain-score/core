@@ -83,7 +83,7 @@ def test_common_session_collects_neural_output_without_helper_class():
                             activations_model={'vision': Extractor()})
     session = InMemorySession(stimulus_set=StimulusSet({'image_path': ['x']}),
                               requested_output_channels=('neural:IT',))
-    model.interact(session)
+    model.participate(session)
     assert session.collect().shape == (1, 4)
 
 
@@ -142,7 +142,7 @@ def test_neural_events_work_without_a_stimulus_table():
                             activations_model={'text': Extractor()})
     session = InMemorySession(inputs=[StreamEvent(channel='text', payload='hello', t_ms=0)],
                               requested_output_channels=['neural:language'])
-    model.interact(session)
+    model.participate(session)
     assert session.collect().shape == (1, 4)
 
 
@@ -160,7 +160,7 @@ def test_common_session_collects_batch_and_streamed_assemblies(streaming):
         requested_output_channels=['neural:language'],
         streaming=streaming,
     )
-    model.interact(session)
+    model.participate(session)
     assert session.collect().shape == (2, 4)
 
 

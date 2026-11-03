@@ -172,7 +172,7 @@ def test_preferred_names_do_not_warn():
                         intervention=lambda c: (None, lambda: None))
 
 
-# --- the facade runs any subject through interact ------------------------
+# --- the facade runs any subject through participate ------------------------
 
 from brainscore_core.model_interface import Subject
 from brainscore_core.streaming import StreamEvent
@@ -180,7 +180,7 @@ from brainscore_core.supported_data_standards.brainio.assemblies import Behavior
 
 
 class _Recorder(Subject):
-    """An interact-only subject: no process, look_at or start_recording."""
+    """A participate-only subject: no process, look_at or start_recording."""
 
     identifier = 'recording-subject'
     in_channels = {'text', 'vision'}
@@ -191,7 +191,7 @@ class _Recorder(Subject):
         self.sessions = []
         self.resets = 0
 
-    def interact(self, session):
+    def participate(self, session):
         self.sessions.append(session)
         while session.next_input() is not None:
             pass
@@ -207,7 +207,7 @@ class _Recorder(Subject):
         self.resets += 1
 
 
-def test_facade_runs_an_interact_only_subject_on_vision_calls():
+def test_facade_runs_an_participate_only_subject_on_vision_calls():
     subject = _Recorder()
     facade = LegacyBenchmarkFacade(subject, visual_degrees=12)
     facade.start_recording('IT', time_bins=[(70, 170), (170, 270)])
@@ -282,11 +282,11 @@ def test_facade_reset_clears_settings_and_resets_subject():
         facade.look_at(_images())
 
 
-def test_typed_look_at_runs_through_interact():
+def test_typed_look_at_runs_through_participate():
     model, extractor = _model()
     sessions = []
-    original = model.interact
-    model.interact = lambda session: (sessions.append(session), original(session))[1]
+    original = model.participate
+    model.participate = lambda session: (sessions.append(session), original(session))[1]
     model.start_recording('IT', time_bins=[(70, 170)])
     via_legacy = model.look_at(_images())
     assert len(sessions) == 1

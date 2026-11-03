@@ -363,7 +363,7 @@ def benchmarkinstance_from_benchmark(benchmark: Benchmark, domain: str) -> Bench
         # the version has changed and the benchmark instance was not yet in the database
         ceiling = benchmark.ceiling
         bench_inst.ceiling = ceiling.item()
-        bench_inst.ceiling_error = _retrieve_score_error(ceiling)
+        bench_inst.ceiling_error = retrieve_score_error(ceiling)
         bench_inst.save()
     return bench_inst
 
@@ -394,12 +394,12 @@ def update_score(score: ScoreObject, entry: Score):
     require_leaderboard_eligible(score.attrs.get('leaderboard_eligible', True))
     if 'ceiling' not in score.attrs:  # many engineering benchmarks do not have a primate ceiling
         # only store raw (unceiled) value
-        entry.score_raw = _retrieve_score_center(score)
+        entry.score_raw = retrieve_score_center(score)
     else:  # score has a ceiling. Store ceiled as well as raw value
-        score_raw = _retrieve_score_center(score.raw)
+        score_raw = retrieve_score_center(score.raw)
         entry.score_raw = score_raw
-        entry.score_ceiled = _retrieve_score_center(score)
-    entry.error = _retrieve_score_error(score)
+        entry.score_ceiled = retrieve_score_center(score)
+    entry.error = retrieve_score_error(score)
     if 'comment' in score.attrs:
         entry.comment = score.attrs['comment']
     logger.debug(f"updating raw score: {entry.score_raw}, ceiled score: {entry.score_ceiled}, error: {entry.error}, "
@@ -407,8 +407,10 @@ def update_score(score: ScoreObject, entry: Score):
     entry.save()
 
 
-def _retrieve_score_center(score: ScoreObject) -> float:
+def retrieve_score_center(score: ScoreObject) -> float:
     """
+    The score value the leaderboard stores.
+
     Deal with multiple formats of storing the score,
     i.e. a single scalar in the score object versus an aggregation dimension.
     """
@@ -417,8 +419,10 @@ def _retrieve_score_center(score: ScoreObject) -> float:
     return score.item()
 
 
-def _retrieve_score_error(score: ScoreObject) -> Union[float, None]:
+def retrieve_score_error(score: ScoreObject) -> Union[float, None]:
     """
+    The score error the leaderboard stores.
+
     Deal with multiple formats of storing the score,
     i.e. an error attribute in the score object versus an aggregation dimension.
     Returns None if no error was found
@@ -428,3 +432,8 @@ def _retrieve_score_error(score: ScoreObject) -> Union[float, None]:
     if 'error' in score.attrs:
         return score.attrs['error']
     return None
+
+
+# Former private names, kept for existing callers (same function objects).
+_retrieve_score_center = retrieve_score_center
+_retrieve_score_error = retrieve_score_error

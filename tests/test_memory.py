@@ -837,8 +837,8 @@ class TestProbeCacheIsolation:
         assert _isolate_probe_identifier(parent, parent).identifier == 'hvm-public'
 
 
-class TestProbeThroughInteract:
-    """The feature-width probe runs one session through interact for every subject."""
+class TestProbeThroughParticipate:
+    """The feature-width probe runs one session through participate for every subject."""
 
     def _stimuli(self):
         import pandas as pd
@@ -848,7 +848,7 @@ class TestProbeThroughInteract:
         stimuli.identifier = 'probe-images'
         return stimuli
 
-    def test_interact_only_subject_is_probed_from_its_declarations(self):
+    def test_participate_only_subject_is_probed_from_its_declarations(self):
         from types import SimpleNamespace
         import numpy as np
         from brainscore_core.memory import _probe_feature_dim, _probe_regions
@@ -862,7 +862,7 @@ class TestProbeThroughInteract:
             out_channels = {'neural:IT'}
             required_channels = set()
 
-            def interact(self, session):
+            def participate(self, session):
                 n = 0
                 while session.next_input() is not None:
                     n += 1

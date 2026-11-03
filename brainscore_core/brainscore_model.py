@@ -22,10 +22,10 @@ from .recording import Recorder
 from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
-    _drain_stream_events as _drain_neural_stream_events,
+    drain_session_inputs as _drain_neural_stream_events,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels,
-    _stimuli_from_stream_session as _neural_stimuli_from_stream_session,
+    session_stimuli as _neural_stimuli_from_stream_session,
 )
 
 
@@ -48,14 +48,14 @@ def _warn_old_names(**given) -> None:
             continue
         warnings.warn(
             f"BrainScoreModel({name}=...) is deprecated; use "
-            f"{_PREFERRED_NAMES[name]}. It keeps working until the public release, "
-            "when the old names are removed together with the interact-to-participate rename.",
+            f"{_PREFERRED_NAMES[name]}. It keeps working until the old names are "
+            "removed in a separate, announced release.",
             DeprecationWarning, stacklevel=3)
 
 
 class BrainScoreModel(UnifiedModel):
     """The one concrete subject, assembled from parts (extractors, region map,
-    answer, policy, intervention, capabilities). Evaluated through ``interact``;
+    answer, policy, intervention, capabilities). Evaluated through ``participate``;
     ``process`` is a typed convenience and the legacy benchmark methods forward
     to :class:`~brainscore_core.legacy_facade.LegacyBenchmarkFacade`."""
 
@@ -108,36 +108,38 @@ class BrainScoreModel(UnifiedModel):
         """A model (or, in principle, a human) evaluated through the unified interface.
 
         Only ``identifier`` is always required; a feature-extraction model also
-        needs ``region_layer_map`` and an ``activations_model`` mapping.
-        Capability functions are optional; each enables another evaluation path.
+        needs ``region_layer_map`` and an ``extractor`` (a modality -> extractor
+        mapping). ``answer``, ``policy`` and ``intervention`` are optional; each
+        enables another evaluation path.
 
         :param identifier: unique model name (also the activation-cache key).
         :param model: the object perturbation hooks / generation run against (e.g.
             the torch module); may be ``None`` for a feature-extraction model whose
             wrapper holds its own module.
         :param region_layer_map: brain region -> layer path (or a ``UnitSelector``).
-        :param preprocessors: input preparation callables, declared by modality.
-            Configure each wrapper with its preparation function or tokenizer.
-        :param activations_model: extraction callable ``(stimuli, layers=...)``,
-            shared across declared modalities, or a modality -> extractor mapping.
-            Image, text, audio and video wrappers use this same slot. A mapping
-            declares its modalities without needing placeholder preprocessors.
+        :param preprocessors: compatibility parameter (deprecated). Prepare inputs
+            inside each extractor instead.
+        :param activations_model: compatibility parameter (deprecated); use
+            ``extractor``.
         :param visual_degrees: vision field-of-view; ignored by non-vision models.
         :param behavioral_readout_layer: layer on which to fit a behavioral readout.
-        :param extractor: extraction callable or modality-to-extractor mapping.
-            Prepare inputs inside each extractor. Preferred over activations_model.
-        :param answer: generate and parse a behavioral answer.
-        :param policy: choose an action from an EnvironmentStep.
-        :param intervention: apply a StateChange and return its cleanup function.
-            The return value is (PerturbationApplied, cleanup).
-        :param generation_fn: generate-and-parse callable for instruction-following
-            behavioral evaluation.
-        :param action_fn: ``EnvironmentStep -> EnvironmentResponse`` policy for
-            closed-loop / embodied evaluation.
-        :param state_change_fn: ``StateChange -> (PerturbationApplied, cleanup)`` for
-            lesion / stimulation evaluation.
-        :param supported_modalities: inputs accepted without an extraction wrapper,
-            for example by a closed-weight generation function. Extractor mappings
+        :param extractor: extraction callable ``(stimuli, layers=...)`` or a
+            modality -> extractor mapping. Image, text, audio and video wrappers
+            all use this slot; a mapping declares its input modalities. Prepare
+            inputs inside each extractor.
+        :param answer: ``(stimulus_row, instruction, label_set) -> label``;
+            generates and parses a behavioral answer for instruction-following
+            tasks.
+        :param policy: ``EnvironmentStep -> EnvironmentResponse``; chooses an
+            action for closed-loop / embodied evaluation.
+        :param intervention: ``StateChange -> (PerturbationApplied, cleanup)``;
+            applies a lesion / stimulation and returns its cleanup function.
+        :param generation_fn: compatibility parameter (deprecated); use ``answer``.
+        :param action_fn: compatibility parameter (deprecated); use ``policy``.
+        :param state_change_fn: compatibility parameter (deprecated); use
+            ``intervention``.
+        :param supported_modalities: inputs accepted without an extractor, for
+            example by a closed-weight ``answer`` function. Extractor mappings
             already declare their inputs; do not repeat them here.
         :param required_modalities: input modalities the model cannot run without.
         :param backbone_id: shared cache key so registrations with identical weights
@@ -247,6 +249,16 @@ class BrainScoreModel(UnifiedModel):
     def capability_config(self):
         """Read-only registration configuration for external capability authors."""
         return MappingProxyType(self._capability_config)
+
+    @property
+    def extractor(self) -> Mapping[str, Callable]:
+        """Read-only modality -> extractor mapping, as normalized at construction.
+
+        Named like the ``extractor`` constructor argument; covers the older
+        ``activations_model``/``preprocessors`` forms too. For observation
+        tools that hook the wired modules; dispatch does not read it.
+        """
+        return MappingProxyType(self._extractors)
 
     def capability_state(self, identifier):
         """Per-model capability state, initialized by the registry before dispatch."""
@@ -472,12 +484,15 @@ class BrainScoreModel(UnifiedModel):
                 multi_modality: bool = False) -> OutputEvent:
         """Evaluate one input event and return the corresponding output event.
 
-        A typed convenience, not part of the subject contract (``interact`` is
+        A typed convenience, not part of the subject contract (``participate`` is
         the evaluation method). Dispatch is by ``input_event`` type:
         a ``StimulusSet`` / ``MultimodalStimulusSet`` -> ``NeuroidAssembly`` of
         recorded activations (call ``start_recording`` first); a ``StateChange``
         -> ``PerturbationApplied`` (apply) or ``None`` (reset); an
-        ``EnvironmentStep`` -> ``EnvironmentResponse`` (needs ``action_fn``).
+        ``EnvironmentStep`` -> ``EnvironmentResponse`` (needs ``policy``).
+        Native benchmarks evaluate subjects through sessions or the typed
+        helpers in ``brainscore_core.streaming_helpers``; ``process`` is not
+        available on every subject.
 
         :param input_event: the stimulus / state-change / environment-step to run.
         :param multi_modality: if True, extract from every detected-and-supported
@@ -494,7 +509,7 @@ class BrainScoreModel(UnifiedModel):
             output = repeat_over_time_bins(output, time_bins)
         return output
 
-    def interact(self, session) -> None:
+    def participate(self, session) -> None:
         """Run a session through the one registered capability that claims it.
 
         The handler sees only the streams this model declares in
@@ -505,7 +520,7 @@ class BrainScoreModel(UnifiedModel):
         from .capabilities.registry import _setup_once
         from .session_view import DeclaredInputSession
         _setup_once(self, handler)
-        handler.interact(self, DeclaredInputSession(session, self.in_channels))
+        handler.participate(self, DeclaredInputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -517,8 +532,12 @@ class BrainScoreModel(UnifiedModel):
                              multi_modality: bool = False) -> OutputEvent:
         return self._dispatcher.handle_stimulus_set(stimuli, multi_modality)
 
-    def _detect_modalities(self, stimuli) -> Set[str]:
+    def detect_modalities(self, stimuli) -> Set[str]:
+        """Declared input modalities whose columns appear in ``stimuli``."""
         return self._dispatcher.detect_modalities(stimuli)
+
+    # Compatibility alias; internal callers still use it.
+    _detect_modalities = detect_modalities
 
     def _pick_modality(self, detected: Set[str]) -> str:
         return self._dispatcher.pick_modality(detected)
@@ -658,7 +677,7 @@ class BrainScoreModel(UnifiedModel):
     # --- Legacy benchmark surface ------------------------------------------
     # Permanent: legacy benchmarks are never removed. Behavior lives in
     # LegacyBenchmarkFacade, which runs each legacy call as a session through
-    # ``interact``; these forwards seed a facade with this model's current
+    # ``participate``; these forwards seed a facade with this model's current
     # recording and task state so direct calls keep working.
 
     @property

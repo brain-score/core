@@ -39,7 +39,7 @@ class _Subject(Subject):
     def required_channels(self):
         return set(self._required_channels)
 
-    def interact(self, session):
+    def participate(self, session):
         self.process_called = True
 
 

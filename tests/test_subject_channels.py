@@ -58,15 +58,15 @@ def test_subject_channel_properties_are_overridable():
     assert subject.required_channels == {"instruction"}
 
 
-def test_typed_interact_default_runs_sessions_and_rejects_unknown_outputs():
+def test_typed_participate_default_runs_sessions_and_rejects_unknown_outputs():
     from brainscore_core.streaming import BufferedSession
 
     subject = _ChannelSubject()
     with pytest.raises(NotImplementedError, match="runs sessions requesting"):
-        subject.interact(BufferedSession(requested_output_channels=["pupil"]))
+        subject.participate(BufferedSession(requested_output_channels=["pupil"]))
 
 
-def test_legacy_subclass_still_instantiates_without_interact():
+def test_legacy_subclass_still_instantiates_without_participate():
     class ExistingSubject(UnifiedModel):
         @property
         def identifier(self):

@@ -1,4 +1,4 @@
-"""Tests for the dependency-pin drift check (_env_check)."""
+"""Tests for the dependency-pin drift check (environment_check, formerly _env_check)."""
 from brainscore_core import _env_check
 
 
@@ -66,3 +66,71 @@ def test_transformers_just_below_shipped_floor_flagged(monkeypatch):
          "numpy": "1.26.4", "xarray": "2022.3.0"}
     monkeypatch.setattr(_env_check, "version", lambda p: v[p])
     assert any("transformers" in d for d in _env_check.check_env_bounds())
+
+
+def test_public_module_is_the_old_module():
+    """The old private name is an alias of the public module, not a copy."""
+    from brainscore_core import environment_check
+    assert _env_check is environment_check
+    assert environment_check.describe_env is _env_check.describe_env
+
+
+def test_patching_the_old_name_reaches_the_public_functions(monkeypatch):
+    from brainscore_core import environment_check
+    v = {"transformers": "4.57.1", "scikit-learn": "1.8.0",
+         "numpy": "1.26.4", "xarray": "2022.3.0"}
+    monkeypatch.setattr(_env_check, "version", lambda p: v[p])
+    assert [row[0] for row in environment_check.describe_env()
+            if row[3] is False] == ["scikit-learn"]
+
+
+def test_describe_env_reports_passing_absent_and_drifted_rows(monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+    from brainscore_core import environment_check
+    v = {"transformers": "4.57.1", "numpy": "2.0.0", "xarray": "2022.3.0"}
+
+    def _version(package):
+        if package not in v:
+            raise PackageNotFoundError(package)
+        return v[package]
+    monkeypatch.setattr(environment_check, "version", _version)
+    assert environment_check.describe_env() == [
+        ("transformers", "4.57.1", ">=4.57,<6", True),
+        ("scikit-learn", None, ">=1.7,<1.8", None),
+        ("numpy", "2.0.0", ">=1.21,<2", False),
+        ("xarray", "2022.3.0", "==2022.3.0", True),
+    ]
+
+
+def test_warn_on_drift_warns_with_the_drift(monkeypatch):
+    import pytest
+    from brainscore_core import environment_check
+    monkeypatch.setattr(environment_check, "check_env_bounds",
+                        lambda: ["numpy==2.0.0 is outside"])
+    with pytest.warns(RuntimeWarning, match="numpy==2.0.0 is outside"):
+        environment_check.warn_on_drift()
+
+
+def test_environment_specs_module_is_separate():
+    """brainscore_core.environment keeps observation/action specs only."""
+    from brainscore_core import environment, environment_check
+    assert environment is not environment_check
+    assert not hasattr(environment, "describe_env")
+
+
+def test_core_imports_without_torch_or_transformers():
+    """Startup runs the drift check without importing heavy dependencies."""
+    import subprocess
+    import sys
+    code = (
+        "import sys\n"
+        "class _Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in ('torch', 'transformers'):\n"
+        "            raise ImportError('blocked ' + name)\n"
+        "sys.meta_path.insert(0, _Block())\n"
+        "import brainscore_core, brainscore_core.environment_check\n"
+        "import brainscore_core.streaming_helpers\n"
+        "assert 'torch' not in sys.modules and 'transformers' not in sys.modules\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
