@@ -44,17 +44,22 @@ counts = {}
 for name, target in manifest.items():
     if name == '_env_check':
         continue  # This module was already only an alias of environment_check.
-    old = definitions(base / 'brainscore_core' / (name + '.py'), 'brainscore_core.' + name)
-    if name == 'streaming_helpers':
-        new = {}
-        for part in ('buffered', 'drivers', 'environment', 'payloads', 'perception'):
-            items = definitions(candidate / 'brainscore_core/_sessions' / (part + '.py'),
-                                'brainscore_core._sessions.' + part)
-            assert not new.keys() & items.keys(), 'Duplicate session definition'
-            new.update(items)
-    else:
-        new = definitions(candidate / 'brainscore_core' / (target.replace('.', '/') + '.py'),
-                          'brainscore_core.' + target)
+    def read(root):
+        original = root / 'brainscore_core' / (name + '.py')
+        if original.exists():
+            return definitions(original, 'brainscore_core.' + name)
+        if name == 'streaming_helpers':
+            combined = {}
+            for part in ('buffered', 'drivers', 'environment', 'payloads', 'perception'):
+                items = definitions(root / 'brainscore_core/_sessions' / (part + '.py'),
+                                    'brainscore_core._sessions.' + part)
+                assert not combined.keys() & items.keys(), 'Duplicate session definition'
+                combined.update(items)
+            return combined
+        return definitions(root / 'brainscore_core' / (target.replace('.', '/') + '.py'),
+                           'brainscore_core.' + target)
+
+    old, new = read(base), read(candidate)
     assert old.keys() == new.keys(), (name, old.keys() ^ new.keys())
     for symbol in old:
         assert old[symbol] == new[symbol], 'Definition changed: ' + name + '.' + symbol

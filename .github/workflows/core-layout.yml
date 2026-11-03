@@ -52,6 +52,10 @@ jobs:
           python -m pip install --no-deps --force-reinstall "$RUNNER_TEMP"/candidate-wheel/*.whl
           HOME="$RUNNER_TEMP/candidate-home" python -I candidate/.github/scripts/core_layout_snapshot.py candidate/.github/scripts/core_layout_modules.json evidence/candidate.json
           python candidate/.github/scripts/core_layout_compare.py baseline candidate evidence
+          mv evidence/comparison.json evidence/base-comparison.json
+          # The check must also work when a future base has this folder layout.
+          python candidate/.github/scripts/core_layout_compare.py candidate candidate evidence
+          mv evidence/comparison.json evidence/organized-base-comparison.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
