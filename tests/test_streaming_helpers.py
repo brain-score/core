@@ -129,18 +129,18 @@ class _MetadataPreservingExtractor:
         )
 
 
-class _InteractTrackingBrainScoreModel(BrainScoreModel):
+class _ParticipateTrackingBrainScoreModel(BrainScoreModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.interact_called = False
-        self.interact_requested_output_channels = None
+        self.participate_called = False
+        self.participate_requested_output_channels = None
 
-    def interact(self, session):
-        self.interact_called = True
-        self.interact_requested_output_channels = tuple(
+    def participate(self, session):
+        self.participate_called = True
+        self.participate_requested_output_channels = tuple(
             session.requested_output_channels
         )
-        return super().interact(session)
+        return super().participate(session)
 
 
 def _native_neural_model(extractor, model_cls=BrainScoreModel):
@@ -258,15 +258,15 @@ class _TemporalBrainScoreModel(BrainScoreModel):
 class _TrackingTemporalBrainScoreModel(_TemporalBrainScoreModel):
     def __init__(self):
         super().__init__()
-        self.interact_called = False
-        self.interact_requested_output_channels = None
+        self.participate_called = False
+        self.participate_requested_output_channels = None
 
-    def interact(self, session):
-        self.interact_called = True
-        self.interact_requested_output_channels = tuple(
+    def participate(self, session):
+        self.participate_called = True
+        self.participate_requested_output_channels = tuple(
             session.requested_output_channels
         )
-        return super().interact(session)
+        return super().participate(session)
 
 
 class _SyntheticSubject(UnifiedModel):
@@ -402,7 +402,7 @@ def test_neural_response_matches_process_assembly_exactly():
     subject = _SyntheticSubject(expected)
     stimuli = _stimulus_set()
 
-    assert type(subject).interact is UnifiedModel.interact
+    assert type(subject).participate is UnifiedModel.participate
     scored = neural_response(subject, stimuli, record="IT")
 
     assert subject.recording_target == "IT"
@@ -410,7 +410,7 @@ def test_neural_response_matches_process_assembly_exactly():
     xr.testing.assert_identical(scored, expected)
 
 
-def test_neural_response_uses_native_interact_and_preserves_metadata_exactly():
+def test_neural_response_uses_native_participate_and_preserves_metadata_exactly():
     stimuli = _metadata_stimulus_set()
 
     legacy_extractor = _MetadataPreservingExtractor()
@@ -420,18 +420,18 @@ def test_neural_response_uses_native_interact_and_preserves_metadata_exactly():
 
     native_extractor = _MetadataPreservingExtractor()
     subject = _native_neural_model(
-        native_extractor, model_cls=_InteractTrackingBrainScoreModel
+        native_extractor, model_cls=_ParticipateTrackingBrainScoreModel
     )
     scored = neural_response(subject, stimuli, record="IT")
 
-    assert subject.interact_called is True
-    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert subject.participate_called is True
+    assert subject.participate_requested_output_channels == ("neural:IT",)
     assert native_extractor.last_stimuli is stimuli
     assert "modality" not in scored.coords
     xr.testing.assert_identical(scored, expected)
 
 
-def test_neural_response_native_interact_matches_multimodal_process_exactly():
+def test_neural_response_native_participate_matches_multimodal_process_exactly():
     stimuli = _multimodal_stimulus_set()
 
     legacy, _, _ = _native_multimodal_model()
@@ -439,19 +439,19 @@ def test_neural_response_native_interact_matches_multimodal_process_exactly():
     expected = legacy.process(stimuli, multi_modality=True)
 
     subject, activations, text = _native_multimodal_model(
-        model_cls=_InteractTrackingBrainScoreModel
+        model_cls=_ParticipateTrackingBrainScoreModel
     )
     scored = neural_response(subject, stimuli, record="IT")
 
-    assert subject.interact_called is True
-    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert subject.participate_called is True
+    assert subject.participate_requested_output_channels == ("neural:IT",)
     assert activations.call_args is not None
     assert text.call_args is not None
     assert set(scored["modality"].values.tolist()) == {"vision", "text"}
     xr.testing.assert_identical(scored, expected)
 
 
-def test_neural_response_native_interact_matches_cross_tower_process_exactly():
+def test_neural_response_native_participate_matches_cross_tower_process_exactly():
     stimuli = _multimodal_stimulus_set()
 
     legacy, _, _ = _native_cross_tower_model()
@@ -459,19 +459,19 @@ def test_neural_response_native_interact_matches_cross_tower_process_exactly():
     expected = legacy.process(stimuli, multi_modality=True)
 
     subject, activations, text = _native_cross_tower_model(
-        model_cls=_InteractTrackingBrainScoreModel
+        model_cls=_ParticipateTrackingBrainScoreModel
     )
     scored = neural_response(subject, stimuli, record="all")
 
-    assert subject.interact_called is True
-    assert subject.interact_requested_output_channels == ("neural:all",)
+    assert subject.participate_called is True
+    assert subject.participate_requested_output_channels == ("neural:all",)
     assert activations.call_args["layers"] == ["vision_model.layer.10"]
     assert text.call_args["layers"] == ["text_model.layer.20"]
     assert set(scored["modality"].values.tolist()) == {"vision", "text"}
     xr.testing.assert_identical(scored, expected)
 
 
-def test_neural_response_native_interact_threads_time_bins_exactly():
+def test_neural_response_native_participate_threads_time_bins_exactly():
     stimuli = _metadata_stimulus_set()
     time_bins = [(70, 170), (170, 270)]
 
@@ -482,8 +482,8 @@ def test_neural_response_native_interact_threads_time_bins_exactly():
     subject = _TrackingTemporalBrainScoreModel()
     scored = neural_response(subject, stimuli, record="IT", time_bins=time_bins)
 
-    assert subject.interact_called is True
-    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert subject.participate_called is True
+    assert subject.participate_requested_output_channels == ("neural:IT",)
     assert scored.dims == ("presentation", "time_bin", "neuroid")
     assert list(scored["time_bin_start_ms"].values) == [70, 170]
     assert list(scored["time_bin_end_ms"].values) == [170, 270]
@@ -500,8 +500,8 @@ def test_neural_response_without_time_bins_keeps_2d_output():
     subject = _TrackingTemporalBrainScoreModel()
     scored = neural_response(subject, stimuli, record="IT")
 
-    assert subject.interact_called is True
-    assert subject.interact_requested_output_channels == ("neural:IT",)
+    assert subject.participate_called is True
+    assert subject.participate_requested_output_channels == ("neural:IT",)
     assert scored.dims == ("presentation", "neuroid")
     assert "time_bin" not in scored.dims
     xr.testing.assert_identical(scored, expected)
@@ -626,13 +626,13 @@ def test_behavioral_response_matches_legacy_start_task_process_exactly():
     expected = legacy.process(scoring)
 
     helper_subject = _behavior_model(
-        features, model_cls=_InteractTrackingBrainScoreModel
+        features, model_cls=_ParticipateTrackingBrainScoreModel
     )
     helper_context = _behavior_context(fitting, scoring)
     scored = behavioral_response(helper_subject, helper_context)
 
-    assert helper_subject.interact_called is True
-    assert helper_subject.interact_requested_output_channels == ("behavior",)
+    assert helper_subject.participate_called is True
+    assert helper_subject.participate_requested_output_channels == ("behavior",)
     assert isinstance(scored, BehavioralAssembly)
     xr.testing.assert_identical(scored, expected)
 
@@ -673,13 +673,13 @@ def test_behavioral_response_matches_legacy_generation_path_exactly():
 
     helper_calls = []
     helper_subject = _generation_model(
-        helper_calls, model_cls=_InteractTrackingBrainScoreModel
+        helper_calls, model_cls=_ParticipateTrackingBrainScoreModel
     )
     helper_context = _generation_context(scoring)
     scored = behavioral_response(helper_subject, helper_context)
 
-    assert helper_subject.interact_called is True
-    assert helper_subject.interact_requested_output_channels == ("behavior",)
+    assert helper_subject.participate_called is True
+    assert helper_subject.participate_requested_output_channels == ("behavior",)
     assert isinstance(scored, BehavioralAssembly)
     xr.testing.assert_identical(scored, expected)
     assert helper_calls == legacy_calls
@@ -706,7 +706,7 @@ def test_behavioral_response_falls_back_for_non_native_subject():
 
     scored = behavioral_response(subject, context)
 
-    assert type(subject).interact is UnifiedModel.interact
+    assert type(subject).participate is UnifiedModel.participate
     assert subject.process_input is scoring
     xr.testing.assert_identical(scored, expected)
 
@@ -827,13 +827,13 @@ def test_environment_session_advances_after_motor_emit():
     assert second_step.step_num == 1
 
 
-def test_native_environment_interact_preserves_applied_legacy_actions():
+def test_native_environment_participate_preserves_applied_legacy_actions():
     session = environment_session(_SyntheticEnvironment(_environment_steps(4)))
     native_model = _native_environment_model(
-        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+        _droid_action_fn, model_cls=_ParticipateTrackingBrainScoreModel
     )
 
-    native_model.interact(session)
+    native_model.participate(session)
     native_trajectory = session.collect("motor")
 
     legacy_model = _make_environment_model(action_fn=_droid_action_fn)
@@ -841,8 +841,8 @@ def test_native_environment_interact_preserves_applied_legacy_actions():
     # The old loop predicted once after termination; that response was never applied.
     expected_trajectory = _legacy_environment_rollout(legacy_model, legacy_env)[:-1]
 
-    assert native_model.interact_called is True
-    assert native_model.interact_requested_output_channels == ("motor",)
+    assert native_model.participate_called is True
+    assert native_model.participate_requested_output_channels == ("motor",)
     assert [event.channel for event in session.emitted] == [
         "motor", "motor", "motor",
     ]
@@ -879,7 +879,7 @@ def test_environment_session_emits_motor_events_for_multistep_rollout():
 
 def test_run_environment_preserves_applied_legacy_actions():
     helper_model = _native_environment_model(
-        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+        _droid_action_fn, model_cls=_ParticipateTrackingBrainScoreModel
     )
     helper_env = _SyntheticEnvironment(_environment_steps(4))
     helper_trajectory = run_environment(helper_model, helper_env)
@@ -900,47 +900,50 @@ def test_run_environment_preserves_applied_legacy_actions():
     assert len(helper_env.actions) == len(legacy_env.actions)
     for helper_action, expected_action in zip(helper_env.actions, legacy_env.actions):
         np.testing.assert_array_equal(helper_action, expected_action)
-    assert helper_model.interact_called is True
-    assert helper_model.interact_requested_output_channels == ("motor",)
+    assert helper_model.participate_called is True
+    assert helper_model.participate_requested_output_channels == ("motor",)
 
 
-def test_run_environment_has_no_process_fallback():
+def test_run_environment_falls_back_for_non_native_subjects():
     subject = _NonNativeEnvironmentSubject(_droid_action_fn)
     env = _SyntheticEnvironment(_environment_steps(3))
 
-    assert type(subject).interact is UnifiedModel.interact
-    with pytest.raises(NotImplementedError):
-        run_environment(subject, env)
-    assert subject.processed_steps == []
+    trajectory = run_environment(subject, env)
+
+    assert type(subject).participate is UnifiedModel.participate
+    assert subject.processed_steps == [0, 1]
+    assert [response.metadata["step_num_seen"] for response in trajectory] == [
+        0, 1,
+    ]
 
 
-def test_run_environment_rejects_objects_without_interact():
+def test_run_environment_rejects_objects_without_participate():
     subject = SimpleNamespace(process=lambda step: pytest.fail("process() reached"))
-    with pytest.raises(TypeError, match="interact"):
+    with pytest.raises(TypeError, match="participate"):
         run_environment(subject, _SyntheticEnvironment(_environment_steps(2)))
 
 
 def test_run_environment_terminates_cleanly_for_zero_and_one_step_envs():
     model = _native_environment_model(
-        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+        _droid_action_fn, model_cls=_ParticipateTrackingBrainScoreModel
     )
     zero_env = _SyntheticEnvironment([])
 
     assert run_environment(model, zero_env) == []
     assert zero_env.actions == []
-    assert model.interact_called is True
-    assert model.interact_requested_output_channels == ("motor",)
+    assert model.participate_called is True
+    assert model.participate_requested_output_channels == ("motor",)
 
     model = _native_environment_model(
-        _droid_action_fn, model_cls=_InteractTrackingBrainScoreModel
+        _droid_action_fn, model_cls=_ParticipateTrackingBrainScoreModel
     )
     one_env = _SyntheticEnvironment(_environment_steps(1))
     trajectory = run_environment(model, one_env)
 
     assert trajectory == []  # Already terminal: no action is requested.
     assert one_env.actions == []
-    assert model.interact_called is True
-    assert model.interact_requested_output_channels == ("motor",)
+    assert model.participate_called is True
+    assert model.participate_requested_output_channels == ("motor",)
 
 
 def _ablation_state_change():
@@ -1030,12 +1033,12 @@ def test_apply_state_change_matches_legacy_process_result():
 
     fn_helper, _ = _counting_state_change_fn()
     helper_model = _native_state_change_model(
-        fn_helper, model_cls=_InteractTrackingBrainScoreModel
+        fn_helper, model_cls=_ParticipateTrackingBrainScoreModel
     )
     helper_result = apply_state_change(helper_model, _ablation_state_change())
 
-    assert helper_model.interact_called is True
-    assert helper_model.interact_requested_output_channels == ("perturbation",)
+    assert helper_model.participate_called is True
+    assert helper_model.participate_requested_output_channels == ("perturbation",)
     assert isinstance(helper_result, PerturbationApplied)
     assert helper_result.handle_id == legacy_result.handle_id
     assert helper_result.target == legacy_result.target
@@ -1061,20 +1064,20 @@ def test_native_state_change_reset_restores_baseline():
         return applied, cleanup
 
     model = _native_state_change_model(
-        state_change_fn, model_cls=_InteractTrackingBrainScoreModel
+        state_change_fn, model_cls=_ParticipateTrackingBrainScoreModel
     )
     applied = apply_state_change(model, _ablation_state_change())
     assert model_state["output"] == 0.0
-    assert model.interact_requested_output_channels == ("perturbation",)
+    assert model.participate_requested_output_channels == ("perturbation",)
 
     reset = StateChange(kind="reset", handle_id=applied.handle_id)
     reset_session = state_change_session(reset)
     reset_event = reset_session.next_input()
-    model.interact_called = False
+    model.participate_called = False
     reset_result = apply_state_change(model, reset)
 
-    assert model.interact_called is True
-    assert model.interact_requested_output_channels == ("perturbation",)
+    assert model.participate_called is True
+    assert model.participate_requested_output_channels == ("perturbation",)
     assert reset_event.channel == "lesion:ablation-handle"
     assert reset_event.meta["reset"] == applied.handle_id
     assert reset_result == applied.handle_id
@@ -1092,7 +1095,7 @@ def test_apply_state_change_falls_back_for_non_native_subject():
 
     result = apply_state_change(subject, state_change)
 
-    assert type(subject).interact is UnifiedModel.interact
+    assert type(subject).participate is UnifiedModel.participate
     assert subject.process_input is state_change
     assert result is applied
 
@@ -1149,3 +1152,127 @@ class TestRecordAcceptsSeveralRegions:
         from brainscore_core.streaming_helpers import neural_response
         with pytest.raises(TypeError, match='single region'):
             neural_response(object(), self._stimuli(), record=['V4', 'IT'])
+
+
+class _TypedSubject:
+    """A plain object with the typed methods the public drivers call.
+
+    No base class: the drivers rely on these calls only, never on discovery.
+    """
+
+    def __init__(self, output=None):
+        self.calls = []
+        self.output = output
+
+    def start_recording(self, target, time_bins=None):
+        self.calls.append(('start_recording', target, time_bins))
+
+    def start_task(self, task_context):
+        self.calls.append(('start_task', task_context))
+
+    def process(self, stimuli, **kwargs):
+        self.calls.append(('process', stimuli, kwargs))
+        return self.output
+
+
+class TestPublicSessionHelpers:
+    """The promoted session helpers keep their behavior under the public names."""
+
+    def test_private_names_are_the_same_functions(self):
+        from brainscore_core import streaming_helpers as helpers
+        assert helpers._drain_stream_events is helpers.drain_session_inputs
+        assert helpers._stimuli_from_stream_session is helpers.session_stimuli
+        assert helpers._drive_neural_session_via_process is helpers.drive_neural_session
+        assert helpers._drive_behavior_session_via_process is helpers.drive_behavior_session
+
+    def test_drain_returns_every_input_in_order_then_none(self):
+        from brainscore_core.streaming import BufferedSession
+        from brainscore_core.streaming_helpers import drain_session_inputs
+        events = [StreamEvent('vision', f'p{index}', float(index), {'i': index})
+                  for index in range(3)]
+        session = BufferedSession(events, requested_output_channels=('neural:IT',))
+        assert drain_session_inputs(session) == events
+        assert session.next_input() is None
+        assert drain_session_inputs(session) == []
+
+    def test_drain_rejects_non_events(self):
+        from brainscore_core.streaming_helpers import drain_session_inputs
+
+        class _Session:
+            def next_input(self):
+                return 'not an event'
+        with pytest.raises(TypeError, match='StreamEvent'):
+            drain_session_inputs(_Session())
+
+    def test_session_stimuli_returns_the_session_table_itself(self):
+        from brainscore_core.streaming_helpers import (
+            drain_session_inputs, session_stimuli)
+        stimuli = _stimulus_set()
+        session = stimulus_session(stimuli, record='IT')
+        assert session_stimuli(session, drain_session_inputs(session)) is stimuli
+
+    def test_session_stimuli_rebuilds_inputs_without_a_table(self):
+        from brainscore_core.streaming_helpers import session_stimuli
+        events = [StreamEvent('vision', 'a.png', 0.0,
+                              {'stimulus_id': 's0', 'column': 'image_path'})]
+
+        class _Session:
+            pass
+        rebuilt = session_stimuli(_Session(), events)
+        assert list(rebuilt['stimulus_id']) == ['s0']
+        assert list(rebuilt['image_path']) == ['a.png']
+
+    def test_drive_neural_session_one_process_call_with_time_bins(self):
+        from brainscore_core.streaming_helpers import drive_neural_session
+        stimuli = _stimulus_set()
+        output = _assembly()
+        subject = _TypedSubject(output)
+        session = stimulus_session(stimuli, record='IT', time_bins=[(70, 170)])
+        drive_neural_session(subject, session)
+        assert subject.calls == [('start_recording', 'IT', [(70, 170)]),
+                                 ('process', stimuli, {})]
+        event, = session.emitted
+        assert event.channel == 'neural:IT'
+        assert event.payload is output
+        assert event.meta == {'driver': 'interact', 'record': 'IT'}
+
+    def test_drive_neural_session_refuses_variance_before_compute(self):
+        from brainscore_core.streaming_helpers import drive_neural_session
+        subject = _TypedSubject()
+        session = stimulus_session(_stimulus_set(), record='IT')
+        session.settings = {'require_variance': True, 'number_of_trials': 3}
+        with pytest.raises(NotImplementedError, match='number_of_trials=3'):
+            drive_neural_session(subject, session)
+        assert subject.calls == []
+        assert session.emitted == []
+
+    def test_drive_behavior_session_starts_task_once_and_scores_the_task_table(self):
+        from brainscore_core.streaming_helpers import drive_behavior_session
+        scored = _stimulus_set()
+        context = TaskContext(task_type='probabilities', label_set=['a', 'b'],
+                              fitting_stimuli=_stimulus_set(),
+                              metadata={'stimulus_set': scored})
+        output = BehavioralAssembly(
+            np.array([[0.9, 0.1], [0.2, 0.8]]),
+            coords={'stimulus_id': ('presentation', ['s0', 's1']),
+                    'choice': ('choice', ['a', 'b'])},
+            dims=['presentation', 'choice'])
+        subject = _TypedSubject(output)
+        session = behavior_session(context)
+        drive_behavior_session(subject, session)
+        assert subject.calls == [('start_task', context), ('process', scored, {})]
+        event, = session.emitted
+        assert event.channel == 'behavior'
+        assert event.payload is output
+        assert event.meta == {'driver': 'interact', 'task_type': 'probabilities'}
+
+    def test_drive_behavior_session_refuses_variance_before_compute(self):
+        from brainscore_core.streaming_helpers import drive_behavior_session
+        context = TaskContext(task_type='probabilities',
+                              metadata={'stimulus_set': _stimulus_set()})
+        subject = _TypedSubject()
+        session = behavior_session(context)
+        session.settings = {'require_variance': True}
+        with pytest.raises(NotImplementedError, match='trial-to-trial variance'):
+            drive_behavior_session(subject, session)
+        assert subject.calls == []

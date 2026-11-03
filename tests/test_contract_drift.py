@@ -20,6 +20,7 @@ PINNED_SEED_CHANNELS = {
     "lesion": (io_catalog.INPUT, "core"),
     "motor": (io_catalog.OUTPUT, "environment harness"),
     "neural": (io_catalog.OUTPUT, "core"),
+    "perturbation": (io_catalog.OUTPUT, "core"),
     "observation": (io_catalog.INPUT, "environment harness"),
     "pharmacological": (io_catalog.INPUT, "core"),
     "proprioception": (io_catalog.INPUT, "environment harness"),
@@ -37,7 +38,7 @@ class _MinimalSubject(Subject):
     in_channels = set()
     out_channels = set()
 
-    def interact(self, session):
+    def participate(self, session):
         pass
 
 
@@ -89,20 +90,20 @@ def test_stream_event_field_contract_is_pinned():
 
 
 def test_session_abc_contract_is_minimal():
-    assert Session.__abstractmethods__ == {"next_input", "emit"}
-    assert not hasattr(Session, "collect")
+    assert Session.__abstractmethods__ == {"next_input", "respond"}
+    assert callable(Session.collect)
 
 
-def test_subject_interact_and_reset_contract_are_pinned():
-    assert hasattr(Subject, "interact")
+def test_subject_participate_and_reset_contract_are_pinned():
+    assert hasattr(Subject, "participate")
     assert hasattr(Subject, "reset")
     assert Subject.__abstractmethods__ == {
-        "identifier", "in_channels", "out_channels", "interact",
+        "identifier", "in_channels", "out_channels", "participate",
     }
     assert "reset" not in Subject.__abstractmethods__
 
     subject = _MinimalSubject()
-    assert subject.interact(session=None) is None
+    assert subject.participate(session=None) is None
     assert not hasattr(subject, "process")
     assert not hasattr(subject, "region_layer_map")
     assert not hasattr(subject, "supported_modalities")

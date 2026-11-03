@@ -2,13 +2,14 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
 from .io_catalog import modalities_to_input_channels
 
 if TYPE_CHECKING:
     from .streaming import Session
+    from .selection import UnitSelector
 
 
 @dataclass
@@ -19,17 +20,19 @@ class TaskContext:
     Benchmarks populate all relevant fields. Models consume whichever
     fields match their paradigm:
     - Feature models use fitting_stimuli + label_set to train a readout
-    - Instruction-following models use instruction + label_set to build a prompt
+      (``BrainScoreModel(behavioral_readout_layer=...)``)
+    - Instruction-following models use instruction + label_set with their
+      ``answer`` function (``BrainScoreModel(answer=...)``)
     - Models that support both can choose their preferred approach
 
     ``prefer_path`` lets a benchmark (or an experimenting user) pin which
     behavioral dispatch path is selected when a model supports more than
     one. Accepts ``'auto'`` (default — generation if available, else
-    readout), ``'generation'`` (force generation, error if generation_fn
-    is missing or instruction is empty), or ``'readout'`` (force readout,
-    error if behavioral_readout_layer is missing or fitting_stimuli is
-    empty). This is the public API replacement for the legacy monkey-patch
-    pattern of setting ``model._generation_fn = None`` to force readout.
+    readout), ``'generation'`` (force generation through the model's
+    ``answer``; error if no answer is registered or instruction/label_set
+    is empty), or ``'readout'`` (force readout, error if
+    behavioral_readout_layer is missing or fitting_stimuli is empty). Use
+    it instead of disabling a model's answer function to force readout.
     """
     task_type: str
     label_set: Optional[List[str]] = None
@@ -43,9 +46,9 @@ class TaskContext:
 class Subject(ABC):
     """Minimal contract for a subject evaluated through a session.
 
-    Declare identity and supported channels, then implement ``interact`` to
-    consume inputs with ``session.next_input()`` and emit responses with
-    ``session.emit(event)``. A subject need not expose layers, modalities, or
+    Declare identity and supported channels, then implement ``participate`` to
+    consume inputs with ``session.next_input()`` and submit responses with
+    ``session.respond(event)``. A subject need not expose layers, modalities, or
     legacy model methods. Declarations may be properties or class attributes.
 
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
@@ -76,7 +79,7 @@ class Subject(ABC):
         return set()
 
     @abstractmethod
-    def interact(self, session: "Session") -> None:
+    def participate(self, session: "Session") -> None:
         """Consume session inputs and emit responses until the session ends."""
         ...
 
@@ -86,16 +89,15 @@ class Subject(ABC):
 
 
 class UnifiedModel(Subject):
-    """Subject base with task, recording, and process methods.
+    """Subject base for models evaluated through typed paths.
 
-    Existing implementations retain ``process``, ``start_task``,
-    ``start_recording``, layer maps, and modality declarations. Channel defaults
-    are derived from those declarations. ``BrainScoreModel`` and domain adapters
-    provide session drivers over their existing computation paths.
+    Implementations provide ``process``, ``start_task``, ``start_recording``,
+    a layer map and modality declarations. ``participate`` (the evaluation
+    method of the contract) runs a session through those typed paths, so a
+    typed model needs no session code of its own. ``process`` is a typed
+    convenience of this base, not part of the subject contract.
 
     New session-native implementations should inherit ``Subject`` directly.
-    ``UnifiedModel`` remains a ``Subject`` subclass, but is no longer an alias
-    for it: the legacy requirements must not constrain the native contract.
     """
 
     @property
@@ -105,7 +107,7 @@ class UnifiedModel(Subject):
 
     @property
     @abstractmethod
-    def region_layer_map(self) -> Dict[str, str]:
+    def region_layer_map(self) -> Mapping[str, Union[str, "UnitSelector"]]:
         ...
 
     @property
@@ -136,43 +138,33 @@ class UnifiedModel(Subject):
 
     @property
     def in_channels(self) -> Set[str]:
-        """Input stream channels this subject can consume.
-
-        Defaults to the v1.5 modality declarations so existing subjects get a
-        conservative v2 channel identity without overriding this property.
-        """
-        return self._modalities_to_input_channels(
-            self._declared_input_modalities()
-        )
+        """Input channels: the declared modalities as channel families."""
+        return modalities_to_input_channels(self.available_modalities)
 
     @property
     def out_channels(self) -> Set[str]:
-        """Output stream channels this subject can emit."""
-        channels = {
-            f"neural:{region}"
-            for region in self.region_layer_map
-        }
-        if self._has_behavioral_output_path():
-            channels.add("behavior")
-        if self._has_action_output_path():
-            channels.add("motor")
-        return channels
+        """Output channels: ``neural:<region>`` for every mapped region.
+
+        Typed models that also answer tasks or act override this to add
+        ``behavior`` or ``motor``; nothing is discovered from attribute names.
+        """
+        return {f"neural:{region}" for region in self.region_layer_map}
 
     @property
     def required_channels(self) -> Set[str]:
         """Input stream channels this subject hard-requires."""
-        return self._modalities_to_input_channels(self.required_modalities)
+        return modalities_to_input_channels(self.required_modalities)
 
-    @abstractmethod
     def process(self, input_event: InputEvent) -> OutputEvent:
-        ...
-
-    def interact(self, session) -> None:
-        identifier = self._safe_identifier()
+        """Typed convenience used by the default ``participate``; not part of the contract."""
         raise NotImplementedError(
-            f"Subject {identifier} has no v2 interact() path yet; use "
-            f"process()/start_recording()."
-        )
+            f"{type(self).__name__} defines no process(); implement participate(session) "
+            "or process(input_event) for the typed session driver.")
+
+    def participate(self, session: "Session") -> None:
+        """Run ``session`` through this model's typed paths."""
+        from .streaming_helpers import drive_typed_session
+        drive_typed_session(self, session)
 
     def start_task(self, task_context: TaskContext) -> None:
         self._task_context: Optional[TaskContext] = task_context
@@ -185,52 +177,3 @@ class UnifiedModel(Subject):
 
     def reset(self) -> None:
         pass
-
-    def _declared_input_modalities(self) -> Set[str]:
-        for attr in ("available_modalities", "supported_modalities"):
-            try:
-                modalities = getattr(self, attr)
-            except (AttributeError, NotImplementedError):
-                continue
-            if modalities is not None:
-                return set(modalities)
-
-        preprocessors = getattr(self, "_preprocessors", None)
-        if hasattr(preprocessors, "keys"):
-            return set(preprocessors.keys())
-        return set()
-
-    @staticmethod
-    def _modalities_to_input_channels(modalities) -> Set[str]:
-        return modalities_to_input_channels(modalities)
-
-    def _has_behavioral_output_path(self) -> bool:
-        for attr in (
-            "_behavioral_readout_layer",
-            "_generation_fn",
-            "behavioral_readout_layer",
-            "generation_fn",
-        ):
-            try:
-                value = getattr(self, attr)
-            except Exception:
-                continue
-            if value is not None:
-                return True
-        return False
-
-    def _has_action_output_path(self) -> bool:
-        for attr in ("_action_fn", "action_fn"):
-            try:
-                value = getattr(self, attr)
-            except Exception:
-                continue
-            if value is not None:
-                return True
-        return False
-
-    def _safe_identifier(self) -> str:
-        try:
-            return str(self.identifier)
-        except Exception:
-            return type(self).__name__

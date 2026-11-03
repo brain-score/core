@@ -22,17 +22,38 @@ class Selection:
 
     :param layer: Dotted module path within the model, e.g.
         ``'language_model.layers.20'`` or ``'visual.transformer.blocks.10'``.
-        Resolved by the registered ``state_change_fn`` against the concrete
-        model object.
+        Resolved by the model's registered ``intervention`` against the
+        concrete model object. A path names the module's output; add ``':input'`` to
+        name its first input instead, e.g.
+        ``'model.layers.14.mlp.down_proj:input'`` for a transformer's MLP
+        neurons, which are computed inline and output by no module. Recording
+        uses the same names, so a region and a perturbation that share a
+        string address the same tensor.
     :param indices: Optional list of unit indices within the layer to
         perturb. ``None`` means ALL units at the layer.
+    :param axis: Tensor axis addressed by indices; -1 keeps the last-axis
+        convention. None flattens all axes after the batch axis in row-major
+        order, matching unpooled activation extraction.
+    :param expected_shape: Optional non-batch tensor shape, checked before use.
+        Localizers set this when coordinates describe a flattened output.
     :param metadata: Free-form bag for selection criteria the
-        ``state_change_fn`` can interpret (e.g., a localizer mask, a
+        ``intervention`` can interpret (e.g., a localizer mask, a
         functional contrast specification).
     """
     layer: str
     indices: Optional[List[int]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    axis: Optional[int] = -1
+    expected_shape: Optional[tuple[int, ...]] = None
+
+    def __post_init__(self) -> None:
+        if self.axis is not None and (isinstance(self.axis, bool) or not isinstance(self.axis, int)):
+            raise TypeError('Selection.axis must be an integer or None (flatten non-batch axes).')
+        if self.axis == 0:
+            raise ValueError('Selection cannot index the batch axis.')
+        if self.expected_shape is not None:
+            self.expected_shape = tuple(self.expected_shape)
+
 
 
 @dataclass
@@ -43,17 +64,19 @@ class Perturbation:
         ``scale``), ``'drive'`` (add ``amount`` — a stimulation / excitation
         analog), ``'replace'`` (replace with ``replacement`` tensor), or
         model-specific kinds (e.g., ``'noise'``) that the registered
-        ``state_change_fn`` knows how to interpret.
+        ``intervention`` knows how to interpret.
     :param scale: Multiplier for ``kind='scale'``. Ignored otherwise.
     :param amount: Additive offset for ``kind='drive'`` — inject activity into
-        the selected units, the counterpart of ablation. Ignored otherwise.
+        the selected units, the counterpart of ablation. A number, or (with
+        ``indices=None``) an array or tensor broadcastable to the layer's
+        activations, e.g. a direction to push along. Ignored otherwise.
     :param replacement: Tensor or array to substitute in for ``kind='replace'``.
         Shape must match the selected units' activations.
     """
     kind: str
     scale: float = 0.0
     replacement: Optional[Any] = None
-    amount: float = 0.0  # appended last to preserve the (kind, scale, replacement) positional API
+    amount: Union[float, Any] = 0.0  # appended last to preserve the (kind, scale, replacement) positional API
 
 
 @dataclass
@@ -61,15 +84,16 @@ class StateChange:
     """Apply or remove an intervention in the model.
 
     Used to simulate conditions like dyslexia, prosopagnosia, or pharmacological
-    effects. Passed to ``model.process()`` the same way stimuli are — the
-    interface is generic over input event type so benchmarks studying neural
+    effects. A session (or the typed ``apply_state_change`` helper) delivers it
+    to the subject; ``BrainScoreModel.process()`` also accepts it as a typed
+    convenience, the same way it accepts stimuli. Benchmarks studying neural
     dysfunction or drug effects do not need a separate model method.
 
     Two roles, distinguished by ``kind``:
 
     1. **Apply** a perturbation: ``kind`` names a perturbation class
        (``'ablation'``, ``'lesion'``, ``'pharmacological'``, ...). The
-       ``state_change_fn`` registered on the model installs the perturbation
+       ``intervention`` registered on the model installs the perturbation
        (e.g., a forward hook), and ``process(StateChange)`` returns a
        :class:`PerturbationApplied` confirmation containing a ``handle_id``.
     2. **Remove** a previously-applied perturbation: ``kind='reset'`` and
@@ -162,13 +186,13 @@ class Proprioception:
 
 @dataclass
 class EnvironmentStep:
-    """Single step of a closed-loop session (game, dialogue, robot).
+    """Single step of an embodied environment.
 
     Used for interactive evaluation where the model observes, acts, and receives
-    the environment's response over multiple ticks. Benchmarks run steps through
-    ``run_environment(subject, environment)``, which calls ``interact(session)``;
-    the interface generalizes over input type rather than adding a separate
-    agent method.
+    the environment's response over multiple ticks. A session delivers it to
+    the subject like a stimulus (``BrainScoreModel.process()`` accepts it as a
+    typed convenience); the model's ``policy`` answers it. The interface
+    generalizes over input type rather than adding a separate agent method.
 
     This is a device-agnostic envelope. The preferred field is
     ``observation`` (an environment-defined payload). The ``cameras`` and
@@ -183,7 +207,8 @@ class EnvironmentStep:
 
     Episode control signals (``is_first``, ``is_last``, ``is_terminal``,
     ``reward``, ``discount``) follow the RLDS convention so existing
-    DROID-format demonstration data can be replayed one step at a time.
+    DROID-format demonstration data can be replayed through a session one
+    step at a time.
 
     Examples::
 
@@ -264,6 +289,8 @@ class EnvironmentResponse:
     OpenPI DROID uses seven joint commands plus a gripper command. LIBERO uses
     six end-effector commands plus a gripper command. Their conventions differ.
     action_dict can carry a structured form; metadata carries telemetry.
+    Its recognized keys are io_catalog.RESPONSE_META_KEYS: a policy that answers
+    in words records answer/valid/parse_error, and provenance travels here.
     """
     action: Any  # numpy.ndarray (action_dim,) float64
     action_dict: Optional[Dict[str, Any]] = None  # DROID-style structured action
@@ -281,8 +308,8 @@ class Message:
     the next agent's stimulus, with no bespoke routing protocol and no ABC
     change.
 
-    ``process(Message)`` routes to the model's ``action_fn`` (an agent
-    *responds* to a message), and a responder may return either a ``Message`` or
+    A ``Message`` routes to the model's ``policy`` (an agent *responds* to a
+    message), and a responder may return either a ``Message`` or
     an :class:`EnvironmentResponse`. ``content`` is the payload (text, an action,
     a structured proposal); ``sender`` / ``recipient`` carry addressing for
     multi-party settings; ``metadata`` carries telemetry without growing the
@@ -364,7 +391,7 @@ InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message, StreamE
 #   - NeuroidAssembly    — neural recording (sensory-stimulus path); forward ref
 #                          so core stays free of a hard BrainIO import
 #   - BehavioralAssembly — behavioral readout / generation; forward ref likewise
-#   - EnvironmentResponse — one closed-loop step (the action/trajectory member)
+#   - EnvironmentResponse — one embodied step (the action/trajectory member)
 #   - PerturbationApplied — state-change acknowledgement + reset handle
 # Future members slot in here when their first benchmark lands, with no ABC
 # change: MotorOutput (continuous motor regression, §2.4) and GeneratedSequence

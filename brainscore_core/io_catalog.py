@@ -71,6 +71,7 @@ class CatalogEntry:
     shape_validator: Optional[ShapeValidator] = None
     owner: str = "core"
     materializers: Tuple[str, ...] = ()
+    payload_type: Any = None            # type or tuple of types a payload must be; None means unchecked
 
     def __post_init__(self):
         if self.kind not in _DIRECTIONS:
@@ -89,8 +90,18 @@ class CatalogEntry:
 _CATALOG: Dict[str, CatalogEntry] = {}
 
 
-def register(entry: CatalogEntry) -> None:
-    """Add or replace a catalog entry, keyed by its family name."""
+def register(entry: CatalogEntry, *, replace: bool = False) -> None:
+    """Add a catalog entry, keyed by its family name.
+
+    Registering a family that already exists is an error unless
+    ``replace=True`` (Contract Rules v3, rule 3.5). Re-registering the same
+    entry object is a no-op.
+    """
+    existing = _CATALOG.get(entry.name)
+    if existing is not None and existing is not entry and not replace:
+        raise ValueError(
+            f"Channel family {entry.name!r} is already registered "
+            f"(owner {existing.owner!r}); pass replace=True to replace it.")
     _CATALOG[entry.name] = entry
 
 
@@ -272,6 +283,11 @@ def validate(
 # pinning a device schema in core.
 # ----------------------------------------------------------------------------
 
+# A policy that answers in words keeps what it said and whether it was understood,
+# with the same names as a response trace. fallback_action is the action applied
+# when the answer could not be parsed.
+RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "provenance")
+
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
     # `vision` is the one visual channel: a still is a 1-frame clip, so it
@@ -348,8 +364,15 @@ _SEED = [
     CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",
                  "harness-defined continuous action / control vector",
                  "the model's action_fn, decoded by the environment harness",
+                 meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
                  materializers=("EnvironmentResponse",)),
+    # --- outputs: perturbation record (carried by PerturbationApplied) ---
+    CatalogEntry("perturbation", OUTPUT, "PerturbationApplied",
+                 "PerturbationApplied record with a handle_id for undoing one change",
+                 "the model's intervention (state_change_fn)",
+                 owner="core",
+                 materializers=("PerturbationApplied",)),
     # --- outputs: physiological readouts (reserved for human harnesses) ---
     CatalogEntry("pupil", OUTPUT, "human harness recording",
                  "(t,) float pupil diameter time series, or scalar diameter",
@@ -365,6 +388,52 @@ _SEED = [
 
 for _entry in _SEED:
     register(_entry)
+
+
+def payload_type_notes(label: str, payload) -> List[str]:
+    """Report a payload whose type does not match its family's ``payload_type``.
+
+    Warn-first (Contract Rules v3, rule 3.2): a mismatch is a note, never a
+    failure, so sessions that run today keep running while the catalog's
+    types are checked against the notebooks and examples. Promote to an error
+    by moving this check into :func:`validate` once that review is done.
+    """
+    entry = get(label)
+    if entry.payload_type is None or isinstance(payload, entry.payload_type):
+        return []
+    expected = entry.payload_type
+    names = (expected.__name__ if isinstance(expected, type)
+             else ', '.join(t.__name__ for t in expected))
+    return [f"{label}: payload is {type(payload).__name__}, not {names} "
+            f"({entry.payload_contract})"]
+
+
+def _declare_payload_types() -> None:
+    """Attach the payload type of each seeded family.
+
+    Done after seeding, with local imports, so the catalog module itself keeps
+    no import-time dependency on the event and assembly modules.
+    """
+    from dataclasses import replace as _replace
+    from pathlib import Path
+    import numpy as np
+    from .events import EnvironmentResponse, EnvironmentStep, PerturbationApplied, StateChange
+    from .supported_data_standards.brainio.assemblies import DataAssembly
+
+    sensory = (str, Path, np.ndarray)
+    payload_types = {
+        'vision': sensory, 'video': sensory, 'audio': sensory,
+        'text': str, 'instruction': str,
+        'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
+        'observation': EnvironmentStep,
+        'neural': DataAssembly, 'behavior': DataAssembly,
+        'motor': EnvironmentResponse, 'perturbation': PerturbationApplied,
+    }
+    for family, payload_type in payload_types.items():
+        register(_replace(get(family), payload_type=payload_type), replace=True)
+
+
+_declare_payload_types()
 
 
 _STIMULUS_COLUMNS: Dict[str, str] = {}

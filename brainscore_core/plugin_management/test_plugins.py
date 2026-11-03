@@ -32,7 +32,8 @@ class PluginTestRunner(EnvironmentManager):
     python brainscore_core/plugin_management/test_plugins.py
     """
 
-    def __init__(self, plugin_directory: Path, test: Union[bool, str] = False):
+    def __init__(self, plugin_directory: Path, test: Union[bool, str] = False,
+                 test_file: Union[Path, None] = None):
         super(PluginTestRunner, self).__init__()
 
         self.plugin_directory = plugin_directory
@@ -42,6 +43,7 @@ class PluginTestRunner(EnvironmentManager):
         self.generic_plugin_test = self._resolve_generic_plugin_test()
         self.env_name = self.plugin_name
         self.test = test if test else False
+        self.test_file = test_file
         self.returncode = 0
         self.script_path = Path(__file__).parent / 'test_plugin.sh'
         assert self.script_path.is_file(), f"bash file {self.script_path} does not exist"
@@ -94,6 +96,8 @@ class PluginTestRunner(EnvironmentManager):
             self.plugin_name, str(self.test), str(self.library_path),
             str(self.generic_plugin_test),
         ]
+        if self.test_file is not None:
+            run_command.append(str(self.test_file.resolve()))
 
         completed_process = self.run_in_env(run_command)
         check.equal(completed_process.returncode, 0)  # use check to register any errors, but let tests continue
@@ -120,7 +124,7 @@ def run_specified_tests(root_directory: Path, test_file: str, test: str) -> Dict
     assert re.match(RECOGNIZED_TEST_FILES, filename), \
         f"Test file {filename} not recognized as test file, must match '{RECOGNIZED_TEST_FILES}'."
     assert plugin_type in PLUGIN_TYPES, "Filepath not recognized as plugin test file."
-    plugin_test_runner = PluginTestRunner(plugin, test=test)
+    plugin_test_runner = PluginTestRunner(plugin, test=test, test_file=Path(test_file))
     plugin_test_runner()
     results[plugin_test_runner.plugin_name] = plugin_test_runner.returncode
 
@@ -143,7 +147,7 @@ def run_all_tests(root_directory: Path) -> Dict:
 
 
 def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]] = None,
-             test: Union[None, str] = None):
+             test: Union[None, str] = None) -> Dict[str, int]:
     """
     Run single specified test or all tests for each plugin.
 
@@ -152,12 +156,19 @@ def run_args(root_directory: Union[Path, str], test_files: Union[None, List[str]
     :param test: name of test to run (optional)
     """
     results = {}
-    if not test_files:
+    if test_files is None:
         results = run_all_tests(root_directory=Path(root_directory))
     else:
         for test_file in test_files:
             assert Path(test_file).exists()
-            results = run_specified_tests(root_directory=Path(root_directory), test_file=test_file, test=test)
-    plugins_with_errors = {k: v for k, v in results.items() if (v != 0) and (v != 5)}
+            selected = run_specified_tests(root_directory=Path(root_directory), test_file=test_file, test=test)
+            # Keep each invocation, including repeated files from one plugin.
+            for plugin, code in selected.items():
+                results[f'{len(results) + 1}:{plugin}:{test_file}'] = code
+    if not results:
+        raise RuntimeError('No plugin tests were selected')
+    plugins_with_errors = {k: v for k, v in results.items() if v != 0}
     num_plugins_failed = len(plugins_with_errors)
-    assert num_plugins_failed == 0, f"\n{num_plugins_failed} plugin tests failed\n{plugins_with_errors}"
+    if num_plugins_failed:
+        raise RuntimeError(f'{num_plugins_failed} plugin test runs failed\n{plugins_with_errors}')
+    return results

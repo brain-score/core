@@ -12,7 +12,7 @@ class _ConcreteSubject(Subject):
     in_channels = {"vision"}
     out_channels = {"behavior"}
 
-    def interact(self, session):
+    def participate(self, session):
         pass
 
 

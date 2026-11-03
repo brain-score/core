@@ -37,7 +37,7 @@ def test_external_input_output_state_reset_and_session():
             return StreamEvent('test_result', state['calls'] + event.payload, event.t_ms)
         def supports_session(self, model, channels):
             return set(channels) == {'test_result'}
-        def interact(self, model, session):
+        def participate(self, model, session):
             while (event := session.next_input()) is not None:
                 session.emit(model.process(event))
     register_capability(Tool())

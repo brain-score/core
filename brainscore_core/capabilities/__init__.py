@@ -13,3 +13,4 @@ from . import behavioral_readout as _behavioral_readout  # noqa: F401
 from . import closed_loop as _closed_loop  # noqa: F401
 from . import neural as _neural  # noqa: F401
 from . import state_change as _state_change  # noqa: F401
+from . import sessions as _sessions  # noqa: F401

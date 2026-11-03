@@ -45,7 +45,11 @@ def _activation_cache_disabled():
 
 def register_input_handler(cls, event_type: type, handler_name: str,
                            before: Optional[type] = None) -> None:
-    """Register a handler for an input-event type on ``cls``."""
+    """Compatibility hook; new integrations should register a Capability."""
+    import warnings
+    warnings.warn(
+        'register_input_handler is deprecated; register a Capability instead.',
+        DeprecationWarning, stacklevel=3)
     if '_INPUT_HANDLERS' not in cls.__dict__:
         cls._INPUT_HANDLERS = list(cls._INPUT_HANDLERS)
     entry = (event_type, handler_name)
@@ -55,6 +59,84 @@ def register_input_handler(cls, event_type: type, handler_name: str,
                 cls._INPUT_HANDLERS.insert(i, entry)
                 return
     cls._INPUT_HANDLERS.append(entry)
+
+
+def normalize_extractors(owner, preprocessors, activations_model):
+    """Adapt registration forms once to ``extractor(stimuli, layers=...)``.
+
+    ``activations_model`` here is the normalized ``extractor`` argument (the
+    compatibility spelling is the same slot). Explicit extractors never use
+    attribute-based capability discovery. Older registrations that put
+    extraction functions in preprocessors are adapted by their callable
+    signature at this compatibility boundary.
+    """
+    from collections.abc import Mapping
+    import inspect
+
+    if isinstance(activations_model, Mapping):
+        extractors = dict(activations_model)
+    elif activations_model is not None:
+        if not preprocessors:
+            raise ValueError(
+                'A single shared extractor needs its input modalities declared. '
+                'Pass extractor={modality: extractor} instead.')
+        extractors = {key: activations_model for key in preprocessors}
+    else:
+        extractors = {}
+    if any(not callable(value) for value in extractors.values()):
+        raise TypeError(
+            'Every extractor must be callable as extractor(stimuli, layers=...). '
+            'Check the values passed in extractor={modality: extractor}.')
+    layer_extractors = set(extractors)
+    for modality, preprocessor in preprocessors.items():
+        if modality in extractors:
+            # Historically the single wrapper applied only to vision; an
+            # extractor supplied in another modality takes precedence there.
+            if isinstance(activations_model, Mapping) or canonical_modality(modality) == 'vision':
+                continue
+        if not callable(preprocessor):
+            continue
+        try:
+            signature = inspect.signature(preprocessor)
+        except (TypeError, ValueError) as error:
+            if modality in extractors:
+                continue
+            raise TypeError(
+                'Cannot inspect this preprocessor. Declare it explicitly as '
+                'extractor={modality: extractor}.') from error
+        variadic_wrapper = (not inspect.isfunction(preprocessor) and
+                            bool(signature.parameters) and all(
+                                p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+                                for p in signature.parameters.values()))
+        if 'layers' in signature.parameters or variadic_wrapper:
+            extractors[modality] = preprocessor
+            layer_extractors.add(modality)
+        else:
+            try:
+                signature.bind(owner._model, object(), recording_layer=None)
+                accepts_legacy_call = True
+            except TypeError:
+                accepts_legacy_call = False
+            if modality in extractors and not accepts_legacy_call:
+                continue
+            import warnings
+            warnings.warn(
+                'Extraction callbacks in preprocessors are deprecated and are removed at '
+                'the public release. Use '
+                'extractor={modality: extractor}, where extractor accepts '
+                '(stimuli, layers=...).',
+                DeprecationWarning, stacklevel=3)
+            def extract(stimuli, *, layers, function=preprocessor):
+                if len(layers) > 1:
+                    raise ValueError(
+                        'This compatibility extraction callback accepts one layer. '
+                        'For multiple layers, use extractor={modality: '
+                        'extractor} with an extractor accepting (stimuli, layers=...).')
+                return function(owner._model, stimuli,
+                                recording_layer=layers[0] if layers else None)
+            extractors[modality] = extract
+            layer_extractors.discard(modality)
+    return extractors, layer_extractors
 
 
 class InputDispatcher:
@@ -151,20 +233,15 @@ class InputDispatcher:
         return sorted(detected)[0]
 
     def supports_layer_extraction(self, modality: str) -> bool:
-        owner = self.owner
-        modality = canonical_modality(modality)
-        if modality == 'vision' and owner._activations_model is not None:
-            return True
-        if not self._has_preprocessor_for(modality):
-            return False
-        return hasattr(self._preprocessor_for(modality), 'identifier')
+        return any(canonical_modality(key) == canonical_modality(modality)
+                   for key in self.owner._layer_extractors)
 
     def extract_for_modality(self, stimuli, modality: str, layers: List[str]):
         # A perturbation (lesion/stimulation) is a mutable forward-hook that the
         # activation cache key does not fingerprint, so a cached UNperturbed
         # extraction would be wrongly returned for a perturbed run. Bypass the
         # cache while any perturbation is active.
-        if self.owner._active_perturbations:
+        if self.owner._perturbations.active_perturbations:
             with _activation_cache_disabled():
                 return self._extract_for_modality_inner(stimuli, modality, layers)
         return self._extract_for_modality_inner(stimuli, modality, layers)
@@ -172,16 +249,13 @@ class InputDispatcher:
     def _extract_for_modality_inner(self, stimuli, modality: str, layers: List[str]):
         owner = self.owner
         modality = canonical_modality(modality)
-        if modality == 'vision' and owner._activations_model is not None:
-            return owner._activations_model(stimuli, layers=layers)
-
-        preprocessor = self._preprocessor_for(modality)
-        if hasattr(preprocessor, 'identifier'):
-            return preprocessor(stimuli, layers=layers)
-        return preprocessor(
-            owner._model, stimuli,
-            recording_layer=owner._recording_layer,
-        )
+        for key, extractor in owner._extractors.items():
+            if canonical_modality(key) == modality:
+                return extractor(stimuli, layers=layers)
+        raise NotImplementedError(
+            f"Model '{owner.identifier}' declares {modality!r} input but has no "
+            'activation extractor for it. Pass extractor={modality: extractor} to '
+            'record internal activity, or use a behavioral task for an output-only model.')
 
     def process_multi_modality(self, stimuli, detected: Set[str],
                                layers: List[str]):
@@ -207,20 +281,21 @@ class InputDispatcher:
                 layers, modality)
             if (owner._region_modality_map
                     and not modality_layers
-                    and owner._recording_regions):
+                    and owner._recorder.recording_regions):
                 continue
             sub = (owner._process_composite_regions(stimuli, modality)
-                   if owner._composite_recording else
+                   if owner._recorder.composite_recording else
                    owner._extract_for_modality(stimuli, modality, modality_layers))
             if not hasattr(sub, 'dims') or 'neuroid' not in sub.dims:
                 raise TypeError(
-                    f"multi_modality dispatch requires every preprocessor "
+                    f"multi_modality dispatch requires every extractor "
                     f"to return an xarray-shaped assembly with a 'neuroid' "
                     f"dim; modality '{modality}' returned "
-                    f"{type(sub).__name__}. Upgrade the preprocessor to a "
-                    f"layer-aware extractor (TextWrapper / VLMVisionWrapper)."
+                    f"{type(sub).__name__}. Pass a layer-aware extractor "
+                    f"(TextWrapper / VLMVisionWrapper) via "
+                    f"extractor={{modality: extractor}}."
                 )
-            if owner._is_multi_region and not owner._composite_recording:
+            if owner._recorder.is_multi_region and not owner._recorder.composite_recording:
                 sub = owner._tag_neuroids_with_regions(sub, modality)
             n_neuroid = sub.sizes['neuroid']
             sub = sub.assign_coords(

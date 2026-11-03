@@ -221,8 +221,10 @@ class TestRunChangedPlugins:
         single_test = 'False'
         library_path = str(Path(self.domain_root).parent)
         generic_plugin_test = str(Path(self.domain_root) / 'model_helpers' / 'generic_plugin_tests.py')
+        selected_test = str((Path(plugin_directory) / 'test.py').resolve())
         assert command_parts == ['bash', script_path,
-                                 plugin_directory, plugin_name, single_test, library_path, generic_plugin_test]
+                                 plugin_directory, plugin_name, single_test, library_path,
+                                 generic_plugin_test, selected_test]
         conda_base.assert_called_once_with()
 
     def test_run_changed_plugin_tests_all_models_benchmarks_data(self, mocker):

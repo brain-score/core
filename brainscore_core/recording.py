@@ -3,7 +3,7 @@
 from typing import Dict, List, Optional, Tuple, Union
 
 from .io_catalog import canonical_modality
-from .selection import CompositeSelector
+from .selection import CompositeSelector, LayerSelector
 
 
 class Recorder:
@@ -25,9 +25,9 @@ class Recorder:
         """Configure the layers extracted by subsequent ``process`` calls.
 
         A string names one region, ``'all'`` expands to every mapped region,
-        and a list records several mapped regions in one extraction. An unknown
-        string is treated as a raw layer path with a warning; unknown entries in
-        a list are rejected because they cannot be given region provenance.
+        and a list records several targets in one extraction. Unknown names are
+        treated as raw layer paths with a warning, whether supplied alone or in
+        a list. ``'all'`` means all mapped regions, not all network layers.
         ``recording_type`` is accepted for legacy adapter compatibility and is
         otherwise ignored by ``BrainScoreModel``.
         """
@@ -42,60 +42,27 @@ class Recorder:
                     "region_layer_map."
                 )
 
-        if (isinstance(recording_target, str)
-                and recording_target in owner._region_layer_selectors
-                and isinstance(owner._region_layer_selectors[recording_target],
-                               CompositeSelector)):
-            recording_target = [recording_target]
-
-        if isinstance(recording_target, str):
-            if recording_target not in owner._region_layer_map_dict:
-                import warnings
+        targets = ([recording_target] if isinstance(recording_target, str)
+                   else list(recording_target))
+        if not targets or any(not isinstance(target, str) or not target for target in targets):
+            raise ValueError('Recording targets must be nonempty region or layer names.')
+        import warnings
+        for target in targets:
+            if target not in owner._region_layer_selectors:
                 warnings.warn(
-                    f"Recording target '{recording_target}' is not a region in "
-                    f"region_layer_map (known regions: "
-                    f"{sorted(owner._region_layer_map_dict.keys())}); treating it "
-                    f"as a raw layer path. If you meant a region, check the spelling.",
+                    f"Recording target {target!r} is not a region in region_layer_map; "
+                    "treating it as a raw layer path. If you meant a region, check the spelling.",
                     UserWarning, stacklevel=2)
-            self.recording_layer = owner._region_layer_map_dict.get(
-                recording_target, recording_target
-            )
-            self.recording_regions = (
-                [recording_target]
-                if recording_target in owner._region_layer_map_dict
-                else []
-            )
-            self.recording_layers = [self.recording_layer]
-            self.is_multi_region = False
-            self.composite_recording = False
-        else:
-            regions = list(recording_target)
-            unknown = [r for r in regions
-                       if r not in owner._region_layer_map_dict]
-            if unknown:
-                raise ValueError(
-                    f"Region(s) {unknown} not in region_layer_map "
-                    f"(known regions: "
-                    f"{list(owner._region_layer_map_dict.keys())})"
-                )
-            self.recording_regions = regions
-            all_layers: List[str] = []
-            for r in regions:
-                sel = owner._region_layer_selectors[r]
-                if isinstance(sel, CompositeSelector):
-                    all_layers.extend(sel.layer_paths)
-                else:
-                    all_layers.append(sel.layer_path)
-            self.recording_layers = list(dict.fromkeys(all_layers))
-            self.recording_layer = (
-                self.recording_layers[0]
-                if len(self.recording_layers) == 1 else None
-            )
-            self.composite_recording = any(
-                isinstance(owner._region_layer_selectors[r], CompositeSelector)
-                for r in regions
-            )
-            self.is_multi_region = len(regions) > 1
+        selectors = [owner._region_layer_selectors.get(target, LayerSelector(target))
+                     for target in targets]
+        self.recording_regions = targets
+        self.recording_layers = list(dict.fromkeys(
+            layer for selector in selectors
+            for layer in (selector.layer_paths if isinstance(selector, CompositeSelector)
+                          else (selector.layer_path,))))
+        self.recording_layer = self.recording_layers[0] if len(self.recording_layers) == 1 else None
+        self.composite_recording = any(isinstance(s, CompositeSelector) for s in selectors)
+        self.is_multi_region = len(targets) > 1
         self.time_bins = time_bins
 
     def reset(self) -> None:
@@ -125,7 +92,7 @@ class Recorder:
                 or canonical_modality(routing[region]) == canonical_modality(modality)]
 
     def layers_for_region(self, region):
-        selector = self.owner._region_layer_selectors[region]
+        selector = self.owner._region_layer_selectors.get(region, LayerSelector(region))
         return (list(selector.layer_paths) if isinstance(selector, CompositeSelector)
                 else [selector.layer_path])
 
@@ -213,7 +180,7 @@ class Recorder:
         owner = self.owner
         blocks = []
         for region in self.regions_for_modality(modality):
-            selector = owner._region_layer_selectors[region]
+            selector = owner._region_layer_selectors.get(region, LayerSelector(region))
             layer_paths = (list(selector.layer_paths)
                            if isinstance(selector, CompositeSelector)
                            else [selector.layer_path])

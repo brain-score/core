@@ -1,5 +1,7 @@
 """Concrete Brain-Score subject implementation."""
 
+from copy import copy
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -17,24 +19,45 @@ from .events import (
 )
 from .perturbation import PerturbationManager
 from .recording import Recorder
-from .selection import UnitSelector, _promote_to_selector
+from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
-    _drain_stream_events as _drain_neural_stream_events,
-    _drive_behavior_session_streaming,
-    _drive_behavior_session_via_process,
-    _drive_environment_session_via_process,
-    _drive_neural_session_streaming,
-    _drive_neural_session_via_process,
-    _drive_state_change_session_via_process,
+    drain_session_inputs as _drain_neural_stream_events,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels,
-    _stimuli_from_stream_session as _neural_stimuli_from_stream_session,
+    session_stimuli as _neural_stimuli_from_stream_session,
 )
 
 
+_PREFERRED_NAMES = {
+    'preprocessors': "extractor={modality: extractor} (configure input preparation "
+                     "on the extractor; declare extractor-less inputs with "
+                     "supported_modalities=)",
+    'activations_model': 'extractor=',
+    'generation_fn': 'answer=',
+    'action_fn': 'policy=',
+    'state_change_fn': 'intervention=',
+}
+
+
+def _warn_old_names(**given) -> None:
+    """Deprecation warning for each older constructor name that was used."""
+    import warnings
+    for name, value in given.items():
+        if value is None or (name == 'preprocessors' and not value):
+            continue
+        warnings.warn(
+            f"BrainScoreModel({name}=...) is deprecated; use "
+            f"{_PREFERRED_NAMES[name]}. It keeps working until the old names are "
+            "removed in a separate, announced release.",
+            DeprecationWarning, stacklevel=3)
+
+
 class BrainScoreModel(UnifiedModel):
-    """Compositional subject with session and legacy typed evaluation paths."""
+    """The one concrete subject, assembled from parts (extractors, region map,
+    answer, policy, intervention, capabilities). Evaluated through ``participate``;
+    ``process`` is a typed convenience and the legacy benchmark methods forward
+    to :class:`~brainscore_core.legacy_facade.LegacyBenchmarkFacade`."""
 
     COLUMN_TO_MODALITY: Dict[str, str] = {
         'image_file_name': 'vision',
@@ -67,10 +90,15 @@ class BrainScoreModel(UnifiedModel):
         activations_model: Any = None,
         visual_degrees: int = 8,
         *legacy_tail_args: Any,
+        extractor: Any = None,
+        answer: Optional[Callable] = None,
+        policy: Optional[Callable] = None,
+        intervention: Optional[Callable] = None,
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
         action_fn: Optional[Callable] = None,
         state_change_fn: Optional[Callable] = None,
+        supported_modalities: Optional[Set[str]] = None,
         required_modalities: Optional[Set[str]] = None,
         backbone_id: Optional[str] = None,
         region_modality_map: Optional[Dict[str, str]] = None,
@@ -80,43 +108,79 @@ class BrainScoreModel(UnifiedModel):
         """A model (or, in principle, a human) evaluated through the unified interface.
 
         Only ``identifier`` is always required; a feature-extraction model also
-        needs ``region_layer_map`` plus a ``preprocessors`` / ``activations_model``
-        pair. The four capability functions are optional and each enables an extra
-        evaluation path.
+        needs ``region_layer_map`` and an ``extractor`` (a modality -> extractor
+        mapping). ``answer``, ``policy`` and ``intervention`` are optional; each
+        enables another evaluation path.
 
         :param identifier: unique model name (also the activation-cache key).
         :param model: the object perturbation hooks / generation run against (e.g.
             the torch module); may be ``None`` for a feature-extraction model whose
             wrapper holds its own module.
         :param region_layer_map: brain region -> layer path (or a ``UnitSelector``).
-        :param preprocessors: modality -> callable. For ``vision``: a resize/normalize
-            callable paired with ``activations_model``. For ``text``/``audio``/``video``:
-            the whole extraction wrapper, with ``activations_model=None``. See EXTENDING.
-        :param activations_model: the vision extraction wrapper (e.g. PytorchWrapper).
+        :param preprocessors: compatibility parameter (deprecated). Prepare inputs
+            inside each extractor instead.
+        :param activations_model: compatibility parameter (deprecated); use
+            ``extractor``.
         :param visual_degrees: vision field-of-view; ignored by non-vision models.
         :param behavioral_readout_layer: layer on which to fit a behavioral readout.
-        :param generation_fn: generate-and-parse callable for instruction-following
-            behavioral evaluation.
-        :param action_fn: ``EnvironmentStep -> EnvironmentResponse`` policy for
-            closed-loop evaluation.
-        :param state_change_fn: ``StateChange -> (PerturbationApplied, cleanup)`` for
-            lesion / stimulation evaluation.
+        :param extractor: extraction callable ``(stimuli, layers=...)`` or a
+            modality -> extractor mapping. Image, text, audio and video wrappers
+            all use this slot; a mapping declares its input modalities. Prepare
+            inputs inside each extractor.
+        :param answer: ``(stimulus_row, instruction, label_set) -> label``;
+            generates and parses a behavioral answer for instruction-following
+            tasks.
+        :param policy: ``EnvironmentStep -> EnvironmentResponse``; chooses an
+            action for closed-loop / embodied evaluation.
+        :param intervention: ``StateChange -> (PerturbationApplied, cleanup)``;
+            applies a lesion / stimulation and returns its cleanup function.
+        :param generation_fn: compatibility parameter (deprecated); use ``answer``.
+        :param action_fn: compatibility parameter (deprecated); use ``policy``.
+        :param state_change_fn: compatibility parameter (deprecated); use
+            ``intervention``.
+        :param supported_modalities: inputs accepted without an extractor, for
+            example by a closed-weight ``answer`` function. Extractor mappings
+            already declare their inputs; do not repeat them here.
         :param required_modalities: input modalities the model cannot run without.
         :param backbone_id: shared cache key so registrations with identical weights
             reuse one activation cache.
-        :param region_modality_map: region -> modality routing for multi-tower models.
+        :param region_modality_map: compatibility routing map. Prefer the modality
+            field on LayerSelector or CompositeSelector in region_layer_map.
 
         Note: passing capability functions POSITIONALLY (via the legacy tail) is
         deprecated and error-prone; always pass them by keyword.
         """
+        # One name per part (Contract Rules v3): extractor, answer, policy,
+        # intervention. The older names keep working with a deprecation warning.
+        _warn_old_names(preprocessors=preprocessors,
+                        activations_model=activations_model,
+                        generation_fn=generation_fn, action_fn=action_fn,
+                        state_change_fn=state_change_fn,
+                        **{k: legacy_capability_config[k] for k in
+                           ('generation_fn', 'action_fn', 'state_change_fn')
+                           if k in legacy_capability_config})
+        # Translate the public vocabulary once; existing plugins keep their
+        # callback names and the internal capability contract stays unchanged.
+        if extractor is not None:
+            if activations_model is not None:
+                raise TypeError("Use extractor or activations_model, not both")
+            activations_model = extractor
+        for public_name, value, old_name, old_value in (
+            ('answer', answer, 'generation_fn', generation_fn),
+            ('policy', policy, 'action_fn', action_fn),
+            ('intervention', intervention, 'state_change_fn', state_change_fn),
+        ):
+            if value is not None:
+                if old_value is not None or old_name in legacy_capability_config:
+                    raise TypeError(f"Use {public_name} or {old_name}, not both")
+                legacy_capability_config[old_name] = value
         if legacy_tail_args:
             import warnings
             warnings.warn(
                 "Passing capability functions positionally to BrainScoreModel is "
                 "deprecated and error-prone: a mis-counted positional silently lands "
                 "in the wrong capability slot. Pass them by keyword instead "
-                "(behavioral_readout_layer=, generation_fn=, action_fn=, "
-                "state_change_fn=).",
+                "(behavioral_readout_layer=, answer=, policy=, intervention=).",
                 DeprecationWarning, stacklevel=2)
         # Fold the now-explicit capability kwargs into the config the normalizer
         # sees, so they are visible in the signature/help() yet routed uniformly.
@@ -142,28 +206,18 @@ class BrainScoreModel(UnifiedModel):
         self._model = model
         region_layer_map = region_layer_map or {}
         preprocessors = preprocessors or {}
-        self._install_region_layer_map(region_layer_map)
-        self._region_modality_map: Dict[str, str] = dict(
-            region_modality_map or {})
-        if self._region_modality_map:
-            unknown_regions = (set(self._region_modality_map.keys())
-                               - set(region_layer_map.keys()))
-            if unknown_regions:
-                raise ValueError(
-                    f"region_modality_map references regions not in "
-                    f"region_layer_map: {sorted(unknown_regions)}."
-                )
-            unknown_modalities = (
-                {canonical_modality(m) for m in self._region_modality_map.values()}
-                - {canonical_modality(k) for k in preprocessors.keys()})
-            if unknown_modalities:
-                raise ValueError(
-                    f"region_modality_map references modalities with no "
-                    f"preprocessor: {sorted(unknown_modalities)}. Available "
-                    f"modalities: {sorted(preprocessors.keys())}."
-                )
-        self._preprocessors = preprocessors
+        # Normalize compatibility inputs once; dispatch always calls an extractor.
+        from .dispatch import normalize_extractors
+        self._preprocessors: Dict[str, Optional[Callable]] = dict(preprocessors)
         self._activations_model = activations_model
+        self._extractors, self._layer_extractors = normalize_extractors(
+            self, preprocessors, activations_model)
+        for modality in supported_modalities or ():
+            self._preprocessors.setdefault(modality, None)
+        for modality in self._extractors:
+            self._preprocessors.setdefault(modality, None)
+        self._region_modality_map: Dict[str, str] = {}
+        self._install_region_layer_map(region_layer_map, region_modality_map)
         self._visual_degrees_val = visual_degrees
         self._capability_config = capability_values
         self._behavioral_readout_layer = capability_values.get(
@@ -181,12 +235,12 @@ class BrainScoreModel(UnifiedModel):
 
         required = ({canonical_modality(m) for m in required_modalities}
                     if required_modalities else set())
-        available = {canonical_modality(k) for k in preprocessors.keys()}
+        available = self.supported_modalities
         if not required.issubset(available):
             raise ValueError(
                 f"required_modalities {required} must be a subset of the "
-                f"available preprocessors {available}. A model cannot require "
-                f"a modality for which it has no preprocessor."
+                f"supported modalities {available}. A model cannot require "
+                f"an input it does not declare."
         )
         self._required_modalities = required
         self._backbone_id = backbone_id or identifier
@@ -195,6 +249,16 @@ class BrainScoreModel(UnifiedModel):
     def capability_config(self):
         """Read-only registration configuration for external capability authors."""
         return MappingProxyType(self._capability_config)
+
+    @property
+    def extractor(self) -> Mapping[str, Callable]:
+        """Read-only modality -> extractor mapping, as normalized at construction.
+
+        Named like the ``extractor`` constructor argument; covers the older
+        ``activations_model``/``preprocessors`` forms too. For observation
+        tools that hook the wired modules; dispatch does not read it.
+        """
+        return MappingProxyType(self._extractors)
 
     def capability_state(self, identifier):
         """Per-model capability state, initialized by the registry before dispatch."""
@@ -206,73 +270,90 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        channels = super().in_channels | set().union(
-            *(set(c.input_channels) for c in self._declared_capabilities()))
-        if self._action_fn is not None:
-            channels.add('observation')
-        return channels
+        return super().in_channels | set().union(
+            *(c.declared_input_channels(self) for c in self._declared_capabilities()))
 
     @property
     def out_channels(self):
-        return super().out_channels | set().union(
-            *(set(c.output_channels) for c in self._declared_capabilities()))
+        # Every output comes from a registered part; nothing is found by name.
+        return set().union(
+            *(c.declared_output_channels(self) for c in self._declared_capabilities()))
 
     def check_session_support(self, channels):
-        """Reject unsupported or ambiguous output combinations before consuming input."""
+        """The one capability that runs a session requesting ``channels``.
+
+        Raises before any input is consumed when no capability, or more than
+        one at the same priority, claims the combination.
+        """
         channels = frozenset(channels)
         if not channels:
             raise ValueError('A session must request at least one output channel.')
-        custom = [c for c in self._declared_capabilities()
+        claims = [c for c in self._declared_capabilities()
                   if c.supports_session(self, channels)]
-        if len(custom) > 1:
-            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in custom]}')
-        stock = (channels in ({'behavior'}, {'motor'}, {'perturbation'})
-                 or all(c.startswith('neural:') for c in channels))
-        if not custom and not stock:
+        if not claims:
             raise NotImplementedError(f'No session handler for {sorted(channels)}')
-        return custom[0] if custom else None
+        first = min(c.order for c in claims)
+        winners = [c for c in claims if c.order == first]
+        if len(winners) > 1:
+            raise ValueError(f'Ambiguous session handlers: {[c.identifier for c in winners]}')
+        return winners[0]
 
     @property
     def identifier(self) -> str:
         return self._identifier_str
 
-    def _install_region_layer_map(self, region_layer_map) -> None:
-        """Rebuild both region->selector and region->layer-path from one mapping.
-
-        The two are derived from the same source and must not drift, which is
-        why callers cannot edit either directly.
-        """
-        self._region_layer_selectors: Dict[str, UnitSelector] = {
-            region: _promote_to_selector(value)
-            for region, value in dict(region_layer_map).items()
-        }
-        self._region_layer_map_dict: Dict[str, str] = {
-            region: selector.layer_path
-            for region, selector in self._region_layer_selectors.items()
-        }
+    def _install_region_layer_map(self, region_layer_map, routing=None) -> None:
+        """Validate and install one lossless region configuration atomically."""
+        selectors = {region: _promote_to_selector(value)
+                     for region, value in dict(region_layer_map).items()}
+        legacy_routing = (dict(routing) if routing is not None else
+                          {r: m for r, m in self._region_modality_map.items()
+                           if r in selectors})
+        unknown = set(legacy_routing) - set(selectors)
+        if unknown:
+            raise ValueError(f"region_modality_map references regions not in region_layer_map: {sorted(unknown)}")
+        for region, selector in selectors.items():
+            modality = getattr(selector, 'modality', None)
+            old_modality = legacy_routing.get(region)
+            if routing is not None and modality and old_modality and (
+                    canonical_modality(modality) != canonical_modality(old_modality)):
+                raise ValueError(f"Conflicting modality routing for region {region!r}")
+            modality = modality or old_modality
+            if modality is not None:
+                if canonical_modality(modality) not in self.supported_modalities:
+                    raise ValueError(f"Region {region!r} references modalities with no preprocessor or extractor: {modality!r}")
+                if isinstance(selector, (LayerSelector, CompositeSelector)):
+                    selectors[region] = replace(selector, modality=modality)
+                elif selector.modality != modality:
+                    # External selectors need only the UnitSelector contract,
+                    # not a dataclass constructor accepting our optional field.
+                    routed = copy(selector)
+                    routed.modality = modality
+                    selectors[region] = routed
+        self._region_layer_selectors = selectors
+        self._region_layer_map_dict = {r: sel.layer_path for r, sel in selectors.items()}
+        self._region_modality_map = {
+            r: sel.modality for r, sel in selectors.items()
+            if sel.modality is not None}
 
     @property
-    def region_layer_map(self) -> Mapping[str, str]:
-        """Read-only view of region -> layer path.
+    def region_layer_map(self) -> Mapping[str, Union[str, UnitSelector]]:
+        """Read-only, lossless recording configuration.
 
-        Returned read-only on purpose. This used to hand back a fresh ``dict``,
-        so ``model.region_layer_map['IT'] = 'h.3'`` edited a throwaway copy and
-        did nothing — no error, no effect. That silently produced a whole layer
-        sweep in which every layer scored identically, because every run was
-        really reading the same layer.
-
-        Mutating the view now raises. Assign a complete mapping, or use
-        :meth:`set_region_layer` for one region; either keeps the selector and
-        layer-path forms in step.
+        Simple entries remain layer strings. Composite units and modality routing
+        remain selectors, so assigning this mapping back preserves every setting.
         """
-        return MappingProxyType(self._region_layer_map_dict)
+        return MappingProxyType({
+            region: (selector.name if isinstance(selector, LayerSelector)
+                     and selector.modality is None else selector)
+            for region, selector in self._region_layer_selectors.items()})
 
     @region_layer_map.setter
     def region_layer_map(self, region_layer_map) -> None:
         self._install_region_layer_map(region_layer_map)
 
     def set_region_layer(self, region: str, value) -> None:
-        """Point one region at a layer path (or ``UnitSelector``)."""
+        """Replace one region's layer or selector, keeping its existing routing."""
         updated = dict(self._region_layer_selectors)
         updated[region] = value
         self._install_region_layer_map(updated)
@@ -311,6 +392,9 @@ class BrainScoreModel(UnifiedModel):
     def backbone_id(self) -> str:
         return self._backbone_id
 
+    # Compatibility surface for tests and notebooks that read recording,
+    # task and perturbation state off the model. Core components read the
+    # owning component (_recorder, _behavioral, _perturbations) directly.
     @property
     def _recording_layer(self) -> Optional[str]:
         return self._recorder.recording_layer
@@ -400,54 +484,43 @@ class BrainScoreModel(UnifiedModel):
                 multi_modality: bool = False) -> OutputEvent:
         """Evaluate one input event and return the corresponding output event.
 
-        The legacy typed evaluation entry point; dispatch is by ``input_event`` type:
+        A typed convenience, not part of the subject contract (``participate`` is
+        the evaluation method). Dispatch is by ``input_event`` type:
         a ``StimulusSet`` / ``MultimodalStimulusSet`` -> ``NeuroidAssembly`` of
         recorded activations (call ``start_recording`` first); a ``StateChange``
         -> ``PerturbationApplied`` (apply) or ``None`` (reset); an
-        ``EnvironmentStep`` -> ``EnvironmentResponse`` (needs ``action_fn``).
+        ``EnvironmentStep`` -> ``EnvironmentResponse`` (needs ``policy``).
+        Native benchmarks evaluate subjects through sessions or the typed
+        helpers in ``brainscore_core.streaming_helpers``; ``process`` is not
+        available on every subject.
 
         :param input_event: the stimulus / state-change / environment-step to run.
         :param multi_modality: if True, extract from every detected-and-supported
             modality and concat along the neuroid axis; default routes a single
             modality by ``MODALITY_PRIORITY``.
         """
-        return self._dispatcher.process(input_event, multi_modality)
+        output = self._dispatcher.process(input_event, multi_modality)
+        time_bins = self._recorder.time_bins
+        if time_bins is not None and len(time_bins) > 1 and not isinstance(
+                input_event, (StateChange, EnvironmentStep, Message)):
+            # Honor every requested time bin: a static response is repeated
+            # across several bins, as legacy vision models do.
+            from .legacy_facade import repeat_over_time_bins
+            output = repeat_over_time_bins(output, time_bins)
+        return output
 
-    def interact(self, session) -> None:
-        """Drive a v2 streaming session through existing model paths."""
-        requested_channels = _requested_output_channels(session)
-        custom = self.check_session_support(requested_channels)
-        if custom is not None:
-            from .capabilities.registry import _setup_once
-            _setup_once(self, custom)
-            custom.interact(self, session)
-            return
-        if requested_channels == ["behavior"]:
-            if getattr(session, "streaming", False):
-                _drive_behavior_session_streaming(self, session)
-            else:
-                _drive_behavior_session_via_process(self, session)
-            return
-        if requested_channels == ["perturbation"]:
-            _drive_state_change_session_via_process(self, session)
-            return
-        if requested_channels == ["motor"]:
-            _drive_environment_session_via_process(self, session)
-            return
-        if all(channel.startswith("neural:") for channel in requested_channels):
-            # A session may ask to be consumed one input at a time (inputs generated
-            # on demand rather than known up front). Same scores, different arrival.
-            if getattr(session, "streaming", False):
-                _drive_neural_session_streaming(self, session)
-            else:
-                _drive_neural_session_via_process(self, session)
-            return
-        raise NotImplementedError(
-            "BrainScoreModel.interact currently supports requested "
-            "neural:<region>, behavior, perturbation, or motor output "
-            "channels; got "
-            f"{requested_channels!r}."
-        )
+    def participate(self, session) -> None:
+        """Run a session through the one registered capability that claims it.
+
+        The handler sees only the streams this model declares in
+        ``in_channels``; every other stream the experiment sends is skipped
+        before it reaches any part (Contract Rules v3, rule 5.5).
+        """
+        handler = self.check_session_support(_requested_output_channels(session))
+        from .capabilities.registry import _setup_once
+        from .session_view import DeclaredInputSession
+        _setup_once(self, handler)
+        handler.participate(self, DeclaredInputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -459,8 +532,12 @@ class BrainScoreModel(UnifiedModel):
                              multi_modality: bool = False) -> OutputEvent:
         return self._dispatcher.handle_stimulus_set(stimuli, multi_modality)
 
-    def _detect_modalities(self, stimuli) -> Set[str]:
+    def detect_modalities(self, stimuli) -> Set[str]:
+        """Declared input modalities whose columns appear in ``stimuli``."""
         return self._dispatcher.detect_modalities(stimuli)
+
+    # Compatibility alias; internal callers still use it.
+    _detect_modalities = detect_modalities
 
     def _pick_modality(self, detected: Set[str]) -> str:
         return self._dispatcher.pick_modality(detected)
@@ -485,9 +562,6 @@ class BrainScoreModel(UnifiedModel):
     def _process_composite_regions(self, stimuli, modality):
         return self._recorder.process_composite_regions(stimuli, modality)
 
-    def _gather_composite_units(self, assembly, selector):
-        return self._recorder.gather_composite_units(assembly, selector)
-
     def start_recording(self,
                         recording_target: Union[str, List[str]],
                         time_bins: Optional[List[Tuple[int, int]]] = None,
@@ -504,8 +578,31 @@ class BrainScoreModel(UnifiedModel):
 
     def start_task(self, task_context, fitting_stimuli=None,
                    **kwargs) -> None:
-        self._behavioral.start_task(task_context, fitting_stimuli,
+        """Configure the behavioral task.
+
+        Fitting stimuli reach the readout with only the input modalities this
+        model declares (rule 5.5); the caller's table is never changed. The
+        same TaskContext object sent again, as a facade session does for every
+        measurement, keeps the fitted readout; a new context, or any context
+        after a state change, fits anew.
+        """
+        from dataclasses import replace
+        from .session_view import declared_only
+        if isinstance(task_context, TaskContext):
+            if self._behavioral.is_configured_for(task_context):
+                return
+            fitting = task_context.fitting_stimuli
+            projected = declared_only(fitting, self.in_channels)
+            context = (task_context if projected is fitting
+                       else replace(task_context, fitting_stimuli=projected))
+            self._behavioral.start_task(context, **kwargs)
+            self._behavioral.mark_configured(task_context)
+            return
+        self._behavioral.start_task(task_context,
+                                    declared_only(fitting_stimuli, self.in_channels),
                                     **kwargs)
+        # The context built from (task, fitting) is what a facade sends back.
+        self._behavioral.mark_configured(self._behavioral.task_context)
 
     def reset(self) -> None:
         failures = []
@@ -517,7 +614,7 @@ class BrainScoreModel(UnifiedModel):
         # Callable capabilities and extractors may own episode/history state.
         # Reset each provider once, including bound-method registrations.
         providers = [self._action_fn, self._generation_fn, self._activations_model,
-                     *self._preprocessors.values()]
+                     *self._preprocessors.values(), *self._extractors.values()]
         seen = set()
         from .capabilities import capability_registry
         for identifier, state in self._capability_state.items():
@@ -542,19 +639,13 @@ class BrainScoreModel(UnifiedModel):
         if failures:
             raise RuntimeError('A model provider failed to reset; the model is not clean.') from failures[0]
 
-    def _resolve_selection(self, state_change: 'StateChange') -> 'StateChange':
-        return self._perturbations.resolve_selection(state_change)
-
     def _dispatch_state_change(self, state_change: 'StateChange') -> Any:
-        return self._dispatcher.dispatch_state_change(state_change)
-
-    @staticmethod
-    def _drain_stream_events(session) -> List[StreamEvent]:
-        return _drain_neural_stream_events(session)
-
-    @staticmethod
-    def _stimuli_from_stream_session(session, events: List[StreamEvent]):
-        return _neural_stimuli_from_stream_session(session, events)
+        try:
+            return self._dispatcher.dispatch_state_change(state_change)
+        finally:
+            # The model changed under the readout: the next start_task fits
+            # again even when the task object is the one already configured.
+            self._behavioral.invalidate()
 
     @staticmethod
     def _reconstruct_stimulus_set_from_events(events: List[StreamEvent]):
@@ -567,20 +658,12 @@ class BrainScoreModel(UnifiedModel):
         """
         return _reconstruct_neural_stimulus_set(events)
 
-    @staticmethod
-    def _requested_output_channels(session) -> List[str]:
-        return _requested_output_channels(session)
-
     @classmethod
     def _requires_behavioral_readout(cls, task_type: str) -> bool:
         return BehavioralReadout.requires_behavioral_readout(task_type)
 
     def _fit_behavioral_readout(self, fitting_stimuli) -> None:
         self._behavioral.fit_behavioral_readout(fitting_stimuli)
-
-    @staticmethod
-    def _extract_labels(stimuli):
-        return BehavioralReadout.extract_labels(stimuli)
 
     def _extract_behavioral_features(self, stimuli):
         return self._behavioral.extract_behavioral_features(stimuli)
@@ -591,40 +674,45 @@ class BrainScoreModel(UnifiedModel):
     def _generate_predictions(self, stimuli):
         return self._behavioral.generate_predictions(stimuli)
 
-    def look_at(self, stimuli, number_of_trials=1, **kwargs):
-        """Vision benchmark compatibility. Delegates to process()."""
-        return self.process(stimuli)
+    # --- Legacy benchmark surface ------------------------------------------
+    # Permanent: legacy benchmarks are never removed. Behavior lives in
+    # LegacyBenchmarkFacade, which runs each legacy call as a session through
+    # ``participate``; these forwards seed a facade with this model's current
+    # recording and task state so direct calls keep working.
+
+    @property
+    def _legacy_facade(self):
+        from .legacy_facade import LegacyBenchmarkFacade
+        facade = LegacyBenchmarkFacade(self, visual_degrees=self._visual_degrees_val)
+        regions = self._recorder.recording_regions
+        if regions:
+            facade.start_recording(regions[0] if len(regions) == 1 else list(regions),
+                                   time_bins=self._recorder.time_bins)
+        if self._behavioral.task_context is not None:
+            facade.start_task(self._behavioral.task_context)
+        return facade
+
+    def look_at(self, stimuli, number_of_trials=1, require_variance=False, **kwargs):
+        """Vision benchmark compatibility (see LegacyBenchmarkFacade.look_at)."""
+        return self._legacy_facade.look_at(stimuli, number_of_trials,
+                                           require_variance, **kwargs)
 
     def visual_degrees(self) -> int:
         """Vision benchmark compatibility."""
         return self._visual_degrees_val
 
     def digest_text(self, text) -> Dict[str, Any]:
-        """Language benchmark compatibility."""
-        import hashlib
-        import pandas as pd
-        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-
-        import numpy as np
-        if isinstance(text, np.ndarray):
-            text = text.tolist()
-        if isinstance(text, (str, list)):
-            if isinstance(text, str):
-                text = [text]
-            stimuli = StimulusSet(pd.DataFrame({
-                'sentence': text,
-                'stimulus_id': list(range(len(text))),
-                'context_id': ['passage'] * len(text),
-            }))
-            content_hash = hashlib.md5(
-                '|'.join(text).encode('utf-8')).hexdigest()[:12]
-            stimuli.identifier = f'text_stimuli_{len(text)}_{content_hash}'
-        else:
-            stimuli = text
-
-        result = self.process(stimuli)
-        return {'neural': result}
+        """Language benchmark compatibility (see LegacyBenchmarkFacade.digest_text)."""
+        return self._legacy_facade.digest_text(text)
 
     def start_neural_recording(self, recording_target, recording_type='fMRI'):
         """Language benchmark compatibility."""
         self.start_recording(recording_target, recording_type=recording_type)
+
+    def start_behavioral_task(self, task):
+        """Language benchmark compatibility; typed models have no legacy language task path."""
+        raise NotImplementedError(
+            f"Subject {self.identifier!r} has no path for the legacy language "
+            f"behavioral task {getattr(task, 'value', task)!r} (reading times / "
+            f"next-word prediction). Legacy language behavioral benchmarks need "
+            f"a subject that implements that task.")

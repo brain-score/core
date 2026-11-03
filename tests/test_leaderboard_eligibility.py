@@ -102,3 +102,17 @@ def test_submission_checks_returned_score_before_upload(monkeypatch, excluded):
         endpoint._score_model_on_benchmark('model', 'benchmark', None, 'vision', True, None)
         assert entry.score_raw == 0.25
         endpoint._upload_score_to_s3.assert_called_once_with(score, 'model', 'benchmark', 'vision')
+
+
+def test_public_score_retrieval_keeps_the_private_names_and_reductions():
+    assert database._retrieve_score_center is database.retrieve_score_center
+    assert database._retrieve_score_error is database.retrieve_score_error
+    scalar = Score(0.25)
+    assert database.retrieve_score_center(scalar) == 0.25
+    assert database.retrieve_score_error(scalar) is None
+    scalar.attrs['error'] = 0.01
+    assert database.retrieve_score_error(scalar) == 0.01
+    aggregated = Score([0.5, 0.02], coords={'aggregation': ['center', 'error']},
+                       dims=['aggregation'])
+    assert database.retrieve_score_center(aggregated) == 0.5
+    assert database.retrieve_score_error(aggregated) == 0.02

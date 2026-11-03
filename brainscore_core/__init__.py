@@ -32,7 +32,7 @@ from .io_catalog import CatalogEntry
 from . import nulls
 
 # Warn loudly if the installed dependency versions have drifted off UMI's pins,
-# since drift silently breaks/changes scoring (see _env_check for detail).
-from ._env_check import warn_on_drift as _warn_on_drift
+# since drift silently breaks/changes scoring (see environment_check for detail).
+from .environment_check import warn_on_drift as _warn_on_drift
 _warn_on_drift()
 del _warn_on_drift

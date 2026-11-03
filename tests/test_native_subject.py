@@ -22,7 +22,7 @@ class TextSubject(Subject):
     def __init__(self):
         self.seen = []
 
-    def interact(self, session):
+    def participate(self, session):
         while (event := session.next_input()) is not None:
             self.seen.append(event)
             if event.channel != "text":
@@ -59,7 +59,7 @@ def test_minimal_subject_consumes_and_emits_timestamped_events():
                  "supported_modalities", "check_session_support"):
         assert not hasattr(subject, name)
     session = InMemorySession([StreamEvent("text", "cat", 12.0, {"stimulus_id": "a"})])
-    subject.interact(session)
+    subject.participate(session)
     assert [event.channel for event in session.emitted] == [
         "neural:language_network", "behavior",
     ]
@@ -85,14 +85,14 @@ def test_minimal_live_session_needs_no_collection_or_model_probe():
                 self.responses.append(event.payload)
 
     session = FeedbackSession()
-    TextSubject().interact(session)
+    TextSubject().participate(session)
     assert session.responses == ["CAT", "CAT"]
 
 
-@pytest.mark.parametrize("missing", ["identifier", "in_channels", "out_channels", "interact"])
+@pytest.mark.parametrize("missing", ["identifier", "in_channels", "out_channels", "participate"])
 def test_incomplete_native_subject_is_rejected(missing):
     declarations = dict(identifier="incomplete", in_channels={"text"},
-                        out_channels={"behavior"}, interact=lambda self, session: None)
+                        out_channels={"behavior"}, participate=lambda self, session: None)
     del declarations[missing]
     incomplete = type("Incomplete", (Subject,), declarations)
     with pytest.raises(TypeError, match=missing):
@@ -105,7 +105,7 @@ def test_optional_requirements_and_stateless_reset_have_safe_defaults():
         in_channels = {"text"}
         out_channels = {"behavior"}
 
-        def interact(self, session):
+        def participate(self, session):
             pass
 
     first, second = Stateless(), Stateless()
