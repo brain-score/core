@@ -212,6 +212,7 @@ def test_behavioral_path_choice_is_explicit_or_warns(monkeypatch, prefer_path):
     model = BrainScoreModel(
         identifier='dual-path', supported_modalities={'text'},
         generation_fn=lambda **kwargs: 'yes', behavioral_readout_layer='layer',
+        activations_model={'text': Extractor()},
     )
     fitted = []
     monkeypatch.setattr(model, '_fit_behavioral_readout', lambda stimuli: fitted.append(stimuli))
@@ -227,6 +228,22 @@ def test_behavioral_path_choice_is_explicit_or_warns(monkeypatch, prefer_path):
         assert 'does not fit' in str(notices[0].message)
     assert bool(fitted) == (prefer_path == 'readout')
     assert model._use_generation_for_task == (prefer_path != 'readout')
+
+
+def test_named_readout_layer_without_extractor_is_not_a_second_path():
+    import warnings
+    from brainscore_core.model_interface import TaskContext
+    model = BrainScoreModel(
+        identifier='answer-only', supported_modalities={'text'},
+        generation_fn=lambda **kwargs: 'yes', behavioral_readout_layer='features',
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', UserWarning)
+        model.start_task(TaskContext(
+            task_type='probabilities', instruction='Choose yes.', label_set=['yes'],
+            fitting_stimuli=StimulusSet({'sentence': ['hello']}),
+        ))
+    assert model._use_generation_for_task is True
 
 
 def test_single_layer_compatibility_callback_rejects_multiple_layers():

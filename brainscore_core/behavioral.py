@@ -143,7 +143,10 @@ class BehavioralReadout:
             return
 
         if gen_viable:
-            if readout_viable and owner._behavioral_readout_layer is not None:
+            # A readout exists only with a layer to read and an extractor to run.
+            readout_wired = (owner._behavioral_readout_layer is not None
+                             and bool(owner._extractors or owner._layer_extractors))
+            if readout_viable and readout_wired:
                 import warnings
                 warnings.warn(
                     'Both generation and fitted readout are available; '
