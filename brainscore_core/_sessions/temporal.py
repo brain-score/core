@@ -1,0 +1,740 @@
+"""
+Temporal binning for naturalistic benchmarks.
+
+The core pattern, from stimulus to binned assembly:
+
+1. Preprocessor expands a clip into individual frames/tokens with
+   ``clip_id`` and ``frame_time_ms`` coordinates in the stimulus set.
+2. The activations_model (PytorchWrapper, TextWrapper, etc.) treats each
+   row as an independent presentation and extracts per-frame activations.
+   Timestamps ride through unchanged as presentation coordinates.
+3. After extraction, ``temporal_bin()`` reads ``clip_id`` and
+   ``frame_time_ms`` from the output assembly, groups frames by clip,
+   averages activations within each requested time window, and returns
+   a ``NeuroidAssembly`` with a ``time_bin`` dimension.
+
+This file provides only step 3. Steps 1 and 2 are model/preprocessor
+concerns — a video preprocessor knows how to split a clip into
+timestamped rows; the existing PytorchWrapper and TextWrapper already
+preserve arbitrary stimulus-set columns as presentation coordinates.
+
+Key property: zero changes to PytorchWrapper or TextWrapper. Timestamps
+are carried by the StimulusSet (via its DataFrame columns), which is
+already the conventional metadata channel. No "sidecar" dataclass.
+"""
+
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Tuple, Union
+
+import numpy as np
+
+from brainscore_core.supported_data_standards.brainio.assemblies import (
+    NeuroidAssembly, walk_coords,
+)
+
+
+TimeBin = Tuple[float, float]
+# Time bins are represented as (start_ms, end_ms) tuples. Open at the top
+# (end is exclusive) so adjacent bins like (0, 500) and (500, 1000) don't
+# double-count frames on the boundary.
+
+
+@dataclass
+class Window:
+    """A temporal context window for processing a clip longer than a model's
+    native temporal window. ``is_causal`` windows reduce to one feature at
+    ``end_ms`` (trailing context); block windows keep their full time-resolved
+    output. A window whose ``[start_ms, end_ms]`` falls outside ``[0, duration]``
+    is padded (the wrapper's ``out_of_bound`` strategy)."""
+    start_ms: float
+    end_ms: float
+    is_causal: bool = False
+
+
+def window_plan(duration_ms: float, context_window_ms: float, *,
+                stride_ms: Optional[float] = None,
+                strategy: str = 'block') -> List[Window]:
+    """Tile ``[0, duration_ms]`` into windows for a model whose native temporal
+    context is ``context_window_ms``. Pure function of numbers (no model).
+
+    - ``'block'``: windows start at 0, stride, 2*stride, … while start < duration
+      (stride defaults to context_window_ms → non-overlapping). The last window
+      may extend past ``duration`` (overhang → padded). Each window's full
+      time-resolved output is used.
+    - ``'causal'``: stride-spaced output times t; each window is ``[t-context, t]``
+      (context precedes the output), one feature per stride at time t. Early
+      windows start before 0 (underhang → padded). A final window ending exactly
+      at ``duration`` is always included.
+    """
+    if context_window_ms <= 0:
+        raise ValueError(f"context_window_ms must be > 0, got {context_window_ms}")
+    if duration_ms <= 0:
+        raise ValueError(f"duration_ms must be > 0, got {duration_ms}")
+    stride = context_window_ms if stride_ms is None else stride_ms
+    if stride <= 0:
+        raise ValueError(f"stride_ms must be > 0, got {stride}")
+    eps = 1e-9
+
+    if strategy == 'block':
+        windows = []
+        start = 0.0
+        while start < duration_ms - eps:
+            windows.append(Window(start, start + context_window_ms, False))
+            start += stride
+        if not windows:  # duration smaller than a step; still one window
+            windows.append(Window(0.0, context_window_ms, False))
+        return windows
+
+    if strategy == 'causal':
+        windows = []
+        t = stride
+        while t < duration_ms - eps:
+            windows.append(Window(t - context_window_ms, t, True))
+            t += stride
+        if not windows or windows[-1].end_ms < duration_ms - eps:
+            windows.append(Window(duration_ms - context_window_ms, duration_ms, True))
+        return windows
+
+    raise ValueError(f"unknown strategy {strategy!r}; use 'block' or 'causal'")
+
+
+def add_time_bin_axis(
+    assembly: NeuroidAssembly,
+    time_bin_start_ms: Optional[float] = None,
+    time_bin_end_ms: Optional[float] = None,
+) -> NeuroidAssembly:
+    """Promote a 2D ``(presentation, neuroid)`` assembly into a 3D
+    ``(presentation, time_bin, neuroid)`` assembly with ``time_bin=1``.
+
+    Lets benchmark code consume image-wrapper output (PytorchWrapper,
+    VLMVisionWrapper) the same way it consumes video/audio/per-token-text
+    wrappers. The axis is purely structural — no aggregation happens —
+    so the values are unchanged and the cost is one ``expand_dims`` call.
+
+    Optional ``time_bin_start_ms`` / ``time_bin_end_ms`` attach absolute
+    ms coords on the new axis. Useful when a still-image stimulus has a
+    known on-screen window (e.g., 100 ms presentation onset → offset).
+
+    No-op when the assembly already carries a ``time_bin`` dim.
+    """
+    if 'time_bin' in assembly.dims:
+        return assembly
+    promoted = assembly.expand_dims('time_bin', axis=1)
+    if time_bin_start_ms is not None:
+        promoted = promoted.assign_coords(
+            time_bin_start_ms=('time_bin', [float(time_bin_start_ms)]))
+    if time_bin_end_ms is not None:
+        promoted = promoted.assign_coords(
+            time_bin_end_ms=('time_bin', [float(time_bin_end_ms)]))
+    return promoted
+
+
+def temporal_bin(
+    assembly: NeuroidAssembly,
+    time_bins: Sequence[TimeBin],
+    *,
+    time_coord: str = 'frame_time_ms',
+    group_coord: str = 'clip_id',
+    aggregation: str = 'mean',
+) -> NeuroidAssembly:
+    """Group per-frame activations by clip, bin by timestamp.
+
+    Input assembly is expected to have dims ``('presentation', 'neuroid')``
+    with ``time_coord`` and ``group_coord`` both varying along the
+    presentation dimension. Each row is one frame/token of one clip.
+
+    Output has dims ``('presentation', 'time_bin', 'neuroid')`` where
+    presentation is one-entry-per-clip and time_bin is one-entry-per-window.
+
+    Args:
+        assembly: 2-D ``NeuroidAssembly`` indexed by frame (not by clip).
+        time_bins: List of ``(start_ms, end_ms)`` tuples. End is exclusive.
+        time_coord: Name of the presentation-dimension coordinate giving
+            each frame's timestamp in milliseconds.
+        group_coord: Name of the coordinate identifying which clip a
+            frame belongs to. Frames with the same value are pooled.
+        aggregation: How to combine activations of frames within one bin.
+            Supported: ``'mean'`` (default), ``'first'`` (take the earliest
+            frame in the bin), ``'none'`` (raise on ambiguity).
+
+    Returns:
+        A ``NeuroidAssembly`` of shape
+        ``(n_clips, n_time_bins, n_neuroids)``. The clip-level
+        presentation coordinate values are the unique ``group_coord``
+        values in the order they first appear in the input.
+
+    Raises:
+        ValueError: If required coordinates are missing, or if a
+            ``(clip, time_bin)`` pair has no frames and aggregation
+            does not cover that case.
+
+    Notes:
+        - Bins are half-open: ``start <= t < end``.
+        - Empty (clip, bin) cells currently produce ``NaN``. Callers
+          (typically benchmarks or downstream metrics) decide how to
+          handle NaNs — there is no one-size-fits-all rule.
+    """
+    # walk_coords is the canonical way to list all coords in this codebase
+    # (xarray 2022.3.0 / NeuroidAssembly hides non-dim coords from
+    # ``.coords`` when dims share a MultiIndex). Names not in this list
+    # really are missing.
+    all_coord_names = [name for name, _, _ in walk_coords(assembly)]
+    if time_coord not in all_coord_names:
+        raise ValueError(
+            f"temporal_bin requires a '{time_coord}' coordinate on the "
+            f"input assembly's presentation dimension. "
+            f"Available coords: {all_coord_names}."
+        )
+    if group_coord not in all_coord_names:
+        raise ValueError(
+            f"temporal_bin requires a '{group_coord}' coordinate on the "
+            f"input assembly's presentation dimension. "
+            f"Available coords: {all_coord_names}."
+        )
+    if aggregation not in ('mean', 'first', 'none'):
+        raise ValueError(
+            f"aggregation={aggregation!r} not in supported "
+            f"('mean', 'first', 'none').")
+
+    # Pull the time and group arrays; both should be length n_presentations.
+    times = np.asarray(assembly[time_coord].values)
+    groups = np.asarray(assembly[group_coord].values)
+    data = assembly.values  # (n_presentations, n_neuroids)
+
+    # Unique clips, preserving order-of-first-appearance.
+    # np.unique returns sorted — we want first-appearance instead.
+    _, first_idx = np.unique(groups, return_index=True)
+    clip_order = groups[np.sort(first_idx)]
+
+    n_clips = len(clip_order)
+    n_time_bins = len(time_bins)
+    n_neuroids = data.shape[1]
+
+    output = np.full((n_clips, n_time_bins, n_neuroids), np.nan,
+                     dtype=data.dtype)
+
+    # Build per-clip row masks once.
+    clip_to_rows = {clip: np.where(groups == clip)[0] for clip in clip_order}
+
+    for ci, clip in enumerate(clip_order):
+        rows = clip_to_rows[clip]
+        clip_times = times[rows]
+        for bi, (start, end) in enumerate(time_bins):
+            bin_mask = (clip_times >= start) & (clip_times < end)
+            if not bin_mask.any():
+                continue  # leave NaN
+            bin_rows = rows[bin_mask]
+            if aggregation == 'mean':
+                output[ci, bi] = data[bin_rows].mean(axis=0)
+            elif aggregation == 'first':
+                earliest_offset = np.argmin(times[bin_rows])
+                output[ci, bi] = data[bin_rows[earliest_offset]]
+            elif aggregation == 'none':
+                if len(bin_rows) > 1:
+                    raise ValueError(
+                        f"aggregation='none' but bin {bi} for clip "
+                        f"{clip} has {len(bin_rows)} frames.")
+                output[ci, bi] = data[bin_rows[0]]
+
+    # Coord construction:
+    # - presentation dim: one entry per clip. We add stimulus_id as a
+    #   second coord to force a MultiIndex — otherwise gather_indexes
+    #   in NeuroidAssembly.__init__ promotes a single coord to a plain
+    #   Index and the coord name is lost (accessing result['clip_id']
+    #   would fail).
+    # - time_bin dim: multiple coords (center_ms, start_ms, end_ms)
+    #   trigger a MultiIndex here too, which preserves the names.
+    # - neuroid dim: carry over from input.
+    time_bin_centers = [0.5 * (s + e) for (s, e) in time_bins]
+    time_bin_bounds = list(time_bins)
+
+    # Copy neuroid-dim coords from input
+    neuroid_coords = {}
+    for coord_name, dims, values in walk_coords(assembly):
+        if set(dims) == {'neuroid'}:
+            neuroid_coords[coord_name] = ('neuroid', values)
+
+    coords = {
+        'clip_id': ('presentation', list(clip_order)),
+        # Mirror as stimulus_id so gather_indexes builds a MultiIndex on
+        # the presentation dim and both names remain accessible.
+        'stimulus_id': ('presentation', list(clip_order)),
+        'time_bin_center_ms': ('time_bin', time_bin_centers),
+        'time_bin_start_ms': ('time_bin', [s for (s, _) in time_bin_bounds]),
+        'time_bin_end_ms': ('time_bin', [e for (_, e) in time_bin_bounds]),
+        **neuroid_coords,
+    }
+
+    return NeuroidAssembly(
+        output,
+        coords=coords,
+        dims=['presentation', 'time_bin', 'neuroid'],
+    )
+
+
+def synchronize_modalities(
+    streams,
+    target_time_bins: Sequence[TimeBin],
+    *,
+    concat_modality: bool = True,
+    modality_coord: str = 'modality',
+) -> Union[NeuroidAssembly, dict]:
+    """Resample several per-modality feature streams onto one shared time grid.
+
+    Each modality's wrapper returns features at its own native temporal
+    resolution — a video tower might emit one vector per 1/30 s frame, an
+    audio tower one per 20 ms, a text tower one per word. To regress them
+    jointly against TR-resolved brain data they must first live on a
+    *single* common time axis. This is the cross-modal alignment step
+    (step 4 of the temporal pipeline), after each wrapper has produced its
+    own ``(presentation, time_bin, neuroid)`` assembly carrying
+    ``time_bin_start_ms`` / ``time_bin_end_ms`` on the ``time_bin`` axis::
+
+        per-modality native-rate streams ──► one common ``target_time_bins`` grid
+
+    For every target bin ``[start, end)`` the source bins whose *center*
+    falls inside it are averaged (same half-open convention as
+    :func:`temporal_bin`). A target bin with no source frames is ``NaN``.
+
+    Args:
+        streams: Mapping ``modality_name -> NeuroidAssembly``. Every
+            assembly must have dims ``('presentation', 'time_bin',
+            'neuroid')``, the same presentation ordering, and enough time
+            coords to locate its source bins (``time_bin_center_ms``, or
+            both ``time_bin_start_ms`` and ``time_bin_end_ms``).
+        target_time_bins: The shared grid as ``(start_ms, end_ms)`` tuples,
+            e.g. one per fMRI TR.
+        concat_modality: When ``True`` (default), the resampled streams are
+            concatenated along the neuroid axis into one assembly, each
+            neuroid tagged with a ``modality`` coord so a benchmark can
+            filter or band-regress per modality. When ``False``, a dict of
+            resampled assemblies (one per modality) is returned.
+        modality_coord: Name of the per-neuroid coord recording the source
+            modality (only used when ``concat_modality``).
+
+    Returns:
+        A single concatenated ``NeuroidAssembly`` (when ``concat_modality``)
+        or a ``dict`` of per-modality assemblies, all sharing the
+        ``target_time_bins`` time axis.
+
+    Raises:
+        ValueError: If ``streams`` is empty, an assembly lacks the
+            ``time_bin`` dim or the time coords needed to place its bins,
+            or the streams disagree on presentation count.
+    """
+    import xarray as xr
+
+    if not streams:
+        raise ValueError("synchronize_modalities requires at least one stream.")
+
+    target_centers = [0.5 * (s + e) for (s, e) in target_time_bins]
+    n_target = len(target_time_bins)
+
+    resampled = {}
+    n_pres_seen: Optional[int] = None
+    for modality, assembly in streams.items():
+        if 'time_bin' not in assembly.dims:
+            raise ValueError(
+                f"stream '{modality}' has no 'time_bin' dim; wrap still-image "
+                f"output with add_time_bin_axis first. Dims: {assembly.dims}.")
+        coord_names = [name for name, _, _ in walk_coords(assembly)]
+        # Locate each source bin's center on the absolute ms timeline.
+        if 'time_bin_center_ms' in coord_names:
+            src_centers = np.asarray(
+                assembly['time_bin_center_ms'].values, dtype=float)
+        elif ('time_bin_start_ms' in coord_names
+              and 'time_bin_end_ms' in coord_names):
+            src_centers = 0.5 * (
+                np.asarray(assembly['time_bin_start_ms'].values, dtype=float)
+                + np.asarray(assembly['time_bin_end_ms'].values, dtype=float))
+        else:
+            raise ValueError(
+                f"stream '{modality}' needs 'time_bin_center_ms' or both "
+                f"'time_bin_start_ms' and 'time_bin_end_ms' on its time_bin "
+                f"axis to be resampled. Coords: {coord_names}.")
+
+        ordered = assembly.transpose('presentation', 'time_bin', 'neuroid')
+        data = np.asarray(ordered.values, dtype=float)
+        n_pres, _, n_neuroid = data.shape
+        if n_pres_seen is None:
+            n_pres_seen = n_pres
+        elif n_pres != n_pres_seen:
+            raise ValueError(
+                f"stream '{modality}' has {n_pres} presentations but a prior "
+                f"stream had {n_pres_seen}; all streams must align.")
+
+        out = np.full((n_pres, n_target, n_neuroid), np.nan, dtype=float)
+        for bi, (start, end) in enumerate(target_time_bins):
+            mask = (src_centers >= start) & (src_centers < end)
+            if mask.any():
+                out[:, bi, :] = np.nanmean(data[:, mask, :], axis=1)
+
+        # Carry over presentation + neuroid coords; reset time_bin to target.
+        pres_coords = {name: ('presentation', np.asarray(values))
+                       for name, dims, values in walk_coords(ordered)
+                       if set(dims) == {'presentation'}}
+        neuroid_coords = {name: ('neuroid', np.asarray(values))
+                          for name, dims, values in walk_coords(ordered)
+                          if set(dims) == {'neuroid'}}
+        coords = {
+            **pres_coords,
+            'time_bin_center_ms': ('time_bin', target_centers),
+            'time_bin_start_ms': ('time_bin', [s for (s, _) in target_time_bins]),
+            'time_bin_end_ms': ('time_bin', [e for (_, e) in target_time_bins]),
+            **neuroid_coords,
+        }
+        resampled[modality] = NeuroidAssembly(
+            out, coords=coords, dims=['presentation', 'time_bin', 'neuroid'])
+
+    if not concat_modality:
+        return resampled
+
+    # Concatenate along neuroid, tagging each neuroid with its modality.
+    tagged = []
+    for modality, assembly in resampled.items():
+        n_neuroid = assembly.sizes['neuroid']
+        tagged.append(assembly.assign_coords(
+            **{modality_coord: ('neuroid', [modality] * n_neuroid)}))
+    return xr.concat(tagged, dim='neuroid')
+
+
+def expand_clip_to_frames(
+    clip_stimulus_set,
+    sample_times_ms: Sequence[float],
+    *,
+    frame_extractor=None,
+    clip_id_col: str = 'stimulus_id',
+    video_col: str = 'video_path',
+    output_image_col: str = 'image_file_name',
+) -> 'StimulusSet':  # noqa: F821
+    """Helper for vision preprocessors: expand clips into timestamped frames.
+
+    Takes a stimulus set where each row is a clip (one ``video_path``
+    per row) and returns a new stimulus set where each row is a single
+    frame with ``clip_id`` and ``frame_time_ms`` columns.
+
+    ``frame_extractor`` is a callable ``(video_path, time_ms) -> Path``
+    that produces an image file for the requested frame. It is the
+    caller's job to supply this (OpenCV / ffmpeg / etc.) — we stay
+    dependency-free here.
+
+    Args:
+        clip_stimulus_set: Input StimulusSet, one row per clip.
+        sample_times_ms: Sequence of timestamps (in ms) at which to
+            extract frames. Same sampling applied to every clip.
+        frame_extractor: Callable that extracts one frame from a video
+            at a given timestamp. Returns a path (str or Path).
+        clip_id_col: Column in input set that identifies each clip.
+            Becomes ``clip_id`` in output.
+        video_col: Column in input set giving the video file path.
+        output_image_col: Column to write frame image paths into.
+
+    Returns:
+        An expanded StimulusSet with one row per (clip, sample_time)
+        pair. Columns include: ``stimulus_id`` (unique per frame),
+        ``clip_id`` (preserved from input row), ``frame_time_ms``,
+        ``output_image_col`` (path to extracted frame), and all other
+        original columns (duplicated per frame).
+    """
+    if frame_extractor is None:
+        raise ValueError(
+            "expand_clip_to_frames requires a frame_extractor "
+            "callable; we don't bundle one to keep brainscore_core "
+            "dependency-free. Typical implementations use OpenCV "
+            "(cv2.VideoCapture) or ffmpeg.")
+
+    import pandas as pd
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+
+    expanded_rows = []
+    stimulus_paths = {}
+    for _, row in clip_stimulus_set.iterrows():
+        clip_id = row[clip_id_col]
+        video_path = row[video_col]
+        for t_ms in sample_times_ms:
+            frame_path = str(frame_extractor(video_path, t_ms))
+            frame_stim_id = f'{clip_id}_t{int(t_ms)}'
+            new_row = dict(row)
+            new_row['stimulus_id'] = frame_stim_id
+            new_row['clip_id'] = clip_id
+            new_row['frame_time_ms'] = float(t_ms)
+            new_row[output_image_col] = frame_path
+            expanded_rows.append(new_row)
+            stimulus_paths[frame_stim_id] = frame_path
+
+    df = pd.DataFrame(expanded_rows)
+    new_set = StimulusSet(df)
+    new_set.identifier = f'{clip_stimulus_set.identifier}-frames'
+    new_set.stimulus_paths = stimulus_paths
+    return new_set
+
+
+# ═════════════════════════════════════════════════════════════════
+# Time-series CV + HRF correction for naturalistic fMRI benchmarks.
+# ═════════════════════════════════════════════════════════════════
+#
+# For benchmarks that score model features against a *continuous* fMRI
+# time series (movie-watching, naturalistic speech), two pieces must
+# differ from the image-benchmark default:
+#
+# 1. Cross-validation folds must be contiguous blocks of time, not
+#    random stripes. Adjacent TRs in a BOLD time series are temporally
+#    correlated by autocorrelation and share stimulus-driven shared
+#    variance; random KFold leaks information from train to test and
+#    produces inflated scores. EPFL's V-JEPA paper uses 15 s contiguous
+#    blocks; Bonner et al. (2021), Toneva & Wehbe (2019), and TRIBEv2
+#    use the same block-CV pattern.
+#
+# 2. Model features must be convolved with a hemodynamic response
+#    function (HRF) before regressing against BOLD. The canonical SPM
+#    double-gamma HRF peaks at ~5 s with an undershoot around 15 s.
+#    Failing to HRF-convolve forces the regressor to learn an implicit
+#    delay which conflates model and BOLD timing.
+#
+# Lahner2024 in its current form does NOT need either: the packaged
+# assembly is pre-computed GLM betas (one value per clip, already
+# HRF-deconvolved at packaging time). These utilities are for the
+# future naturalistic time-series benchmarks (IBC, Courtois NeuroMod,
+# Algonauts 2023) that M8/M12 target.
+
+
+def contiguous_block_cv(
+    n_samples: int,
+    block_size_samples: int,
+    n_splits: Optional[int] = None,
+):
+    """Yield (train_idx, test_idx) splits where each test set is a
+    contiguous block of consecutive indices.
+
+    For time-series data where adjacent samples share variance (BOLD
+    autocorrelation, naturalistic stimulus structure), random KFold
+    leaks information and inflates scores. Contiguous blocks preserve
+    the temporal structure of held-out data.
+
+    The default partition is sequential, non-overlapping: fold ``i``
+    holds out samples ``[i*block_size, (i+1)*block_size)``. Samples that
+    don't fit evenly (``n_samples % block_size != 0``) fall into the
+    last fold's train set on all but the final split, and vice versa
+    on the final split — every sample appears in exactly one test set.
+
+    Args:
+        n_samples: Total number of time points.
+        block_size_samples: Length of each held-out block, in samples.
+        n_splits: Number of folds. Defaults to
+            ``ceil(n_samples / block_size_samples)`` so every sample is
+            held out in exactly one fold.
+
+    Yields:
+        ``(train_idx, test_idx)`` pairs of ``np.ndarray[int]``.
+    """
+    if n_samples <= 0:
+        raise ValueError(f"n_samples must be positive, got {n_samples}")
+    if block_size_samples <= 0:
+        raise ValueError(
+            f"block_size_samples must be positive, got {block_size_samples}")
+    if block_size_samples > n_samples:
+        raise ValueError(
+            f"block_size_samples ({block_size_samples}) must not exceed "
+            f"n_samples ({n_samples})")
+
+    # Default: cover every sample exactly once by ceiling-dividing.
+    default_n_splits = (n_samples + block_size_samples - 1) // block_size_samples
+    n_splits = n_splits or default_n_splits
+
+    if n_splits <= 0:
+        raise ValueError(f"n_splits must be positive, got {n_splits}")
+
+    for fold in range(n_splits):
+        test_start = fold * block_size_samples
+        test_end = min(test_start + block_size_samples, n_samples)
+        if test_end <= test_start:
+            # Happens if the user asked for more folds than blocks fit —
+            # skip rather than emit an empty test set.
+            continue
+        test_idx = np.arange(test_start, test_end)
+        train_idx = np.concatenate([
+            np.arange(0, test_start),
+            np.arange(test_end, n_samples),
+        ])
+        yield train_idx, test_idx
+
+
+def double_gamma_hrf(
+    duration_sec: float,
+    sampling_rate_hz: float,
+    peak_delay: float = 6.0,
+    peak_dispersion: float = 1.0,
+    undershoot_delay: float = 16.0,
+    undershoot_dispersion: float = 1.0,
+    peak_undershoot_ratio: float = 1 / 6.0,
+) -> np.ndarray:
+    """Sample the canonical SPM double-gamma HRF.
+
+    ``h(t) = peak(t) - (1/6) * undershoot(t)``, where each component is
+    a gamma density with shape/scale parameters. Defaults reproduce the
+    SPM canonical (peak ≈ 5 s, undershoot ≈ 15 s, peak:undershoot = 6:1).
+
+    The returned kernel is normalized to unit sum so convolution
+    preserves the feature scale.
+
+    Args:
+        duration_sec: Length of the sampled kernel. 32 s covers the
+            canonical peak + undershoot; longer is fine but wasteful.
+        sampling_rate_hz: Sample rate of the output (typically equal to
+            the fMRI TR, e.g. 1 / 1.5 s ≈ 0.667 Hz, or the model's
+            feature sample rate).
+        peak_delay/peak_dispersion: Gamma parameters for the positive
+            peak component. SPM default: delay=6, dispersion=1.
+        undershoot_delay/undershoot_dispersion: Gamma parameters for the
+            undershoot. SPM default: delay=16, dispersion=1.
+        peak_undershoot_ratio: Scale factor on the undershoot relative
+            to the peak. SPM default: 1/6.
+
+    Returns:
+        1-D ``np.ndarray`` of length ``round(duration_sec * sampling_rate_hz)``,
+        normalized to sum to 1.
+    """
+    from scipy.special import gamma as gamma_fn
+
+    n = int(round(duration_sec * sampling_rate_hz))
+    if n <= 0:
+        raise ValueError(
+            f"HRF duration × sample rate must be > 0; got {duration_sec}s "
+            f"at {sampling_rate_hz} Hz.")
+
+    t = np.arange(n, dtype=np.float64) / sampling_rate_hz
+    # Gamma PDF with shape=delay, scale=1/dispersion. Equivalent to
+    # scipy.stats.gamma(a=delay, scale=1/dispersion).pdf(t).
+    peak = (t ** (peak_delay - 1) * (peak_dispersion ** peak_delay)
+            * np.exp(-peak_dispersion * t)) / gamma_fn(peak_delay)
+    undershoot = (t ** (undershoot_delay - 1)
+                  * (undershoot_dispersion ** undershoot_delay)
+                  * np.exp(-undershoot_dispersion * t)) / gamma_fn(undershoot_delay)
+    h = peak - peak_undershoot_ratio * undershoot
+    total = h.sum()
+    if total == 0:
+        raise ValueError(
+            "HRF summed to zero — check duration/sampling parameters.")
+    return h / total
+
+
+def hrf_convolve(
+    features: np.ndarray,
+    sampling_rate_hz: float,
+    hrf: Optional[np.ndarray] = None,
+    hrf_duration_sec: float = 32.0,
+) -> np.ndarray:
+    """Convolve model features with an HRF along the time axis.
+
+    Aligns the timing of model features to BOLD responses for regression
+    against fMRI time series. The returned array has the same shape as
+    the input — only the past influences the present (causal truncation
+    of the ``np.convolve`` full mode).
+
+    Args:
+        features: ``(n_time, n_features)`` array. Rows are time points
+            sampled at ``sampling_rate_hz``.
+        sampling_rate_hz: Sample rate of the feature time series.
+        hrf: Optional pre-computed 1-D HRF kernel. Must be sampled at
+            the same rate as ``features``. If None, the canonical SPM
+            double-gamma is used.
+        hrf_duration_sec: Duration of the default HRF kernel when
+            ``hrf`` is None. 32 s is standard (covers peak + undershoot).
+
+    Returns:
+        ``(n_time, n_features)`` convolved features, same dtype as input.
+    """
+    if features.ndim != 2:
+        raise ValueError(
+            f"hrf_convolve expects 2-D (time, features) input; got shape "
+            f"{features.shape}")
+
+    n_time, n_features = features.shape
+    if n_time == 0:
+        return features.copy()
+
+    if hrf is None:
+        hrf = double_gamma_hrf(hrf_duration_sec, sampling_rate_hz)
+
+    if hrf.ndim != 1:
+        raise ValueError(f"hrf must be 1-D; got shape {hrf.shape}")
+
+    # Causal convolution: truncate 'full' result to the length of the
+    # original time axis. Equivalent to 'same' mode for power-of-2 lengths
+    # but explicit so behavior is unambiguous for any n.
+    out = np.zeros_like(features)
+    for j in range(n_features):
+        conv = np.convolve(features[:, j], hrf, mode='full')[:n_time]
+        out[:, j] = conv
+    return out
+
+
+def lanczos_kernel(cutoff, offsets, window=3):
+    """Lanczos (windowed-sinc) weights at ``offsets``, in the same time units.
+
+    ``window`` bounds how many sinc lobes contribute; beyond it the weight is
+    zero, which is what makes this a finite filter rather than an infinite sinc.
+    """
+    scaled = np.asarray(offsets, dtype=float) * cutoff
+    with np.errstate(divide='ignore', invalid='ignore'):
+        weights = (window * np.sin(np.pi * scaled)
+                   * np.sin(np.pi * scaled / window)
+                   / (np.pi ** 2 * scaled ** 2))
+    weights[scaled == 0] = 1.0
+    weights[np.abs(scaled) > window] = 0.0
+    return weights
+
+
+def lanczos_downsample(features, feature_times, target_times, window=3,
+                       cutoff_mult=1.0):
+    """Resample irregularly-timed ``features`` onto ``target_times``.
+
+    Stimulus features arrive at word or token times — irregular, several per
+    second — while fMRI samples on a slow regular grid. Taking only the last
+    value in each sample discards the rest of the window; a windowed-sinc filter
+    keeps them, low-passed at the target grid's own frequency so nothing above
+    what that grid can represent is folded back in.
+
+    This is the filter used by LITcoder (``lanczosinterp2D``) for the same job,
+    reproduced here so a Brain-Score benchmark can adopt the same downsampling
+    without taking on that dependency.
+
+    :param features: ``(n_feature_times, n_features)``.
+    :param feature_times: when each row of ``features`` occurred.
+    :param target_times: evenly spaced times to resample onto; their spacing
+        sets the low-pass cutoff.
+    :returns: ``(len(target_times), n_features)``.
+    """
+    features = np.asarray(features, dtype=float)
+    feature_times = np.asarray(feature_times, dtype=float)
+    target_times = np.asarray(target_times, dtype=float)
+    if features.shape[0] != feature_times.shape[0]:
+        raise ValueError(
+            f'{features.shape[0]} feature rows but {feature_times.shape[0]} '
+            f'feature times')
+    if len(target_times) < 2:
+        raise ValueError('need at least two target times to infer a cutoff')
+
+    cutoff = cutoff_mult / np.mean(np.diff(target_times))
+    weights = np.empty((len(target_times), len(feature_times)))
+    for index, target in enumerate(target_times):
+        weights[index] = lanczos_kernel(cutoff, target - feature_times, window)
+    return weights @ features
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    Window,
+    window_plan,
+    add_time_bin_axis,
+    temporal_bin,
+    synchronize_modalities,
+    expand_clip_to_frames,
+    contiguous_block_cv,
+    double_gamma_hrf,
+    hrf_convolve,
+    lanczos_kernel,
+    lanczos_downsample,
+):
+    _definition.__module__ = 'brainscore_core.temporal'
+del _definition
