@@ -197,12 +197,31 @@ import importlib
 
 
 _COMPONENT_MODULES = {
+    'behavior': '_model.behavior',
     'behavioral': '_model.behavioral',
     'capability_config': '_model.capability_config',
     'dispatch': '_model.dispatch',
     'perturbation': '_model.perturbation',
     'recording': '_model.recording',
+    'temporal': '_sessions.temporal',
+    'streaming_helpers': '_sessions.helpers',
     'session_view': '_sessions.view',
+    'compatibility': '_evaluation.compatibility',
+    'execution_plan': '_evaluation.execution_plan',
+    'memory': '_evaluation.memory',
+    'preflight': '_evaluation.preflight',
+    'score_metadata': '_evaluation.score_metadata',
+    'score_status': '_evaluation.score_status',
+    'legacy_facade': '_evaluation.legacy_facade',
+    'nulls': '_evaluation.nulls',
+    'assembly_builder': '_data.assembly_builder',
+    'multimodal': '_data.multimodal',
+    'text': '_data.text',
+    'environment_check': '_runtime.environment_check',
+    'extraction_cache': '_runtime.extraction_cache',
+    'hf_compat': '_runtime.hf_compat',
+    'extensions': '_runtime.extensions',
+    '_env_check': '_runtime.environment_check',
 }
 
 
@@ -283,3 +302,23 @@ def test_layout_keeps_recorded_contract_type_names():
     assert EnvironmentStep.__module__ == 'brainscore_core.events'
     assert EnvironmentResponse.__module__ == 'brainscore_core.events'
     assert StateChange.__module__ == 'brainscore_core.events'
+
+
+@pytest.mark.parametrize('module_name,type_name', [
+    ('behavior', 'ProbabilitiesClassifier'),
+    ('behavioral', 'BehavioralReadout'),
+    ('compatibility', 'CompatibilityMatch'),
+    ('execution_plan', 'ExecutionPlan'),
+    ('extraction_cache', 'FileContent'),
+    ('legacy_facade', 'LegacyBenchmarkFacade'),
+    ('memory', 'MemoryError'),
+    ('multimodal', 'MultimodalStimulusSet'),
+    ('temporal', 'Window'),
+])
+def test_moved_types_keep_public_pickle_references(module_name, type_name):
+    import pickle
+
+    module = importlib.import_module('brainscore_core.' + module_name)
+    definition = vars(module)[type_name]
+    assert definition.__module__ == 'brainscore_core.' + module_name
+    assert pickle.loads(pickle.dumps(definition)) is definition

@@ -2,8 +2,8 @@
 
 from typing import Iterable, Optional, Set
 
-from .compatibility import benchmark_requested_output_channels
-from .streaming import parse_channel
+from brainscore_core._evaluation.compatibility import benchmark_requested_output_channels
+from brainscore_core.streaming import parse_channel
 
 
 def stamp_score_metadata(
@@ -95,3 +95,19 @@ def _behavior_protocol(subject) -> str:
     if getattr(subject, "_use_generation_for_task", False) is True:
         return "behavior:generation"
     return "behavior:readout"
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    stamp_score_metadata,
+    requested_output_channels_for_score,
+    infer_score_protocol,
+    _sorted_tuple,
+    _channel_family,
+    _normalise_parent,
+    _optional_attr,
+    _is_behavior_parent,
+    _behavior_protocol,
+):
+    _definition.__module__ = 'brainscore_core.score_metadata'
+del _definition

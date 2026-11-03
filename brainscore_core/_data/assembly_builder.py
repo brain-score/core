@@ -117,3 +117,15 @@ def replace_presentation_coord(assembly, coord_name: str,
         new_coords[name] = (dims, coord_values)
     new_coords[coord_name] = ('presentation', list(values))
     return type(assembly)(assembly.values, coords=new_coords, dims=assembly.dims)
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    make_neuroid_ids,
+    make_layer_neuroid_coords,
+    make_assembly,
+    concat_neuroid_assemblies,
+    replace_presentation_coord,
+):
+    _definition.__module__ = 'brainscore_core.assembly_builder'
+del _definition

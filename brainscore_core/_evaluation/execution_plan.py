@@ -120,3 +120,12 @@ class ExecutionPlan:
         """Metric feature width: the declared compression/windowing target, else the
         raw (probed or declared) recording width passed in."""
         return self.metric_feature_width or raw_feature_width
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    _positive_int,
+    ExecutionPlan,
+):
+    _definition.__module__ = 'brainscore_core.execution_plan'
+del _definition

@@ -108,3 +108,11 @@ class PerturbationManager:
             )
         self.active_perturbations[applied.handle_id] = cleanup
         return applied
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    PerturbationManager,
+):
+    _definition.__module__ = 'brainscore_core.perturbation'
+del _definition

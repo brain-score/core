@@ -193,3 +193,20 @@ def resolve(name: str) -> Callable:
             f"{name!r} is a PERTURBATION-level null: realize it by constructing a "
             f"Perturbation variant and dispatching process(StateChange(...)).")
     raise ValueError(f"unknown null {name!r}; callable nulls: {sorted(CALLABLE_NULLS)}.")
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    _rng,
+    shuffle_rows,
+    shift_features,
+    shuffle_labels,
+    random_unit_subset,
+    random_action,
+    temporal_shift_curve,
+    describe,
+    callable_nulls,
+    resolve,
+):
+    _definition.__module__ = 'brainscore_core.nulls'
+del _definition

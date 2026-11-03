@@ -720,3 +720,21 @@ def lanczos_downsample(features, feature_times, target_times, window=3,
     for index, target in enumerate(target_times):
         weights[index] = lanczos_kernel(cutoff, target - feature_times, window)
     return weights @ features
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    Window,
+    window_plan,
+    add_time_bin_axis,
+    temporal_bin,
+    synchronize_modalities,
+    expand_clip_to_frames,
+    contiguous_block_cv,
+    double_gamma_hrf,
+    hrf_convolve,
+    lanczos_kernel,
+    lanczos_downsample,
+):
+    _definition.__module__ = 'brainscore_core.temporal'
+del _definition

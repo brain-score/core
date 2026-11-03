@@ -236,3 +236,11 @@ class Recorder:
             else:
                 keep_positions.extend(layer_positions[list(indices)].tolist())
         return assembly.isel(neuroid=keep_positions)
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    Recorder,
+):
+    _definition.__module__ = 'brainscore_core.recording'
+del _definition

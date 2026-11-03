@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 from result_caching import store_xarray as _store_xarray, is_enabled
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('brainscore_core.extraction_cache')
 _weight_hashes = ContextVar('brainscore_weight_hashes', default=None)
 _HASH_CHUNK_BYTES = 4 * 1024 * 1024
 
@@ -320,3 +320,26 @@ class store_xarray(_store_xarray):
                 logger.info('Activation cache miss: %s; unversioned entries are retained but cannot be reused',
                             identifier)
         return identifier
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    weight_fingerprint_scope,
+    UncacheableConfiguration,
+    FileContent,
+    file_inputs,
+    _tensor_chunks,
+    _hash_tensor,
+    _tensor_content,
+    _name,
+    _version,
+    _canonical,
+    fingerprint,
+    extraction_fingerprint,
+    model_config,
+    wrapper_config,
+    implementation_config,
+    store_xarray,
+):
+    _definition.__module__ = 'brainscore_core.extraction_cache'
+del _definition

@@ -25,10 +25,10 @@ import sys
 import warnings
 from typing import Optional
 
-from .execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
-from .contract import Subject
+from brainscore_core._evaluation.execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
+from brainscore_core.contract import Subject
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('brainscore_core.memory')
 
 class MemoryError(Exception):
     """Raised when estimated memory exceeds available resources."""
@@ -442,7 +442,7 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
         except Exception:
             one = stimulus_set
         one = _isolate_probe_identifier(one, stimulus_set)
-    from .streaming_helpers import neural_response
+    from brainscore_core._sessions.helpers import neural_response
     time_bins = getattr(benchmark, 'timebins', None)
     regions = ([recording_target] if recording_target is not None
                else _probe_regions(model, benchmark))
@@ -681,3 +681,30 @@ def check_memory(
             f"{available / 1e9:.1f} GB). OOM risk is elevated.",
             ResourceWarning,
         )
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    MemoryError,
+    get_available_memory,
+    get_host_available_memory,
+    get_peak_memory,
+    reset_peak_memory,
+    _get_peak_rss,
+    _detect_metric_category,
+    _get_n_targets,
+    _get_n_stimuli,
+    _get_n_alphas,
+    estimate_metric_memory,
+    _safe_getattr,
+    _get_benchmark_stimulus_set,
+    _get_execution_plan,
+    _probe_regions,
+    _isolate_probe_identifier,
+    _probe_feature_dim,
+    _resolve_feature_dim,
+    _get_n_presentations,
+    check_memory,
+):
+    _definition.__module__ = 'brainscore_core.memory'
+del _definition

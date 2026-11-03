@@ -120,3 +120,11 @@ class ProbabilitiesClassifier:
             (idx, lbl) for lbl, idx in label_to_index.items()
         )
         return indices, index_to_label
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    ProbabilitiesClassifier,
+):
+    _definition.__module__ = 'brainscore_core.behavior'
+del _definition

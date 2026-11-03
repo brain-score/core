@@ -87,3 +87,12 @@ def _consume_host_arg(legacy_values, name, current_value):
             f"BrainScoreModel() got multiple values for argument '{name}'"
         )
     return legacy_values.pop(name)
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    normalize_capability_config,
+    _consume_host_arg,
+):
+    _definition.__module__ = 'brainscore_core.capability_config'
+del _definition

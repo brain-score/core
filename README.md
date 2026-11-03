@@ -27,10 +27,15 @@ please [send in a pull request](https://github.com/brain-score/core/pulls).
 | `model_interface.py`, `brainscore_model.py` | Public model imports and model construction |
 | `_model/` | Dispatch, task state, recording state and intervention lifecycle |
 | `_sessions/` | Buffered inputs, environments, perception windows and session drivers |
-| `streaming_helpers.py` | Public session helpers |
+| `_evaluation/` | Compatibility, preflight, memory checks and legacy scoring |
+| `_data/` | Assemblies, multimodal stimuli and text helpers |
+| `_runtime/` | Extraction caching, dependency checks and channel registration |
 
-Existing imports remain available. The underscored packages hold implementation
-details; integrations should use the public interfaces.
+The package root keeps ten files for public definitions and entry points.
+Existing imports such as `brainscore_core.memory` and
+`brainscore_core.streaming_helpers` remain available and share the same module
+state as their implementations. The underscored folders are internal; use the
+established public imports in integrations.
 
 ## License
 

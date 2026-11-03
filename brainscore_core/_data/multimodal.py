@@ -159,3 +159,11 @@ class MultimodalStimulusSet(StimulusSet):
         mm.sample_rates_hz = dict(sample_rates_hz) if sample_rates_hz else {}
         mm.refresh_modality_columns()
         return mm
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    MultimodalStimulusSet,
+):
+    _definition.__module__ = 'brainscore_core.multimodal'
+del _definition

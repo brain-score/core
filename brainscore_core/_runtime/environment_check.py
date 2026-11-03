@@ -126,3 +126,14 @@ def describe_env() -> List[Tuple[str, Optional[str], str, Optional[bool]]]:
         except Exception:
             rows.append((pkg, installed, expected, None))
     return rows
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    _parse,
+    check_env_bounds,
+    warn_on_drift,
+    describe_env,
+):
+    _definition.__module__ = 'brainscore_core.environment_check'
+del _definition

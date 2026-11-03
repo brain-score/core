@@ -22,7 +22,7 @@ def declared_only(stimulus_set, channels):
     """
     if stimulus_set is None:
         return None
-    from ..streaming_helpers import _channel_for_stimulus_column, _preserve_stimulus_set_type
+    from brainscore_core._sessions.helpers import _channel_for_stimulus_column, _preserve_stimulus_set_type
     declared = frozenset(channels)
 
     def is_declared(channel):
@@ -84,3 +84,12 @@ class DeclaredInputSession(Session):
 
     def collect(self, channel=None):
         return self._session.collect(channel)
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    declared_only,
+    DeclaredInputSession,
+):
+    _definition.__module__ = 'brainscore_core.session_view'
+del _definition

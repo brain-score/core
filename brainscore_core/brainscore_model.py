@@ -21,7 +21,7 @@ from ._model.perturbation import PerturbationManager
 from ._model.recording import Recorder
 from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
-from .streaming_helpers import (
+from brainscore_core._sessions.helpers import (
     drain_session_inputs as _drain_neural_stream_events,
     _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
     _requested_output_channels,
@@ -505,7 +505,7 @@ class BrainScoreModel(UnifiedModel):
                 input_event, (StateChange, EnvironmentStep, Message)):
             # Honor every requested time bin: a static response is repeated
             # across several bins, as legacy vision models do.
-            from .legacy_facade import repeat_over_time_bins
+            from brainscore_core._evaluation.legacy_facade import repeat_over_time_bins
             output = repeat_over_time_bins(output, time_bins)
         return output
 
@@ -518,7 +518,7 @@ class BrainScoreModel(UnifiedModel):
         """
         handler = self.check_session_support(_requested_output_channels(session))
         from .capabilities.registry import _setup_once
-        from .session_view import DeclaredInputSession
+        from brainscore_core._sessions.view import DeclaredInputSession
         _setup_once(self, handler)
         handler.participate(self, DeclaredInputSession(session, self.in_channels))
 
@@ -587,7 +587,7 @@ class BrainScoreModel(UnifiedModel):
         after a state change, fits anew.
         """
         from dataclasses import replace
-        from .session_view import declared_only
+        from brainscore_core._sessions.view import declared_only
         if isinstance(task_context, TaskContext):
             if self._behavioral.is_configured_for(task_context):
                 return
@@ -682,7 +682,7 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def _legacy_facade(self):
-        from .legacy_facade import LegacyBenchmarkFacade
+        from brainscore_core._evaluation.legacy_facade import LegacyBenchmarkFacade
         facade = LegacyBenchmarkFacade(self, visual_degrees=self._visual_degrees_val)
         regions = self._recorder.recording_regions
         if regions:

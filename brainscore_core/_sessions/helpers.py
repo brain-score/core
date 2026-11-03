@@ -11,21 +11,21 @@ import inspect
 import time
 from typing import Any, List, Optional, Sequence, Tuple, Union
 import numpy as np
-from .contract import Subject, TaskContext, UnifiedModel  # noqa: F401  (re-exported)
-from .io_catalog import modalities_to_input_channels
-from .streaming import BufferedSession, Session, StreamEvent, parse_channel
-from .events import (
+from brainscore_core.contract import Subject, TaskContext, UnifiedModel  # noqa: F401  (re-exported)
+from brainscore_core.io_catalog import modalities_to_input_channels
+from brainscore_core.streaming import BufferedSession, Session, StreamEvent, parse_channel
+from brainscore_core.events import (
     EnvironmentResponse,
     EnvironmentStep,
     PerturbationApplied,
     StateChange,
 )
-from .supported_data_standards.brainio.assemblies import (
+from brainscore_core.supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
     NeuroidAssembly,
 )
 
-from ._sessions.buffered import (
+from brainscore_core._sessions.buffered import (
     BehavioralSession,
     StateChangeSession,
     StimulusSetSession,
@@ -37,7 +37,7 @@ from ._sessions.buffered import (
     stimulus_session,
 )
 
-from ._sessions.environment import (
+from brainscore_core._sessions.environment import (
     EnvironmentSession,
     _coerce_environment_step,
     _drive_environment_session_via_process,
@@ -50,14 +50,14 @@ from ._sessions.environment import (
     run_environment,
 )
 
-from ._sessions.perception import (
+from brainscore_core._sessions.perception import (
     RealTimeStreamSession,
     StreamingStimulusSetSession,
     WindowedStreamSession,
     _default_window_to_stimuli,
 )
 
-from ._sessions.drivers import (
+from brainscore_core._sessions.drivers import (
     _combined_recording_target,
     _demultiplex_neural_output,
     _drive_behavior_session_streaming,
@@ -76,7 +76,7 @@ from ._sessions.drivers import (
     measurement_settings,
 )
 
-from ._sessions.payloads import (
+from brainscore_core._sessions.payloads import (
     STIMULUS_COLUMN_TO_MODALITY,
     _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY,
     _STIMULUS_INPUT_CHANNEL_FAMILIES,

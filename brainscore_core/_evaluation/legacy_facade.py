@@ -19,8 +19,8 @@ state, so direct calls keep working too.
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .contract import TaskContext
-from .streaming import BufferedSession
+from brainscore_core.contract import TaskContext
+from brainscore_core.streaming import BufferedSession
 
 PASSIVE = 'passive'
 
@@ -282,3 +282,17 @@ def _time_bin_pairs(time_bins) -> List[Tuple[Any, Any]]:
         start, end = item
         pairs.append((start, end))
     return pairs
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    LegacyBenchmarkFacade,
+    mark_legacy_benchmark,
+    subject_for_benchmark,
+    declared_visual_degrees,
+    text_stimulus_set,
+    repeat_over_time_bins,
+    _time_bin_pairs,
+):
+    _definition.__module__ = 'brainscore_core.legacy_facade'
+del _definition

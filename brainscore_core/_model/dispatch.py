@@ -337,3 +337,16 @@ def _reset_presentation_index(assembly):
     if index.__class__.__name__ != 'MultiIndex':
         return assembly
     return assembly.reset_index('presentation')
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    _activation_cache_disabled,
+    register_input_handler,
+    normalize_extractors,
+    InputDispatcher,
+    _concat_modalities_along_neuroid,
+    _reset_presentation_index,
+):
+    _definition.__module__ = 'brainscore_core.dispatch'
+del _definition

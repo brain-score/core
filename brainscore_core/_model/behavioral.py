@@ -170,7 +170,7 @@ class BehavioralReadout:
 
     def fit_behavioral_readout(self, fitting_stimuli) -> None:
         """Extract readout-layer features and fit a probabilities classifier."""
-        from brainscore_core.behavior import ProbabilitiesClassifier
+        from brainscore_core._model.behavior import ProbabilitiesClassifier
 
         owner = self.owner
         task_type = (
@@ -292,3 +292,11 @@ class BehavioralReadout:
             },
             dims=['presentation', 'choice'],
         )
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    BehavioralReadout,
+):
+    _definition.__module__ = 'brainscore_core.behavioral'
+del _definition

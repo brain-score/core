@@ -1,8 +1,8 @@
 """Public registration for external stimulus domains and channel payloads."""
 
-from . import io_catalog
-from .io_catalog import CatalogEntry
-from .streaming import StreamEvent
+from brainscore_core import io_catalog
+from brainscore_core.io_catalog import CatalogEntry
+from brainscore_core.streaming import StreamEvent
 
 
 def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
@@ -10,8 +10,8 @@ def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
 
     Existing registrations require explicit replacement.
     """
-    from .streaming import parse_channel
-    from .brainscore_model import BrainScoreModel
+    from brainscore_core.streaming import parse_channel
+    from brainscore_core.brainscore_model import BrainScoreModel
     _, address = parse_channel(entry.name)
     if address is not None:
         raise ValueError("Register a channel family, not an addressed instance")
@@ -32,3 +32,11 @@ def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
 
 
 __all__ = ['CatalogEntry', 'StreamEvent', 'register_channel']
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    register_channel,
+):
+    _definition.__module__ = 'brainscore_core.extensions'
+del _definition

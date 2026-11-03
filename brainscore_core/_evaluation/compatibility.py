@@ -29,10 +29,10 @@ import warnings
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Set
 
-from . import io_catalog
-from .io_catalog import canonical_modality, modalities_to_input_channels
-from .model_interface import Subject
-from .streaming import parse_channel
+from brainscore_core import io_catalog
+from brainscore_core.io_catalog import canonical_modality, modalities_to_input_channels
+from brainscore_core.model_interface import Subject
+from brainscore_core.streaming import parse_channel
 
 
 class CompatibilityError(Exception):
@@ -306,3 +306,24 @@ def check_io_catalog(model: Subject, benchmark) -> None:
             CompatibilityWarning,
             stacklevel=2,
         )
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    CompatibilityError,
+    CompatibilityWarning,
+    ensure_legacy_benchmark_modalities,
+    CompatibilityMatch,
+    check_channel_compatibility,
+    benchmark_input_channels,
+    benchmark_required_input_channels,
+    benchmark_accepted_input_channels,
+    benchmark_requested_output_channels,
+    validate_channels,
+    _format_channels,
+    _benchmark_identifier,
+    check_compatibility,
+    check_io_catalog,
+):
+    _definition.__module__ = 'brainscore_core.compatibility'
+del _definition
