@@ -211,7 +211,7 @@ def test_behavioral_path_choice_is_explicit_or_warns(monkeypatch, prefer_path):
     from brainscore_core.model_interface import TaskContext
     model = BrainScoreModel(
         identifier='dual-path', supported_modalities={'text'},
-        generation_fn=lambda **kwargs: 'yes',
+        generation_fn=lambda **kwargs: 'yes', behavioral_readout_layer='layer',
     )
     fitted = []
     monkeypatch.setattr(model, '_fit_behavioral_readout', lambda stimuli: fitted.append(stimuli))

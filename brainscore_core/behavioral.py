@@ -143,7 +143,7 @@ class BehavioralReadout:
             return
 
         if gen_viable:
-            if readout_viable:
+            if readout_viable and owner._behavioral_readout_layer is not None:
                 import warnings
                 warnings.warn(
                     'Both generation and fitted readout are available; '
