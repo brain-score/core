@@ -33,6 +33,11 @@ class TaskContext:
     is empty), or ``'readout'`` (force readout, error if
     behavioral_readout_layer is missing or fitting_stimuli is empty). Use
     it instead of disabling a model's answer function to force readout.
+
+    ``BrainScoreModel`` accepts ``task_type`` ``'passive'`` or one of
+    ``'probabilities'``, ``'classification'``, ``'label'``. Put the stimuli to
+    answer (for example a held-out test set) in ``metadata['stimulus_set']``
+    when using ``behavioral_response``.
     """
     task_type: str
     label_set: Optional[List[str]] = None
