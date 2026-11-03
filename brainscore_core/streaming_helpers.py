@@ -396,10 +396,15 @@ def apply_state_change(subject, state_change: StateChange):
 
 def run_environment(subject, environment, *, seed=None, options=None,
                     action_validator=None, require_specs=False) -> list:
-    """Run one episode and close its environment, returning applied actions.
+    """Run one closed-loop episode and close its environment, returning applied actions.
 
-    The caller owns subject reset. For isolated trials and tools, use
-    Experiment with SessionProtocol, which resets before and after each trial.
+    The subject must implement ``participate(session)``; there is no ``process()``
+    fallback for closed-loop sessions.
+
+    Reset rule: the caller owns ``subject.reset()`` between episodes (or uses
+    Experiment with SessionProtocol, which resets before and after each trial).
+    Policy adapters additionally clear their own per-episode memory when a step
+    arrives with ``is_first=True``.
     """
     try:
         session = environment_session(
@@ -412,7 +417,14 @@ def run_environment(subject, environment, *, seed=None, options=None,
             close()
         raise
     with session:
-        subject.participate(session)
+        participate = getattr(subject, "participate", None)
+        if not callable(participate):
+            raise TypeError(
+                f"{type(subject).__name__} has no participate(session); closed-loop "
+                "sessions require a Subject. Wrap a bare action function as "
+                "BrainScoreModel(..., policy=fn)."
+            )
+        participate(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
         return session.collect("motor")

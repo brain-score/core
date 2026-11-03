@@ -15,7 +15,7 @@ temporal / multimodal       ``shift_features`` along time (mis-align modality
 state-change / ablation     ``random_unit_subset`` (ablate random units),
                             opposite-sign perturbation
 unit / composite select     ``random_unit_subset`` (vs the selected population)
-embodied (policy)           ``random_action`` (vs the learned policy)
+closed-loop (policy)        ``random_action`` (vs the learned policy)
 ==========================  ==================================================
 
 These transforms are deliberately mechanical so the floor is unambiguous: if
@@ -68,8 +68,9 @@ NULLS_BY_CAPABILITY: Dict[str, List[str]] = {
     'state_change': ['random_unit_subset', 'opposite_sign'],
     'unit_selection': ['random_unit_subset'],
     'composite_selection': ['random_unit_subset'],
-    'embodied': ['random_action', 'random_init_model'],
+    'closed_loop': ['random_action', 'random_init_model'],
 }
+NULLS_BY_CAPABILITY['embodied'] = NULLS_BY_CAPABILITY['closed_loop']  # deprecated key
 
 
 def _rng(seed: Optional[int]) -> np.random.RandomState:
@@ -139,7 +140,7 @@ def random_unit_subset(n_total: int, k: int, *, seed: int = 0) -> np.ndarray:
 
 def random_action(action_shape: Sequence[int], *, seed: int = 0,
                   low: float = -1.0, high: float = 1.0) -> np.ndarray:
-    """Uniform random action in ``[low, high]`` — the embodied policy floor.
+    """Uniform random action in ``[low, high]`` — the closed-loop policy floor.
 
     A learned policy stepping a game/robot must outperform an agent that
     emits random actions of the same shape. Without this, a high task-success

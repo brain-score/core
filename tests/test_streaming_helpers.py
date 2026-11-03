@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
@@ -863,8 +864,8 @@ def test_environment_session_emits_motor_events_for_multistep_rollout():
     session = environment_session(_SyntheticEnvironment(_environment_steps(3)))
     model = _make_environment_model(action_fn=_droid_action_fn)
 
-    from brainscore_core.streaming_helpers import _drive_environment_via_process
-    _drive_environment_via_process(model, session)
+    from brainscore_core.streaming_helpers import _drive_environment_session_via_process
+    _drive_environment_session_via_process(model, session)
 
     assert [event.channel for event in session.emitted] == [
         "motor", "motor",
@@ -914,6 +915,12 @@ def test_run_environment_falls_back_for_non_native_subjects():
     assert [response.metadata["step_num_seen"] for response in trajectory] == [
         0, 1,
     ]
+
+
+def test_run_environment_rejects_objects_without_participate():
+    subject = SimpleNamespace(process=lambda step: pytest.fail("process() reached"))
+    with pytest.raises(TypeError, match="participate"):
+        run_environment(subject, _SyntheticEnvironment(_environment_steps(2)))
 
 
 def test_run_environment_terminates_cleanly_for_zero_and_one_step_envs():
