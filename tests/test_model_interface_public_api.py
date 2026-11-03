@@ -190,3 +190,135 @@ def test_extractor_access_imports_no_framework():
         "assert not bad, bad\n"
     )
     subprocess.run([sys.executable, '-c', code], check=True)
+
+
+# Keep the existing imports usable as implementation files move into packages.
+import importlib
+
+
+_COMPONENT_MODULES = {
+    'behavior': '_model.behavior',
+    'behavioral': '_model.behavioral',
+    'capability_config': '_model.capability_config',
+    'dispatch': '_model.dispatch',
+    'perturbation': '_model.perturbation',
+    'recording': '_model.recording',
+    'temporal': '_sessions.temporal',
+    'streaming_helpers': '_sessions.helpers',
+    'session_view': '_sessions.view',
+    'compatibility': '_evaluation.compatibility',
+    'execution_plan': '_evaluation.execution_plan',
+    'memory': '_evaluation.memory',
+    'preflight': '_evaluation.preflight',
+    'score_metadata': '_evaluation.score_metadata',
+    'score_status': '_evaluation.score_status',
+    'legacy_facade': '_evaluation.legacy_facade',
+    'nulls': '_evaluation.nulls',
+    'assembly_builder': '_data.assembly_builder',
+    'multimodal': '_data.multimodal',
+    'text': '_data.text',
+    'environment_check': '_runtime.environment_check',
+    'extraction_cache': '_runtime.extraction_cache',
+    'hf_compat': '_runtime.hf_compat',
+    'extensions': '_runtime.extensions',
+    '_env_check': '_runtime.environment_check',
+}
+
+
+@pytest.mark.parametrize('name,implementation', _COMPONENT_MODULES.items())
+def test_component_imports_share_the_same_module(name, implementation):
+    public = importlib.import_module('brainscore_core.' + name)
+    organized = importlib.import_module('brainscore_core.' + implementation)
+    assert public is organized
+
+
+@pytest.mark.parametrize('name,implementation', _COMPONENT_MODULES.items())
+@pytest.mark.parametrize('first', ['public', 'implementation'])
+def test_component_import_order_stays_framework_free(name, implementation, first):
+    paths = ['brainscore_core.' + name, 'brainscore_core.' + implementation]
+    if first == 'implementation':
+        paths.reverse()
+    code = (
+        'import importlib, sys\n'
+        f'first = importlib.import_module({paths[0]!r})\n'
+        f'second = importlib.import_module({paths[1]!r})\n'
+        'assert first is second\n'
+        "assert not {'torch', 'transformers', 'tensorflow', 'jax'} & sys.modules.keys()\n"
+    )
+    subprocess.run([sys.executable, '-I', '-c', code], check=True)
+
+
+def test_moved_dispatcher_shares_nested_cache_state(monkeypatch):
+    public = importlib.import_module('brainscore_core.dispatch')
+    organized = importlib.import_module('brainscore_core._model.dispatch')
+    monkeypatch.delenv('RESULTCACHING_DISABLE', raising=False)
+    with public._activation_cache_disabled():
+        with organized._activation_cache_disabled():
+            assert public._cache_disable_depth == 2
+            assert organized._cache_disable_depth == 2
+        assert public._cache_disable_depth == 1
+    assert public._cache_disable_depth == 0
+    import os
+    assert 'RESULTCACHING_DISABLE' not in os.environ
+
+
+def test_session_facade_preserves_implementation_identity():
+    from brainscore_core import streaming_helpers as public
+    from brainscore_core._sessions import buffered, drivers, environment, payloads, perception
+
+    pairs = [
+        (public.StimulusSetSession, buffered.StimulusSetSession),
+        (public.BehavioralSession, buffered.BehavioralSession),
+        (public.StateChangeSession, buffered.StateChangeSession),
+        (public.neural_response, buffered.neural_response),
+        (public.behavioral_response, buffered.behavioral_response),
+        (public.apply_state_change, buffered.apply_state_change),
+        (public.EnvironmentSession, environment.EnvironmentSession),
+        (public.run_environment, environment.run_environment),
+        (public.StreamingStimulusSetSession, perception.StreamingStimulusSetSession),
+        (public.WindowedStreamSession, perception.WindowedStreamSession),
+        (public.RealTimeStreamSession, perception.RealTimeStreamSession),
+        (public.drive_neural_session, drivers.drive_neural_session),
+        (public.drive_behavior_session, drivers.drive_behavior_session),
+        (public.drive_typed_session, drivers.drive_typed_session),
+        (public.drain_session_inputs, payloads.drain_session_inputs),
+        (public.session_stimuli, payloads.session_stimuli),
+    ]
+    assert all(left is right for left, right in pairs)
+    assert public._drain_stream_events is public.drain_session_inputs
+    assert public._stimuli_from_stream_session is public.session_stimuli
+    assert public._drive_neural_session_via_process is public.drive_neural_session
+    assert public._drive_behavior_session_via_process is public.drive_behavior_session
+
+
+def test_layout_keeps_recorded_contract_type_names():
+    from brainscore_core.contract import TaskContext
+    from brainscore_core.events import EnvironmentResponse, EnvironmentStep, StateChange
+    from brainscore_core.streaming import StreamEvent
+
+    assert BrainScoreModel.__module__ == 'brainscore_core.brainscore_model'
+    assert Subject.__module__ == TaskContext.__module__ == 'brainscore_core.contract'
+    assert StreamEvent.__module__ == 'brainscore_core.streaming'
+    assert EnvironmentStep.__module__ == 'brainscore_core.events'
+    assert EnvironmentResponse.__module__ == 'brainscore_core.events'
+    assert StateChange.__module__ == 'brainscore_core.events'
+
+
+@pytest.mark.parametrize('module_name,type_name', [
+    ('behavior', 'ProbabilitiesClassifier'),
+    ('behavioral', 'BehavioralReadout'),
+    ('compatibility', 'CompatibilityMatch'),
+    ('execution_plan', 'ExecutionPlan'),
+    ('extraction_cache', 'FileContent'),
+    ('legacy_facade', 'LegacyBenchmarkFacade'),
+    ('memory', 'MemoryError'),
+    ('multimodal', 'MultimodalStimulusSet'),
+    ('temporal', 'Window'),
+])
+def test_moved_types_keep_public_pickle_references(module_name, type_name):
+    import pickle
+
+    module = importlib.import_module('brainscore_core.' + module_name)
+    definition = vars(module)[type_name]
+    assert definition.__module__ == 'brainscore_core.' + module_name
+    assert pickle.loads(pickle.dumps(definition)) is definition

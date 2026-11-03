@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 if TYPE_CHECKING:  # annotation-only; resolved against the vendored brainio
     from brainscore_core.supported_data_standards.brainio.assemblies import (
         NeuroidAssembly, BehavioralAssembly)
-    from .multimodal import MultimodalStimulusSet
+    from brainscore_core._data.multimodal import MultimodalStimulusSet
     from .selection import UnitSelection
 
 
