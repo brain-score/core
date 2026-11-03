@@ -103,6 +103,8 @@ class LegacyBenchmarkFacade:
             'number_of_trials': number_of_trials,
             'require_variance': require_variance,
         })
+        if channel == 'behavior':
+            return resolve_invalid_answers(measured[channel])
         return measured[channel]
 
     # --- language: ArtificialSubject ------------------------------------
@@ -282,3 +284,47 @@ def _time_bin_pairs(time_bins) -> List[Tuple[Any, Any]]:
         start, end = item
         pairs.append((start, end))
     return pairs
+
+
+# Above this share of invalid answers the model is not doing the task; scoring
+# its guesses would report noise as alignment.
+MAX_INVALID_ANSWER_FRACTION = 0.1
+
+
+def resolve_invalid_answers(assembly, *, seed: int = 0):
+    """Replace invalid generated answers with a seeded random valid label.
+
+    Legacy behavioral benchmarks cannot express "invalid": probability metrics
+    need a distribution and choice metrics take an argmax, which would credit
+    the first label. A random valid label scores an invalid answer at chance
+    for both. The count is kept in ``attrs['n_invalid_answers']``, and more
+    than ``MAX_INVALID_ANSWER_FRACTION`` invalid answers raises instead.
+    """
+    import warnings
+    import numpy as np
+
+    if 'choice' not in assembly.dims or assembly.ndim != 2:
+        return assembly
+    # Only the generation path writes NaN rows; one marks an invalid answer.
+    choice_axis = assembly.dims.index('choice')
+    invalid = np.isnan(assembly.values).all(axis=choice_axis)
+    if not invalid.any():
+        return assembly
+    fraction = invalid.mean()
+    if fraction > MAX_INVALID_ANSWER_FRACTION:
+        raise ValueError(
+            f"{int(invalid.sum())} of {invalid.size} answers ({fraction:.0%}) are "
+            f"outside the label set, above the {MAX_INVALID_ANSWER_FRACTION:.0%} "
+            f"limit for legacy behavioral benchmarks. Check the answer function's "
+            f"parsing; the replies are in the 'raw_answer' coordinate.")
+    resolved = assembly.copy()
+    values = np.moveaxis(resolved.values, choice_axis, -1)
+    rng = np.random.RandomState(seed)
+    for row in np.flatnonzero(invalid):
+        values[row] = 0
+        values[row, rng.randint(values.shape[-1])] = 1
+    resolved.values = np.moveaxis(values, -1, choice_axis)
+    resolved.attrs['n_invalid_answers'] = int(invalid.sum())
+    warnings.warn(f"{int(invalid.sum())} invalid answers were scored as random valid "
+                  f"labels (seed {seed}) for a legacy behavioral benchmark.")
+    return resolved
