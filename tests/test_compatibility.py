@@ -98,6 +98,14 @@ class TestRequiredModalities:
         bench = FakeBenchmark()  # no required_modalities attribute
         check_compatibility(model, bench)  # should not raise
 
+    @pytest.mark.parametrize('name', ['input_channels', 'output_channels'])
+    def test_protocol_spelling_on_benchmark_raises(self, name):
+        """Declarations under a subject or protocol name must not pass unchecked."""
+        bench = FakeBenchmark()
+        setattr(bench, name, {'text'})
+        with pytest.raises(CompatibilityError, match='required_input_channels'):
+            check_compatibility(FakeModel(modalities={'vision'}), bench)
+
 
 # ── Accepted modalities (any-of gate) ───────────────────────────────
 

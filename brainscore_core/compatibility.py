@@ -97,6 +97,19 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     subject_id = subject.identifier
     benchmark_id = _benchmark_identifier(benchmark)
 
+    if not bench_inputs and not bench_requested:
+        # Undeclared legacy benchmarks are allowed. A benchmark that spells its
+        # declarations like a subject or protocol would otherwise pass unchecked.
+        near_misses = sorted(name for name in ('input_channels', 'output_channels',
+                                               'in_channels', 'out_channels')
+                             if getattr(benchmark, name, None))
+        if near_misses:
+            raise CompatibilityError(
+                f"Benchmark '{benchmark_id}' sets {', '.join(near_misses)}, which "
+                f"benchmarks do not read, so compatibility was not checked. Use "
+                f"required_input_channels and requested_output_channels."
+            )
+
     validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
     validate_channels(subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels")
     validate_channels(subject_required, io_catalog.INPUT,
