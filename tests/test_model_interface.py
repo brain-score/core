@@ -645,6 +645,38 @@ class TestPreferPathDispatch:
         m.start_task(ctx)
         assert m._use_generation_for_task is True
 
+    def test_unknown_task_type_raises(self):
+        """A typo such as 'choice' must not silently run as a passive task."""
+        m = self._make_dual_path_model()
+        ctx = TaskContext(task_type='choice', label_set=['real', 'pseudo'],
+                          instruction="Is this real?")
+        with pytest.raises(ValueError, match="Unknown task_type 'choice'"):
+            m.start_task(ctx)
+
+    def test_passive_task_type_still_accepted(self):
+        m = self._make_dual_path_model()
+        m.start_task(TaskContext(task_type='passive'))
+        assert m._use_generation_for_task is False
+
+    def test_no_dual_path_warning_without_readout_layer(self):
+        """An answer-only model given fitting stimuli has one path, not two."""
+        m = self._make_dual_path_model(has_readout=False)
+        ctx = TaskContext(task_type='probabilities', label_set=['real', 'pseudo'],
+                          instruction="Is this real?",
+                          fitting_stimuli=self._fitting_stub())
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', UserWarning)
+            m.start_task(ctx)
+        assert m._use_generation_for_task is True
+
+    def test_dual_path_warning_with_readout_layer(self):
+        m = self._make_dual_path_model()
+        ctx = TaskContext(task_type='probabilities', label_set=['real', 'pseudo'],
+                          instruction="Is this real?",
+                          fitting_stimuli=self._fitting_stub())
+        with pytest.warns(UserWarning, match='Both generation and fitted readout'):
+            m.start_task(ctx)
+
 
 # -- BrainScoreModel state tests ---------------------------------------------
 

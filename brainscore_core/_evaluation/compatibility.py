@@ -82,6 +82,12 @@ class CompatibilityMatch:
         }
 
 
+def _looks_like_channels(value) -> bool:
+    """A nonempty collection of channel-name strings, not unrelated metadata."""
+    return (isinstance(value, (set, frozenset, list, tuple)) and bool(value)
+            and all(isinstance(item, str) for item in value))
+
+
 def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMatch:
     """Check the three compatibility conditions and return the match.
 
@@ -96,6 +102,21 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     bench_requested = benchmark_requested_output_channels(benchmark)
     subject_id = subject.identifier
     benchmark_id = _benchmark_identifier(benchmark)
+
+    # Undeclared legacy benchmarks are allowed. A side spelled the way a subject
+    # or protocol spells it would otherwise go unchecked, so name the right field.
+    for resolved, field_name, near_names in (
+            (bench_inputs, 'required_input_channels', ('input_channels', 'in_channels')),
+            (bench_requested, 'requested_output_channels', ('output_channels', 'out_channels'))):
+        if resolved:
+            continue
+        misspelled = [name for name in near_names
+                      if _looks_like_channels(getattr(benchmark, name, None))]
+        if misspelled:
+            raise CompatibilityError(
+                f"Benchmark '{benchmark_id}' sets {', '.join(misspelled)}, which "
+                f"benchmarks do not read, so it was not checked. Use {field_name}."
+            )
 
     validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
     validate_channels(subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels")
