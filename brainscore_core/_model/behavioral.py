@@ -1,0 +1,319 @@
+"""Behavioral readout and generation support for BrainScoreModel."""
+
+from typing import Any, Optional
+
+from ..contract import TaskContext
+
+
+class BehavioralReadout:
+    """Owns behavioral task state for a BrainScoreModel instance."""
+
+    BEHAVIORAL_TASK_TYPES = frozenset({
+        'probabilities', 'classification', 'label',
+    })
+
+    def __init__(self, owner) -> None:
+        self.owner = owner
+        self.task_context: Optional[TaskContext] = None
+        self.readout_classifier: Any = None
+        self.use_generation_for_task = False
+        # The TaskContext object the current configuration came from, so a
+        # repeated send of the same task keeps the fitted readout.
+        self.configured_from: Optional[TaskContext] = None
+        self._configured_as: Optional[set] = None  # fingerprints of the fitted configuration
+        self._stale = False
+
+    @classmethod
+    def requires_behavioral_readout(cls, task_type: str) -> bool:
+        return task_type in cls.BEHAVIORAL_TASK_TYPES
+
+    @staticmethod
+    def _fingerprint(task_context: TaskContext) -> tuple:
+        """Everything the fitted readout depends on: task, fitting rows and labels, generation settings."""
+        fitting = task_context.fitting_stimuli
+        rows = labels = None
+        columns = getattr(fitting, 'columns', None)
+        if columns is not None:
+            try:
+                if 'stimulus_id' in columns:
+                    rows = tuple(fitting['stimulus_id'])
+                for column in ('image_label', 'label'):
+                    if column in columns:
+                        labels = tuple(fitting[column])
+                        break
+            except (TypeError, KeyError, AttributeError):
+                rows = labels = None  # not a table; identity alone must do
+        label_set = task_context.label_set
+        return (task_context.task_type, id(fitting), rows, labels, task_context.instruction,
+                tuple(label_set) if label_set is not None else None,
+                task_context.prefer_path or 'auto')
+
+    def is_configured_for(self, task_context: TaskContext) -> bool:
+        """Whether ``task_context`` is the task already configured, unchanged since.
+
+        True for the object the configuration came from and for the context
+        this component holds (the same task after input projection), as long
+        as its task, fitting table, labels and generation settings are the
+        ones fitted. TaskContext is mutable: a caller that swaps the fitting
+        table or relabels it and calls start_task again gets a new fit.
+        """
+        if self._stale or self.task_context is None or not self._configured_as:
+            return False
+        if task_context is not self.configured_from and task_context is not self.task_context:
+            return False
+        return self._fingerprint(task_context) in self._configured_as
+
+    def mark_configured(self, task_context: Optional[TaskContext]) -> None:
+        """Remember the configuration just fitted, as the caller's context and as the one held."""
+        self.configured_from = task_context
+        self._configured_as = None
+        if task_context is not None:
+            self._configured_as = {self._fingerprint(task_context)}
+            if self.task_context is not None and self.task_context is not task_context:
+                self._configured_as.add(self._fingerprint(self.task_context))
+        self._stale = False
+
+    def invalidate(self) -> None:
+        """The model changed (a state change was applied or undone): fit again next time."""
+        self._stale = True
+
+    def start_task(self, task_context_or_task, fitting_stimuli=None,
+                   **kwargs) -> None:
+        del kwargs
+        owner = self.owner
+        if isinstance(task_context_or_task, TaskContext):
+            task_context = task_context_or_task
+        else:
+            task_context = TaskContext(
+                task_type=task_context_or_task,
+                fitting_stimuli=fitting_stimuli,
+            )
+        self.task_context = task_context
+
+        task_type = task_context.task_type
+        if task_type != 'passive' and not owner._requires_behavioral_readout(task_type):
+            raise ValueError(
+                f"Unknown task_type {task_type!r}. BrainScoreModel accepts "
+                f"'passive' or one of {sorted(self.BEHAVIORAL_TASK_TYPES)}; "
+                f"answer and readout models both use 'probabilities'."
+            )
+        if not owner._requires_behavioral_readout(task_type):
+            self.use_generation_for_task = False
+            self.readout_classifier = None
+            return
+
+        instruction = task_context.instruction
+        label_set = task_context.label_set
+        fitting = task_context.fitting_stimuli
+        prefer = task_context.prefer_path or 'auto'
+        if prefer not in ('auto', 'generation', 'readout'):
+            raise ValueError(
+                f"TaskContext.prefer_path must be one of "
+                f"('auto', 'generation', 'readout'); got {prefer!r}."
+            )
+
+        gen_viable = (owner._generation_fn is not None
+                      and instruction and label_set)
+        readout_viable = fitting is not None
+
+        if prefer == 'generation':
+            if not gen_viable:
+                raise ValueError(
+                    f"Model '{owner.identifier}' cannot run task "
+                    f"'{task_type}' via generation path "
+                    f"(prefer_path='generation'): "
+                    f"requires an answer function registered with "
+                    f"BrainScoreModel(answer=...) AND TaskContext.instruction "
+                    f"AND TaskContext.label_set to be set."
+                )
+            self.use_generation_for_task = True
+            self.readout_classifier = None
+            return
+
+        if prefer == 'readout':
+            if not readout_viable:
+                raise ValueError(
+                    f"Model '{owner.identifier}' cannot run task "
+                    f"'{task_type}' via readout path "
+                    f"(prefer_path='readout'): "
+                    f"requires TaskContext.fitting_stimuli to be set."
+                )
+            self.use_generation_for_task = False
+            owner._fit_behavioral_readout(fitting)
+            return
+
+        if gen_viable:
+            # A readout exists only with a layer to read and an extractor to run.
+            readout_wired = (owner._behavioral_readout_layer is not None
+                             and bool(owner._extractors or owner._layer_extractors))
+            if readout_viable and readout_wired:
+                import warnings
+                warnings.warn(
+                    'Both generation and fitted readout are available; '
+                    "prefer_path='auto' selects generation and does not fit on "
+                    'fitting_stimuli. Set TaskContext.prefer_path to '
+                    "'generation' or 'readout' to choose explicitly.",
+                    UserWarning, stacklevel=3)
+            self.use_generation_for_task = True
+            self.readout_classifier = None
+            return
+
+        self.use_generation_for_task = False
+        if readout_viable:
+            owner._fit_behavioral_readout(fitting)
+        else:
+            raise ValueError(
+                f"Model '{owner.identifier}' cannot run behavioral task "
+                f"'{task_type}': TaskContext provides neither fitting_stimuli "
+                f"(needed for readout path) nor (instruction + label_set, "
+                f"with BrainScoreModel(answer=...)) (needed for generation path)."
+            )
+
+    def reset(self) -> None:
+        self.task_context = None
+        self.readout_classifier = None
+        self.use_generation_for_task = False
+        self.configured_from = None
+        self._configured_as = None
+        self._stale = False
+
+    def fit_behavioral_readout(self, fitting_stimuli) -> None:
+        """Extract readout-layer features and fit a probabilities classifier."""
+        from brainscore_core._model.behavior import ProbabilitiesClassifier
+
+        owner = self.owner
+        task_type = (
+            self.task_context.task_type
+            if self.task_context is not None else None
+        )
+        if owner._behavioral_readout_layer is None:
+            raise ValueError(
+                f"Model '{owner.identifier}' was asked to perform a behavioral "
+                f"task (task_type={task_type!r}) but no "
+                f"behavioral_readout_layer is set. Register the model with "
+                f"BrainScoreModel(..., behavioral_readout_layer='<layer name>')."
+            )
+
+        labels = self.extract_labels(fitting_stimuli)
+        features = owner._extract_behavioral_features(fitting_stimuli)
+
+        self.readout_classifier = ProbabilitiesClassifier()
+        self.readout_classifier.fit(features, labels)
+
+    @staticmethod
+    def extract_labels(stimuli):
+        for col in ('image_label', 'label'):
+            if col in stimuli.columns:
+                return list(stimuli[col].values)
+        raise ValueError(
+            f"Cannot find labels in fitting_stimuli. Expected one of "
+            f"'image_label' or 'label' columns; got: {list(stimuli.columns)}."
+        )
+
+    def extract_behavioral_features(self, stimuli):
+        """Run the model once at the behavioral readout layer."""
+        owner = self.owner
+        saved_layer = owner._recorder.recording_layer
+        saved_layers = owner._recorder.recording_layers
+        saved_regions = owner._recorder.recording_regions
+        saved_multi = owner._recorder.is_multi_region
+        saved_composite = owner._recorder.composite_recording
+        saved_classifier = self.readout_classifier
+        owner._recorder.recording_layer = owner._behavioral_readout_layer
+        owner._recorder.recording_layers = (
+            [owner._behavioral_readout_layer]
+            if owner._behavioral_readout_layer else []
+        )
+        owner._recorder.recording_regions = []
+        owner._recorder.is_multi_region = False
+        owner._recorder.composite_recording = False
+        self.readout_classifier = None
+        try:
+            features = owner.process(stimuli)
+        finally:
+            owner._recorder.recording_layer = saved_layer
+            owner._recorder.recording_layers = saved_layers
+            owner._recorder.recording_regions = saved_regions
+            owner._recorder.is_multi_region = saved_multi
+            owner._recorder.composite_recording = saved_composite
+            self.readout_classifier = saved_classifier
+
+        if 'presentation' in features.dims and 'neuroid' in features.dims:
+            features = features.transpose('presentation', 'neuroid')
+        return features
+
+    def predict_probabilities(self, stimuli):
+        """Return a BehavioralAssembly of per-label probabilities."""
+        features = self.owner._extract_behavioral_features(stimuli)
+        return self.readout_classifier.predict_proba(features)
+
+    def generate_predictions(self, stimuli):
+        """Call the registered answer function per stimulus, return one-hot BehavioralAssembly."""
+        import numpy as np
+        from brainscore_core.supported_data_standards.brainio.assemblies import (
+            BehavioralAssembly,
+        )
+
+        owner = self.owner
+        task_context = self.task_context
+        if task_context is None:
+            raise RuntimeError(
+                "generate_predictions requires an active TaskContext."
+            )
+        label_set = list(task_context.label_set)
+        instruction = task_context.instruction
+        label_to_idx = {lbl: i for i, lbl in enumerate(label_set)}
+
+        n_stimuli = len(stimuli)
+        n_labels = len(label_set)
+        proba = np.zeros((n_stimuli, n_labels), dtype=np.float32)
+
+        raw_answers, valid = [], []
+        for i, (_, row) in enumerate(stimuli.iterrows()):
+            predicted = owner._generation_fn(
+                stimulus_row=row,
+                instruction=instruction,
+                label_set=label_set,
+            )
+            raw_answers.append(str(predicted))
+            valid.append(predicted in label_to_idx)
+            if valid[-1]:
+                proba[i, label_to_idx[predicted]] = 1.0
+            else:
+                # No label is credited: a substituted label would bias accuracy toward it.
+                proba[i, :] = np.nan
+                import warnings
+                warnings.warn(
+                    f"answer function returned {predicted!r}, not in "
+                    f"label_set={label_set}. The response is recorded as invalid "
+                    f"(NaN probabilities, answer_valid=False)."
+                )
+
+        stimulus_ids = list(stimuli['stimulus_id'].values)
+        presentation_coords = {
+            'stimulus_id': ('presentation', stimulus_ids),
+        }
+        for column in stimuli.columns:
+            if column == 'stimulus_id':
+                continue
+            presentation_coords[column] = (
+                'presentation', list(stimuli[column].values))
+        presentation_coords['raw_answer'] = ('presentation', raw_answers)
+        presentation_coords['answer_valid'] = ('presentation', valid)
+
+        return BehavioralAssembly(
+            proba,
+            coords={
+                **presentation_coords,
+                'choice': label_set,
+            },
+            dims=['presentation', 'choice'],
+        )
+
+
+# Keep existing pickle references and public type names stable.
+for _definition in (
+    BehavioralReadout,
+):
+    _definition.__module__ = 'brainscore_core.behavioral'
+del _definition

@@ -155,7 +155,7 @@ class BufferedSession(Session):
                  requested_output_channels: Optional[Iterable[str]] = None,
                  stimulus_set: Any = None, task_context: Any = None,
                  time_bins: Any = None, streaming: bool = False) -> None:
-        from .streaming_helpers import _stimulus_events, _behavior_events, _behavior_stimuli_to_score
+        from brainscore_core._sessions.helpers import _stimulus_events, _behavior_events, _behavior_stimuli_to_score
         inputs = tuple(inputs)
         if stimulus_set is not None:
             if inputs:
@@ -185,7 +185,7 @@ class BufferedSession(Session):
 
     def collect(self, channel: Optional[str] = None) -> Any:
         """Collect neural/behavioral assemblies, or events for other channels."""
-        from .streaming_helpers import _collect_neural_events, _collect_behavior_events
+        from brainscore_core._sessions.helpers import _collect_neural_events, _collect_behavior_events
         if channel is None:
             channels = self.requested_output_channels
             if not channels:
