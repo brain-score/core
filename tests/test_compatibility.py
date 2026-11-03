@@ -98,13 +98,27 @@ class TestRequiredModalities:
         bench = FakeBenchmark()  # no required_modalities attribute
         check_compatibility(model, bench)  # should not raise
 
-    @pytest.mark.parametrize('name', ['input_channels', 'output_channels'])
-    def test_protocol_spelling_on_benchmark_raises(self, name):
+    @pytest.mark.parametrize('name, field', [
+        ('input_channels', 'required_input_channels'),
+        ('output_channels', 'requested_output_channels')])
+    def test_protocol_spelling_on_benchmark_raises(self, name, field):
         """Declarations under a subject or protocol name must not pass unchecked."""
         bench = FakeBenchmark()
-        setattr(bench, name, {'text'})
-        with pytest.raises(CompatibilityError, match='required_input_channels'):
+        setattr(bench, name, {'text'} if name == 'input_channels' else {'neural:IT'})
+        with pytest.raises(CompatibilityError, match=field):
             check_compatibility(FakeModel(modalities={'vision'}), bench)
+
+    def test_half_misspelled_declaration_raises(self):
+        bench = FakeBenchmark()
+        bench.required_input_channels = {'vision'}
+        bench.output_channels = {'neural:IT'}
+        with pytest.raises(CompatibilityError, match='requested_output_channels'):
+            check_compatibility(FakeModel(modalities={'vision'}), bench)
+
+    def test_unrelated_legacy_metadata_is_ignored(self):
+        bench = FakeBenchmark()
+        bench.input_channels = 3  # e.g. image color channels, not channel names
+        check_compatibility(FakeModel(modalities={'vision'}), bench)
 
 
 # ── Accepted modalities (any-of gate) ───────────────────────────────

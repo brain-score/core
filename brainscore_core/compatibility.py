@@ -82,6 +82,12 @@ class CompatibilityMatch:
         }
 
 
+def _looks_like_channels(value) -> bool:
+    """A nonempty collection of channel-name strings, not unrelated metadata."""
+    return (isinstance(value, (set, frozenset, list, tuple)) and bool(value)
+            and all(isinstance(item, str) for item in value))
+
+
 def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMatch:
     """Check the three compatibility conditions and return the match.
 
@@ -97,17 +103,19 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     subject_id = subject.identifier
     benchmark_id = _benchmark_identifier(benchmark)
 
-    if not bench_inputs and not bench_requested:
-        # Undeclared legacy benchmarks are allowed. A benchmark that spells its
-        # declarations like a subject or protocol would otherwise pass unchecked.
-        near_misses = sorted(name for name in ('input_channels', 'output_channels',
-                                               'in_channels', 'out_channels')
-                             if getattr(benchmark, name, None))
-        if near_misses:
+    # Undeclared legacy benchmarks are allowed. A side spelled the way a subject
+    # or protocol spells it would otherwise go unchecked, so name the right field.
+    for resolved, field_name, near_names in (
+            (bench_inputs, 'required_input_channels', ('input_channels', 'in_channels')),
+            (bench_requested, 'requested_output_channels', ('output_channels', 'out_channels'))):
+        if resolved:
+            continue
+        misspelled = [name for name in near_names
+                      if _looks_like_channels(getattr(benchmark, name, None))]
+        if misspelled:
             raise CompatibilityError(
-                f"Benchmark '{benchmark_id}' sets {', '.join(near_misses)}, which "
-                f"benchmarks do not read, so compatibility was not checked. Use "
-                f"required_input_channels and requested_output_channels."
+                f"Benchmark '{benchmark_id}' sets {', '.join(misspelled)}, which "
+                f"benchmarks do not read, so it was not checked. Use {field_name}."
             )
 
     validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
