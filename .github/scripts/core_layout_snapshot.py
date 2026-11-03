@@ -5,7 +5,7 @@ Run in CI against both wheels. This deliberately imports no model framework.
 import importlib
 import inspect
 import json
-from dataclasses import fields, is_dataclass
+from dataclasses import MISSING, fields, is_dataclass
 from pathlib import Path
 import sys
 
@@ -32,7 +32,12 @@ for name, module in modules.items():
     for key, value in public.items():
         if inspect.isfunction(value) or inspect.isclass(value):
             try:
-                signatures[key] = str(inspect.signature(value))
+                signature = inspect.signature(value)
+                # This singleton's repr contains a process-specific address.
+                parameters = [parameter.replace(default='<dataclasses.MISSING>')
+                              if parameter.default is MISSING else parameter
+                              for parameter in signature.parameters.values()]
+                signatures[key] = str(signature.replace(parameters=parameters))
             except (TypeError, ValueError):
                 pass
     apis[name] = {'names': sorted(public), 'signatures': signatures}
