@@ -382,6 +382,15 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
 def behavioral_response(subject, task_context) -> BehavioralAssembly:
     """Run ``subject`` on the task and return its behavior as a
     ``BehavioralAssembly`` -- the model's output, not a Score.
+
+    The stimuli to answer go in ``task_context.metadata['stimulus_set']``;
+    ``fitting_stimuli`` is only the training set for a readout. Without that
+    key the fitting stimuli are answered instead, so pass it for any held-out
+    test set::
+
+        task = TaskContext(task_type='probabilities', label_set=['real', 'pseudo'],
+                           fitting_stimuli=train, metadata={'stimulus_set': test})
+        behavior = behavioral_response(subject, task)
     """
     session = behavior_session(task_context)
     subject.participate(session)
