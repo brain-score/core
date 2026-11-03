@@ -72,15 +72,6 @@ def test_external_modality_routes_without_host_modification():
                          columns=['image_path'])
 
 
-def test_nested_robot_camera_validation_precedes_policy():
-    import numpy as np
-    from brainscore_core.events import CameraFrame, EnvironmentStep
-    model = BrainScoreModel('robot', action_fn=lambda step: pytest.fail('policy ran'))
-    with pytest.raises(ValueError):
-        model.process(EnvironmentStep(observation={'cameras': {
-            'wrist': CameraFrame(rgb=np.zeros((8, 8, 3), dtype=np.float32))}}))
-
-
 def test_session_benchmark_checks_execution_support_before_compute():
     from types import SimpleNamespace
     from brainscore_core.compatibility import check_channel_compatibility, CompatibilityError

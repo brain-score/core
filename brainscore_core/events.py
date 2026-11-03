@@ -1,6 +1,7 @@
 """Input/output event dataclasses for the Brain-Score subject contract."""
 
 from .streaming import StreamEvent
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
@@ -161,12 +162,13 @@ class Proprioception:
 
 @dataclass
 class EnvironmentStep:
-    """Single step of an embodied environment.
+    """Single step of a closed-loop session (game, dialogue, robot).
 
     Used for interactive evaluation where the model observes, acts, and receives
-    the environment's response over multiple ticks. Passed to ``process()`` like
-    a stimulus — the interface generalizes over input type rather than adding
-    a separate agent method.
+    the environment's response over multiple ticks. Benchmarks run steps through
+    ``run_environment(subject, environment)``, which calls ``interact(session)``;
+    the interface generalizes over input type rather than adding a separate
+    agent method.
 
     This is a device-agnostic envelope. The preferred field is
     ``observation`` (an environment-defined payload). The ``cameras`` and
@@ -181,8 +183,7 @@ class EnvironmentStep:
 
     Episode control signals (``is_first``, ``is_last``, ``is_terminal``,
     ``reward``, ``discount``) follow the RLDS convention so existing
-    DROID-format demonstration data can be replayed through ``process()``
-    one step at a time.
+    DROID-format demonstration data can be replayed one step at a time.
 
     Examples::
 
@@ -236,6 +237,12 @@ class EnvironmentStep:
         # Bridge the deprecated DROID fields onto the generic observation so the
         # dispatch path is uniform: if no observation was given but the DROID
         # fields were, expose them as the observation.
+        if self.cameras is not None or self.proprioception is not None:
+            warnings.warn(
+                "EnvironmentStep(cameras=..., proprioception=...) is deprecated; "
+                "build robot steps with brainscore.harnesses.robotics."
+                "build_environment_step, which uses observation=.",
+                DeprecationWarning, stacklevel=3)
         if self.observation is None and (
             self.cameras is not None or self.proprioception is not None
         ):
@@ -357,7 +364,7 @@ InputEvent = Union['StimulusSet', StateChange, EnvironmentStep, Message, StreamE
 #   - NeuroidAssembly    — neural recording (sensory-stimulus path); forward ref
 #                          so core stays free of a hard BrainIO import
 #   - BehavioralAssembly — behavioral readout / generation; forward ref likewise
-#   - EnvironmentResponse — one embodied step (the action/trajectory member)
+#   - EnvironmentResponse — one closed-loop step (the action/trajectory member)
 #   - PerturbationApplied — state-change acknowledgement + reset handle
 # Future members slot in here when their first benchmark lands, with no ABC
 # change: MotorOutput (continuous motor regression, §2.4) and GeneratedSequence

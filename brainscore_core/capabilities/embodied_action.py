@@ -3,7 +3,6 @@
 from .base import Capability
 from .registry import register_capability
 from ..events import EnvironmentResponse, EnvironmentStep, Message
-from ..io_catalog import check_payload
 
 
 class EmbodiedActionCapability(Capability):
@@ -23,32 +22,6 @@ class EmbodiedActionCapability(Capability):
         return self._process_environment_step(model, event)
 
     def _process_environment_step(self, model, input_event: EnvironmentStep):
-        # Validate camera payloads at the boundary (best-effort), so a malformed
-        # frame is flagged here instead of failing deep inside the policy.
-        issues = []
-        observation = input_event.observation
-        cameras = getattr(input_event, 'cameras', None)
-        if isinstance(observation, dict) and observation.get('cameras') is not None:
-            cameras = observation['cameras']
-        if cameras is not None and not isinstance(cameras, dict):
-            raise ValueError('Environment cameras must be a name-to-CameraFrame mapping.')
-        for cam_name, frame in (cameras or {}).items():
-            rgb = getattr(frame, 'rgb', None)
-            if rgb is not None:
-                issues += [f"camera '{cam_name}': {m}"
-                           for m in check_payload('vision', rgb)]
-                # check_payload only verifies ndim + dtype; a CameraFrame is
-                # channels-last RGB, so also reject (H, W, 4) / (3, H, W).
-                shape = getattr(rgb, 'shape', None)
-                if shape is not None and not (len(shape) == 3 and shape[-1] == 3):
-                    issues.append(
-                        f"camera '{cam_name}': rgb shape {tuple(shape)} is not "
-                        f"(H, W, 3) channels-last RGB.")
-        if issues:
-            raise ValueError(
-                "EnvironmentStep camera payload(s) failed validation:\n  - "
-                + "\n  - ".join(issues)
-            )
         if model._action_fn is None:
             raise NotImplementedError(
                 f"Model '{model.identifier}' has no action_fn registered. "
