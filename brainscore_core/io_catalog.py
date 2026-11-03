@@ -319,7 +319,7 @@ _SEED = [
                  addressing="address is a unit selector or agent",
                  owner="core",
                  materializers=("StateChange",)),
-    # --- inputs: embodied (carried by EnvironmentStep, harness-defined payload) ---
+    # --- inputs: closed-loop (carried by EnvironmentStep, harness-defined payload) ---
     # Retained legacy v1.5 channel; not a canonical v2 seed family.
     CatalogEntry("observation", INPUT, "EnvironmentStep.observation",
                  "harness-defined; the environment harness documents its own structure",

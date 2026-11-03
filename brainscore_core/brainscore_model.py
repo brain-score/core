@@ -98,7 +98,7 @@ class BrainScoreModel(UnifiedModel):
         :param generation_fn: generate-and-parse callable for instruction-following
             behavioral evaluation.
         :param action_fn: ``EnvironmentStep -> EnvironmentResponse`` policy for
-            closed-loop / embodied evaluation.
+            closed-loop evaluation.
         :param state_change_fn: ``StateChange -> (PerturbationApplied, cleanup)`` for
             lesion / stimulation evaluation.
         :param required_modalities: input modalities the model cannot run without.

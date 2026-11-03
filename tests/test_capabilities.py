@@ -134,7 +134,7 @@ def test_behavioral_generation_capability_precedes_readout_and_neural():
     assert 'behavioral-readout' not in model._capability_state
 
 
-def test_embodied_action_capability_dispatches_environment_step():
+def test_closed_loop_capability_dispatches_environment_step():
     calls = []
 
     def action_fn(step):
@@ -152,14 +152,14 @@ def test_embodied_action_capability_dispatches_environment_step():
 
     result = model.process(step)
 
-    assert 'embodied-action' in capability_registry
+    assert 'closed-loop' in capability_registry
     assert isinstance(result, EnvironmentResponse)
     assert result.action == [0.0, 1.0]
     assert calls == [step]
-    assert 'embodied-action' in model._capability_state
+    assert 'closed-loop' in model._capability_state
 
 
-def test_embodied_action_capability_dispatches_message():
+def test_closed_loop_capability_dispatches_message():
     calls = []
 
     def action_fn(step):
@@ -315,3 +315,9 @@ def test_self_registering_capability_file_dispatches_without_host_edits(tmp_path
         capability_registry.pop('test-demo-capability', None)
         sys.path.remove(str(tmp_path))
         sys.modules.pop('demo_capability_plugin', None)
+
+
+def test_embodied_action_names_alias_closed_loop_capability():
+    from brainscore_core.capabilities.closed_loop import ClosedLoopCapability
+    from brainscore_core.capabilities.embodied_action import EmbodiedActionCapability
+    assert EmbodiedActionCapability is ClosedLoopCapability
