@@ -2,8 +2,8 @@
 
 from typing import Dict, List, Optional, Tuple, Union
 
-from .io_catalog import canonical_modality
-from .selection import CompositeSelector, LayerSelector
+from ..io_catalog import canonical_modality
+from ..selection import CompositeSelector, LayerSelector
 
 
 class Recorder:

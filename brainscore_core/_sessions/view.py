@@ -9,7 +9,7 @@ keeps its own inputs and responses. A subject written against ``Subject``
 directly reads only what it declares.
 """
 
-from .streaming import Session, StreamEvent
+from ..streaming import Session, StreamEvent
 
 
 def declared_only(stimulus_set, channels):
@@ -22,7 +22,7 @@ def declared_only(stimulus_set, channels):
     """
     if stimulus_set is None:
         return None
-    from .streaming_helpers import _channel_for_stimulus_column, _preserve_stimulus_set_type
+    from ..streaming_helpers import _channel_for_stimulus_column, _preserve_stimulus_set_type
     declared = frozenset(channels)
 
     def is_declared(channel):

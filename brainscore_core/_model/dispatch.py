@@ -5,10 +5,10 @@ import threading
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Set, Tuple
 
-from .capabilities import enabled_capabilities
-from .events import EnvironmentStep, Message, OutputEvent, StateChange
-from .streaming import StreamEvent
-from .io_catalog import canonical_modality
+from ..capabilities import enabled_capabilities
+from ..events import EnvironmentStep, Message, OutputEvent, StateChange
+from ..streaming import StreamEvent
+from ..io_catalog import canonical_modality
 
 
 _cache_disable_depth = 0
@@ -148,7 +148,7 @@ class InputDispatcher:
     def process(self, input_event, multi_modality: bool = False) -> OutputEvent:
         owner = self.owner
         if isinstance(input_event, StreamEvent):
-            from .io_catalog import validate, INPUT, OUTPUT
+            from ..io_catalog import validate, INPUT, OUTPUT
             issues = validate(input_event.channel, input_event.payload, INPUT)
             if issues:
                 raise ValueError('; '.join(issues))
@@ -214,7 +214,7 @@ class InputDispatcher:
     def detect_modalities(self, stimuli) -> Set[str]:
         owner = self.owner
         detected: Set[str] = set()
-        from .io_catalog import stimulus_columns
+        from ..io_catalog import stimulus_columns
         columns = {**owner.COLUMN_TO_MODALITY, **stimulus_columns()}
         for col in stimuli.columns:
             modality = columns.get(col)

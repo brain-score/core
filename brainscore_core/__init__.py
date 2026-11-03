@@ -31,6 +31,20 @@ from . import io_catalog
 from .io_catalog import CatalogEntry
 from . import nulls
 
+# Keep established component imports bound to the same module objects. This
+# also keeps cache state and patches shared across the old and organized paths.
+import sys as _sys
+from ._model import behavioral, capability_config, dispatch, perturbation, recording
+from ._sessions import view as session_view
+
+_sys.modules[__name__ + '.behavioral'] = behavioral
+_sys.modules[__name__ + '.capability_config'] = capability_config
+_sys.modules[__name__ + '.dispatch'] = dispatch
+_sys.modules[__name__ + '.perturbation'] = perturbation
+_sys.modules[__name__ + '.recording'] = recording
+_sys.modules[__name__ + '.session_view'] = session_view
+del _sys
+
 # Warn loudly if the installed dependency versions have drifted off UMI's pins,
 # since drift silently breaks/changes scoring (see environment_check for detail).
 from .environment_check import warn_on_drift as _warn_on_drift

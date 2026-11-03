@@ -3,8 +3,8 @@
 from dataclasses import replace
 from typing import Callable, Dict
 
-from .events import PerturbationApplied
-from .selection import UnitSelection
+from ..events import PerturbationApplied
+from ..selection import UnitSelection
 
 
 class PerturbationManager:

@@ -5,10 +5,10 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Mapping, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from .behavioral import BehavioralReadout
-from .capability_config import normalize_capability_config
+from ._model.behavioral import BehavioralReadout
+from ._model.capability_config import normalize_capability_config
 from .contract import UnifiedModel, TaskContext
-from .dispatch import InputDispatcher, register_input_handler
+from ._model.dispatch import InputDispatcher, register_input_handler
 from .io_catalog import canonical_modality
 from .events import (
     EnvironmentStep,
@@ -17,8 +17,8 @@ from .events import (
     OutputEvent,
     StateChange,
 )
-from .perturbation import PerturbationManager
-from .recording import Recorder
+from ._model.perturbation import PerturbationManager
+from ._model.recording import Recorder
 from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_to_selector
 from .streaming import StreamEvent
 from .streaming_helpers import (
@@ -207,7 +207,7 @@ class BrainScoreModel(UnifiedModel):
         region_layer_map = region_layer_map or {}
         preprocessors = preprocessors or {}
         # Normalize compatibility inputs once; dispatch always calls an extractor.
-        from .dispatch import normalize_extractors
+        from ._model.dispatch import normalize_extractors
         self._preprocessors: Dict[str, Optional[Callable]] = dict(preprocessors)
         self._activations_model = activations_model
         self._extractors, self._layer_extractors = normalize_extractors(

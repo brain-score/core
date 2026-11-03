@@ -19,6 +19,19 @@ See the [Documentation](https://brain-score-core.readthedocs.io) for more detail
 Brain-Score is made by and for the community. To contribute,
 please [send in a pull request](https://github.com/brain-score/core/pulls).
 
+## Source layout
+
+| Location | Responsibility |
+| --- | --- |
+| `contract.py`, `events.py`, `streaming.py` | Subject, event and session definitions |
+| `model_interface.py`, `brainscore_model.py` | Public model imports and model construction |
+| `_model/` | Dispatch, task state, recording state and intervention lifecycle |
+| `_sessions/` | Buffered inputs, environments, perception windows and session drivers |
+| `streaming_helpers.py` | Public session helpers |
+
+Existing imports remain available. The underscored packages hold implementation
+details; integrations should use the public interfaces.
+
 ## License
 
 MIT license

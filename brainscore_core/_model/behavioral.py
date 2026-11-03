@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from .contract import TaskContext
+from ..contract import TaskContext
 
 
 class BehavioralReadout:
