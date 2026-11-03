@@ -645,6 +645,19 @@ class TestPreferPathDispatch:
         m.start_task(ctx)
         assert m._use_generation_for_task is True
 
+    def test_unknown_task_type_raises(self):
+        """A typo such as 'choice' must not silently run as a passive task."""
+        m = self._make_dual_path_model()
+        ctx = TaskContext(task_type='choice', label_set=['real', 'pseudo'],
+                          instruction="Is this real?")
+        with pytest.raises(ValueError, match="Unknown task_type 'choice'"):
+            m.start_task(ctx)
+
+    def test_passive_task_type_still_accepted(self):
+        m = self._make_dual_path_model()
+        m.start_task(TaskContext(task_type='passive'))
+        assert m._use_generation_for_task is False
+
 
 # -- BrainScoreModel state tests ---------------------------------------------
 

@@ -91,6 +91,12 @@ class BehavioralReadout:
         self.task_context = task_context
 
         task_type = task_context.task_type
+        if task_type != 'passive' and not owner._requires_behavioral_readout(task_type):
+            raise ValueError(
+                f"Unknown task_type {task_type!r}. BrainScoreModel accepts "
+                f"'passive' or one of {sorted(self.BEHAVIORAL_TASK_TYPES)}; "
+                f"answer and readout models both use 'probabilities'."
+            )
         if not owner._requires_behavioral_readout(task_type):
             self.use_generation_for_task = False
             self.readout_classifier = None
