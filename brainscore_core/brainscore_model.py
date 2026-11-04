@@ -139,7 +139,8 @@ class BrainScoreModel(UnifiedModel):
             and written answers.
         :param likelihood: ``(prompt, candidates) -> {candidate: log
             probability}``; scores candidate replies without generating. Gives
-            choices and their implied probabilities.
+            choices and their implied probabilities. Run the prompt on its own
+            before any candidate, so a recording during scoring is the prompt pass.
         :param policy: ``EnvironmentStep -> EnvironmentResponse``; chooses an
             action for closed-loop / embodied evaluation.
         :param intervention: ``StateChange -> (PerturbationApplied, cleanup)``;
