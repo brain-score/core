@@ -1,5 +1,6 @@
 """State-change and perturbation lifecycle support for BrainScoreModel."""
 
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import Callable, Dict
 
@@ -13,6 +14,23 @@ class PerturbationManager:
     def __init__(self, owner) -> None:
         self.owner = owner
         self.active_perturbations: Dict[str, Callable[[], None]] = {}
+        self._changes: Dict[str, object] = {}   # handle -> resolved StateChange
+
+    @contextmanager
+    def intact(self):
+        """Undo every active change for the block, then apply each again.
+
+        Handles keep their identity, so a later reset by handle still works.
+        """
+        handles = list(self.active_perturbations)
+        for handle in reversed(handles):
+            self.active_perturbations[handle]()
+        try:
+            yield
+        finally:
+            for handle in handles:
+                _, cleanup = self.owner._state_change_fn(self._changes[handle])
+                self.active_perturbations[handle] = cleanup
 
     def reset(self) -> None:
         """Undo every active perturbation.
@@ -32,6 +50,7 @@ class PerturbationManager:
                 failures.append((handle_id, error))
             else:
                 self.active_perturbations.pop(handle_id, None)
+                self._changes.pop(handle_id, None)
         if failures:
             import warnings
             detail = '; '.join(f'{handle!r}: {type(err).__name__}: {err}'
@@ -79,6 +98,7 @@ class PerturbationManager:
             # model perturbed with no way to retry.
             cleanup()
             self.active_perturbations.pop(handle_id, None)
+            self._changes.pop(handle_id, None)
             return None
 
         if owner._state_change_fn is None:
@@ -107,6 +127,7 @@ class PerturbationManager:
                 f"state_change_fn must produce unique handle_ids per call."
             )
         self.active_perturbations[applied.handle_id] = cleanup
+        self._changes[applied.handle_id] = state_change
         return applied
 
 

@@ -296,6 +296,9 @@ _SEED = [
                  "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, or a path to one",
                  "image/video preprocessor + a vision model harness (wrapper)",
                  meta_keys=("stimulus_id",), expected_ndim=(3, 4), expected_dtype="uint8",
+                 addressing=("address is the form a subject takes natively: 'still' "
+                             "(images) or 'clip' (video); a subject declares each form it "
+                             "has, and a benchmark adapts a stimulus only when a form is missing"),
                  materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
                  "a Python str",
@@ -359,6 +362,8 @@ _SEED = [
                  "a label, a probability vector, or generated text",
                  "a fitted readout or the model's generation path",
                  meta_keys=("label_set",),
+                 addressing=("address is the kind of answer a TaskContext response asks for: "
+                             "choice, probabilities, confidence, rating or text"),
                  materializers=("start_task", "BehavioralAssembly")),
     # --- outputs: motor (carried by EnvironmentResponse, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",

@@ -381,6 +381,52 @@ def drive_behavior_session(
     ))
 
 
+def drive_behavior_and_neural_session(model, session, driver: str = "interact") -> None:
+    """Record ``neural:<region>`` while the subject does the session's task.
+
+    ``behavior`` is sent too when requested.
+
+    Each stimulus is shown once: the regions are recorded during the same
+    forward pass that produced the answer (see
+    ``BehavioralReadout.respond_and_record``). Only ``BrainScoreModel`` runs
+    this; it is reached through its session capability.
+    """
+    task_context = getattr(session, "task_context", None)
+    if task_context is None:
+        raise ValueError("A behavior session needs session.task_context.")
+    if getattr(session, "streaming", False):
+        raise NotImplementedError(
+            "Recording during a task presents the stimulus set at once; "
+            "use streaming=False.")
+    time_bins = getattr(session, "time_bins", None)
+    if time_bins is not None and len(time_bins) > 1:
+        raise NotImplementedError(
+            "Recording during a task returns one time bin; request at most one.")
+    requested = _requested_output_channels(session)
+    regions = [parse_channel(c)[1] for c in requested if parse_channel(c)[0] == "neural"]
+    answers = [c for c in requested if parse_channel(c)[0] == "behavior"]
+    _refuse_variance(model, session)
+    model.start_task(task_context)
+    stimuli = _behavior_stimuli_from_session(session, task_context)
+    if stimuli is None:
+        raise ValueError("Recording during a task needs stimuli to present.")
+    if task_context.response is not None:
+        behavior, neural = model._behavioral.respond(stimuli, answers, regions)
+    else:
+        if set(answers) - {"behavior"}:
+            raise ValueError(f"{answers} need TaskContext(response=...); task_type "
+                             f"{task_context.task_type!r} answers on 'behavior'.")
+        plain, neural = model._behavioral.respond_and_record(stimuli, regions)
+        behavior = {"behavior": plain} if answers else {}
+    for channel in answers:
+        session.emit(StreamEvent(channel=channel, payload=behavior[channel], t_ms=0.0,
+                                 meta={"driver": driver, "task_type": task_context.task_type}))
+    for region in regions:
+        session.emit(StreamEvent(channel=f"neural:{region}", payload=neural[region], t_ms=0.0,
+                                 meta={"driver": driver, "record": region,
+                                       "during": "behavior"}))
+
+
 _drive_neural_session_via_process = drive_neural_session
 
 

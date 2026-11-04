@@ -94,6 +94,8 @@ class BrainScoreModel(UnifiedModel):
         answer: Optional[Callable] = None,
         policy: Optional[Callable] = None,
         intervention: Optional[Callable] = None,
+        reply: Optional[Callable] = None,
+        likelihood: Optional[Callable] = None,
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
         action_fn: Optional[Callable] = None,
@@ -130,6 +132,14 @@ class BrainScoreModel(UnifiedModel):
         :param answer: ``(stimulus_row, instruction, label_set) -> label``;
             generates and parses a behavioral answer for instruction-following
             tasks.
+        :param reply: ``(prompt) -> str``; the model's raw reply to one trial.
+            ``prompt`` is a ``brainscore_core.responses.Prompt``: the trial's parts
+            in order (instruction, stimulus parts, the response's directive).
+            Parsing is the task's. Gives choices, ratings, reported confidence
+            and written answers.
+        :param likelihood: ``(prompt, candidates) -> {candidate: log
+            probability}``; scores candidate replies without generating. Gives
+            choices and their implied probabilities.
         :param policy: ``EnvironmentStep -> EnvironmentResponse``; chooses an
             action for closed-loop / embodied evaluation.
         :param intervention: ``StateChange -> (PerturbationApplied, cleanup)``;
@@ -223,6 +233,7 @@ class BrainScoreModel(UnifiedModel):
         self._behavioral_readout_layer = capability_values.get(
             'behavioral_readout_layer')
         self._generation_fn = capability_values.get('generation_fn')
+        self._reply_fn, self._likelihood_fn = reply, likelihood
         self._action_fn = capability_values.get('action_fn')
         self._state_change_fn = capability_values.get('state_change_fn')
 
@@ -270,8 +281,13 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        return super().in_channels | set().union(
+        return super().in_channels | self._visual_forms() | set().union(
             *(c.declared_input_channels(self) for c in self._declared_capabilities()))
+
+    def _visual_forms(self):
+        """The visual forms taken natively: a ``vision`` key takes stills, a ``video`` key clips."""
+        forms = {'vision': 'vision:still', 'video': 'vision:clip'}
+        return {forms[key] for key in self._preprocessors if key in forms}
 
     @property
     def out_channels(self):
@@ -613,7 +629,8 @@ class BrainScoreModel(UnifiedModel):
                 failures.append(error)
         # Callable capabilities and extractors may own episode/history state.
         # Reset each provider once, including bound-method registrations.
-        providers = [self._action_fn, self._generation_fn, self._activations_model,
+        providers = [self._action_fn, self._generation_fn, self._reply_fn, self._likelihood_fn,
+                     self._activations_model,
                      *self._preprocessors.values(), *self._extractors.values()]
         seen = set()
         from .capabilities import capability_registry

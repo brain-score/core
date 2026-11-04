@@ -24,6 +24,28 @@ from brainscore_core.supported_data_standards.brainio.assemblies import (
 )
 
 
+class RatingRegressor:
+    """Ridge regression readout for numeric answers (ratings).
+
+    Scales features, fits ridge regression on numeric labels, predicts one
+    value per presentation. The rating counterpart of ProbabilitiesClassifier.
+    """
+
+    def __init__(self, alpha: float = 1.0):
+        import sklearn.linear_model
+        import sklearn.preprocessing
+        self._regressor = sklearn.linear_model.Ridge(alpha=alpha)
+        self._scaler = sklearn.preprocessing.StandardScaler()
+
+    def fit(self, features, labels: Iterable) -> 'RatingRegressor':
+        X = self._scaler.fit_transform(np.asarray(features))
+        self._regressor.fit(X, np.asarray(list(labels), dtype=float))
+        return self
+
+    def predict(self, features) -> np.ndarray:
+        return self._regressor.predict(self._scaler.transform(np.asarray(features)))
+
+
 class ProbabilitiesClassifier:
     """Logistic regression readout that produces label probabilities.
 

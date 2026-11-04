@@ -41,10 +41,18 @@ class NeuralSessions(_SessionCapability):
         return bool(channels) and all(c.startswith('neural:') for c in channels)
 
     def participate(self, model, session) -> None:
-        if getattr(session, 'streaming', False):
-            _drivers._drive_neural_session_streaming(model, session)
-        else:
-            _drivers.drive_neural_session(model, session, allow_multi_modality=True)
+        task = getattr(session, 'task_context', None)
+        if task is not None and task.task_type != 'passive':
+            # The session's task decides what the subject does (rule 4.1):
+            # record during the task; the answers are not sent.
+            _drivers.drive_behavior_and_neural_session(model, session)
+            return
+        # A passive session records activity even after a task was configured.
+        with model._behavioral.suspended():
+            if getattr(session, 'streaming', False):
+                _drivers._drive_neural_session_streaming(model, session)
+            else:
+                _drivers.drive_neural_session(model, session, allow_multi_modality=True)
 
 
 class BehaviorSessions(_SessionCapability):
@@ -52,19 +60,40 @@ class BehaviorSessions(_SessionCapability):
 
     def enabled_for(self, model) -> bool:
         return (model._behavioral_readout_layer is not None
-                or model._generation_fn is not None)
+                or model._generation_fn is not None
+                or model._reply_fn is not None or model._likelihood_fn is not None)
 
     def declared_input_channels(self, model):
-        return {'instruction'} if model._generation_fn is not None else set()
+        replies = (model._generation_fn, model._reply_fn, model._likelihood_fn)
+        return {'instruction'} if any(part is not None for part in replies) else set()
 
     def declared_output_channels(self, model):
-        return {'behavior'}
+        # Each part declares the kinds of answer it can give (rule 2.4).
+        channels = {'behavior'}
+        if model._behavioral_readout_layer is not None:
+            channels |= {'behavior:choice', 'behavior:probabilities', 'behavior:rating'}
+        if model._generation_fn is not None:
+            channels |= {'behavior:choice'}
+        if model._reply_fn is not None:
+            channels |= {'behavior:choice', 'behavior:rating', 'behavior:confidence',
+                         'behavior:text'}
+        if model._likelihood_fn is not None:
+            channels |= {'behavior:choice', 'behavior:probabilities'}
+        return channels
 
     def supports_session(self, model, channels) -> bool:
-        return set(channels) == {'behavior'}
+        # Behavior alone, or behavior plus regions recorded during the same answers.
+        behavior = {c for c in channels if c == 'behavior' or c.startswith('behavior:')}
+        recorded = set(channels) - behavior
+        return bool(behavior) and behavior <= self.declared_output_channels(model) and recorded <= {
+            f'neural:{region}' for region in model.region_layer_map}
 
     def participate(self, model, session) -> None:
-        if getattr(session, 'streaming', False):
+        requested = set(_drivers._requested_output_channels(session))
+        task = getattr(session, 'task_context', None)
+        if requested != {'behavior'} or (task is not None and task.response is not None):
+            _drivers.drive_behavior_and_neural_session(model, session)
+        elif getattr(session, 'streaming', False):
             _drivers._drive_behavior_session_streaming(model, session)
         else:
             _drivers.drive_behavior_session(model, session)

@@ -70,6 +70,7 @@ from brainscore_core._sessions.drivers import (
     _drive_via_process,
     _refuse_variance,
     _start_recording,
+    drive_behavior_and_neural_session,
     drive_behavior_session,
     drive_neural_session,
     drive_typed_session,
