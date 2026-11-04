@@ -41,10 +41,12 @@ class NeuralSessions(_SessionCapability):
         return bool(channels) and all(c.startswith('neural:') for c in channels)
 
     def participate(self, model, session) -> None:
-        if getattr(session, 'streaming', False):
-            _drivers._drive_neural_session_streaming(model, session)
-        else:
-            _drivers.drive_neural_session(model, session, allow_multi_modality=True)
+        # A neural-only session records activity even after a task was configured.
+        with model._behavioral.suspended():
+            if getattr(session, 'streaming', False):
+                _drivers._drive_neural_session_streaming(model, session)
+            else:
+                _drivers.drive_neural_session(model, session, allow_multi_modality=True)
 
 
 class BehaviorSessions(_SessionCapability):
@@ -61,10 +63,15 @@ class BehaviorSessions(_SessionCapability):
         return {'behavior'}
 
     def supports_session(self, model, channels) -> bool:
-        return set(channels) == {'behavior'}
+        # Behavior alone, or behavior plus regions recorded during the same answers.
+        recorded = set(channels) - {'behavior'}
+        return 'behavior' in channels and recorded <= {
+            f'neural:{region}' for region in model.region_layer_map}
 
     def participate(self, model, session) -> None:
-        if getattr(session, 'streaming', False):
+        if set(_drivers._requested_output_channels(session)) != {'behavior'}:
+            _drivers.drive_behavior_and_neural_session(model, session)
+        elif getattr(session, 'streaming', False):
             _drivers._drive_behavior_session_streaming(model, session)
         else:
             _drivers.drive_behavior_session(model, session)
