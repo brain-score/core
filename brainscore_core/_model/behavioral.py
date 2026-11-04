@@ -302,7 +302,7 @@ class BehavioralReadout:
                 + (' with reported confidence (needs reply=)' if reported_confidence else '')
                 + '. Paths tried: ' + '; '.join(f'{p} needs {needs[p]}' for p in order))
         source = None
-        if isinstance(response, Choice) and response.probabilities:
+        if isinstance(response, Choice) and (response.probabilities or response.reaction_time):
             if path != 'readout' and owner._likelihood_fn is not None:
                 source = 'likelihood'
             elif readout_wired:
@@ -410,6 +410,9 @@ class BehavioralReadout:
                 elif self.probability_source == 'readout':
                     outputs['behavior:probabilities'] = _implied(self.readout_classifier.predict_proba(
                         owner._extract_behavioral_features(stimuli)), 'readout')
+        if isinstance(response, Choice) and response.reaction_time:
+            outputs['behavior:rt'] = _reaction_time(outputs['behavior:probabilities'],
+                                                    response.reaction_time, stimuli)
         outputs['behavior'] = outputs[response.channels[0]]
         if prompts:
             # A multi-image trial records one step per image: name each by its part.
@@ -757,6 +760,20 @@ def _texts(parsed, replies, stimuli):
               'answer_valid': ('presentation', [v is not None for v, _ in parsed])}
     return BehavioralAssembly(values, coords=coords, dims=['presentation'],
                               attrs={'measure': {'kind': 'reported', 'source': 'reply'}})
+
+
+def _reaction_time(probabilities, link, stimuli):
+    """An implied reaction time per stimulus from label probabilities (larger = slower)."""
+    from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+    values = np.asarray(probabilities.values, dtype=float)
+    ordered = np.sort(values, axis=1)[:, ::-1]
+    if link == 'evidence_margin':
+        rt = 1.0 - (ordered[:, 0] - ordered[:, 1])
+    else:                                         # surprisal of the chosen (most probable) label
+        rt = -np.log2(np.clip(ordered[:, 0], 1e-12, 1.0))
+    return BehavioralAssembly(rt, dims=['presentation'], coords=_presentation(stimuli),
+                              attrs={'measure': {'kind': 'implied', 'link': link,
+                                                 'source': probabilities.attrs.get('measure', {}).get('source')}})
 
 
 def _softmax_rows(scores, labels):

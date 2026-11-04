@@ -51,21 +51,32 @@ class Choice:
     ``probabilities=True`` also returns the implied probability of each label
     (from a readout or a language model's likelihoods). ``confidence=Scale(...)``
     also asks the subject to report how sure it is, in the same reply.
+    ``reaction_time`` also returns an implied reaction time from those
+    probabilities, scored by correlation with human RTs as Futrell2018 scores
+    surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
+    probable labels; close calls are slow) or ``'surprisal'`` (-log2 of the
+    chosen label's probability).
     """
     labels: Tuple[str, ...]
     probabilities: bool = False
     confidence: Optional[Scale] = None
+    reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
+
+    REACTION_TIMES = ('evidence_margin', 'surprisal')
 
     def __post_init__(self):
         if isinstance(self.labels, str) or len(self.labels) < 2:
             raise ValueError('Choice needs at least two labels')
+        if self.reaction_time not in (None, *self.REACTION_TIMES):
+            raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
         object.__setattr__(self, 'labels', tuple(self.labels))
 
     @property
     def channels(self) -> Tuple[str, ...]:
         return (('behavior:choice',)
                 + (('behavior:probabilities',) if self.probabilities else ())
-                + (('behavior:confidence',) if self.confidence is not None else ()))
+                + (('behavior:confidence',) if self.confidence is not None else ())
+                + (('behavior:rt',) if self.reaction_time is not None else ()))
 
     def directive(self) -> str:
         text = f'Answer with exactly one of: {", ".join(self.labels)}.'

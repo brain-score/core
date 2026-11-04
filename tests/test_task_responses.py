@@ -181,3 +181,20 @@ def test_named_parts_show_a_sequence_in_order():
         trial_prompt(TaskContext(response=Choice(['yes', 'no']), present=('image:word_3',)), row)
     with pytest.raises(ValueError, match='kind'):
         TaskContext(response=Choice(['yes', 'no']), present=('picture:word_1',))
+
+
+@pytest.mark.parametrize('link', ['evidence_margin', 'surprisal'])
+def test_implied_reaction_times_rise_for_close_calls(link):
+    scores = {'a': {'cat': -0.1, 'dog': -5.0}, 'b': {'cat': -1.0, 'dog': -1.2},
+              'c': {'cat': -3.0, 'dog': -0.05}, 'd': {'cat': -0.7, 'dog': -0.69}}
+    model, _ = _model(scores=scores)
+    task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog'], reaction_time=link))
+    rt = _ask(model, task, ['behavior:rt']).collect('behavior:rt')
+    assert rt.attrs['measure'] == {'kind': 'implied', 'link': link, 'source': 'likelihood'}
+    fast, slow = rt.values[0], rt.values[3]                   # a clear call, a near tie
+    assert slow > fast
+
+
+def test_a_reply_only_model_cannot_give_reaction_times():
+    model, _ = _model(replies={s: 'cat' for s in 'abcd'})
+    assert 'behavior:rt' not in model.out_channels
