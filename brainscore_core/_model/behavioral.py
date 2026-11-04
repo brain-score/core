@@ -320,7 +320,7 @@ class BehavioralReadout:
         recorded during that presentation: the prompt pass of a reply, or the
         readout's own extraction.
         """
-        from ..responses import Choice, Scale, Text, labels_of, prompt_for
+        from ..responses import Choice, Scale, Text, labels_of, trial_prompt
         owner, task = self.owner, self.task_context
         response, path = task.response, self.response_path
         layers = {region: self._region_layer(region) for region in regions}
@@ -332,7 +332,8 @@ class BehavioralReadout:
                                       'cannot be recorded in one presentation with a generated '
                                       "answer; use prefer_path='readout' or drop probabilities.")
         labels = labels_of(response)
-        prompt = prompt_for(task.instruction, response)
+        # Every trial's prompt is built first, so a bad layout fails before any compute.
+        prompts = [trial_prompt(task, row) for _, row in stimuli.iterrows()]
         neural, outputs = {}, {}
 
         if path == 'readout':
@@ -347,17 +348,16 @@ class BehavioralReadout:
                     outputs['behavior:probabilities'] = _implied(values, 'readout')
         else:
             if path == 'likelihood':
-                def call(row):
-                    return owner._likelihood_fn(stimulus_row=row, prompt=prompt,
-                                                candidates=list(labels))
+                def call(row, prompt):
+                    return owner._likelihood_fn(prompt, list(labels))
             elif owner._reply_fn is not None:
-                def call(row):
-                    return owner._reply_fn(stimulus_row=row, prompt=prompt)
+                def call(row, prompt):
+                    return owner._reply_fn(prompt)
             else:   # a registration's answer: it phrases and parses a Choice itself
-                def call(row):
+                def call(row, prompt):
                     return owner._generation_fn(stimulus_row=row, instruction=task.instruction,
                                                 label_set=list(labels))
-            replies, neural = self._per_stimulus(stimuli, layers, call)
+            replies, neural = self._per_stimulus(stimuli, layers, call, prompts)
             if path == 'likelihood':
                 probabilities = _softmax_rows(replies, labels)
                 chosen = [labels[i] for i in probabilities.argmax(1)]
@@ -384,25 +384,24 @@ class BehavioralReadout:
                         [response.parse_confidence(reply) for reply in replies], stimuli,
                         'reply', raw=replies)
                 if self.probability_source is not None:
-                    extra = self._probabilities_after(stimuli, prompt, labels)
+                    extra = self._probabilities_after(stimuli, prompts, labels)
                     outputs['behavior:probabilities'] = extra
         outputs['behavior'] = outputs[response.channels[0]]
         stamp = self._stamp(path, 'prompt' if path == 'generation' else 'readout extraction')
         return ({c: outputs[c] for c in channels},
                 {r: a.assign_attrs(recording=stamp) for r, a in neural.items()})
 
-    def _probabilities_after(self, stimuli, prompt, labels):
+    def _probabilities_after(self, stimuli, prompts, labels):
         """Implied probabilities alongside a generated answer (extra passes, not recorded)."""
         owner = self.owner
         if self.probability_source == 'likelihood':
-            scores = [owner._likelihood_fn(stimulus_row=row, prompt=prompt, candidates=list(labels))
-                      for _, row in stimuli.iterrows()]
+            scores = [owner._likelihood_fn(prompt, list(labels)) for prompt in prompts]
             return _implied_array(_softmax_rows(scores, labels), stimuli, labels, 'likelihood')
         return _implied(self.readout_classifier.predict_proba(
             self.owner._extract_behavioral_features(stimuli)), 'readout')
 
-    def _per_stimulus(self, stimuli, layers, call):
-        """Call ``call(row)`` once per stimulus, recording ``layers`` on each first pass."""
+    def _per_stimulus(self, stimuli, layers, call, prompts=None):
+        """Call ``call(row, prompt)`` once per stimulus, recording ``layers`` on each first pass."""
         from ..io_catalog import canonical_modality
         owner = self.owner
         by_modality: Dict[str, list] = {}
@@ -410,8 +409,8 @@ class BehavioralReadout:
             by_modality.setdefault(self._region_modality(region), []).append(layer)
         recordings = {}
         for modality, modality_layers in by_modality.items():
-            extractor = next((e for key, e in owner._extractors.items()
-                              if canonical_modality(key) == modality), None)
+            from .dispatch import extractor_for
+            extractor = extractor_for(owner, modality, stimuli)
             if extractor is None:
                 raise NotImplementedError(f'No {modality!r} extractor to record from.')
             try:
@@ -425,8 +424,8 @@ class BehavioralReadout:
         replies, trials = [], []
         with ExitStack() as stack:
             live = {m: stack.enter_context(r) for m, r in recordings.items()}
-            for _, row in stimuli.iterrows():
-                replies.append(call(row))
+            for index, (_, row) in enumerate(stimuli.iterrows()):
+                replies.append(call(row, None if prompts is None else prompts[index]))
                 trials.append({m: recording.take() for m, recording in live.items()})
         neural = {region: _trials_to_assembly([t[self._region_modality(region)] for t in trials],
                                               stimuli, layer, region)
@@ -494,8 +493,8 @@ class BehavioralReadout:
             by_modality.setdefault(self._region_modality(region), []).append(layer)
         recordings = {}
         for modality, modality_layers in by_modality.items():
-            extractor = next((e for key, e in owner._extractors.items()
-                              if canonical_modality(key) == modality), None)
+            from .dispatch import extractor_for
+            extractor = extractor_for(owner, modality, stimuli)
             if extractor is None:
                 raise NotImplementedError(f'No {modality!r} extractor to record from.')
             try:
@@ -703,23 +702,40 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
     from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 
     rows = []
+    timed = 'time_bin' in trials[0].dims
     for index, trial in enumerate(trials):
         selected = trial.isel(neuroid=trial['layer'].values == layer)
         if selected.sizes['neuroid'] == 0:
             raise ValueError(
                 f'No activity reached layer {layer!r} while answering stimulus '
                 f'{stimuli["stimulus_id"].iloc[index]!r}; that input may not use it.')
-        rows.append(np.asarray(selected.values).reshape(-1))
+        if timed:
+            # A clip keeps its time steps: (time_bin, neuroid) per presentation.
+            if selected.sizes['time_bin'] != trials[0].sizes['time_bin']:
+                raise ValueError('Clips of different lengths gave different numbers of time steps; '
+                                 'present clips of one length to record them together.')
+            rows.append(np.asarray(selected.transpose('presentation', 'time_bin', 'neuroid').values)[0])
+        else:
+            rows.append(np.asarray(selected.values).reshape(-1))
     first = trials[0].isel(neuroid=trials[0]['layer'].values == layer)
     index = first.indexes.get('neuroid')
     names = list(index.names) if isinstance(index, pd.MultiIndex) else []
     names += [name for name, coord in first.coords.items()
               if coord.dims == ('neuroid',) and name != 'neuroid' and name not in names]
     coords = {name: ('neuroid', np.asarray(first[name].values)) for name in names}
-    coords['region'] = ('neuroid', [region] * len(rows[0]))
+    coords['region'] = ('neuroid', [region] * first.sizes['neuroid'])
     for column in stimuli.columns:
         coords[column] = ('presentation', list(stimuli[column].values))
-    return NeuroidAssembly(np.stack(rows), coords=coords, dims=['presentation', 'neuroid'])
+    if not timed:
+        return NeuroidAssembly(np.stack(rows), coords=coords, dims=['presentation', 'neuroid'])
+    time_index = first.indexes.get('time_bin')
+    time_names = list(time_index.names) if isinstance(time_index, pd.MultiIndex) else []
+    time_names += [name for name, coord in first.coords.items()
+                   if coord.dims == ('time_bin',) and name != 'time_bin' and name not in time_names]
+    for name in time_names:
+        coords[name] = ('time_bin', np.asarray(first[name].values))
+    return NeuroidAssembly(np.stack(rows), coords=coords,
+                           dims=['presentation', 'time_bin', 'neuroid'])
 
 
 # Keep existing pickle references and public type names stable.

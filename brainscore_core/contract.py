@@ -45,6 +45,10 @@ class TaskContext:
     The older ``task_type`` values ``'label'``, ``'classification'`` and
     ``'probabilities'`` keep their meaning on the plain ``behavior`` channel.
 
+    ``present`` gives the order of a trial's parts when a stimulus has several
+    (e.g. ``('text', 'video')``: a sentence, then a clip). A replying model is
+    shown the instruction, those parts in order, then the response's directive.
+
     ``readout_fit`` says which network a readout is fitted on while a change
     (a lesion, a stimulation) is active: ``'current'`` (default) fits on the
     changed network; ``'intact'`` fits on the network with every change undone,
@@ -59,6 +63,7 @@ class TaskContext:
     metadata: Dict[str, Any] = field(default_factory=dict)
     readout_fit: str = 'current'  # 'current' | 'intact'
     response: Any = None  # a brainscore_core.responses Choice, Scale or Text
+    present: Optional[Tuple[str, ...]] = None  # order of a trial's parts: 'text', 'image', 'video', 'audio'
 
     def __post_init__(self):
         # The response, when given, decides the task type; label lists follow it.
@@ -75,6 +80,11 @@ class TaskContext:
                 self.label_set = list(self.response.labels)
         elif self.task_type is None:
             raise ValueError("Give a response (Choice, Scale, Text) or task_type='passive'.")
+        if self.present is not None:
+            unknown = set(self.present) - {'text', 'image', 'video', 'audio'}
+            if unknown or isinstance(self.present, str):
+                raise ValueError(f"present lists parts from 'text', 'image', 'video', 'audio'; got {self.present!r}")
+            self.present = tuple(self.present)
 
 
 

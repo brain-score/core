@@ -132,13 +132,14 @@ class BrainScoreModel(UnifiedModel):
         :param answer: ``(stimulus_row, instruction, label_set) -> label``;
             generates and parses a behavioral answer for instruction-following
             tasks.
-        :param reply: ``(stimulus_row, prompt) -> str``; the model's raw reply to
-            a prompt the task builds (instruction plus the response's directive).
+        :param reply: ``(prompt) -> str``; the model's raw reply to one trial.
+            ``prompt`` is a ``brainscore_core.responses.Prompt``: the trial's parts
+            in order (instruction, stimulus parts, the response's directive).
             Parsing is the task's. Gives choices, ratings, reported confidence
             and written answers.
-        :param likelihood: ``(stimulus_row, prompt, candidates) -> {candidate:
-            log probability}``; scores candidate replies without generating.
-            Gives choices and their implied probabilities.
+        :param likelihood: ``(prompt, candidates) -> {candidate: log
+            probability}``; scores candidate replies without generating. Gives
+            choices and their implied probabilities.
         :param policy: ``EnvironmentStep -> EnvironmentResponse``; chooses an
             action for closed-loop / embodied evaluation.
         :param intervention: ``StateChange -> (PerturbationApplied, cleanup)``;

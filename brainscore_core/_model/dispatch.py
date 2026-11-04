@@ -69,6 +69,17 @@ def _is_clip(stimuli) -> bool:
     return any(column in getattr(stimuli, 'columns', ()) for column in CLIP_COLUMNS)
 
 
+def extractor_for(owner, modality: str, stimuli):
+    """The extractor for ``modality``; with a still and a clip extractor, the one
+    matching the stimulus's form. None when the model has no such extractor."""
+    modality = canonical_modality(modality)
+    matching = [key for key in owner._extractors if canonical_modality(key) == modality]
+    if len(matching) > 1 and modality == 'vision':
+        wanted = 'video' if _is_clip(stimuli) else 'vision'
+        matching = [key for key in matching if key == wanted] or matching
+    return owner._extractors[matching[0]] if matching else None
+
+
 def normalize_extractors(owner, preprocessors, activations_model):
     """Adapt registration forms once to ``extractor(stimuli, layers=...)``.
 
@@ -256,14 +267,10 @@ class InputDispatcher:
 
     def _extract_for_modality_inner(self, stimuli, modality: str, layers: List[str]):
         owner = self.owner
+        extractor = extractor_for(owner, modality, stimuli)
+        if extractor is not None:
+            return extractor(stimuli, layers=layers)
         modality = canonical_modality(modality)
-        matching = [key for key in owner._extractors if canonical_modality(key) == modality]
-        if len(matching) > 1 and modality == 'vision':
-            # A still extractor and a clip extractor: the stimulus says which to use.
-            wanted = 'video' if _is_clip(stimuli) else 'vision'
-            matching = [key for key in matching if key == wanted] or matching
-        if matching:
-            return owner._extractors[matching[0]](stimuli, layers=layers)
         raise NotImplementedError(
             f"Model '{owner.identifier}' declares {modality!r} input but has no "
             'activation extractor for it. Pass extractor={modality: extractor} to '

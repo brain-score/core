@@ -47,3 +47,54 @@ def test_models_without_an_extractor_declare_the_inputs_they_accept():
     model = BrainScoreModel('judge', supported_modalities={'vision'},
                             answer=lambda stimulus_row, instruction, label_set: label_set[0])
     assert 'vision:still' in model.in_channels
+
+
+class _Recorder:
+    """record(layers) stand-in; a clip recording has two time steps."""
+
+    def __init__(self, value, timed):
+        self.value, self.timed, self.hooks = value, timed, []
+
+    def __call__(self, stimuli, layers, **kwargs):
+        raise AssertionError('a task presents through reply, not the extractor')
+
+    def record(self, layers):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def recording():
+            owner = self
+
+            class Take:
+                @staticmethod
+                def take():
+                    coords = {'stimulus_id': ('presentation', ['?']),
+                              'neuroid_id': ('neuroid', ['n0', 'n1']),
+                              'layer': ('neuroid', [layers[0]] * 2)}
+                    if not owner.timed:
+                        return NeuroidAssembly(np.full((1, 2), owner.value), coords=coords,
+                                               dims=['presentation', 'neuroid'])
+                    coords.update(time_bin_start_ms=('time_bin', [0.0, 1000.0]),
+                                  time_bin_end_ms=('time_bin', [1000.0, 2000.0]))
+                    values = np.stack([np.full(2, owner.value), np.full(2, owner.value + 1)])[None]
+                    return NeuroidAssembly(values, coords=coords,
+                                           dims=['presentation', 'time_bin', 'neuroid'])
+            yield Take()
+        return recording()
+
+
+def test_a_clip_recorded_during_a_task_uses_the_clip_extractor_and_keeps_time():
+    from brainscore_core.model_interface import TaskContext
+    from brainscore_core.responses import Choice
+    from brainscore_core.streaming import BufferedSession
+    model = BrainScoreModel('m', extractor={'vision': _Recorder(1.0, False), 'video': _Recorder(5.0, True)},
+                            region_layer_map={'IT': LayerSelector('blocks.1', modality='vision')},
+                            reply=lambda prompt: 'left')
+    task = TaskContext(instruction='Which way?', response=Choice(['left', 'right']))
+    session = BufferedSession(stimulus_set=_stimuli('video_path'), task_context=task,
+                              requested_output_channels=['behavior:choice', 'neural:IT'])
+    model.participate(session)
+    recorded = session.collect('neural:IT')
+    assert recorded.dims == ('presentation', 'time_bin', 'neuroid')
+    np.testing.assert_array_equal(recorded.values[0, :, 0], [5.0, 6.0])
+    assert list(recorded['time_bin_start_ms'].values) == [0.0, 1000.0]

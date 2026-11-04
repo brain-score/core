@@ -31,12 +31,12 @@ def _features(stimuli, layers, **kwargs):
 def _model(replies=None, scores=None, readout=False):
     prompts = []
 
-    def reply(stimulus_row, prompt):
-        prompts.append(prompt)
-        return replies[stimulus_row['stimulus_id']]
+    def reply(prompt):
+        prompts.append(prompt.text())
+        return replies[prompt.stimulus_id]
 
-    def likelihood(stimulus_row, prompt, candidates):
-        return {c: scores[stimulus_row['stimulus_id']][c] for c in candidates}
+    def likelihood(prompt, candidates):
+        return {c: scores[prompt.stimulus_id][c] for c in candidates}
 
     model = BrainScoreModel(identifier='toy', extractor={'text': _features},
                             reply=reply if replies else None,
@@ -61,7 +61,7 @@ def test_choice_reply_is_parsed_and_invalid_replies_are_kept_as_invalid():
     assert list(choice['answer_valid'].values) == [True, True, False, False]
     assert list(choice['raw_answer'].values) == ['Cat', 'a dog.', 'cat or dog', 'bird']
     assert choice.attrs['measure'] == {'kind': 'reported', 'source': 'reply'}
-    assert prompts[0] == 'Which animal?\n\nAnswer with exactly one of: cat, dog.'
+    assert prompts[0] == 'Which animal?\n\nw\n\nAnswer with exactly one of: cat, dog.'
 
 
 def test_reported_confidence_comes_from_the_same_reply():
@@ -94,7 +94,7 @@ def test_written_answers_are_kept_as_written():
     text = _ask(model, TaskContext(instruction='Describe it.', response=Text()),
                 ['behavior:text']).collect('behavior:text')
     assert list(text.values) == [f'A story about {s}.' for s in 'abcd']
-    assert prompts[0] == 'Describe it.'
+    assert prompts[0] == 'Describe it.\n\nw'
 
 
 def test_likelihood_gives_a_choice_and_its_implied_probabilities():
@@ -141,3 +141,29 @@ def test_task_type_and_response_must_agree():
     with pytest.raises(ValueError, match='passive'):
         TaskContext()
     assert TaskContext(response=Choice(['a', 'b'])).label_set == ['a', 'b']
+
+
+def test_a_trial_is_shown_in_the_declared_order():
+    from brainscore_core.responses import trial_prompt
+    row = {'stimulus_id': 's', 'sentence': 'Watch the ball.', 'video_path': 'clip.mp4'}
+    task = TaskContext(instruction='Which way?', response=Choice(['left', 'right']),
+                       present=('text', 'video'))
+    assert trial_prompt(task, row).parts == (
+        ('text', 'Which way?'), ('text', 'Watch the ball.'), ('video', 'clip.mp4'),
+        ('text', 'Answer with exactly one of: left, right.'))
+    with pytest.raises(ValueError, match='present'):
+        trial_prompt(TaskContext(instruction='Which way?', response=Choice(['left', 'right'])), row)
+
+
+def test_an_unordered_multi_part_stimulus_fails_before_any_reply():
+    calls = []
+    model = BrainScoreModel(identifier='m', supported_modalities={'text', 'vision'},
+                            reply=lambda prompt: calls.append(prompt) or 'left')
+    both = StimulusSet({'stimulus_id': ['a'], 'sentence': ['x'], 'video_path': ['v.mp4']})
+    both.identifier = 'both-parts'
+    session = BufferedSession(stimulus_set=both, task_context=TaskContext(
+        instruction='Which way?', response=Choice(['left', 'right'])),
+        requested_output_channels=['behavior:choice'])
+    with pytest.raises(ValueError, match='present'):
+        model.participate(session)
+    assert calls == []

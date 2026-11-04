@@ -13,7 +13,7 @@ which it is.
 """
 import re
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,68 @@ class Text:
 
     def parse(self, reply: str) -> Tuple[Optional[str], Optional[str]]:
         return (reply, None) if isinstance(reply, str) else (None, 'the reply is not text')
+
+
+# The stimulus columns that carry each kind of trial part.
+PART_COLUMNS = {
+    'text': ('sentence', 'text'),
+    'image': ('image_file_name', 'image_path', 'filename'),
+    'video': ('video_path', 'video_file_name'),
+    'audio': ('audio_path', 'audio_file_name', 'audio_file'),
+}
+
+
+@dataclass(frozen=True)
+class Prompt:
+    """What one trial shows a replying model, in order.
+
+    ``parts`` are ``(kind, content)`` pairs: ``('text', str)``, or ``('image' |
+    'video' | 'audio', path)``. The order is the trial's: the instruction, the
+    stimulus parts in ``TaskContext.present`` order, then the response's
+    directive. A ``reply`` or ``likelihood`` part shows them in this order.
+    """
+    parts: Tuple[Tuple[str, Any], ...]
+    stimulus_id: Optional[str] = None
+
+    def text(self) -> str:
+        """The text parts joined, for a model that reads text only."""
+        return '\n\n'.join(content for kind, content in self.parts if kind == 'text')
+
+
+def trial_prompt(task, stimulus_row) -> Prompt:
+    """Build one trial's Prompt from the task and a stimulus row (fails before any compute)."""
+    present = {}
+    for kind, columns in PART_COLUMNS.items():
+        for column in columns:
+            value = _cell(stimulus_row, column)
+            if value is not None:
+                present[kind] = value
+                break
+    order = tuple(task.present) if task.present is not None else tuple(present)
+    if task.present is None and len(present) > 1:
+        raise ValueError(f'Each stimulus has several parts {sorted(present)}; say the order people '
+                         'saw them in with TaskContext(present=(...)), e.g. present=("text", "video").')
+    missing = [kind for kind in order if kind not in present]
+    if missing:
+        raise ValueError(f'TaskContext.present names {missing}, but the stimulus has only {sorted(present)}.')
+    parts = []
+    if (task.instruction or '').strip():
+        parts.append(('text', task.instruction.strip()))
+    parts += [(kind, present[kind]) for kind in order]
+    directive = task.response.directive() if task.response is not None else ''
+    if directive:
+        parts.append(('text', directive))
+    return Prompt(tuple(parts), stimulus_id=_cell(stimulus_row, 'stimulus_id'))
+
+
+def _cell(row, column):
+    try:
+        value = row[column]
+    except (KeyError, TypeError, IndexError):
+        return None
+    if value is None or (isinstance(value, float) and value != value):
+        return None
+    return value
 
 
 def response_channels(response) -> Tuple[str, ...]:
