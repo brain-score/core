@@ -118,6 +118,16 @@ def test_readout_choice_with_probabilities():
     assert session.collect('behavior:probabilities').values.shape == (4, 2)
 
 
+@pytest.mark.parametrize('labels', [['cat', 'dog'], ['dog', 'cat']])
+def test_readout_probabilities_follow_the_task_label_order(labels):
+    model, _ = _model(readout=True)
+    task = TaskContext(response=Choice(labels, probabilities=True), fitting_stimuli=STIMULI)
+    session = _ask(model, task, ['behavior:choice', 'behavior:probabilities'])
+    choice, probabilities = session.collect('behavior:choice'), session.collect('behavior:probabilities')
+    assert list(probabilities['choice'].values) == list(choice['choice'].values) == labels
+    np.testing.assert_array_equal(probabilities.values.argmax(1), choice.values.argmax(1))
+
+
 @pytest.mark.parametrize('response, channel', [(Text(), 'behavior:text'),
                                                (Choice(['cat', 'dog'], confidence=Scale(1, 5)),
                                                 'behavior:confidence')])

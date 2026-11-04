@@ -344,7 +344,7 @@ class BehavioralReadout:
                     [str(values['choice'].values[i]) for i in np.asarray(values.values).argmax(1)],
                     [True] * len(stimuli), stimuli, labels, 'readout', raw=None)
                 if self.probability_source == 'readout':
-                    outputs['behavior:probabilities'] = _implied(values, 'readout')
+                    outputs['behavior:probabilities'] = _implied(_in_order(values, labels), 'readout')
         else:
             score_first = path == 'generation' and self.probability_source == 'likelihood'
             remember = owner._memory == 'session'
@@ -408,8 +408,9 @@ class BehavioralReadout:
                     outputs['behavior:probabilities'] = _implied_array(
                         _softmax_rows(scores, labels), stimuli, labels, 'likelihood')
                 elif self.probability_source == 'readout':
-                    outputs['behavior:probabilities'] = _implied(self.readout_classifier.predict_proba(
-                        owner._extract_behavioral_features(stimuli)), 'readout')
+                    outputs['behavior:probabilities'] = _implied(_in_order(
+                        self.readout_classifier.predict_proba(owner._extract_behavioral_features(stimuli)),
+                        labels), 'readout')
         if isinstance(response, Choice) and response.reaction_time:
             outputs['behavior:rt'] = _reaction_time(outputs['behavior:probabilities'],
                                                     response.reaction_time, stimuli)
@@ -789,6 +790,12 @@ def _implied_array(probabilities, stimuli, labels, source):
                               coords={**_presentation(stimuli), 'choice': list(labels)},
                               dims=['presentation', 'choice'],
                               attrs={'measure': {'kind': 'implied', 'source': source}})
+
+
+def _in_order(assembly, labels):
+    """Readout columns in the task's label order, as ``behavior:choice`` has them."""
+    present = [label for label in labels if label in set(assembly['choice'].values)]
+    return assembly.sel(choice=present) if len(present) == assembly.sizes['choice'] else assembly
 
 
 def _implied(assembly, source):
