@@ -60,22 +60,38 @@ class BehaviorSessions(_SessionCapability):
 
     def enabled_for(self, model) -> bool:
         return (model._behavioral_readout_layer is not None
-                or model._generation_fn is not None)
+                or model._generation_fn is not None
+                or model._reply_fn is not None or model._likelihood_fn is not None)
 
     def declared_input_channels(self, model):
-        return {'instruction'} if model._generation_fn is not None else set()
+        replies = (model._generation_fn, model._reply_fn, model._likelihood_fn)
+        return {'instruction'} if any(part is not None for part in replies) else set()
 
     def declared_output_channels(self, model):
-        return {'behavior'}
+        # Each part declares the kinds of answer it can give (rule 2.4).
+        channels = {'behavior'}
+        if model._behavioral_readout_layer is not None:
+            channels |= {'behavior:choice', 'behavior:probabilities', 'behavior:rating'}
+        if model._generation_fn is not None:
+            channels |= {'behavior:choice'}
+        if model._reply_fn is not None:
+            channels |= {'behavior:choice', 'behavior:rating', 'behavior:confidence',
+                         'behavior:text'}
+        if model._likelihood_fn is not None:
+            channels |= {'behavior:choice', 'behavior:probabilities'}
+        return channels
 
     def supports_session(self, model, channels) -> bool:
         # Behavior alone, or behavior plus regions recorded during the same answers.
-        recorded = set(channels) - {'behavior'}
-        return 'behavior' in channels and recorded <= {
+        behavior = {c for c in channels if c == 'behavior' or c.startswith('behavior:')}
+        recorded = set(channels) - behavior
+        return bool(behavior) and behavior <= self.declared_output_channels(model) and recorded <= {
             f'neural:{region}' for region in model.region_layer_map}
 
     def participate(self, model, session) -> None:
-        if set(_drivers._requested_output_channels(session)) != {'behavior'}:
+        requested = set(_drivers._requested_output_channels(session))
+        task = getattr(session, 'task_context', None)
+        if requested != {'behavior'} or (task is not None and task.response is not None):
             _drivers.drive_behavior_and_neural_session(model, session)
         elif getattr(session, 'streaming', False):
             _drivers._drive_behavior_session_streaming(model, session)

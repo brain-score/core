@@ -359,6 +359,8 @@ _SEED = [
                  "a label, a probability vector, or generated text",
                  "a fitted readout or the model's generation path",
                  meta_keys=("label_set",),
+                 addressing=("address is the kind of answer a TaskContext response asks for: "
+                             "choice, probabilities, confidence, rating or text"),
                  materializers=("start_task", "BehavioralAssembly")),
     # --- outputs: motor (carried by EnvironmentResponse, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",

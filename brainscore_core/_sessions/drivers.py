@@ -402,19 +402,24 @@ def drive_behavior_and_neural_session(model, session, driver: str = "interact") 
     if time_bins is not None and len(time_bins) > 1:
         raise NotImplementedError(
             "Recording during a task returns one time bin; request at most one.")
-    regions = []
-    for channel in _requested_output_channels(session):
-        family, region = parse_channel(channel)
-        if family == "neural":
-            regions.append(region)
+    requested = _requested_output_channels(session)
+    regions = [parse_channel(c)[1] for c in requested if parse_channel(c)[0] == "neural"]
+    answers = [c for c in requested if parse_channel(c)[0] == "behavior"]
     _refuse_variance(model, session)
     model.start_task(task_context)
     stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
         raise ValueError("Recording during a task needs stimuli to present.")
-    behavior, neural = model._behavioral.respond_and_record(stimuli, regions)
-    if "behavior" in _requested_output_channels(session):
-        session.emit(StreamEvent(channel="behavior", payload=behavior, t_ms=0.0,
+    if task_context.response is not None:
+        behavior, neural = model._behavioral.respond(stimuli, answers, regions)
+    else:
+        if set(answers) - {"behavior"}:
+            raise ValueError(f"{answers} need TaskContext(response=...); task_type "
+                             f"{task_context.task_type!r} answers on 'behavior'.")
+        plain, neural = model._behavioral.respond_and_record(stimuli, regions)
+        behavior = {"behavior": plain} if answers else {}
+    for channel in answers:
+        session.emit(StreamEvent(channel=channel, payload=behavior[channel], t_ms=0.0,
                                  meta={"driver": driver, "task_type": task_context.task_type}))
     for region in regions:
         session.emit(StreamEvent(channel=f"neural:{region}", payload=neural[region], t_ms=0.0,

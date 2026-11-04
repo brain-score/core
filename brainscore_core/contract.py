@@ -39,19 +39,42 @@ class TaskContext:
     answer (for example a held-out test set) in ``metadata['stimulus_set']``
     when using ``behavioral_response``.
 
+    ``response`` is the form of the answer (``brainscore_core.responses``):
+    ``Choice``, ``Scale`` or ``Text``; ``task_type='passive'`` means no answer.
+    With a response, outputs are requested on ``behavior:<kind>`` channels.
+    The older ``task_type`` values ``'label'``, ``'classification'`` and
+    ``'probabilities'`` keep their meaning on the plain ``behavior`` channel.
+
     ``readout_fit`` says which network a readout is fitted on while a change
     (a lesion, a stimulation) is active: ``'current'`` (default) fits on the
     changed network; ``'intact'`` fits on the network with every change undone,
     then tests the changed network with that readout, as an animal trained
     before a lesion is tested after it.
     """
-    task_type: str
+    task_type: Optional[str] = None
     label_set: Optional[List[str]] = None
     fitting_stimuli: Optional[Any] = None
     instruction: Optional[str] = None
     prefer_path: Optional[str] = None  # 'auto' | 'generation' | 'readout'
     metadata: Dict[str, Any] = field(default_factory=dict)
     readout_fit: str = 'current'  # 'current' | 'intact'
+    response: Any = None  # a brainscore_core.responses Choice, Scale or Text
+
+    def __post_init__(self):
+        # The response, when given, decides the task type; label lists follow it.
+        kinds = {'Choice': 'choice', 'Scale': 'rating', 'Text': 'text'}
+        if self.response is not None:
+            kind = kinds.get(type(self.response).__name__)
+            if kind is None:
+                raise TypeError('response must be a Choice, Scale or Text from brainscore_core.responses')
+            if self.task_type is None:
+                self.task_type = kind
+            elif self.task_type != kind:
+                raise ValueError(f'task_type {self.task_type!r} contradicts a {type(self.response).__name__} response')
+            if kind == 'choice' and self.label_set is None:
+                self.label_set = list(self.response.labels)
+        elif self.task_type is None:
+            raise ValueError("Give a response (Choice, Scale, Text) or task_type='passive'.")
 
 
 

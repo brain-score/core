@@ -394,7 +394,9 @@ class TestDeclaredChannelsRun:
 
     def test_every_part_declares_registered_channels(self):
         model = self._model()
-        assert model.out_channels == {'neural:IT', 'behavior', 'motor', 'perturbation'}
+        assert model.out_channels == {'neural:IT', 'behavior', 'behavior:choice',
+                                      'behavior:probabilities', 'behavior:rating',
+                                      'motor', 'perturbation'}
         assert {'vision', 'observation', 'lesion', 'stimulation'} <= model.in_channels
         for output in sorted(model.out_channels):
             bench = FakeBenchmark(identifier=output)
