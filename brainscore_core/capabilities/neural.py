@@ -65,7 +65,8 @@ class NeuralEncodingCapability(Capability):
                 f"{sorted(model._region_layer_map_dict.keys())}."
             )
 
-        if multi_modality and len(detected) > 1:
+        from .._model.dispatch import fused_for
+        if (multi_modality or fused_for(model, detected) is not None) and len(detected) > 1:
             return model._process_multi_modality(stimuli, detected, layers)
 
         if not multi_modality and len(detected) > 1:

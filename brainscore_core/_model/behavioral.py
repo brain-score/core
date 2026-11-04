@@ -530,6 +530,8 @@ class BehavioralReadout:
         if modality is not None:
             return canonical_modality(modality)
         modalities = {canonical_modality(key) for key in self.owner._extractors}
+        if len({id(e) for e in self.owner._extractors.values()}) == 1:
+            return sorted(modalities)[0]        # one (fused) extractor records every region
         if len(modalities) != 1:
             raise ValueError(
                 f'Region {region!r} does not say which input it reads. Map it with '

@@ -133,6 +133,10 @@ class BrainScoreModel(UnifiedModel):
         :param answer: ``(stimulus_row, instruction, label_set) -> label``;
             generates and parses a behavioral answer for instruction-following
             tasks.
+        :param extractor: also accepts a fused extractor under a tuple of input
+            types, ``{('vision', 'text'): fused}``: one forward pass over all of a
+            stimulus's parts. It declares each type, and takes any stimulus that
+            brings several of them at once.
         :param reply: ``(prompt) -> str``; the model's raw reply to one trial.
             ``prompt`` is a ``brainscore_core.responses.Prompt``: the trial's parts
             in order (instruction, stimulus parts, the response's directive).
@@ -228,6 +232,7 @@ class BrainScoreModel(UnifiedModel):
         from ._model.dispatch import normalize_extractors
         self._preprocessors: Dict[str, Optional[Callable]] = dict(preprocessors)
         self._activations_model = activations_model
+        self._fused_extractors = []     # (input types, extractor) registered under a tuple
         self._extractors, self._layer_extractors = normalize_extractors(
             self, preprocessors, activations_model)
         for modality in supported_modalities or ():
