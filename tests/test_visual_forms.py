@@ -98,3 +98,38 @@ def test_a_clip_recorded_during_a_task_uses_the_clip_extractor_and_keeps_time():
     assert recorded.dims == ('presentation', 'time_bin', 'neuroid')
     np.testing.assert_array_equal(recorded.values[0, :, 0], [5.0, 6.0])
     assert list(recorded['time_bin_start_ms'].values) == [0.0, 1000.0]
+
+
+def test_a_multi_image_trial_is_recorded_per_image():
+    from contextlib import contextmanager
+    from brainscore_core.model_interface import TaskContext
+    from brainscore_core.responses import Choice
+    from brainscore_core.streaming import BufferedSession
+
+    class PerImage:
+        def __call__(self, stimuli, layers, **kwargs):
+            raise AssertionError('recorded during the reply')
+
+        @contextmanager
+        def record(self, layers):
+            class Take:
+                @staticmethod
+                def take():
+                    values = np.arange(6, dtype=float).reshape(1, 3, 2)   # 3 images, 2 units
+                    return NeuroidAssembly(values, dims=['presentation', 'part', 'neuroid'], coords={
+                        'stimulus_id': ('presentation', ['?']), 'part_index': ('part', [0, 1, 2]),
+                        'neuroid_id': ('neuroid', ['n0', 'n1']), 'layer': ('neuroid', [layers[0]] * 2)})
+            yield Take()
+
+    model = BrainScoreModel('m', extractor={'vision': PerImage()},
+                            region_layer_map={'IT': LayerSelector('blocks.1', modality='vision')},
+                            reply=lambda prompt: 'yes')
+    trials = StimulusSet({'stimulus_id': ['t1'], 'rules': ['r.png'], 'word_1': ['a.png'], 'word_2': ['b.png']})
+    trials.identifier = 'sequence'
+    task = TaskContext(response=Choice(['yes', 'no']), present=('image:rules', 'image:word_1', 'image:word_2'))
+    session = BufferedSession(stimulus_set=trials, task_context=task,
+                              requested_output_channels=['behavior:choice', 'neural:IT'])
+    model.participate(session)
+    recorded = session.collect('neural:IT')
+    assert recorded.dims == ('presentation', 'part', 'neuroid')
+    assert list(recorded['part_name'].values) == ['rules', 'word_1', 'word_2']

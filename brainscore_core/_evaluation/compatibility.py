@@ -160,6 +160,14 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"'{benchmark_id}' sends {_format_channels(bench_inputs)}."
         )
 
+    required_traits = set(getattr(benchmark, 'required_traits', None) or ())
+    missing_traits = required_traits - set(subject.traits) if required_traits else set()
+    if missing_traits:
+        raise CompatibilityError(
+            f"Benchmark '{benchmark_id}' requires subject traits {sorted(missing_traits)}; "
+            f"subject '{subject_id}' declares {sorted(subject.traits) or 'none'}."
+        )
+
     if getattr(benchmark, "uses_session", False):
         probe = getattr(subject, "check_session_support", None)
         if callable(probe):

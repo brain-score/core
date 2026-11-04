@@ -71,14 +71,14 @@ class BehaviorSessions(_SessionCapability):
         # Each part declares the kinds of answer it can give (rule 2.4).
         channels = {'behavior'}
         if model._behavioral_readout_layer is not None:
-            channels |= {'behavior:choice', 'behavior:probabilities', 'behavior:rating'}
+            channels |= {'behavior:choice', 'behavior:probabilities', 'behavior:rating', 'behavior:rt'}
         if model._generation_fn is not None:
             channels |= {'behavior:choice'}
         if model._reply_fn is not None:
             channels |= {'behavior:choice', 'behavior:rating', 'behavior:confidence',
                          'behavior:text'}
         if model._likelihood_fn is not None:
-            channels |= {'behavior:choice', 'behavior:probabilities'}
+            channels |= {'behavior:choice', 'behavior:probabilities', 'behavior:rt'}
         return channels
 
     def supports_session(self, model, channels) -> bool:

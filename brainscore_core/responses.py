@@ -51,21 +51,32 @@ class Choice:
     ``probabilities=True`` also returns the implied probability of each label
     (from a readout or a language model's likelihoods). ``confidence=Scale(...)``
     also asks the subject to report how sure it is, in the same reply.
+    ``reaction_time`` also returns an implied reaction time from those
+    probabilities, scored by correlation with human RTs as Futrell2018 scores
+    surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
+    probable labels; close calls are slow) or ``'surprisal'`` (-log2 of the
+    chosen label's probability).
     """
     labels: Tuple[str, ...]
     probabilities: bool = False
     confidence: Optional[Scale] = None
+    reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
+
+    REACTION_TIMES = ('evidence_margin', 'surprisal')
 
     def __post_init__(self):
         if isinstance(self.labels, str) or len(self.labels) < 2:
             raise ValueError('Choice needs at least two labels')
+        if self.reaction_time not in (None, *self.REACTION_TIMES):
+            raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
         object.__setattr__(self, 'labels', tuple(self.labels))
 
     @property
     def channels(self) -> Tuple[str, ...]:
         return (('behavior:choice',)
                 + (('behavior:probabilities',) if self.probabilities else ())
-                + (('behavior:confidence',) if self.confidence is not None else ()))
+                + (('behavior:confidence',) if self.confidence is not None else ())
+                + (('behavior:rt',) if self.reaction_time is not None else ()))
 
     def directive(self) -> str:
         text = f'Answer with exactly one of: {", ".join(self.labels)}.'
@@ -126,6 +137,8 @@ class Prompt:
     """
     parts: Tuple[Tuple[str, Any], ...]
     stimulus_id: Optional[str] = None
+    names: Tuple[str, ...] = ()   # one per part: 'instruction', a column name, or 'directive'
+    history: Tuple[Tuple['Prompt', str], ...] = ()   # earlier trials of the session: (prompt, reply)
 
     def text(self) -> str:
         """The text parts joined, for a model that reads text only."""
@@ -145,17 +158,28 @@ def trial_prompt(task, stimulus_row) -> Prompt:
     if task.present is None and len(present) > 1:
         raise ValueError(f'Each stimulus has several parts {sorted(present)}; say the order people '
                          'saw them in with TaskContext(present=(...)), e.g. present=("text", "video").')
-    missing = [kind for kind in order if kind not in present]
-    if missing:
-        raise ValueError(f'TaskContext.present names {missing}, but the stimulus has only {sorted(present)}.')
-    parts = []
+    shown = []          # (kind, value, name)
+    for entry in order:
+        if ':' in entry:
+            # A named part: 'image:word_1' shows the image in column word_1.
+            kind, column = entry.split(':', 1)
+            value = _cell(stimulus_row, column)
+            if value is None:
+                raise ValueError(f'TaskContext.present names column {column!r}, which this stimulus lacks.')
+            shown.append((kind, value, column))
+        elif entry in present:
+            shown.append((entry, present[entry], entry))
+        else:
+            raise ValueError(f'TaskContext.present names {entry!r}, but the stimulus has only {sorted(present)}.')
+    parts, names = [], []
     if (task.instruction or '').strip():
-        parts.append(('text', task.instruction.strip()))
-    parts += [(kind, present[kind]) for kind in order]
+        parts.append(('text', task.instruction.strip())); names.append('instruction')
+    for kind, value, name in shown:
+        parts.append((kind, value)); names.append(name)
     directive = task.response.directive() if task.response is not None else ''
     if directive:
-        parts.append(('text', directive))
-    return Prompt(tuple(parts), stimulus_id=_cell(stimulus_row, 'stimulus_id'))
+        parts.append(('text', directive)); names.append('directive')
+    return Prompt(tuple(parts), stimulus_id=_cell(stimulus_row, 'stimulus_id'), names=tuple(names))
 
 
 def _cell(row, column):

@@ -1,7 +1,8 @@
 """Behavioral readout and generation support for BrainScoreModel."""
 
 from contextlib import ExitStack, contextmanager, nullcontext
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple
+from dataclasses import replace
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..contract import TaskContext
 
@@ -25,6 +26,8 @@ class BehavioralReadout:
         self.configured_from: Optional[TaskContext] = None
         self._configured_as: Optional[set] = None  # fingerprints of the fitted configuration
         self._stale = False
+        # With memory='session': the session's earlier trials as (prompt, reply).
+        self.history: list = []
         # Response tasks (TaskContext.response): how the answer and probabilities are produced.
         self.response_path: Optional[str] = None
         self.probability_source: Optional[str] = None
@@ -181,6 +184,7 @@ class BehavioralReadout:
             )
 
     def reset(self) -> None:
+        self.history = []
         self.response_path = self.probability_source = None
         self.task_context = None
         self.readout_classifier = None
@@ -298,7 +302,7 @@ class BehavioralReadout:
                 + (' with reported confidence (needs reply=)' if reported_confidence else '')
                 + '. Paths tried: ' + '; '.join(f'{p} needs {needs[p]}' for p in order))
         source = None
-        if isinstance(response, Choice) and response.probabilities:
+        if isinstance(response, Choice) and (response.probabilities or response.reaction_time):
             if path != 'readout' and owner._likelihood_fn is not None:
                 source = 'likelihood'
             elif readout_wired:
@@ -316,21 +320,16 @@ class BehavioralReadout:
     def respond(self, stimuli, channels, regions=()):
         """Answer a response task; return ``({channel: assembly}, {region: NeuroidAssembly})``.
 
-        Each stimulus is presented once on the answer's path. Regions are
-        recorded during that presentation: the prompt pass of a reply, or the
-        readout's own extraction.
+        Each stimulus is presented once on the answer's path, and regions are
+        recorded during that presentation: the prompt pass of a reply or of
+        likelihood scoring, or the readout's own extraction. Implied
+        probabilities next to a reply are scored first, from the same prompt,
+        so the recording is still the prompt pass.
         """
         from ..responses import Choice, Scale, Text, labels_of, trial_prompt
         owner, task = self.owner, self.task_context
         response, path = task.response, self.response_path
-        layers = {region: self._region_layer(region) for region in regions}
-        if layers and path == 'likelihood':
-            raise NotImplementedError('Recording during likelihood scoring is not supported; '
-                                      "use prefer_path='generation' or 'readout'.")
-        if layers and path == 'generation' and self.probability_source is not None:
-            raise NotImplementedError('Implied probabilities need extra forward passes, so they '
-                                      'cannot be recorded in one presentation with a generated '
-                                      "answer; use prefer_path='readout' or drop probabilities.")
+        layers = {region: self._region_layers(region) for region in regions}
         labels = labels_of(response)
         # Every trial's prompt is built first, so a bad layout fails before any compute.
         prompts = [trial_prompt(task, row) for _, row in stimuli.iterrows()]
@@ -347,17 +346,39 @@ class BehavioralReadout:
                 if self.probability_source == 'readout':
                     outputs['behavior:probabilities'] = _implied(values, 'readout')
         else:
+            score_first = path == 'generation' and self.probability_source == 'likelihood'
+            remember = owner._memory == 'session'
+            if remember and owner._reply_fn is None and owner._likelihood_fn is None:
+                raise ValueError("memory='session' needs reply= or likelihood=; answer= cannot see "
+                                 'earlier trials.')
+
+            def with_history(prompt):
+                return replace(prompt, history=tuple(self.history)) if remember else prompt
+
             if path == 'likelihood':
                 def call(row, prompt):
-                    return owner._likelihood_fn(prompt, list(labels))
+                    scores = owner._likelihood_fn(with_history(prompt), list(labels))
+                    if remember:
+                        self.history.append((prompt, max(scores, key=scores.get)))
+                    return scores
             elif owner._reply_fn is not None:
                 def call(row, prompt):
-                    return owner._reply_fn(prompt)
+                    shown = with_history(prompt)
+                    # Scoring first keeps the recorded first pass the prompt alone.
+                    scores = owner._likelihood_fn(shown, list(labels)) if score_first else None
+                    reply = owner._reply_fn(shown)
+                    if remember:
+                        self.history.append((prompt, str(reply)))
+                    return reply, scores
             else:   # a registration's answer: it phrases and parses a Choice itself
                 def call(row, prompt):
                     return owner._generation_fn(stimulus_row=row, instruction=task.instruction,
                                                 label_set=list(labels))
             replies, neural = self._per_stimulus(stimuli, layers, call, prompts)
+            scores = None
+            if path == 'generation' and owner._reply_fn is not None:
+                scores = [s for _, s in replies]
+                replies = [r for r, _ in replies]
             if path == 'likelihood':
                 probabilities = _softmax_rows(replies, labels)
                 chosen = [labels[i] for i in probabilities.argmax(1)]
@@ -383,54 +404,92 @@ class BehavioralReadout:
                     outputs['behavior:confidence'] = _numbers(
                         [response.parse_confidence(reply) for reply in replies], stimuli,
                         'reply', raw=replies)
-                if self.probability_source is not None:
-                    extra = self._probabilities_after(stimuli, prompts, labels)
-                    outputs['behavior:probabilities'] = extra
+                if score_first:
+                    outputs['behavior:probabilities'] = _implied_array(
+                        _softmax_rows(scores, labels), stimuli, labels, 'likelihood')
+                elif self.probability_source == 'readout':
+                    outputs['behavior:probabilities'] = _implied(self.readout_classifier.predict_proba(
+                        owner._extract_behavioral_features(stimuli)), 'readout')
+        if isinstance(response, Choice) and response.reaction_time:
+            outputs['behavior:rt'] = _reaction_time(outputs['behavior:probabilities'],
+                                                    response.reaction_time, stimuli)
         outputs['behavior'] = outputs[response.channels[0]]
-        stamp = self._stamp(path, 'prompt' if path == 'generation' else 'readout extraction')
+        if prompts:
+            # A multi-image trial records one step per image: name each by its part.
+            image_names = [name for (kind, _), name in zip(prompts[0].parts, prompts[0].names)
+                           if kind == 'image']
+            neural = {region: (assembly.assign_coords(part_name=('part', image_names))
+                               if 'part' in assembly.dims and assembly.sizes['part'] == len(image_names)
+                               else assembly)
+                      for region, assembly in neural.items()}
+        stamp = self._stamp(path, 'readout extraction' if path == 'readout' else 'prompt')
         return ({c: outputs[c] for c in channels},
                 {r: a.assign_attrs(recording=stamp) for r, a in neural.items()})
 
-    def _probabilities_after(self, stimuli, prompts, labels):
-        """Implied probabilities alongside a generated answer (extra passes, not recorded)."""
-        owner = self.owner
-        if self.probability_source == 'likelihood':
-            scores = [owner._likelihood_fn(prompt, list(labels)) for prompt in prompts]
-            return _implied_array(_softmax_rows(scores, labels), stimuli, labels, 'likelihood')
-        return _implied(self.readout_classifier.predict_proba(
-            self.owner._extract_behavioral_features(stimuli)), 'readout')
+    def _open_recordings(self, stimuli, layers):
+        """One live recording per input type, before any compute.
 
-    def _per_stimulus(self, stimuli, layers, call, prompts=None):
-        """Call ``call(row, prompt)`` once per stimulus, recording ``layers`` on each first pass."""
-        from ..io_catalog import canonical_modality
+        An extractor's own ``record(layers)`` when it has one; otherwise forward
+        hooks on the model passed as ``BrainScoreModel(model=...)``, with layer
+        paths read from that model.
+        """
         owner = self.owner
+        from .dispatch import extractor_for
         by_modality: Dict[str, list] = {}
-        for region, layer in layers.items():
-            by_modality.setdefault(self._region_modality(region), []).append(layer)
+        for region, region_layers in layers.items():
+            by_modality.setdefault(self._region_modality(region), []).extend(region_layers)
         recordings = {}
         for modality, modality_layers in by_modality.items():
-            from .dispatch import extractor_for
+            modality_layers = list(dict.fromkeys(modality_layers))
             extractor = extractor_for(owner, modality, stimuli)
             if extractor is None:
                 raise NotImplementedError(f'No {modality!r} extractor to record from.')
             try:
                 record = extractor.record
             except AttributeError:
+                record = None
+            if record is not None:
+                recordings[modality] = record(modality_layers)
+            elif owner._model is not None:
+                recordings[modality] = _hook_recording(owner._model, modality_layers, owner.identifier)
+            else:
                 raise NotImplementedError(
-                    f'The {modality!r} extractor cannot record while the model answers: '
-                    'it needs a record(layers) method. Use a readout task, or a '
-                    'neural-only session.') from None
-            recordings[modality] = record(list(dict.fromkeys(modality_layers)))
+                    f'The {modality!r} extractor cannot record while the model answers: give it '
+                    'a record(layers) method, or pass the network as BrainScoreModel(model=...).')
+        return recordings
+
+    def _per_stimulus(self, stimuli, layers, call, prompts=None):
+        """Call ``call(row, prompt)`` once per stimulus, recording ``layers`` on each first pass."""
+        recordings = self._open_recordings(stimuli, layers)
         replies, trials = [], []
         with ExitStack() as stack:
             live = {m: stack.enter_context(r) for m, r in recordings.items()}
             for index, (_, row) in enumerate(stimuli.iterrows()):
                 replies.append(call(row, None if prompts is None else prompts[index]))
                 trials.append({m: recording.take() for m, recording in live.items()})
-        neural = {region: _trials_to_assembly([t[self._region_modality(region)] for t in trials],
-                                              stimuli, layer, region)
-                  for region, layer in layers.items()}
-        return replies, neural
+        return replies, self._trial_regions(trials, stimuli, layers)
+
+    def _trial_regions(self, trials, stimuli, layers):
+        """Per-trial recordings -> one NeuroidAssembly per region (composite regions gathered)."""
+        import xarray as xr
+        neural = {}
+        for region, region_layers in layers.items():
+            modality = self._region_modality(region)
+            per_layer = [_trials_to_assembly([trial[modality] for trial in trials], stimuli, layer, region)
+                         for layer in region_layers]
+            neural[region] = self._gather(region, per_layer)
+        return neural
+
+    def _gather(self, region, per_layer):
+        """A region's units: one layer as is; a composite region's units gathered from its layers."""
+        import xarray as xr
+        from ..selection import CompositeSelector
+        selector = self.owner._region_layer_selectors.get(region)
+        if not isinstance(selector, CompositeSelector):
+            return per_layer[0]
+        recorder = self.owner._recorder
+        combined = xr.concat([recorder.ensure_unit_indices(a) for a in per_layer], dim='neuroid')
+        return recorder.gather_composite_units(combined, selector)
 
     @contextmanager
     def suspended(self):
@@ -451,27 +510,22 @@ class BehavioralReadout:
 
         Returns ``(BehavioralAssembly, {region: NeuroidAssembly})``. With
         ``answer``, the recording is the first forward pass of each answer (the
-        prompt, before any generated token), taken through each extractor's
-        ``record(layers)``. With a readout, the region layers are extracted in
-        the same call as the readout layer. Unsupported requests fail before
-        any compute.
+        prompt, before any generated token). With a readout, the region layers
+        are extracted in the same call as the readout layer.
         """
-        layers = {region: self._region_layer(region) for region in regions}
+        layers = {region: self._region_layers(region) for region in regions}
         if self.use_generation_for_task:
             return self._generate_and_record(stimuli, layers)
         return self._read_out_and_record(stimuli, layers)
 
-    def _region_layer(self, region: str) -> str:
+    def _region_layers(self, region: str) -> List[str]:
         from ..selection import CompositeSelector
         selector = self.owner._region_layer_selectors.get(region)
         if selector is None:
             raise ValueError(f'Region {region!r} is not in region_layer_map.')
         if isinstance(selector, CompositeSelector):
-            # ponytail: composite regions need per-unit gathering; add when a study asks.
-            raise NotImplementedError(
-                f'Region {region!r} combines several layers; record it with a '
-                'neural-only session.')
-        return selector.layer_path
+            return list(selector.layer_paths)
+        return [selector.layer_path]
 
     def _region_modality(self, region: str) -> str:
         from ..io_catalog import canonical_modality
@@ -479,45 +533,25 @@ class BehavioralReadout:
         if modality is not None:
             return canonical_modality(modality)
         modalities = {canonical_modality(key) for key in self.owner._extractors}
+        if len({id(e) for e in self.owner._extractors.values()}) == 1:
+            return sorted(modalities)[0]        # one (fused) extractor records every region
         if len(modalities) != 1:
             raise ValueError(
                 f'Region {region!r} does not say which input it reads. Map it with '
                 "LayerSelector(name=..., modality=...) to record it during a task.")
         return next(iter(modalities))
 
-    def _generate_and_record(self, stimuli, layers: Dict[str, str]):
-        from ..io_catalog import canonical_modality
-        owner = self.owner
-        by_modality: Dict[str, list] = {}
-        for region, layer in layers.items():
-            by_modality.setdefault(self._region_modality(region), []).append(layer)
-        recordings = {}
-        for modality, modality_layers in by_modality.items():
-            from .dispatch import extractor_for
-            extractor = extractor_for(owner, modality, stimuli)
-            if extractor is None:
-                raise NotImplementedError(f'No {modality!r} extractor to record from.')
-            try:
-                record = extractor.record
-            except AttributeError:
-                raise NotImplementedError(
-                    f'The {modality!r} extractor cannot record while the model answers: '
-                    'it needs a record(layers) method. Use a readout task, or a '
-                    'neural-only session.') from None
-            recordings[modality] = record(list(dict.fromkeys(modality_layers)))
+    def _generate_and_record(self, stimuli, layers):
+        recordings = self._open_recordings(stimuli, layers)
         trials = []
         with ExitStack() as stack:
             live = {m: stack.enter_context(r) for m, r in recordings.items()}
             behavior = self.generate_predictions(
                 stimuli, after_each=lambda: trials.append(
                     {m: recording.take() for m, recording in live.items()}))
-        neural = {}
-        for region, layer in layers.items():
-            modality = self._region_modality(region)
-            neural[region] = _trials_to_assembly(
-                [trial[modality] for trial in trials], stimuli, layer, region
-            ).assign_attrs(recording=self._stamp('answer', 'prompt'))
-        return behavior, neural
+        stamp = self._stamp('answer', 'prompt')
+        return behavior, {region: assembly.assign_attrs(recording=stamp)
+                          for region, assembly in self._trial_regions(trials, stimuli, layers).items()}
 
     def _stamp(self, path, forward_pass):
         """How a recording was made, so task and passive recordings stay distinct."""
@@ -526,7 +560,7 @@ class BehavioralReadout:
                 if self.task_context.response is not None else None,
                 'forward_pass': forward_pass, 'readout_fit': self.task_context.readout_fit}
 
-    def _read_out_and_record(self, stimuli, layers: Dict[str, str], raw: bool = False):
+    def _read_out_and_record(self, stimuli, layers, raw: bool = False):
         from ..responses import Scale
         owner = self.owner
         readout_layer = owner._behavioral_readout_layer
@@ -537,7 +571,7 @@ class BehavioralReadout:
                     f'Region {region!r} reads {self._region_modality(region)!r} input, but '
                     f'the readout presents {modality!r} input; one presentation cannot '
                     'record it.')
-        all_layers = list(dict.fromkeys([readout_layer, *layers.values()]))
+        all_layers = list(dict.fromkeys([readout_layer, *(l for ls in layers.values() for l in ls)]))
         extracted = owner._recorder.ensure_layer_provenance(
             owner._extract_for_modality(stimuli, modality, all_layers), all_layers,
             description='Readout extraction')
@@ -550,11 +584,11 @@ class BehavioralReadout:
         else:
             behavior = self.readout_classifier.predict_proba(features)
         neural = {}
-        for region, layer in layers.items():
-            selected = extracted.isel(neuroid=layer_of == layer)
+        for region, region_layers in layers.items():
+            per_layer = [extracted.isel(neuroid=layer_of == layer) for layer in region_layers]
+            selected = self._gather(region, per_layer)
             neural[region] = selected.assign_coords(
-                region=('neuroid', [region] * selected.sizes['neuroid'])
-            )
+                region=('neuroid', [region] * selected.sizes['neuroid']))
             if not raw:
                 neural[region] = neural[region].assign_attrs(
                     recording=self._stamp('readout', 'readout extraction'))
@@ -630,6 +664,58 @@ class BehavioralReadout:
         )
 
 
+@contextmanager
+def _hook_recording(model, layers, identifier):
+    """Forward hooks on ``model`` for extractors without ``record()``.
+
+    ``take()`` returns the first pass since the previous take, each layer's
+    output flattened per presentation, as a still-image extractor packages it.
+    """
+    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+
+    def module_at(path):
+        module = model
+        for part in path.split('.'):
+            module = module[int(part)] if part.isdigit() else getattr(module, part, None)
+            if module is None:
+                raise NotImplementedError(f'Layer {path!r} is not a module of the model passed as model=; '
+                                          'give the extractor a record(layers) method.')
+        return module
+
+    modules = {layer: module_at(layer) for layer in layers}   # unknown paths fail before compute
+    captured = {}
+
+    def keep(layer):
+        def hook(_module, _inputs, output):
+            if layer not in captured:
+                output = output[0] if isinstance(output, (tuple, list)) else output
+                captured[layer] = np.asarray(output.detach().float().cpu().numpy())
+        return hook
+
+    handles = [module.register_forward_hook(keep(layer)) for layer, module in modules.items()]
+
+    class Recording:
+        @staticmethod
+        def take():
+            missing = [layer for layer in layers if layer not in captured]
+            if missing:
+                raise ValueError(f'No forward pass reached {missing} since the last presentation.')
+            rows = {layer: captured[layer].reshape(1, -1) for layer in layers}
+            captured.clear()
+            values = np.concatenate([rows[layer] for layer in layers], axis=1)
+            neuroid_layers = [layer for layer in layers for _ in range(rows[layer].shape[1])]
+            numbers = [i for layer in layers for i in range(rows[layer].shape[1])]
+            return NeuroidAssembly(values, dims=['presentation', 'neuroid'], coords={
+                'stimulus_id': ('presentation', ['?']),
+                'neuroid_id': ('neuroid', [f'{identifier}.{l}.{i}' for l, i in zip(neuroid_layers, numbers)]),
+                'neuroid_num': ('neuroid', numbers), 'layer': ('neuroid', neuroid_layers)})
+    try:
+        yield Recording()
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
 def _presentation(stimuli):
     return {column: ('presentation', list(stimuli[column].values)) for column in stimuli.columns}
 
@@ -676,6 +762,20 @@ def _texts(parsed, replies, stimuli):
                               attrs={'measure': {'kind': 'reported', 'source': 'reply'}})
 
 
+def _reaction_time(probabilities, link, stimuli):
+    """An implied reaction time per stimulus from label probabilities (larger = slower)."""
+    from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+    values = np.asarray(probabilities.values, dtype=float)
+    ordered = np.sort(values, axis=1)[:, ::-1]
+    if link == 'evidence_margin':
+        rt = 1.0 - (ordered[:, 0] - ordered[:, 1])
+    else:                                         # surprisal of the chosen (most probable) label
+        rt = -np.log2(np.clip(ordered[:, 0], 1e-12, 1.0))
+    return BehavioralAssembly(rt, dims=['presentation'], coords=_presentation(stimuli),
+                              attrs={'measure': {'kind': 'implied', 'link': link,
+                                                 'source': probabilities.attrs.get('measure', {}).get('source')}})
+
+
 def _softmax_rows(scores, labels):
     logp = np.array([[float(row[label]) for label in labels] for row in scores], dtype=float)
     logp -= logp.max(axis=1, keepdims=True)
@@ -702,7 +802,12 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
     from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 
     rows = []
-    timed = 'time_bin' in trials[0].dims
+    # A clip keeps its time steps and a multi-image trial its parts: one extra dimension.
+    extra = [dim for dim in trials[0].dims if dim not in ('presentation', 'neuroid')]
+    if len(extra) > 1:
+        raise ValueError(f'A recording during a task may have one extra dimension; got {extra}.')
+    timed = bool(extra)
+    extra = extra[0] if extra else None
     for index, trial in enumerate(trials):
         selected = trial.isel(neuroid=trial['layer'].values == layer)
         if selected.sizes['neuroid'] == 0:
@@ -710,11 +815,10 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
                 f'No activity reached layer {layer!r} while answering stimulus '
                 f'{stimuli["stimulus_id"].iloc[index]!r}; that input may not use it.')
         if timed:
-            # A clip keeps its time steps: (time_bin, neuroid) per presentation.
-            if selected.sizes['time_bin'] != trials[0].sizes['time_bin']:
-                raise ValueError('Clips of different lengths gave different numbers of time steps; '
-                                 'present clips of one length to record them together.')
-            rows.append(np.asarray(selected.transpose('presentation', 'time_bin', 'neuroid').values)[0])
+            if selected.sizes[extra] != trials[0].sizes[extra]:
+                raise ValueError(f'Trials gave different numbers of {extra} steps; present trials of one '
+                                 'length (clips of one duration, sequences of one length) together.')
+            rows.append(np.asarray(selected.transpose('presentation', extra, 'neuroid').values)[0])
         else:
             rows.append(np.asarray(selected.values).reshape(-1))
     first = trials[0].isel(neuroid=trials[0]['layer'].values == layer)
@@ -728,14 +832,14 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
         coords[column] = ('presentation', list(stimuli[column].values))
     if not timed:
         return NeuroidAssembly(np.stack(rows), coords=coords, dims=['presentation', 'neuroid'])
-    time_index = first.indexes.get('time_bin')
-    time_names = list(time_index.names) if isinstance(time_index, pd.MultiIndex) else []
-    time_names += [name for name, coord in first.coords.items()
-                   if coord.dims == ('time_bin',) and name != 'time_bin' and name not in time_names]
-    for name in time_names:
-        coords[name] = ('time_bin', np.asarray(first[name].values))
+    extra_index = first.indexes.get(extra)
+    extra_names = list(extra_index.names) if isinstance(extra_index, pd.MultiIndex) else []
+    extra_names += [name for name, coord in first.coords.items()
+                    if coord.dims == (extra,) and name != extra and name not in extra_names]
+    for name in extra_names:
+        coords[name] = (extra, np.asarray(first[name].values))
     return NeuroidAssembly(np.stack(rows), coords=coords,
-                           dims=['presentation', 'time_bin', 'neuroid'])
+                           dims=['presentation', extra, 'neuroid'])
 
 
 # Keep existing pickle references and public type names stable.

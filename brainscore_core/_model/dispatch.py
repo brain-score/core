@@ -69,6 +69,16 @@ def _is_clip(stimuli) -> bool:
     return any(column in getattr(stimuli, 'columns', ()) for column in CLIP_COLUMNS)
 
 
+def fused_for(owner, detected):
+    """The fused extractor taking every detected input type, if one is registered."""
+    if len(detected) < 2:
+        return None
+    for types, extractor in owner._fused_extractors:
+        if set(detected) <= types:
+            return extractor
+    return None
+
+
 def extractor_for(owner, modality: str, stimuli):
     """The extractor for ``modality``; with a still and a clip extractor, the one
     matching the stimulus's form. None when the model has no such extractor."""
@@ -93,7 +103,18 @@ def normalize_extractors(owner, preprocessors, activations_model):
     import inspect
 
     if isinstance(activations_model, Mapping):
-        extractors = dict(activations_model)
+        # A fused extractor is registered under every input type it takes at
+        # once, {('vision', 'text'): fused}. It also serves each type alone
+        # unless a single-type extractor is registered for it.
+        fused = [(frozenset(canonical_modality(m) for m in key), value)
+                 for key, value in activations_model.items() if isinstance(key, tuple)]
+        extractors = {}
+        for types, value in fused:
+            for modality in types:
+                extractors.setdefault(modality, value)
+        extractors.update({key: value for key, value in activations_model.items()
+                           if not isinstance(key, tuple)})
+        owner._fused_extractors = fused
     elif activations_model is not None:
         if not preprocessors:
             raise ValueError(
@@ -283,6 +304,13 @@ class InputDispatcher:
         import xarray as xr
 
         owner = self.owner
+        fused = fused_for(owner, detected)
+        if fused is not None:
+            # One fused extractor takes every input type: one forward pass.
+            assembly = fused(stimuli, layers=layers)
+            if owner._recorder.is_multi_region:
+                assembly = owner._tag_neuroids_with_regions(assembly)
+            return assembly
         ordered = sorted(
             detected,
             key=lambda m: (

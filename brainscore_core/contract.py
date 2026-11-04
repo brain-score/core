@@ -46,7 +46,9 @@ class TaskContext:
     ``'probabilities'`` keep their meaning on the plain ``behavior`` channel.
 
     ``present`` gives the order of a trial's parts when a stimulus has several
-    (e.g. ``('text', 'video')``: a sentence, then a clip). A replying model is
+    (e.g. ``('text', 'video')``: a sentence, then a clip). Name columns to show
+    several parts of one kind in sequence: ``('image:instruction', 'image:word_1',
+    'image:word_2')``. A replying model is
     shown the instruction, those parts in order, then the response's directive.
 
     ``readout_fit`` says which network a readout is fitted on while a change
@@ -81,9 +83,11 @@ class TaskContext:
         elif self.task_type is None:
             raise ValueError("Give a response (Choice, Scale, Text) or task_type='passive'.")
         if self.present is not None:
-            unknown = set(self.present) - {'text', 'image', 'video', 'audio'}
+            kinds = {'text', 'image', 'video', 'audio'}
+            unknown = [entry for entry in self.present if entry.split(':', 1)[0] not in kinds]
             if unknown or isinstance(self.present, str):
-                raise ValueError(f"present lists parts from 'text', 'image', 'video', 'audio'; got {self.present!r}")
+                raise ValueError("present lists parts as a kind ('text', 'image', 'video', 'audio') "
+                                 f"or 'kind:column' (e.g. 'image:word_1'); got {self.present!r}")
             self.present = tuple(self.present)
 
 
@@ -121,6 +125,16 @@ class Subject(ABC):
     @property
     def required_channels(self) -> Set[str]:
         """Inputs the subject cannot run without; none by default."""
+        return set()
+
+    @property
+    def traits(self) -> Set[str]:
+        """Properties of the subject a benchmark may require; none by default.
+
+        ``'memory:session'``: the subject keeps what it saw and said across the
+        trials of one session, until ``reset()``. A benchmark that needs a trait
+        lists it in ``required_traits``; a subject without it is N/A.
+        """
         return set()
 
     @abstractmethod
