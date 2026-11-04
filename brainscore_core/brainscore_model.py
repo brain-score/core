@@ -280,8 +280,13 @@ class BrainScoreModel(UnifiedModel):
 
     @property
     def in_channels(self):
-        return super().in_channels | set().union(
+        return super().in_channels | self._visual_forms() | set().union(
             *(c.declared_input_channels(self) for c in self._declared_capabilities()))
+
+    def _visual_forms(self):
+        """The visual forms taken natively: a ``vision`` key takes stills, a ``video`` key clips."""
+        forms = {'vision': 'vision:still', 'video': 'vision:clip'}
+        return {forms[key] for key in self._preprocessors if key in forms}
 
     @property
     def out_channels(self):

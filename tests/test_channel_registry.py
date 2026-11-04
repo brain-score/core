@@ -92,8 +92,6 @@ def test_validate_reports_invalid_address_grammar():
 
 
 def test_validate_reports_unaddressable_channel_family():
-    image = np.zeros((224, 224, 3), dtype=np.uint8)
-
-    failures = io_catalog.validate("vision:left", image, direction=INPUT)
+    failures = io_catalog.validate("text:left", "a sentence", direction=INPUT)
 
     assert any("not addressable" in failure for failure in failures)

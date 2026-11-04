@@ -223,11 +223,11 @@ def test_wrong_direction_channel_declaration_raises():
 
 def test_invalid_addressed_channel_declaration_raises():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"text"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision:left"},
+        required_input_channels={"text:left"},
         requested_output_channels={"neural:IT"},
     )
 
