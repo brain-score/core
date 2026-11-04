@@ -1,6 +1,7 @@
 """Behavioral readout and generation support for BrainScoreModel."""
 
 from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..contract import TaskContext
@@ -25,6 +26,8 @@ class BehavioralReadout:
         self.configured_from: Optional[TaskContext] = None
         self._configured_as: Optional[set] = None  # fingerprints of the fitted configuration
         self._stale = False
+        # With memory='session': the session's earlier trials as (prompt, reply).
+        self.history: list = []
         # Response tasks (TaskContext.response): how the answer and probabilities are produced.
         self.response_path: Optional[str] = None
         self.probability_source: Optional[str] = None
@@ -181,6 +184,7 @@ class BehavioralReadout:
             )
 
     def reset(self) -> None:
+        self.history = []
         self.response_path = self.probability_source = None
         self.task_context = None
         self.readout_classifier = None
@@ -343,14 +347,29 @@ class BehavioralReadout:
                     outputs['behavior:probabilities'] = _implied(values, 'readout')
         else:
             score_first = path == 'generation' and self.probability_source == 'likelihood'
+            remember = owner._memory == 'session'
+            if remember and owner._reply_fn is None and owner._likelihood_fn is None:
+                raise ValueError("memory='session' needs reply= or likelihood=; answer= cannot see "
+                                 'earlier trials.')
+
+            def with_history(prompt):
+                return replace(prompt, history=tuple(self.history)) if remember else prompt
+
             if path == 'likelihood':
                 def call(row, prompt):
-                    return owner._likelihood_fn(prompt, list(labels))
+                    scores = owner._likelihood_fn(with_history(prompt), list(labels))
+                    if remember:
+                        self.history.append((prompt, max(scores, key=scores.get)))
+                    return scores
             elif owner._reply_fn is not None:
                 def call(row, prompt):
+                    shown = with_history(prompt)
                     # Scoring first keeps the recorded first pass the prompt alone.
-                    scores = owner._likelihood_fn(prompt, list(labels)) if score_first else None
-                    return owner._reply_fn(prompt), scores
+                    scores = owner._likelihood_fn(shown, list(labels)) if score_first else None
+                    reply = owner._reply_fn(shown)
+                    if remember:
+                        self.history.append((prompt, str(reply)))
+                    return reply, scores
             else:   # a registration's answer: it phrases and parses a Choice itself
                 def call(row, prompt):
                     return owner._generation_fn(stimulus_row=row, instruction=task.instruction,

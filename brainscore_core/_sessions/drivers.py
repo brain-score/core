@@ -403,6 +403,7 @@ def drive_behavior_and_neural_session(model, session, driver: str = "interact") 
     answers = [c for c in requested if parse_channel(c)[0] == "behavior"]
     _refuse_variance(model, session)
     model.start_task(task_context)
+    model._behavioral.history = []     # memory spans one session, not the next
     stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
         raise ValueError("Recording during a task needs stimuli to present.")

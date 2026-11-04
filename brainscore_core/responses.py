@@ -127,6 +127,7 @@ class Prompt:
     parts: Tuple[Tuple[str, Any], ...]
     stimulus_id: Optional[str] = None
     names: Tuple[str, ...] = ()   # one per part: 'instruction', a column name, or 'directive'
+    history: Tuple[Tuple['Prompt', str], ...] = ()   # earlier trials of the session: (prompt, reply)
 
     def text(self) -> str:
         """The text parts joined, for a model that reads text only."""

@@ -96,6 +96,7 @@ class BrainScoreModel(UnifiedModel):
         intervention: Optional[Callable] = None,
         reply: Optional[Callable] = None,
         likelihood: Optional[Callable] = None,
+        memory: Optional[str] = None,
         behavioral_readout_layer: Optional[str] = None,
         generation_fn: Optional[Callable] = None,
         action_fn: Optional[Callable] = None,
@@ -141,6 +142,12 @@ class BrainScoreModel(UnifiedModel):
             probability}``; scores candidate replies without generating. Gives
             choices and their implied probabilities. Run the prompt on its own
             before any candidate, so a recording during scoring is the prompt pass.
+        :param memory: ``'session'`` keeps what the model saw and said across the
+            trials of a session, until ``reset()``: each trial's prompt and reply
+            reach ``reply`` and ``likelihood`` as ``prompt.history``. It declares
+            the ``memory:session`` trait. A stateful extractor (a recurrent model)
+            keeps its own state the same way. ``None`` (default): every trial is
+            independent.
         :param policy: ``EnvironmentStep -> EnvironmentResponse``; chooses an
             action for closed-loop / embodied evaluation.
         :param intervention: ``StateChange -> (PerturbationApplied, cleanup)``;
@@ -235,6 +242,9 @@ class BrainScoreModel(UnifiedModel):
             'behavioral_readout_layer')
         self._generation_fn = capability_values.get('generation_fn')
         self._reply_fn, self._likelihood_fn = reply, likelihood
+        if memory not in (None, 'session'):
+            raise ValueError("memory must be None or 'session'")
+        self._memory = memory
         self._action_fn = capability_values.get('action_fn')
         self._state_change_fn = capability_values.get('state_change_fn')
 
@@ -289,6 +299,10 @@ class BrainScoreModel(UnifiedModel):
         """The visual forms taken natively: a ``vision`` key takes stills, a ``video`` key clips."""
         forms = {'vision': 'vision:still', 'video': 'vision:clip'}
         return {forms[key] for key in self._preprocessors if key in forms}
+
+    @property
+    def traits(self):
+        return {'memory:session'} if self._memory == 'session' else set()
 
     @property
     def out_channels(self):

@@ -127,6 +127,16 @@ class Subject(ABC):
         """Inputs the subject cannot run without; none by default."""
         return set()
 
+    @property
+    def traits(self) -> Set[str]:
+        """Properties of the subject a benchmark may require; none by default.
+
+        ``'memory:session'``: the subject keeps what it saw and said across the
+        trials of one session, until ``reset()``. A benchmark that needs a trait
+        lists it in ``required_traits``; a subject without it is N/A.
+        """
+        return set()
+
     @abstractmethod
     def participate(self, session: "Session") -> None:
         """Consume session inputs and emit responses until the session ends."""
