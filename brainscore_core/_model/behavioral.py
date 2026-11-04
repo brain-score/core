@@ -387,6 +387,14 @@ class BehavioralReadout:
                     extra = self._probabilities_after(stimuli, prompts, labels)
                     outputs['behavior:probabilities'] = extra
         outputs['behavior'] = outputs[response.channels[0]]
+        if prompts:
+            # A multi-image trial records one step per image: name each by its part.
+            image_names = [name for (kind, _), name in zip(prompts[0].parts, prompts[0].names)
+                           if kind == 'image']
+            neural = {region: (assembly.assign_coords(part_name=('part', image_names))
+                               if 'part' in assembly.dims and assembly.sizes['part'] == len(image_names)
+                               else assembly)
+                      for region, assembly in neural.items()}
         stamp = self._stamp(path, 'prompt' if path == 'generation' else 'readout extraction')
         return ({c: outputs[c] for c in channels},
                 {r: a.assign_attrs(recording=stamp) for r, a in neural.items()})
@@ -702,7 +710,12 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
     from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 
     rows = []
-    timed = 'time_bin' in trials[0].dims
+    # A clip keeps its time steps and a multi-image trial its parts: one extra dimension.
+    extra = [dim for dim in trials[0].dims if dim not in ('presentation', 'neuroid')]
+    if len(extra) > 1:
+        raise ValueError(f'A recording during a task may have one extra dimension; got {extra}.')
+    timed = bool(extra)
+    extra = extra[0] if extra else None
     for index, trial in enumerate(trials):
         selected = trial.isel(neuroid=trial['layer'].values == layer)
         if selected.sizes['neuroid'] == 0:
@@ -710,11 +723,10 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
                 f'No activity reached layer {layer!r} while answering stimulus '
                 f'{stimuli["stimulus_id"].iloc[index]!r}; that input may not use it.')
         if timed:
-            # A clip keeps its time steps: (time_bin, neuroid) per presentation.
-            if selected.sizes['time_bin'] != trials[0].sizes['time_bin']:
-                raise ValueError('Clips of different lengths gave different numbers of time steps; '
-                                 'present clips of one length to record them together.')
-            rows.append(np.asarray(selected.transpose('presentation', 'time_bin', 'neuroid').values)[0])
+            if selected.sizes[extra] != trials[0].sizes[extra]:
+                raise ValueError(f'Trials gave different numbers of {extra} steps; present trials of one '
+                                 'length (clips of one duration, sequences of one length) together.')
+            rows.append(np.asarray(selected.transpose('presentation', extra, 'neuroid').values)[0])
         else:
             rows.append(np.asarray(selected.values).reshape(-1))
     first = trials[0].isel(neuroid=trials[0]['layer'].values == layer)
@@ -728,14 +740,14 @@ def _trials_to_assembly(trials, stimuli, layer: str, region: str):
         coords[column] = ('presentation', list(stimuli[column].values))
     if not timed:
         return NeuroidAssembly(np.stack(rows), coords=coords, dims=['presentation', 'neuroid'])
-    time_index = first.indexes.get('time_bin')
-    time_names = list(time_index.names) if isinstance(time_index, pd.MultiIndex) else []
-    time_names += [name for name, coord in first.coords.items()
-                   if coord.dims == ('time_bin',) and name != 'time_bin' and name not in time_names]
-    for name in time_names:
-        coords[name] = ('time_bin', np.asarray(first[name].values))
+    extra_index = first.indexes.get(extra)
+    extra_names = list(extra_index.names) if isinstance(extra_index, pd.MultiIndex) else []
+    extra_names += [name for name, coord in first.coords.items()
+                    if coord.dims == (extra,) and name != extra and name not in extra_names]
+    for name in extra_names:
+        coords[name] = (extra, np.asarray(first[name].values))
     return NeuroidAssembly(np.stack(rows), coords=coords,
-                           dims=['presentation', 'time_bin', 'neuroid'])
+                           dims=['presentation', extra, 'neuroid'])
 
 
 # Keep existing pickle references and public type names stable.

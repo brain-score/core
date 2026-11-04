@@ -167,3 +167,17 @@ def test_an_unordered_multi_part_stimulus_fails_before_any_reply():
     with pytest.raises(ValueError, match='present'):
         model.participate(session)
     assert calls == []
+
+
+def test_named_parts_show_a_sequence_in_order():
+    from brainscore_core.responses import trial_prompt
+    row = {'stimulus_id': 't1', 'instruction': 'rules.png', 'word_1': 'w1.png', 'word_2': 'w2.png'}
+    task = TaskContext(response=Choice(['yes', 'no']),
+                       present=('image:instruction', 'image:word_1', 'image:word_2'))
+    prompt = trial_prompt(task, row)
+    assert prompt.parts[:3] == (('image', 'rules.png'), ('image', 'w1.png'), ('image', 'w2.png'))
+    assert prompt.names == ('instruction', 'word_1', 'word_2', 'directive')
+    with pytest.raises(ValueError, match='word_3'):
+        trial_prompt(TaskContext(response=Choice(['yes', 'no']), present=('image:word_3',)), row)
+    with pytest.raises(ValueError, match='kind'):
+        TaskContext(response=Choice(['yes', 'no']), present=('picture:word_1',))
