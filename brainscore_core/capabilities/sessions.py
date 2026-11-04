@@ -41,7 +41,13 @@ class NeuralSessions(_SessionCapability):
         return bool(channels) and all(c.startswith('neural:') for c in channels)
 
     def participate(self, model, session) -> None:
-        # A neural-only session records activity even after a task was configured.
+        task = getattr(session, 'task_context', None)
+        if task is not None and task.task_type != 'passive':
+            # The session's task decides what the subject does (rule 4.1):
+            # record during the task; the answers are not sent.
+            _drivers.drive_behavior_and_neural_session(model, session)
+            return
+        # A passive session records activity even after a task was configured.
         with model._behavioral.suspended():
             if getattr(session, 'streaming', False):
                 _drivers._drive_neural_session_streaming(model, session)

@@ -10,7 +10,11 @@ import numpy as np
 import pytest
 
 from brainscore_core.brainscore_model import BrainScoreModel
+from dataclasses import replace
+
+from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
 from brainscore_core.model_interface import TaskContext
+from brainscore_core.streaming_helpers import apply_state_change
 from brainscore_core.selection import LayerSelector
 from brainscore_core.streaming import BufferedSession
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
@@ -25,11 +29,12 @@ class ToyNet:
     """Activity depends on the stimulus and on what else is in the prompt."""
 
     def __init__(self):
-        self.passes, self.hooks = 0, []
+        self.passes, self.hooks, self.silenced, self.log = 0, [], False, []
 
     def forward(self, stimulus_id, prompt=''):
         self.passes += 1
-        base = float(sum(map(ord, stimulus_id)) + len(prompt))
+        self.log.append(self.silenced)
+        base = 0.0 if self.silenced else float(sum(map(ord, stimulus_id)) + len(prompt))
         out = {layer: base + np.arange(n, dtype=float) * (i + 1)
                for i, (layer, n) in enumerate(LAYERS.items())}
         for hook in self.hooks:
@@ -85,10 +90,18 @@ def _model(net, extractor_type=ToyExtractor, **kwargs):
     def answer(stimulus_row, instruction, label_set):
         out = net.forward(stimulus_row['stimulus_id'], prompt=instruction)
         return label_set[int(out['late'][0]) % 2]
+
+    def intervention(change):
+        net.silenced = True
+
+        def cleanup():
+            net.silenced = False
+        return PerturbationApplied(handle_id=f'h{len(net.log)}', target=change.target,
+                                   perturbation=change.perturbation, applied_at=0), cleanup
     return BrainScoreModel(identifier='toy', extractor={'text': extractor_type(net)},
                            region_layer_map={'A': LayerSelector('early', modality='text'),
                                              'B': LayerSelector('late', modality='text')},
-                           answer=answer, **kwargs)
+                           answer=answer, intervention=intervention, **kwargs)
 
 
 def _run(model, task, channels):
@@ -156,3 +169,56 @@ def test_neural_session_after_a_task_returns_activity():
     session = BufferedSession(stimulus_set=STIMULI, requested_output_channels=['neural:A'])
     model.participate(session)
     assert isinstance(session.collect('neural:A'), NeuroidAssembly)
+
+
+SILENCE = StateChange(kind='ablation', target=Selection(layer='early'),
+                      perturbation=Perturbation(kind='zero'))
+
+
+def test_neural_only_session_under_a_task_records_during_the_task():
+    net = ToyNet()
+    session = _run(_model(net), GENERATE, ['neural:A'])
+    assert net.passes == len(STIMULI)
+    assert [e.channel for e in session.emitted] == ['neural:A']       # answers not sent
+    recorded = session.collect('neural:A')
+    expected = [ToyNet().forward(s, prompt='Name the animal.')['early'] for s in 'abc']
+    np.testing.assert_array_equal(recorded.values, expected)
+    assert recorded.attrs['recording']['task_type'] == 'label'
+    assert recorded.attrs['recording']['forward_pass'] == 'prompt'
+
+
+def test_passive_task_records_plain_viewing_unchanged():
+    net = ToyNet()
+    passive = TaskContext(task_type='passive')
+    session = BufferedSession(stimulus_set=STIMULI, task_context=passive,
+                              requested_output_channels=['neural:A'])
+    _model(net).participate(session)
+    recorded = session.collect('neural:A')
+    np.testing.assert_array_equal(recorded.values, [ToyNet().forward(s)['early'] for s in 'abc'])
+    assert 'recording' not in recorded.attrs     # existing neural outputs are unchanged
+
+
+def _readout_task(fit):
+    return TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       fitting_stimuli=STIMULI, prefer_path='readout', readout_fit=fit)
+
+
+@pytest.mark.parametrize('fit, fitted_silenced', [('intact', False), ('current', True)])
+def test_readout_fit_chooses_the_network_it_learns_on(fit, fitted_silenced):
+    net = ToyNet()
+    model = _model(net, behavioral_readout_layer='late')
+    applied = apply_state_change(model, SILENCE)
+    session = _run(model, _readout_task(fit), ['behavior', 'neural:A'])
+    fitting, scoring = net.log[:len(STIMULI)], net.log[len(STIMULI):]
+    assert fitting == [fitted_silenced] * len(STIMULI)
+    assert scoring == [True] * len(STIMULI)                # tested on the changed network
+    np.testing.assert_array_equal(session.collect('neural:A').values, [np.arange(3.)] * 3)  # silenced
+    handle = applied.handle_id
+    apply_state_change(model, StateChange(kind='reset', handle_id=handle))   # handle survives
+    assert not net.silenced
+
+
+def test_readout_fit_is_validated():
+    with pytest.raises(ValueError, match='readout_fit'):
+        _run(_model(ToyNet(), behavioral_readout_layer='late'), _readout_task('sometimes'),
+             ['behavior'])

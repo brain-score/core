@@ -382,7 +382,9 @@ def drive_behavior_session(
 
 
 def drive_behavior_and_neural_session(model, session, driver: str = "interact") -> None:
-    """Answer ``behavior`` and record ``neural:<region>`` from one presentation.
+    """Record ``neural:<region>`` while the subject does the session's task.
+
+    ``behavior`` is sent too when requested.
 
     Each stimulus is shown once: the regions are recorded during the same
     forward pass that produced the answer (see
@@ -411,8 +413,9 @@ def drive_behavior_and_neural_session(model, session, driver: str = "interact") 
     if stimuli is None:
         raise ValueError("Recording during a task needs stimuli to present.")
     behavior, neural = model._behavioral.respond_and_record(stimuli, regions)
-    session.emit(StreamEvent(channel="behavior", payload=behavior, t_ms=0.0,
-                             meta={"driver": driver, "task_type": task_context.task_type}))
+    if "behavior" in _requested_output_channels(session):
+        session.emit(StreamEvent(channel="behavior", payload=behavior, t_ms=0.0,
+                                 meta={"driver": driver, "task_type": task_context.task_type}))
     for region in regions:
         session.emit(StreamEvent(channel=f"neural:{region}", payload=neural[region], t_ms=0.0,
                                  meta={"driver": driver, "record": region,

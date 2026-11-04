@@ -38,6 +38,12 @@ class TaskContext:
     ``'probabilities'``, ``'classification'``, ``'label'``. Put the stimuli to
     answer (for example a held-out test set) in ``metadata['stimulus_set']``
     when using ``behavioral_response``.
+
+    ``readout_fit`` says which network a readout is fitted on while a change
+    (a lesion, a stimulation) is active: ``'current'`` (default) fits on the
+    changed network; ``'intact'`` fits on the network with every change undone,
+    then tests the changed network with that readout, as an animal trained
+    before a lesion is tested after it.
     """
     task_type: str
     label_set: Optional[List[str]] = None
@@ -45,6 +51,7 @@ class TaskContext:
     instruction: Optional[str] = None
     prefer_path: Optional[str] = None  # 'auto' | 'generation' | 'readout'
     metadata: Dict[str, Any] = field(default_factory=dict)
+    readout_fit: str = 'current'  # 'current' | 'intact'
 
 
 

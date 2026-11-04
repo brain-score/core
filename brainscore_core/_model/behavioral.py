@@ -1,6 +1,6 @@
 """Behavioral readout and generation support for BrainScoreModel."""
 
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 from ..contract import TaskContext
@@ -92,6 +92,8 @@ class BehavioralReadout:
         self.task_context = task_context
 
         task_type = task_context.task_type
+        if task_context.readout_fit not in ('current', 'intact'):
+            raise ValueError(f"readout_fit must be 'current' or 'intact', not {task_context.readout_fit!r}.")
         if task_type != 'passive' and not owner._requires_behavioral_readout(task_type):
             raise ValueError(
                 f"Unknown task_type {task_type!r}. BrainScoreModel accepts "
@@ -196,7 +198,9 @@ class BehavioralReadout:
             )
 
         labels = self.extract_labels(fitting_stimuli)
-        features = owner._extract_behavioral_features(fitting_stimuli)
+        intact = (self.task_context is not None and self.task_context.readout_fit == 'intact')
+        with (owner._perturbations.intact() if intact else nullcontext()):
+            features = owner._extract_behavioral_features(fitting_stimuli)
 
         self.readout_classifier = ProbabilitiesClassifier()
         self.readout_classifier.fit(features, labels)
@@ -331,8 +335,14 @@ class BehavioralReadout:
         for region, layer in layers.items():
             modality = self._region_modality(region)
             neural[region] = _trials_to_assembly(
-                [trial[modality] for trial in trials], stimuli, layer, region)
+                [trial[modality] for trial in trials], stimuli, layer, region
+            ).assign_attrs(recording=self._stamp('answer', 'prompt'))
         return behavior, neural
+
+    def _stamp(self, path, forward_pass):
+        """How a recording was made, so task and passive recordings stay distinct."""
+        return {'task_type': self.task_context.task_type, 'path': path,
+                'forward_pass': forward_pass, 'readout_fit': self.task_context.readout_fit}
 
     def _read_out_and_record(self, stimuli, layers: Dict[str, str]):
         owner = self.owner
@@ -357,7 +367,8 @@ class BehavioralReadout:
         for region, layer in layers.items():
             selected = extracted.isel(neuroid=layer_of == layer)
             neural[region] = selected.assign_coords(
-                region=('neuroid', [region] * selected.sizes['neuroid']))
+                region=('neuroid', [region] * selected.sizes['neuroid'])
+            ).assign_attrs(recording=self._stamp('readout', 'readout extraction'))
         return behavior, neural
 
     def generate_predictions(self, stimuli, after_each: Optional[Callable[[], None]] = None):
