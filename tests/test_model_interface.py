@@ -493,7 +493,16 @@ class TestBrainScoreModelDispatch:
             preprocessors={'vision': make_stub_preprocessor()},
         )
         stimuli = StubStimulusSet(columns=['unknown_column'])
-        with pytest.raises(ValueError, match="No recognized modality columns"):
+        with pytest.raises(ValueError, match="No column in this stimulus set"):
+            m.process(stimuli)
+
+    def test_paths_only_stimulus_set_error_names_the_column_to_add(self):
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        m = BrainScoreModel(identifier='test', extractor={'vision': lambda stimuli, layers: None})
+        stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a']}))
+        stimuli.stimulus_paths = {'a': '/tmp/a.png'}
+        with pytest.raises(ValueError, match=r"No column.*image_path.*stimulus_paths dict alone"):
             m.process(stimuli)
 
     def test_single_modality_detected_from_multi_preprocessor_model(self):

@@ -366,6 +366,8 @@ class BrainScoreModel(UnifiedModel):
                     routed = copy(selector)
                     routed.modality = modality
                     selectors[region] = routed
+        from ._model.recording import validate_region_layers
+        validate_region_layers(self, selectors)
         self._region_layer_selectors = selectors
         self._region_layer_map_dict = {r: sel.layer_path for r, sel in selectors.items()}
         self._region_modality_map = {

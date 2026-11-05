@@ -16,6 +16,12 @@ class Extractor(Protocol):
     ``identifier`` and ``backbone_id`` key the activation cache (registrations
     that share weights share ``backbone_id``). An extractor that keeps state
     between calls also defines ``reset()``.
+
+    An extractor may also define ``layer_names()``, returning every path it
+    can record, relative to the module it wraps. ``BrainScoreModel`` then
+    rejects an unknown ``region_layer_map`` path or raw recording target
+    before any forward pass; a ``':input'`` site is checked by its module
+    path. An extractor without ``layer_names()`` skips this early check.
     """
 
     identifier: str

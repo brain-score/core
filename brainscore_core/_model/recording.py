@@ -5,6 +5,63 @@ from typing import Dict, List, Optional, Tuple, Union
 from ..io_catalog import canonical_modality
 from ..selection import CompositeSelector, LayerSelector
 
+INPUT_SITE = ':input'
+
+
+def selector_layers(selector) -> Tuple[str, ...]:
+    return (tuple(selector.layer_paths) if isinstance(selector, CompositeSelector)
+            else (selector.layer_path,))
+
+
+def declared_layers(owner, modality: Optional[str] = None):
+    """Layer paths the extractors for ``modality`` (all, when None) declare.
+
+    An extractor declares its layer namespace through an optional public
+    ``layer_names()`` (paths relative to the module it wraps). Returns None when
+    there is no extractor or any candidate declares nothing (e.g. a plain
+    callable), so validation never rejects a layer it cannot see.
+    """
+    wanted = canonical_modality(modality) if modality else None
+    candidates = {id(e): e for key, e in owner._extractors.items()
+                  if wanted is None or canonical_modality(key) == wanted}
+    if not candidates:
+        return None
+    names = set()
+    for extractor in candidates.values():
+        try:
+            layer_names = extractor.layer_names
+        except AttributeError:
+            return None
+        names.update(layer_names())
+    return names
+
+
+def unknown_layer_message(owner, path: str, modality: Optional[str] = None) -> Optional[str]:
+    """Why ``path`` is not a layer of the routed extractor, or None if it is
+    (or cannot be checked). ``':input'`` sites check their module path."""
+    names = declared_layers(owner, modality)
+    base = path[:-len(INPUT_SITE)] if path.endswith(INPUT_SITE) else path
+    if names is None or base in names:
+        return None
+    import difflib
+    # A full path given where the extractor wraps a sub-module ends with a valid one.
+    suffixes = sorted((n for n in names if base.endswith('.' + n)), key=len, reverse=True)
+    close = list(dict.fromkeys(suffixes + difflib.get_close_matches(base, names, n=5, cutoff=0.6)))[:5]
+    tower = f'the {modality!r} extractor' if modality else 'the extractor'
+    hint = (f'Close matches: {close}.' if close else
+            f'Some valid layers: {sorted(names)[:10]} ({len(names)} in all; '
+            'see extractor.layer_names()).')
+    return f'{path!r} is not a layer of {tower} of {owner.identifier!r}. {hint}'
+
+
+def validate_region_layers(owner, selectors) -> None:
+    """Fail at registration when a region maps to a layer its extractor lacks."""
+    for region, selector in selectors.items():
+        for path in selector_layers(selector):
+            message = unknown_layer_message(owner, path, selector.modality)
+            if message:
+                raise ValueError(f'region_layer_map[{region!r}]: {message}')
+
 
 class Recorder:
     """Owns recording target state for a BrainScoreModel instance."""
@@ -48,7 +105,15 @@ class Recorder:
             raise ValueError('Recording targets must be nonempty region or layer names.')
         import warnings
         for target in targets:
-            if target not in owner._region_layer_selectors:
+            if target in owner._region_layer_selectors:
+                continue
+            message = unknown_layer_message(owner, target)
+            if message:
+                raise ValueError(
+                    f"Recording target {target!r} is not a region in region_layer_map "
+                    f"(known regions: {sorted(owner._region_layer_selectors)}). As a layer "
+                    f"path: {message}")
+            if declared_layers(owner) is None:
                 warnings.warn(
                     f"Recording target {target!r} is not a region in region_layer_map; "
                     "treating it as a raw layer path. If you meant a region, check the spelling.",
@@ -92,9 +157,8 @@ class Recorder:
                 or canonical_modality(routing[region]) == canonical_modality(modality)]
 
     def layers_for_region(self, region):
-        selector = self.owner._region_layer_selectors.get(region, LayerSelector(region))
-        return (list(selector.layer_paths) if isinstance(selector, CompositeSelector)
-                else [selector.layer_path])
+        return list(selector_layers(
+            self.owner._region_layer_selectors.get(region, LayerSelector(region))))
 
     def current_layers(self) -> List[str]:
         if self.recording_layers:

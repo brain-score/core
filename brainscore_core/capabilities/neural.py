@@ -27,11 +27,18 @@ class NeuralEncodingCapability(Capability):
         detected = model._detect_modalities(stimuli)
 
         if not detected:
+            from ..io_catalog import stimulus_columns
+            mapping = {**model.COLUMN_TO_MODALITY, **stimulus_columns()}
+            accepted = {m: sorted(c for c, cm in mapping.items()
+                                  if canonical_modality(cm) == canonical_modality(m))
+                        for m in model.supported_modalities}
             raise ValueError(
-                f"No recognized modality columns in stimulus set. "
-                f"Columns present: {list(stimuli.columns)}. "
-                f"Known column mappings: {model.COLUMN_TO_MODALITY}. "
-                f"Model supports: {model.supported_modalities}."
+                f"No column in this stimulus set says what kind of input it holds "
+                f"(columns present: {list(stimuli.columns)}). Add one column per input "
+                f"this model takes; each row holds the input itself or its file path, "
+                f"for example stimuli['image_path'] = [...] for images. Columns this "
+                f"model reads: {accepted}. A stimulus_paths dict alone is not enough: "
+                f"the column names the input type."
             )
 
         layers = model._recorder.current_layers()
