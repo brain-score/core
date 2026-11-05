@@ -85,3 +85,33 @@ class TestRegistryPrefix:
                                 plugin_type='data', identifier='dummy-stimulus_set',
                                 registry_prefix='stimulus_set')
         assert importer.plugin_dirname == 'dummy_stimulus_set'
+
+
+class TestInstallSafeguards:
+    def test_python_modules_are_skipped(self, tmp_path):
+        from brainscore_core.plugin_management.import_plugin import _without_stdlib_modules
+        requirements = tmp_path / 'requirements.txt'
+        requirements.write_text('torch\nimp\ncollections  # stdlib\ntimm>=1.0\n')
+        kept = _without_stdlib_modules(requirements, tmp_path / 'out.txt').read_text().split()
+        assert kept == ['torch', 'timm>=1.0']
+
+    def test_installed_pins_are_held(self, tmp_path):
+        import numpy
+        from brainscore_core.plugin_management.import_plugin import _hold_installed_versions
+        assert f'numpy=={numpy.__version__}' in _hold_installed_versions(tmp_path / 'c.txt').read_text()
+
+    def test_conflict_is_explained_with_a_next_step(self):
+        from brainscore_core.plugin_management.import_plugin import _explain_install_failure
+        stderr = ('ERROR: Cannot install transformers==4.30.2 because these package versions have conflicting dependencies.\n'
+                  'The conflict is caused by:\n    The user requested transformers==4.30.2\n'
+                  '    The user requested (constraint) transformers==4.57.6\nERROR: ResolutionImpossible\n')
+        message = _explain_install_failure('cvt_13', stderr)
+        assert 'conflict with this environment' in message
+        assert 'the plugin asks for transformers==4.30.2' in message and 'this environment holds transformers==4.57.6' in message
+        assert 'conda create --name bs-model --clone' in message
+
+    def test_missing_platform_package_is_explained(self):
+        from brainscore_core.plugin_management.import_plugin import _explain_install_failure
+        message = _explain_install_failure('openstl', 'ERROR: No matching distribution found for decord\n')
+        assert 'no release for this platform' in message and 'decord' in message
+        assert 'Linux' in message

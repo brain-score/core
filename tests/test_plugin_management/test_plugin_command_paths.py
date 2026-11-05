@@ -201,12 +201,22 @@ def test_plugin_install_uses_current_python_and_literal_paths(tmp_path, monkeypa
     installer.plugins_dir = tmp_path
     installer.plugin_dirname = plugin.name
     calls = []
-    monkeypatch.setattr(subprocess, 'run', lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, '', '')
+
+    monkeypatch.setenv('BS_INSTALL_DEPENDENCIES', 'yes')
+    monkeypatch.setattr(subprocess, 'run', run)
     installer.install_requirements()
     command = calls[0][0][0]
     assert command[:4] == [sys.executable, '-m', 'pip', 'install']
-    assert command[4:] == ([str(plugin)] if filename == 'setup.py' else ['-r', str(plugin / filename)])
-    assert calls[0][1] == {'check': True}
+    assert command[4] == '-c'                    # pinned packages held at their installed versions
+    if filename == 'setup.py':
+        assert command[6:] == [str(plugin)]
+    else:                                        # a copy without Python's own module names
+        assert command[6] == '-r' and Path(command[7]).name == 'requirements.txt'
+    assert calls[0][1] == {'capture_output': True, 'text': True}
 
 
 def test_failed_plugin_install_stops_before_import(tmp_path, monkeypatch):
@@ -217,9 +227,12 @@ def test_failed_plugin_install_stops_before_import(tmp_path, monkeypatch):
     installer.plugins_dir = tmp_path.parent
     installer.plugin_dirname = tmp_path.name
 
+    installer.identifier = 'dummy'
+    from brainscore_core.plugin_management.import_plugin import PluginDependencyError
+
     def fail(command, **kwargs):
-        raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 1, '', 'ERROR: something went wrong')
 
     monkeypatch.setattr(subprocess, 'run', fail)
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(PluginDependencyError, match='dummy'):
         installer.install_requirements()
