@@ -14,6 +14,7 @@ Usage (internal to BrainScoreModel):
 `fitting_labels` is an iterable of string labels, one per presentation.
 """
 
+import warnings
 from collections import OrderedDict
 from typing import Iterable
 
@@ -85,7 +86,13 @@ class ProbabilitiesClassifier:
         self._scaler.fit(X)
         X = self._scaler.transform(X)
         y, self._label_mapping = self._labels_to_indices(list(labels))
-        self._classifier.fit(X, y)
+        # multi_class='multinomial' is deprecated but still honoured below sklearn 1.8,
+        # and dropping it would change binary probabilities; environment_check guards
+        # the version, so the deprecation notice only adds noise to every fit.
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', message=".*'multi_class' was deprecated",
+                                    category=FutureWarning)
+            self._classifier.fit(X, y)
         self._fitted = True
         return self
 

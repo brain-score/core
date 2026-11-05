@@ -1,7 +1,9 @@
 import logging
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -69,32 +71,108 @@ class ImportPlugin:
 
     def install_requirements(self):
         """
-        Install all the requirements of the given plugin directory.
-        - If a `setup.py` file exists, it is run in the current interpreter.
-        - Alternatively, if a `requirements.txt` file exists, this is done via
-          `pip install` in the current interpreter.
-        - If both `setup.py` and `requirements.txt` are present, `setup.py` is installed first.
-        """
-        setup_file = self.plugins_dir / self.plugin_dirname / 'setup.py'
-        requirements_file = self.plugins_dir / self.plugin_dirname / 'requirements.txt'
-        
-        if not setup_file.is_file() and not requirements_file.is_file():
-            logger.debug(
-                f"Plugin {self.plugin_dirname} has no requirements file {requirements_file} "
-                f"or setup file {setup_file}"
-            )
-        
-        if setup_file.is_file():
-            subprocess.run(
-                [sys.executable, '-m', 'pip', 'install', str(setup_file.parent)],
-                check=True,
-            )
+        Install the requirements of the given plugin directory into the current interpreter.
 
-        if requirements_file.is_file():
-            subprocess.run(
-                [sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file)],
-                check=True,
-            )
+        - A `setup.py` installs the directory; a `requirements.txt` is installed with `-r`.
+        - Packages the environment is pinned to (see `PROTECTED_PACKAGES`) are held at their
+          installed versions. A plugin that needs other versions raises `PluginDependencyError`
+          instead of changing them, since that would move every other model's scores.
+        - Lines naming Python's own modules (e.g. `imp`, `collections`) are skipped: they are
+          not packages, and pip would fail on them.
+        """
+        plugin_dir = self.plugins_dir / self.plugin_dirname
+        setup_file, requirements_file = plugin_dir / 'setup.py', plugin_dir / 'requirements.txt'
+        if not setup_file.is_file() and not requirements_file.is_file():
+            logger.debug(f"Plugin {self.plugin_dirname} has no requirements.txt or setup.py")
+            return
+        with tempfile.TemporaryDirectory(prefix='bs-plugin-') as scratch:
+            scratch = Path(scratch)
+            args = [str(plugin_dir)] if setup_file.is_file() else []
+            if requirements_file.is_file():
+                args += ['-r', str(_without_stdlib_modules(requirements_file, scratch / 'requirements.txt'))]
+            # In a dedicated environment ('newenv'), the plugin may set any versions it needs.
+            if installation_preference() == 'yes':
+                args = ['-c', str(_hold_installed_versions(scratch / 'constraints.txt')), *args]
+            completed = subprocess.run([sys.executable, '-m', 'pip', 'install', *args],
+                                       capture_output=True, text=True)
+        if completed.returncode != 0:
+            raise PluginDependencyError(_explain_install_failure(
+                self.identifier, completed.stdout + completed.stderr, plugin_dir))
+
+
+# Pinned by the shared environment; a plugin may add packages but not move these.
+PROTECTED_PACKAGES = ('numpy', 'pandas', 'scipy', 'scikit-learn', 'xarray', 'pyarrow', 'netCDF4',
+                      'torch', 'torchvision', 'transformers', 'datasets', 'importlib-metadata')
+
+
+class PluginDependencyError(RuntimeError):
+    """A plugin's requirements cannot be installed into this environment."""
+
+
+def _hold_installed_versions(path: Path) -> Path:
+    from importlib.metadata import PackageNotFoundError, version
+    lines = []
+    for name in PROTECTED_PACKAGES:
+        try:
+            lines.append(f'{name}=={version(name)}')
+        except PackageNotFoundError:
+            continue
+    path.write_text('\n'.join(lines) + '\n')
+    return path
+
+
+def _without_stdlib_modules(requirements: Path, path: Path) -> Path:
+    kept = []
+    for line in requirements.read_text().splitlines():
+        name = re.match(r'\s*([A-Za-z0-9_.-]+)\s*$', line.split('#')[0])
+        if name and name.group(1) in sys.stdlib_module_names:
+            logger.warning(f"Skipping '{name.group(1)}' in {requirements}: it is part of Python, not a package.")
+            continue
+        kept.append(line)
+    path.write_text('\n'.join(kept) + '\n')
+    return path
+
+
+def _explain_install_failure(identifier: str, output: str, plugin_dir: Path = None) -> str:
+    """A readable reason, the pip lines behind it, and what to try next."""
+    stderr = output
+    lines = [line for line in output.splitlines() if line.strip()]
+    requirements = (plugin_dir / 'requirements.txt') if plugin_dir is not None else Path('<plugin>/requirements.txt')
+    runner = ("Next step: give it an environment of its own, so this one keeps its versions:\n"
+              "    conda create --name bs-model --clone \"$CONDA_DEFAULT_ENV\" && conda activate bs-model\n"
+              f"    python -m pip install -r \"{requirements}\"\n"
+              f"then load or score '{identifier}' there.")
+    linux = ("Next step: load it on Linux (for example an EC2 instance), where more packages have "
+             "ready-made builds. If it fails there too, please tell a maintainer: "
+             "https://github.com/brain-score/vision/issues")
+    missing = [line for line in lines if 'No matching distribution found for' in line]
+    if 'ResolutionImpossible' in stderr or 'conflict' in stderr.lower():
+        detail = []
+        for line in lines:
+            line = line.strip()
+            if line.startswith('The user requested (constraint) '):
+                detail.append('this environment holds ' + line.split(') ', 1)[1])
+            elif line.startswith('The user requested '):
+                detail.append('the plugin asks for ' + line[len('The user requested '):])
+            elif ' depends on ' in line:
+                detail.append(line)
+        detail = detail[:6]
+        reason = (f"'{identifier}' needs package versions that conflict with this environment. "
+                  "Installing them would change the versions scores are verified against, "
+                  "so nothing was installed.")
+    elif missing:
+        detail = [line.strip() for line in missing][:3]
+        reason = (f"'{identifier}' needs a package with no release for this platform or Python version. "
+                  f"It may install on Linux.")
+        runner = linux
+    elif 'Failed to build' in stderr:
+        detail = [line.strip() for line in lines if 'Failed to build' in line][:3]
+        reason = f"'{identifier}' needs a package that failed to build from source here."
+        runner = linux
+    else:
+        detail = lines[-5:]
+        reason = f"Installing the requirements of '{identifier}' failed."
+    return '\n'.join([reason, *('  ' + line for line in detail), runner])
 
 
 def installation_preference():
