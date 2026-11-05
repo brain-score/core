@@ -129,6 +129,29 @@ class RandomSelection(UnitSelection):
     axis: Optional[int] = -1
     expected_shape: Optional[Tuple[int, ...]] = None
 
+    @classmethod
+    def matched_to(cls, selection: 'Selection', seed: int = 0) -> 'RandomSelection':
+        """The random control for a resolved selection: the same layer, layout and
+        number of units, drawn from the same population.
+
+        ``RandomSelection.matched_to(units, seed=0)`` is shorthand for passing
+        ``layer``, ``n_units``, ``n_total``, ``population``, ``axis`` and
+        ``expected_shape`` by hand.
+        """
+        metadata = selection.metadata or {}
+        population = metadata.get('unit_population')
+        if population is not None:
+            n_total = len(population)
+        elif 'n_recorded' in metadata:
+            n_total = int(metadata['n_recorded'])
+        else:
+            raise ValueError('matched_to needs a selection that records its unit population '
+                             "(metadata['unit_population'] or metadata['n_recorded']), "
+                             'such as a resolved FunctionalSelection.')
+        return cls(layer=selection.layer, n_units=len(selection.indices), n_total=n_total,
+                   seed=seed, population=None if population is None else list(population),
+                   axis=selection.axis, expected_shape=selection.expected_shape)
+
     def resolve(self, model) -> 'Selection':
         import numpy as np
         k = min(self.n_units, self.n_total)

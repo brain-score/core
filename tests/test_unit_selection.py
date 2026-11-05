@@ -283,3 +283,24 @@ def test_subset_without_original_addresses_is_rejected():
     model.region_layer_selectors = {'VWFA': CompositeSelector((('enc.5', (4, 1)),))}
     with pytest.raises(ValueError, match='original unit_index'):
         FunctionalSelection('VWFA', 'stim', (['word'], ['nonword']), n_units=1).resolve(model)
+
+
+def test_matched_to_copies_the_functional_selection_settings():
+    from brainscore_core.model_interface import Selection
+    from brainscore_core.selection import RandomSelection
+    population = list(range(10, 60))
+    units = Selection(layer='features.12', indices=[11, 12, 13], axis=1, expected_shape=(512, 13, 13),
+                      metadata={'selector': 'functional', 'unit_population': population})
+    by_hand = RandomSelection('features.12', n_units=3, n_total=50, population=population,
+                              seed=4, axis=1, expected_shape=(512, 13, 13)).resolve(None)
+    matched = RandomSelection.matched_to(units, seed=4).resolve(None)
+    assert matched.indices == by_hand.indices
+    assert (matched.layer, matched.axis, matched.expected_shape) == ('features.12', 1, (512, 13, 13))
+
+
+def test_matched_to_needs_a_population():
+    import pytest
+    from brainscore_core.model_interface import Selection
+    from brainscore_core.selection import RandomSelection
+    with pytest.raises(ValueError, match='unit population'):
+        RandomSelection.matched_to(Selection(layer='x', indices=[0], metadata={}))
