@@ -5,10 +5,10 @@ from typing import Any, Optional, Sequence, Union
 from ..streaming import Session, StreamEvent
 from ..supported_data_standards.brainio.assemblies import NeuroidAssembly
 from .payloads import (
-    _channel_for_stimulus_column,
     _collect_requested_channels,
     _neural_channels,
-    _row_value,
+    _stimulus_input_columns,
+    _table_row_events,
 )
 
 
@@ -32,28 +32,20 @@ class StreamingStimulusSetSession(Session):
         self.requested_output_channels = _neural_channels(record)
         self.emitted: list[StreamEvent] = []
         self._pending: list[StreamEvent] = []
-        self._rows = stimulus_set.iterrows()
-        self._columns = [
-            (column, _channel_for_stimulus_column(column))
-            for column in list(getattr(stimulus_set, "columns", []))
-            if _channel_for_stimulus_column(column) is not None
-        ]
+        self._rows = enumerate(stimulus_set.iterrows())
+        self._columns = _stimulus_input_columns(stimulus_set)
         self.max_events_held = 0     # observability: proves nothing is pre-drained
 
     def next_input(self) -> Optional[StreamEvent]:
         while not self._pending:
             try:
-                row_index, row = next(self._rows)
+                position, (row_index, row) = next(self._rows)
             except StopIteration:
                 return None
-            stimulus_id = _row_value(row, "stimulus_id", default=row_index)
-            t_ms = float(_row_value(row, "t_ms", default=0.0))
-            for column, channel in self._columns:
-                self._pending.append(StreamEvent(
-                    channel=channel, payload=row[column], t_ms=t_ms,
-                    meta={"stimulus_id": stimulus_id,
-                          "stimulus_index": row_index, "column": column},
-                ))
+            # One event per input column; a several-column row marks its
+            # events with meta['table_row'] so the row is presented once.
+            self._pending.extend(_table_row_events(self._columns, position,
+                                                   row_index, row))
         self.max_events_held = max(self.max_events_held, len(self._pending))
         return self._pending.pop(0)
 

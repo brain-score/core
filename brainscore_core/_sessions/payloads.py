@@ -222,30 +222,104 @@ _drain_stream_events = drain_session_inputs
 _stimuli_from_stream_session = session_stimuli
 
 
-def _stimulus_events(stimulus_set) -> list[StreamEvent]:
-    events: list[StreamEvent] = []
-    columns = list(getattr(stimulus_set, "columns", []))
-    input_columns = [
+def _stimulus_input_columns(stimulus_set) -> list[tuple[str, str]]:
+    """``(column, channel)`` for each input column of a stimulus table."""
+    return [
         (column, _channel_for_stimulus_column(column))
-        for column in columns
+        for column in list(getattr(stimulus_set, "columns", []))
         if _channel_for_stimulus_column(column) is not None
     ]
 
-    for row_index, row in stimulus_set.iterrows():
-        stimulus_id = _row_value(row, "stimulus_id", default=row_index)
-        t_ms = float(_row_value(row, "t_ms", default=0.0))
-        for column, channel in input_columns:
-            events.append(StreamEvent(
-                channel=channel,
-                payload=row[column],
-                t_ms=t_ms,
-                meta={
-                    "stimulus_id": stimulus_id,
-                    "stimulus_index": row_index,
-                    "column": column,
-                },
-            ))
+
+def _table_row_events(input_columns, position: int, row_index,
+                      row) -> list[StreamEvent]:
+    """The input events of one table row: one event per input column.
+
+    A row with several input columns (``video_path`` and ``audio_path``) is
+    one presentation that reaches the subject on several streams. Its events
+    then carry ``meta['table_row']``, the row's position in the table, so a
+    driver that answers one event at a time can present the row once (rule
+    4.5). Rows of a one-column table are one event each and stay unchanged.
+    """
+    stimulus_id = _row_value(row, "stimulus_id", default=row_index)
+    t_ms = float(_row_value(row, "t_ms", default=0.0))
+    events = []
+    for column, channel in input_columns:
+        meta = {"stimulus_id": stimulus_id, "stimulus_index": row_index,
+                "column": column}
+        if len(input_columns) > 1:
+            meta["table_row"] = position
+        events.append(StreamEvent(channel=channel, payload=row[column],
+                                  t_ms=t_ms, meta=meta))
     return events
+
+
+def _stimulus_events(stimulus_set) -> list[StreamEvent]:
+    events: list[StreamEvent] = []
+    input_columns = _stimulus_input_columns(stimulus_set)
+    for position, (row_index, row) in enumerate(stimulus_set.iterrows()):
+        events.extend(_table_row_events(input_columns, position, row_index, row))
+    return events
+
+
+def _is_null(value) -> bool:
+    import pandas as pd
+    try:
+        result = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(result, (bool, np.bool_)) and bool(result)
+
+
+def _same_value(left, right) -> bool:
+    """Equality for a present identity field; a null equals only a null."""
+    if _is_null(left) or _is_null(right):
+        return _is_null(left) and _is_null(right)
+    try:
+        return bool(left == right)
+    except (TypeError, ValueError):
+        return False
+
+
+def _table_row_position(session, event: StreamEvent) -> Optional[int]:
+    """The table position of a row-part event, or ``None`` for any other event.
+
+    An event counts as one input column of row ``p`` of the session's own
+    stimulus table only when all of these hold: ``meta['table_row']`` is the
+    integer ``p`` inside the table; ``meta['stimulus_index']`` is present and
+    equals the table's index label at ``p`` (a null label equals a null
+    label); ``meta['stimulus_id']`` equals
+    that row's stimulus id; and ``meta['column']`` is an input column of the
+    table whose channel is the event's channel. Everything is read from the
+    event and the table, never from settings a user can replace. Any other
+    event, including every event of a base record, is presented alone.
+    """
+    meta = event.meta if isinstance(event.meta, dict) else {}
+    position = meta.get("table_row")
+    if isinstance(position, (bool, np.bool_)) or not isinstance(position, (int, np.integer)):
+        return None
+    table = getattr(session, "stimulus_set", None)
+    if table is None or not 0 <= int(position) < len(table):
+        return None
+    if "stimulus_index" not in meta or "stimulus_id" not in meta:
+        return None
+    column = meta.get("column")
+    if (not isinstance(column, str) or column not in table.columns
+            or _channel_for_stimulus_column(column) != event.channel):
+        return None
+    position = int(position)
+    label = table.index[position]
+    expected_id = _row_value(table.iloc[position], "stimulus_id", default=label)
+    if not (_same_value(meta["stimulus_index"], label)
+            and _same_value(meta["stimulus_id"], expected_id)):
+        return None
+    return position
+
+
+def _table_row_stimuli(session, position: int):
+    """A one-row slice of the session's table, selected by position."""
+    table = session.stimulus_set
+    return _preserve_stimulus_set_type(table, table.iloc[[position]])
 
 
 def _behavior_events(task_context, scoring_stimuli) -> list[StreamEvent]:
