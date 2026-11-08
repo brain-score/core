@@ -476,15 +476,39 @@ class BehavioralReadout:
         neural = {}
         for region, region_layers in layers.items():
             modality = self._region_modality(region)
-            per_layer = [_trials_to_assembly([trial[modality] for trial in trials], stimuli, layer, region)
-                         for layer in region_layers]
+            recorded = [trial[modality] for trial in trials]
+            needed = self._required_layers(region)
+            # Only required layers: a layer whose unit subset is empty contributes no
+            # units, so it may be absent from any trial (required_layers).
+            per_layer = [_trials_to_assembly(recorded, stimuli, layer, region)
+                         for layer in region_layers if layer in needed]
             neural[region] = self._gather(region, per_layer)
         return neural
 
+    def _required_layers(self, region: str):
+        """The layers that must contribute neuroids to ``region`` (the recorder's rule)."""
+        from .recording import required_layers
+        from ..selection import LayerSelector
+        return required_layers(self.owner._region_layer_selectors.get(region, LayerSelector(region)))
+
     def _gather(self, region, per_layer):
-        """A region's units: one layer as is; a composite region's units gathered from its layers."""
+        """A region's units: one layer as is; a composite region's units gathered from its layers.
+
+        Every layer the region requires must have contributed neuroids, as in
+        the neural session path, whichever path (readout or generation) recorded.
+        """
+        import numpy as np
         import xarray as xr
         from ..selection import CompositeSelector
+        needed = self._required_layers(region)
+        present = {str(layer) for block in per_layer if block.sizes['neuroid']
+                   for layer in np.asarray(block['layer'].values)}
+        missing = [layer for layer in needed if layer not in present]
+        if missing or not present:
+            raise ValueError(
+                f'Region {region!r} needs neuroids from every selected layer '
+                f'{list(needed)}; the extractor returned no neuroids for '
+                f'{missing or "any of its layers"}.')
         selector = self.owner._region_layer_selectors.get(region)
         if not isinstance(selector, CompositeSelector):
             return per_layer[0]
@@ -492,7 +516,10 @@ class BehavioralReadout:
         from .._data.time_axis import require_one_time_axis
         require_one_time_axis(per_layer, sources=[f'{region}:layer{i}' for i in range(len(per_layer))])
         combined = xr.concat([recorder.ensure_unit_indices(a) for a in per_layer], dim='neuroid')
-        return recorder.gather_composite_units(combined, selector)
+        selected = recorder.gather_composite_units(combined, selector)
+        if not selected.sizes['neuroid']:
+            raise ValueError(f'Region {region!r} selects no neuroids from its layers.')
+        return selected
 
     @contextmanager
     def suspended(self):

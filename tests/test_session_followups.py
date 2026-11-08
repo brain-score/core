@@ -132,3 +132,128 @@ def test_manual_concat_of_equal_order_inputs_is_unchanged(case, validate):
     assert list(merged.coords) == list(expected.coords)
 
 
+# --- 2. task paths refuse a missing selected layer ----------------------------
+
+class Incomplete(ToyExtractor):
+    """Drops 'early' from every output, as a malformed extractor would."""
+    def __call__(self, stimuli, layers, **kwargs):
+        return super().__call__(stimuli, [l for l in layers if l != 'early'], **kwargs)
+
+    @contextmanager
+    def record(self, layers):
+        with super().record([l for l in layers if l != 'early']) as rec:
+            yield rec
+
+
+def task_model(net, extractor_type, regions):
+    def answer(stimulus_row, instruction, label_set):
+        net.forward(stimulus_row['stimulus_id'], prompt=instruction)
+        return label_set[0]
+    return BrainScoreModel('task-layers', extractor={'text': extractor_type(net)}, region_layer_map=regions,
+                           behavioral_readout_layer='late', answer=answer)
+
+
+READOUT = TaskContext(task_type='probabilities', label_set=['cat', 'dog'], fitting_stimuli=STIMULI,
+                      prefer_path='readout')
+TASKS = {'readout': READOUT, 'generation': GENERATE}
+MIX = {'mix': CompositeSelector((('early', None), ('late', None)), modality='text')}
+
+
+@pytest.mark.parametrize('mode', ['readout', 'generation'])
+def test_task_composite_refuses_missing_selected_layer(mode):
+    """Codex v6 probe: readout and generation refuse it, like the neural session path."""
+    m = task_model(ToyNet(), Incomplete, MIX)
+    with pytest.raises(ValueError, match='layer|neuroid|activity'):
+        _run(m, TASKS[mode], ['neural:mix'])
+
+
+def test_neural_session_refuses_the_same_missing_layer():
+    m = task_model(ToyNet(), Incomplete, MIX)
+    with pytest.raises(ValueError, match='every selected layer|no neuroids'):
+        _run(m, None, ['neural:mix'])
+
+
+def test_readout_refuses_a_plain_region_whose_layer_is_missing():
+    m = task_model(ToyNet(), Incomplete, {'E': LayerSelector('early', modality='text')})
+    with pytest.raises(ValueError, match='every selected layer'):
+        _run(m, READOUT, ['behavior', 'neural:E'])
+
+
+@pytest.mark.parametrize('mode', ['readout', 'generation'])
+def test_task_accepts_an_absent_layer_whose_unit_subset_is_empty(mode):
+    """A composite layer with no selected units is not required (required_layers)."""
+    regions = {'mix': CompositeSelector((('early', ()), ('late', None)), modality='text')}
+    session = _run(task_model(ToyNet(), Incomplete, regions), TASKS[mode], ['behavior', 'neural:mix'])
+    mix = session.collect('neural:mix')
+    assert set(mix['layer'].values) == {'late'}
+    complete = _run(task_model(ToyNet(), ToyExtractor, regions), TASKS[mode], ['behavior', 'neural:mix'])
+    np.testing.assert_array_equal(mix.values, complete.collect('neural:mix').values)
+
+
+@pytest.mark.parametrize('mode', ['readout', 'generation'])
+def test_task_refuses_a_composite_that_selects_no_units(mode):
+    regions = {'mix': CompositeSelector((('early', ()), ('late', ())), modality='text')}
+    with pytest.raises(ValueError, match='no neuroids'):
+        _run(task_model(ToyNet(), ToyExtractor, regions), TASKS[mode], ['behavior', 'neural:mix'])
+
+
+@pytest.mark.parametrize('mode', ['readout', 'generation'])
+def test_complete_composite_keeps_its_pass_count_and_values(mode):
+    behavior_net, joint_net = ToyNet(), ToyNet()
+    _run(task_model(behavior_net, ToyExtractor, MIX), TASKS[mode], ['behavior'])
+    joint = _run(task_model(joint_net, ToyExtractor, MIX), TASKS[mode], ['behavior', 'neural:mix'])
+    assert joint_net.passes == behavior_net.passes          # recording adds no forward pass
+    if mode == 'generation':
+        assert joint_net.passes == len(STIMULI)
+    mix = joint.collect('neural:mix')
+    assert list(mix['layer'].values) == ['early'] * 3 + ['late'] * 2
+
+
+def conditional_extractor(pattern):
+    """Records 'early' on no trial, every trial, or trials a and c only."""
+    class Conditional(ToyExtractor):
+        @contextmanager
+        def record(self, layers):
+            captured, count = [], [0]
+            recording = type('Recording', (), {})()
+
+            def take():
+                row = captured[0]
+                captured.clear()
+                count[0] += 1
+                keep_early = pattern == 'always' or (pattern == 'sometimes' and count[0] % 2)
+                return _assembly([row], ['?'], [l for l in layers if l != 'early' or keep_early])
+            recording.take = take
+            self.net.hooks.append(captured.append)
+            try:
+                yield recording
+            finally:
+                self.net.hooks.remove(captured.append)
+    return Conditional
+
+
+GENERATION_FORMS = {'answer': GENERATE,
+                    'choice': replace(GENERATE, task_type=None, label_set=None, response=Choice(('cat', 'dog')))}
+
+
+@pytest.mark.parametrize('form', sorted(GENERATION_FORMS))
+@pytest.mark.parametrize('pattern', ['never', 'always', 'sometimes'])
+def test_generation_ignores_an_optional_layer_on_every_trial(pattern, form):
+    """An empty unit subset stays optional, whatever the other trials record."""
+    regions = {'mix': CompositeSelector((('early', ()), ('late', None)), modality='text')}
+    net = ToyNet()
+    joint = _run(task_model(net, conditional_extractor(pattern), regions), GENERATION_FORMS[form],
+                 ['behavior', 'neural:mix'])
+    expected = _run(task_model(ToyNet(), ToyExtractor, regions), GENERATION_FORMS[form],
+                    ['behavior', 'neural:mix'])
+    assert_same_output(joint.collect('neural:mix'), expected.collect('neural:mix'))
+    assert net.passes == len(STIMULI)
+
+
+@pytest.mark.parametrize('form', sorted(GENERATION_FORMS))
+def test_generation_refuses_a_required_layer_missing_on_some_trials(form):
+    m = task_model(ToyNet(), conditional_extractor('sometimes'), MIX)
+    with pytest.raises(ValueError, match="No activity reached layer 'early' while answering stimulus 'b'"):
+        _run(m, GENERATION_FORMS[form], ['behavior', 'neural:mix'])
+
+
