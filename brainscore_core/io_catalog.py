@@ -288,6 +288,22 @@ def validate(
 # when the answer could not be parsed.
 RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "provenance")
 
+# A stimulus table sends one event per input column of each row. Every such
+# event names its row and column (stimulus_id, stimulus_index, column). When a
+# row has several input columns, its events also carry table_row: the integer
+# position of the row in the session's stimulus_set. Consecutive events with a
+# table_row that matches the table (stimulus_index equals the index label at
+# that position, a null label matching a null label; stimulus_id equals the
+# row's id; column is an input column of the table whose channel is the
+# event's channel) are one presentation, and the row is shown once (rule 4.5).
+# Only consecutive events group: interleaved rows are separate presentations.
+# A repeated column or a different t_ms starts a new presentation. A row whose
+# remaining columns never arrive is presented when the input moves on or ends.
+# A complete, matching table_row is honored on any event, including an
+# external one; an event without it, or with one that does not match, is
+# presented alone. Rows of a one-column table carry no table_row.
+TABLE_ROW_META_KEYS = ("stimulus_id", "stimulus_index", "column", "table_row")
+
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
     # `vision` is the one visual channel: a still is a 1-frame clip, so it
@@ -295,7 +311,7 @@ _SEED = [
     CatalogEntry("vision", INPUT, "StimulusSet column",
                  "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, or a path to one",
                  "image/video preprocessor + a vision model harness (wrapper)",
-                 meta_keys=("stimulus_id",), expected_ndim=(3, 4), expected_dtype="uint8",
+                 meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(3, 4), expected_dtype="uint8",
                  addressing=("address is the form a subject takes natively: 'still' "
                              "(images) or 'clip' (video); a subject declares each form it "
                              "has, and a benchmark adapts a stimulus only when a form is missing"),
@@ -303,11 +319,11 @@ _SEED = [
     CatalogEntry("text", INPUT, "StimulusSet column",
                  "a Python str",
                  "tokenizer + a text model harness (TextWrapper)",
-                 meta_keys=("stimulus_id",), materializers=("StimulusSet",)),
+                 meta_keys=TABLE_ROW_META_KEYS, materializers=("StimulusSet",)),
     CatalogEntry("audio", INPUT, "StimulusSet column",
                  "(samples,) float32 waveform, or a path; sample rate read from the file header",
                  "an audio model harness (AudioWrapper)",
-                 meta_keys=("stimulus_id", "sample_rate_hz"), expected_ndim=(1,),
+                 meta_keys=TABLE_ROW_META_KEYS + ("sample_rate_hz",), expected_ndim=(1,),
                  materializers=("StimulusSet",)),
     # `video` is a backward-compatible alias of `vision` (temporal vision); it
     # canonicalizes to `vision` via ``canonical_modality``. New registrations
@@ -315,7 +331,7 @@ _SEED = [
     CatalogEntry("video", INPUT, "StimulusSet column",
                  "(T, H, W, 3) uint8 clip, or a path (alias of the vision channel)",
                  "a video model harness (VideoWrapper)",
-                 meta_keys=("stimulus_id",), expected_ndim=(4,),
+                 meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(4,),
                  materializers=("StimulusSet",)),
     CatalogEntry("instruction", INPUT, "TaskContext.instruction or EnvironmentStep.instruction",
                  "a Python str framing the task",
