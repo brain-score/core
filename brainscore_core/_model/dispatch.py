@@ -362,6 +362,8 @@ class InputDispatcher:
 
 def _concat_modalities_along_neuroid(sub_assemblies, xr):
     """Concat modality assemblies without letting presentation indexes collide."""
+    from .._data.time_axis import require_one_time_axis
+    require_one_time_axis(sub_assemblies)
     flattened = [
         _reset_presentation_index(assembly)
         for assembly in sub_assemblies

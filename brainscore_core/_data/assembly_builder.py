@@ -63,6 +63,9 @@ def concat_neuroid_assemblies(
     """
     if len(assemblies) == 1:
         return assemblies[0]
+    if any('time_bin' in a.dims for a in assemblies):
+        from .time_axis import require_one_time_axis
+        require_one_time_axis(assemblies, sources=[f'block{i}' for i in range(len(assemblies))])
     if strategy == 'xarray':
         import xarray as xr
         return xr.concat(list(assemblies), dim='neuroid')

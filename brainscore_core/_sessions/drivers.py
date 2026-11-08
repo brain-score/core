@@ -1,7 +1,7 @@
 """Run typed subjects through the public session contract."""
 
 from __future__ import annotations
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from ..contract import TaskContext
 from ..streaming import StreamEvent, parse_channel
@@ -39,6 +39,7 @@ def _drive_via_process(subject, session: StimulusSetSession, stimulus_set,
 def drive_neural_session(
     subject: Any, session: Any, driver: str = "interact",
     allow_multi_modality: bool = False,
+    channel_runner: Optional[Callable] = None,
 ) -> None:
     """Answer a session's ``neural:<region>`` requests with one ``process`` call.
 
@@ -53,6 +54,11 @@ def drive_neural_session(
     refused before any compute. ``allow_multi_modality`` is the subject's own
     statement that its ``process`` combines several input modalities; when
     several are present it is called with ``multi_modality=True``.
+
+    ``channel_runner(stimuli, channel_regions, time_bins, multi_modality)``
+    returns ``{channel: payload}``. A subject that records regions with
+    separate extractors supplies one, so each channel keeps the payload it
+    would have alone. Without it, all regions are recorded in one call.
     """
     _refuse_variance(subject, session)
     input_events = drain_session_inputs(session)
@@ -71,15 +77,19 @@ def drive_neural_session(
             )
         channel_regions.append((channel, region))
 
-    recording_target = _combined_recording_target(channel_regions)
-    _start_recording(subject, recording_target, time_bins=time_bins)
-    if use_multi_modality:
-        output = subject.process(stimuli, multi_modality=True)
+    if channel_runner is not None:
+        payloads = channel_runner(stimuli, channel_regions, time_bins, use_multi_modality)
+        outputs = [(channel, region, payloads[channel])
+                   for channel, region in channel_regions]
     else:
-        output = subject.process(stimuli)
-    for channel, region, channel_output in _demultiplex_neural_output(
-        output, channel_regions
-    ):
+        recording_target = _combined_recording_target(channel_regions)
+        _start_recording(subject, recording_target, time_bins=time_bins)
+        if use_multi_modality:
+            output = subject.process(stimuli, multi_modality=True)
+        else:
+            output = subject.process(stimuli)
+        outputs = _demultiplex_neural_output(output, channel_regions)
+    for channel, region, channel_output in outputs:
         session.emit(StreamEvent(
             channel=channel,
             payload=channel_output,
@@ -168,7 +178,8 @@ def _demultiplex_neural_output(output, channel_regions):
 
 
 def _drive_neural_session_streaming(
-    subject, session, driver: str = "interact_streaming"
+    subject, session, driver: str = "interact_streaming",
+    channel_runner: Optional[Callable] = None,
 ) -> None:
     """Pull one session input event, process it, emit its outputs, and repeat.
 
@@ -209,10 +220,13 @@ def _drive_neural_session_streaming(
                 f"{type(event).__name__}."
             )
         stimuli = _one_row_stimuli(session, event, stream_index)
-        output = subject.process(stimuli)
-        for channel, region, channel_output in _demultiplex_neural_output(
-            output, channel_regions
-        ):
+        if channel_runner is not None:
+            payloads = channel_runner(stimuli, channel_regions, time_bins, False)
+            outputs = [(channel, region, payloads[channel])
+                       for channel, region in channel_regions]
+        else:
+            outputs = _demultiplex_neural_output(subject.process(stimuli), channel_regions)
+        for channel, region, channel_output in outputs:
             session.emit(StreamEvent(
                 channel=channel,
                 payload=channel_output,
