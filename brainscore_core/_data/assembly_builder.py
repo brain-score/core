@@ -58,8 +58,17 @@ def concat_neuroid_assemblies(
     """Concatenate assemblies along ``neuroid`` preserving existing coords.
 
     ``strategy='manual'`` matches the historic wrapper implementation that
-    avoids ``xarray.concat`` for large 2-D activations. ``strategy='xarray'``
-    keeps wrappers that already relied on xarray concat byte-for-byte closer.
+    avoids ``xarray.concat`` for large 2-D activations. It joins rows by
+    presentation identity, not by position: a block that lists the same
+    presentations in another order is put in the first block's order, and a
+    block whose rows cannot be matched to the first block's is refused. When
+    the blocks have no presentation identity at all (no ``presentation``
+    dimension, or equal presentation keys that do not tell rows apart, such as
+    repeated ``stimulus_id`` values without an index), rows are joined by
+    position, as before: nothing identifies them, and nothing contradicts the
+    order.
+    ``strategy='xarray'`` keeps wrappers that already relied on xarray concat
+    byte-for-byte closer.
     """
     if len(assemblies) == 1:
         return assemblies[0]
@@ -73,6 +82,8 @@ def concat_neuroid_assemblies(
         raise ValueError(f"Unknown concat strategy {strategy!r}.")
 
     first = assemblies[0]
+    assemblies = [first] + [_in_presentation_order(first, assembly, i)
+                            for i, assembly in enumerate(assemblies[1:], start=1)]
     merged = np.concatenate(
         [a.values for a in assemblies],
         axis=first.dims.index('neuroid'),
@@ -108,6 +119,39 @@ def concat_neuroid_assemblies(
         coords={**nonneuroid_coords, **final_neuroid_coords},
         dims=first.dims,
     )
+
+
+def _in_presentation_order(first, assembly, position: int):
+    """``assembly`` with its rows in ``first``'s presentation order.
+
+    Presentations are matched with the rule the time-axis guard uses: an
+    identical complete presentation index needs no reorder; otherwise unique
+    ``stimulus_id`` values, or else the complete index with its level names,
+    identify each row. Rows that cannot be matched are refused, because joining
+    them by position would pair one presentation's values with another's.
+    """
+    if 'presentation' not in first.dims or 'presentation' not in assembly.dims:
+        return assembly
+    index_a = first.indexes.get('presentation')
+    index_b = assembly.indexes.get('presentation')
+    if (index_a is not None and index_b is not None
+            and list(index_a.names) == list(index_b.names) and index_a.equals(index_b)):
+        return assembly                     # the same rows in the same order
+    from .time_axis import _alignment, _presentation_keys
+    keys_a, keys_b = _presentation_keys(first), _presentation_keys(assembly)
+    order = _alignment(keys_a, keys_b)
+    if order is None:
+        if keys_a == keys_b:
+            return assembly                 # nothing tells the rows apart
+        raise ValueError(
+            f"Block {position} does not list the same presentations as block 0 "
+            "in a way that can be matched row by row (identical presentation "
+            "index, unique stimulus_id, or the complete presentation index), so "
+            "its rows cannot be joined without pairing values from different "
+            "presentations. Give every block the same presentations.")
+    if order == list(range(len(order))):
+        return assembly
+    return assembly.isel(presentation=order)
 
 
 def replace_presentation_coord(assembly, coord_name: str,

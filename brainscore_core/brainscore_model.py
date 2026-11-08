@@ -1,5 +1,7 @@
 """Concrete Brain-Score subject implementation."""
 
+import threading
+from contextlib import contextmanager
 from copy import copy
 from dataclasses import replace
 from types import MappingProxyType
@@ -51,6 +53,42 @@ def _warn_old_names(**given) -> None:
             f"{_PREFERRED_NAMES[name]}. It keeps working until the old names are "
             "removed in a separate, announced release.",
             DeprecationWarning, stacklevel=3)
+
+
+# Models that are taking part in a session now: id -> the token of the
+# invocation that reserved it. A model's recording, task and change state
+# belong to the one session it takes part in, so a second session on the same
+# model is refused instead of sharing that state.
+_active_sessions: Dict[int, object] = {}
+_active_sessions_lock = threading.Lock()
+
+
+@contextmanager
+def _one_session_at_a_time(model):
+    """Refuse a second session on ``model`` while its first one is running.
+
+    The cleanup is in place before the reservation is made, and it removes
+    only this invocation's reservation (matched by its token). Thus the model
+    is released however its session ends (a result, an exception or
+    KeyboardInterrupt, also one that arrives just after the reservation), and
+    a refused nested call never releases the session that is running.
+    """
+    key, token = id(model), object()
+    try:
+        with _active_sessions_lock:
+            if key in _active_sessions:
+                raise RuntimeError(
+                    f'Model {model.identifier!r} is already taking part in a session. '
+                    'A model takes part in one session at a time, because its '
+                    'recording and task state belong to that session. Wait for the '
+                    'running session to finish, or build a separate model for each '
+                    'session that runs at the same time.')
+            _active_sessions[key] = token
+        yield
+    finally:
+        with _active_sessions_lock:
+            if _active_sessions.get(key) is token:
+                del _active_sessions[key]
 
 
 class BrainScoreModel(UnifiedModel):
@@ -554,11 +592,12 @@ class BrainScoreModel(UnifiedModel):
         ``in_channels``; every other stream the experiment sends is skipped
         before it reaches any part (Contract Rules v3, rule 5.5).
         """
-        handler = self.check_session_support(_requested_output_channels(session))
-        from .capabilities.registry import _setup_once
-        from brainscore_core._sessions.view import DeclaredInputSession
-        _setup_once(self, handler)
-        handler.participate(self, DeclaredInputSession(session, self.in_channels))
+        with _one_session_at_a_time(self):
+            handler = self.check_session_support(_requested_output_channels(session))
+            from .capabilities.registry import _setup_once
+            from brainscore_core._sessions.view import DeclaredInputSession
+            _setup_once(self, handler)
+            handler.participate(self, DeclaredInputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
