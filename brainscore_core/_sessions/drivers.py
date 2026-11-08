@@ -6,6 +6,7 @@ import numpy as np
 from ..contract import TaskContext
 from ..streaming import StreamEvent, parse_channel
 from ..events import StateChange
+from ..responses import response_channels
 from .buffered import BehavioralSession, StateChangeSession, StimulusSetSession
 from .environment import _drive_environment_session_via_process
 from .payloads import (
@@ -456,15 +457,24 @@ def drive_behavior_and_neural_session(model, session, driver: str = "interact") 
     requested = _requested_output_channels(session)
     regions = [parse_channel(c)[1] for c in requested if parse_channel(c)[0] == "neural"]
     answers = [c for c in requested if parse_channel(c)[0] == "behavior"]
+    # Refuse answers the task cannot give before any setup or compute.
+    if task_context.response is None and set(answers) - {"behavior"}:
+        raise ValueError(f"{answers} need TaskContext(response=...); task_type "
+                         f"{task_context.task_type!r} answers on 'behavior'.")
+    if task_context.response is not None:
+        given = set(response_channels(task_context.response))
+        unanswered = sorted(set(answers) - given - {"behavior"})
+        if unanswered:
+            raise ValueError(
+                f"{unanswered} requested, but the task's response "
+                f"{type(task_context.response).__name__} answers only on "
+                f"{sorted(given)}; ask for those or change the response.")
     _refuse_variance(model, session)
     model.start_task(task_context)
     model._behavioral.history = []     # memory spans one session, not the next
     stimuli = _behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
         raise ValueError("Recording during a task needs stimuli to present.")
-    if task_context.response is None and set(answers) - {"behavior"}:
-        raise ValueError(f"{answers} need TaskContext(response=...); task_type "
-                         f"{task_context.task_type!r} answers on 'behavior'.")
     # A streaming session gets each trial's outputs as soon as that trial ends;
     # otherwise the whole set is answered and sent at once.
     streaming = getattr(session, "streaming", False)
