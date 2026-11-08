@@ -49,10 +49,17 @@ class NeuralSessions(_SessionCapability):
             return
         # A passive session records activity even after a task was configured.
         with model._behavioral.suspended():
+            from .._model.channels import run_neural_channels
+
+            def runner(stimuli, channel_regions, time_bins, multi_modality):
+                return run_neural_channels(model, stimuli, channel_regions,
+                                           time_bins, multi_modality)
             if getattr(session, 'streaming', False):
-                _drivers._drive_neural_session_streaming(model, session)
+                _drivers._drive_neural_session_streaming(
+                    model, session, channel_runner=runner)
             else:
-                _drivers.drive_neural_session(model, session, allow_multi_modality=True)
+                _drivers.drive_neural_session(model, session, allow_multi_modality=True,
+                                              channel_runner=runner)
 
 
 class BehaviorSessions(_SessionCapability):

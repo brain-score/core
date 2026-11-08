@@ -489,6 +489,8 @@ class BehavioralReadout:
         if not isinstance(selector, CompositeSelector):
             return per_layer[0]
         recorder = self.owner._recorder
+        from .._data.time_axis import require_one_time_axis
+        require_one_time_axis(per_layer, sources=[f'{region}:layer{i}' for i in range(len(per_layer))])
         combined = xr.concat([recorder.ensure_unit_indices(a) for a in per_layer], dim='neuroid')
         return recorder.gather_composite_units(combined, selector)
 

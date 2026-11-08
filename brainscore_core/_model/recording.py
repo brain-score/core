@@ -13,6 +13,20 @@ def selector_layers(selector) -> Tuple[str, ...]:
             else (selector.layer_path,))
 
 
+def required_layers(selector) -> Tuple[str, ...]:
+    """The layers that must contribute neuroids to ``selector``'s region.
+
+    A composite layer whose selected unit subset is empty is intentionally
+    unused: it may be absent from the extractor output and is never required.
+    This one rule serves the composite check before unit selection, the channel
+    check after it, and the expansion of ``'all'``.
+    """
+    if isinstance(selector, CompositeSelector):
+        return tuple(layer for layer, indices in selector.layers
+                     if indices is None or len(indices))
+    return selector_layers(selector)
+
+
 def declared_layers(owner, modality: Optional[str] = None):
     """Layer paths the extractors for ``modality`` (all, when None) declare.
 
@@ -254,12 +268,23 @@ class Recorder:
                 layer_paths,
                 description=f"Composite region {region!r} output",
             )
+            labels = set(np.asarray(assembly['layer'].values).astype(str))
+            needed = required_layers(selector)
+            missing = [layer for layer in needed if layer not in labels]
+            if missing or labels - set(layer_paths):
+                raise ValueError(
+                    f"Composite region {region!r} needs neuroids from every selected "
+                    f"layer {list(needed)} (and none outside {layer_paths}); the "
+                    f"extractor returned layers {sorted(labels)}.")
             assembly = self.ensure_unit_indices(assembly)
             block = self.gather_composite_units(assembly, selector)
             n = block.sizes['neuroid']
             block = block.assign_coords(
                 region=('neuroid', np.array([region] * n)))
             blocks.append(block)
+        from .._data.time_axis import require_one_time_axis
+        require_one_time_axis(blocks, sources=[str(b['region'].values[0]) if b.sizes['neuroid'] else '?'
+                                               for b in blocks])
         return xr.concat(blocks, dim='neuroid')
 
     @staticmethod
