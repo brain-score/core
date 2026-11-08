@@ -163,7 +163,9 @@ def _demultiplex_neural_output(output, channel_regions):
                 f"region {region!r}; available region labels are "
                 f"{sorted(set(str(value) for value in region_values))}."
             )
-        outputs.append((channel, region, output.isel(neuroid=positions)))
+        from .._model.dispatch import _restore_native_time_output
+        channel_output = _restore_native_time_output(output.isel(neuroid=positions))
+        outputs.append((channel, region, channel_output))
     return outputs
 
 

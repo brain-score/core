@@ -366,7 +366,13 @@ def _concat_modalities_along_neuroid(sub_assemblies, xr):
         _reset_presentation_index(assembly)
         for assembly in sub_assemblies
     ]
+    flattened, native_times = _normalize_time_indexes(flattened)
     combined = xr.concat(flattened, dim='neuroid')
+    if native_times:
+        coordinates = [name for name, coord in combined.coords.items()
+                       if name != 'neuroid' and coord.dims == ('neuroid',)]
+        combined = combined.set_index(neuroid=coordinates)
+        combined.attrs = {**combined.attrs, '_umi_native_time_indexes': native_times}
     presentation_coords = [
         name for name, coord in combined.coords.items()
         if name != 'presentation' and coord.dims == ('presentation',)
@@ -374,6 +380,95 @@ def _concat_modalities_along_neuroid(sub_assemblies, xr):
     if presentation_coords:
         combined = combined.set_index(presentation=presentation_coords)
     return combined
+
+
+def _normalize_time_indexes(assemblies):
+    """Join incompatible time schemas by physical bounds, never by sample number.
+
+    Matching schemas retain the historical concat path. Source-only time metadata
+    becomes a per-neuroid coordinate while the combined array uses the union of
+    real intervals. The session driver restores each channel's native time axis.
+    """
+    import numpy as np
+
+    timed = [assembly for assembly in assemblies if 'time_bin' in assembly.dims]
+    schemas = {tuple(assembly.indexes['time_bin'].names) if 'time_bin' in assembly.indexes else ()
+               for assembly in timed}
+    if len(schemas) <= 1:
+        return assemblies, {}
+    bounds = ('time_bin_start_ms', 'time_bin_end_ms')
+    normalized, native = [], {}
+    for assembly in assemblies:
+        if 'time_bin' not in assembly.dims:
+            normalized.append(assembly)
+            continue
+        names = list(assembly.indexes['time_bin'].names) if 'time_bin' in assembly.indexes else []
+        flat = assembly.reset_index('time_bin') if 'time_bin' in assembly.indexes else assembly
+        if any(name not in flat.coords or flat[name].dims != ('time_bin',) for name in bounds):
+            raise ValueError('Different modality time indexes require explicit time_bin_start_ms '
+                             'and time_bin_end_ms coordinates; positional alignment is not valid.')
+        if any(not np.isfinite(flat[name].values).all() for name in bounds):
+            raise ValueError('Modality time-bin bounds must be finite for temporal alignment.')
+        modalities = set(map(str, assembly['modality'].values))
+        if len(modalities) != 1:
+            raise ValueError('Each temporal block must identify one source modality.')
+        modality = next(iter(modalities))
+        one_dimensional = [name for name, coord in flat.coords.items()
+                           if name != 'time_bin' and coord.dims == ('time_bin',)]
+        native[modality] = {'index_names': names, 'one_dimensional': one_dimensional,
+                            'dtypes': {name: str(flat[name].dtype) for name in one_dimensional},
+                            'coordinates': [name for name, coord in flat.coords.items()
+                                            if name != 'time_bin' and 'time_bin' in coord.dims]}
+        shape = (flat.sizes['time_bin'], flat.sizes['neuroid'])
+        extras = {name: (('time_bin', 'neuroid'), np.broadcast_to(flat[name].values[:, None], shape))
+                  for name in one_dimensional if name not in bounds}
+        extras['source_time_bin_index'] = (('time_bin', 'neuroid'),
+            np.broadcast_to(np.arange(shape[0])[:, None], shape))
+        flat = flat.assign_coords(extras).set_index(time_bin=list(bounds))
+        if 'neuroid' in flat.indexes:
+            flat = flat.reset_index('neuroid')
+        normalized.append(flat)
+    # Older supported xarray versions require every concat coordinate to exist
+    # in every block. Missing source metadata is explicitly absent, not copied.
+    coordinate_dims = {name: coord.dims for block in normalized
+                       for name, coord in block.coords.items() if 'neuroid' in coord.dims}
+    for index, block in enumerate(normalized):
+        missing = {name: (dims, np.full(tuple(block.sizes[dim] for dim in dims), np.nan))
+                   for name, dims in coordinate_dims.items() if name not in block.coords}
+        normalized[index] = block.assign_coords(missing)
+    return normalized, native
+
+
+def _restore_native_time_output(assembly):
+    """Remove only union-padding bins; keep genuine NaNs and source metadata."""
+    import numpy as np
+
+    native = assembly.attrs.get('_umi_native_time_indexes')
+    if not native or 'source_time_bin_index' not in assembly.coords:
+        return assembly
+    modalities = set(map(str, assembly['modality'].values))
+    if len(modalities) != 1:
+        return assembly
+    metadata = native.get(next(iter(modalities)))
+    if metadata is None:
+        return assembly
+    positions = assembly['source_time_bin_index'].values
+    present = np.flatnonzero(np.any(np.isfinite(positions), axis=1))
+    order = np.argsort(np.nanmin(positions[present], axis=1), kind='stable')
+    restored = assembly.isel(time_bin=present[order]).reset_index('time_bin')
+    drop = [name for name, coord in restored.coords.items()
+            if 'time_bin' in coord.dims and name not in metadata['coordinates']]
+    if drop:
+        restored = restored.drop_vars(drop)
+    for name in metadata['one_dimensional']:
+        coord = restored[name]
+        values = coord.isel(neuroid=0).values if coord.dims == ('time_bin', 'neuroid') else coord.values
+        restored = restored.assign_coords({name: ('time_bin', values.astype(metadata['dtypes'][name]))})
+    if metadata['index_names']:
+        restored = restored.set_index(time_bin=metadata['index_names'])
+    restored.attrs = dict(restored.attrs)
+    restored.attrs.pop('_umi_native_time_indexes', None)
+    return restored
 
 
 def _reset_presentation_index(assembly):
@@ -393,6 +488,8 @@ for _definition in (
     normalize_extractors,
     InputDispatcher,
     _concat_modalities_along_neuroid,
+    _normalize_time_indexes,
+    _restore_native_time_output,
     _reset_presentation_index,
 ):
     _definition.__module__ = 'brainscore_core.dispatch'
