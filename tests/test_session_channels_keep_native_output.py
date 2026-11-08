@@ -658,13 +658,17 @@ def test_time_guard_keeps_presentation_index_level_names():
         require_one_time_axis([block('early', 'trial'), block('late', 'other_trial')])
 
 
-def test_streamed_table_with_two_input_columns_keeps_base_behavior():
-    """Follow-up, not fixed here: each input column is its own event, as on base."""
+def test_streamed_table_with_two_input_columns_presents_each_row_once():
+    """Each input column is its own event; the row is still presented once (rule 4.5).
+
+    On base b296d09 this gave four calls and four presentations (A, A, B, B).
+    tests/test_stream_rows_once.py covers the fix in full.
+    """
     calls = []
     model = BrainScoreModel('stream', extractor={'text': keyed('t', calls)},
                             region_layer_map={'A': LayerSelector('late', modality='text')})
     table = StimulusSet({'stimulus_id': IDS, 'sentence': ['x', 'y'], 'text': ['x', 'y']})
     session = StreamingStimulusSetSession(stimulus_set=table, record='A')
     model.participate(session)
-    assert len(calls) == 4
-    assert session.collect('neural:A').sizes['presentation'] == 4
+    assert len(calls) == 2
+    assert session.collect('neural:A').sizes['presentation'] == 2

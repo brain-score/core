@@ -15,6 +15,9 @@ from .payloads import (
     _requested_output_channels,
     _spans_several_inputs,
     _state_change_handle_id,
+    _stimulus_input_columns,
+    _table_row_position,
+    _table_row_stimuli,
     drain_session_inputs,
     session_stimuli,
 )
@@ -195,6 +198,13 @@ def _drive_neural_session_streaming(
 
     Built-in streaming session classes declare ``streaming = True``. A custom
     session can opt into this driver by declaring the same protocol flag.
+
+    A table row with several input columns arrives as one event per column.
+    Those events carry ``meta['table_row']``; consecutive events of one row
+    are one presentation, so the row is presented once (rule 4.5) when its
+    last input column arrives. Every other event, and every event whose
+    marker does not match the session's own table, is presented alone, as
+    before. No event is dropped.
     """
     channels = _requested_output_channels(session)
     channel_regions = []
@@ -212,14 +222,9 @@ def _drive_neural_session_streaming(
     _start_recording(subject, recording_target, time_bins=time_bins)
 
     stream_index = 0
-    event = session.next_input()
-    while event is not None:
-        if not isinstance(event, StreamEvent):
-            raise TypeError(
-                "streaming neural participate expects StreamEvent inputs; got "
-                f"{type(event).__name__}."
-            )
-        stimuli = _one_row_stimuli(session, event, stream_index)
+
+    def present(stimuli, t_ms) -> None:
+        nonlocal stream_index
         if channel_runner is not None:
             payloads = channel_runner(stimuli, channel_regions, time_bins, False)
             outputs = [(channel, region, payloads[channel])
@@ -230,7 +235,7 @@ def _drive_neural_session_streaming(
             session.emit(StreamEvent(
                 channel=channel,
                 payload=channel_output,
-                t_ms=event.t_ms,
+                t_ms=t_ms,
                 meta={
                     "driver": driver,
                     "record": region,
@@ -239,7 +244,43 @@ def _drive_neural_session_streaming(
                 },
             ))
         stream_index += 1
+
+    # The input columns a row delivers through this session. A view that
+    # drops an undeclared stream drops its table column too.
+    table = getattr(session, "stimulus_set", None)
+    row_columns = ({column for column, _ in _stimulus_input_columns(table)}
+                   if table is not None else set())
+    row_events: list[StreamEvent] = []   # arrived input columns of one row
+    row_position = None
+
+    def present_row() -> None:
+        nonlocal row_events
+        if row_events:
+            present(_table_row_stimuli(session, row_position), row_events[0].t_ms)
+            row_events = []
+
+    event = session.next_input()
+    while event is not None:
+        if not isinstance(event, StreamEvent):
+            raise TypeError(
+                "streaming neural participate expects StreamEvent inputs; got "
+                f"{type(event).__name__}."
+            )
+        position = _table_row_position(session, event)
+        if row_events and (
+                position != row_position
+                or event.t_ms != row_events[0].t_ms
+                or event.meta["column"] in {e.meta["column"] for e in row_events}):
+            present_row()            # the next event starts another presentation
+        if position is None:
+            present(_one_row_stimuli(session, event, stream_index), event.t_ms)
+        else:
+            row_events.append(event)
+            row_position = position
+            if row_columns <= {e.meta["column"] for e in row_events}:
+                present_row()        # the row's last input column has arrived
         event = session.next_input()
+    present_row()                    # a row cut short by the end of input
 
 
 def drive_typed_session(subject, session) -> None:
