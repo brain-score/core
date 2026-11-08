@@ -257,3 +257,177 @@ def test_generation_refuses_a_required_layer_missing_on_some_trials(form):
         _run(m, GENERATION_FORMS[form], ['behavior', 'neural:mix'])
 
 
+# --- 3. one session at a time per model ----------------------------------------
+
+def output(stimuli, layers):
+    arrays = [np.tile(np.array([sum(map(ord, l)), sum(map(ord, l)) + 1], dtype='float32'),
+                      (len(stimuli), 1)) for l in layers]
+    return NeuroidAssembly(np.concatenate(arrays, axis=1), dims=['presentation', 'neuroid'], coords={
+        'stimulus_id': ('presentation', list(stimuli.stimulus_id)),
+        'origin': ('presentation', ['source'] * len(stimuli)),
+        'neuroid_id': ('neuroid', [f'{l}.{i}' for l in layers for i in range(2)]),
+        'layer': ('neuroid', [l for l in layers for _ in range(2)])})
+
+
+REGIONS = {r: LayerSelector(l, modality='text') for r, l in
+           [('A', 'early'), ('B', 'late'), ('C', 'other'), ('D', 'fourth')]}
+
+
+def model(extract=output, identifier='one-at-a-time'):
+    return BrainScoreModel(identifier, extractor={'text': extract}, region_layer_map=REGIONS)
+
+
+def run(m, regions):
+    s = BufferedSession(stimulus_set=StimulusSet({'stimulus_id': ['a', 'b'], 'sentence': ['x', 'x']}),
+                        requested_output_channels=['neural:' + r for r in regions])
+    m.participate(s)
+    return s
+
+
+def alone(region):
+    return run(model(), [region]).collect('neural:' + region)
+
+
+def paused_first_session(extract_hook=None):
+    """Start session (A, B) on a model in a thread and pause it inside the extractor."""
+    entered, release = threading.Event(), threading.Event()
+    results, errors = {}, {}
+
+    def extract(stimuli, layers):
+        if threading.current_thread().name == 'first-session':
+            entered.set()
+            assert release.wait(3), 'test synchronization timed out'
+        return output(stimuli, layers)
+    m = model(extract)
+
+    def worker():
+        try:
+            results['first'] = run(m, ['A', 'B'])
+        except BaseException as e:
+            errors['first'] = f'{type(e).__name__}: {e}'
+    first = threading.Thread(target=worker, name='first-session')
+    first.start()
+    assert entered.wait(3), 'test synchronization timed out'
+    return m, first, release, results, errors
+
+
+def test_concurrent_sessions_on_one_model_keep_native_outputs():
+    """Codex v6 probe on the per-channel default: the second session is refused
+    clearly, and the first keeps exactly its standalone outputs."""
+    m, first, release, results, errors = paused_first_session()
+    try:
+        with pytest.raises(RuntimeError, match='already taking part in a session'):
+            run(m, ['C', 'D'])
+    finally:
+        release.set()
+        first.join(3)
+    assert not first.is_alive()
+    assert not errors, errors
+    for r in ('A', 'B'):
+        assert_same_output(results['first'].collect('neural:' + r), alone(r))
+    # The guard is released: the refused request now runs and is native too.
+    second = run(m, ['C', 'D'])
+    for r in ('C', 'D'):
+        assert_same_output(second.collect('neural:' + r), alone(r))
+
+
+def test_sessions_on_different_models_may_run_at_the_same_time():
+    m, first, release, results, errors = paused_first_session()
+    try:
+        other = run(model(identifier='other'), ['C'])
+    finally:
+        release.set()
+        first.join(3)
+    assert not errors, errors
+    assert_same_output(other.collect('neural:C'), alone('C'))
+
+
+def test_sequential_sessions_on_one_model_still_work():
+    m = model()
+    outputs = [run(m, ['A', 'B']) for _ in range(3)]
+    for session in outputs:
+        for r in ('A', 'B'):
+            assert_same_output(session.collect('neural:' + r), alone(r))
+
+
+def test_a_nested_session_on_the_same_model_is_refused():
+    controls = {'nest': True}
+
+    def extract(stimuli, layers):
+        if controls['nest']:
+            run(m, ['C'])
+        return output(stimuli, layers)
+    m = model(extract)
+    with pytest.raises(RuntimeError, match='already taking part in a session'):
+        run(m, ['A'])
+    controls['nest'] = False                # the guard was released by the failed session
+    assert_same_output(run(m, ['A']).collect('neural:A'), alone('A'))
+
+
+def test_a_refused_nested_call_keeps_the_outer_reservation():
+    from brainscore_core import brainscore_model as module
+    checks = []
+
+    def extract(stimuli, layers):
+        if not checks:
+            for _ in range(2):          # a refusal must not release the running session
+                with pytest.raises(RuntimeError, match='already taking part in a session'):
+                    run(m, ['C'])
+                checks.append(id(m) in module._active_sessions)
+        return output(stimuli, layers)
+    m = model(extract)
+    assert_same_output(run(m, ['A']).collect('neural:A'), alone('A'))
+    assert checks == [True, True]
+    assert id(m) not in module._active_sessions
+
+
+def test_an_interrupt_just_after_the_reservation_releases_the_model():
+    """KeyboardInterrupt between the reservation and the session must not leave it reserved."""
+    from brainscore_core import brainscore_model as module
+    guard = module._one_session_at_a_time.__wrapped__
+    lines, start = inspect.getsourcelines(guard)
+    reserve = start + next(i for i, line in enumerate(lines) if '_active_sessions[key] = token' in line)
+    m = model()
+    reached = []
+
+    def interrupt(frame, event, arg):
+        if frame.f_code is guard.__code__ and event == 'line' and frame.f_lineno > reserve:
+            reached.append(id(m) in module._active_sessions)
+            sys.settrace(None)
+            raise KeyboardInterrupt('just after the reservation')
+        return interrupt
+    try:
+        sys.settrace(interrupt)
+        with pytest.raises(KeyboardInterrupt, match='just after the reservation'):
+            run(m, ['A'])
+    finally:
+        sys.settrace(None)
+    assert reached == [True]                # the interrupt arrived while the model was reserved
+    assert id(m) not in module._active_sessions
+    assert_same_output(run(m, ['A']).collect('neural:A'), alone('A'))
+
+
+@pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt])
+def test_the_model_is_released_after_a_failed_session(error):
+    controls = {'fail': True}
+
+    def extract(stimuli, layers):
+        if controls['fail']:
+            raise error('inside the extractor')
+        return output(stimuli, layers)
+    m = model(extract)
+    with pytest.raises(error, match='inside the extractor'):
+        run(m, ['A', 'B'])
+    controls['fail'] = False
+    session = run(m, ['A', 'B'])
+    for r in ('A', 'B'):
+        assert_same_output(session.collect('neural:' + r), alone(r))
+
+
+def test_an_unsupported_session_releases_the_model():
+    m = model()
+    session = BufferedSession(stimulus_set=StimulusSet({'stimulus_id': ['a'], 'sentence': ['x']}),
+                              requested_output_channels=['behavior'])
+    with pytest.raises(Exception):
+        m.participate(session)                  # no answer part: refused before any compute
+    assert_same_output(run(m, ['A']).collect('neural:A'), alone('A'))
