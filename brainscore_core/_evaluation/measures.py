@@ -3,10 +3,16 @@
 A behavioral assembly states its measure in ``attrs['measure']``:
 ``{'kind': 'reported' | 'implied', 'source': ...}`` (see
 ``brainscore_core.responses``). ``score()`` opens ``record_measures()`` around
-the benchmark run. Core notes the measure of each behavioral response it hands
-to a benchmark: the legacy facade, the typed helpers and
-``BrainScoreModel.process``. The score metadata then reads the record. Only
-returned data is read, never the subject's state.
+the benchmark run. Core notes the measure at one point for session output:
+each ``behavior`` ``StreamEvent`` a subject creates, before any session
+concatenates payloads. ``BrainScoreModel.process`` notes the assembly it
+returns, because that typed path has no event. The score metadata then reads
+the record. Only returned data is read, never the subject's state.
+
+ponytail: the record is a ``ContextVar``. A response made in a worker thread or
+process is not noted. No behavioral path in core, vision, language or unified
+makes its response events there today (worker pools only extract features or
+compute metrics); copy the context into the worker if one ever does.
 """
 
 from contextlib import contextmanager
@@ -35,13 +41,21 @@ class MeasureRecord:
 
 @contextmanager
 def record_measures() -> Iterator[MeasureRecord]:
-    """Collect the measure of each behavioral response until the block ends."""
+    """Collect the measure of each behavioral response until the block ends.
+
+    A record opened inside another one (a benchmark that calls ``score()``)
+    also passes its measures to the outer record when it ends, so the outer
+    score describes the responses its result came from.
+    """
+    outer = _active.get()
     record = MeasureRecord()
     token = _active.set(record)
     try:
         yield record
     finally:
         _active.reset(token)
+        if outer is not None:
+            outer.measures |= record.measures
 
 
 def note_measure(assembly) -> None:
@@ -56,6 +70,5 @@ def note_measure(assembly) -> None:
         record.measures.add((measure['kind'], None if source is None else str(source)))
 
 
-def is_behavior_channel(channel: str) -> bool:
-    return channel == 'behavior' or str(channel).startswith('behavior:')
-
+def is_behavior_channel(channel) -> bool:
+    return isinstance(channel, str) and (channel == 'behavior' or channel.startswith('behavior:'))

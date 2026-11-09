@@ -18,6 +18,13 @@ class StreamEvent:
     t_ms: Optional[float]  # None when an environment has no physical time scale.
     meta: dict = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Every session output passes through here, so one event's measure is
+        # noted before any session concatenates payloads (a scoring run only).
+        from brainscore_core._evaluation.measures import is_behavior_channel, note_measure
+        if is_behavior_channel(self.channel):
+            note_measure(self.payload)
+
 
 def parse_channel(name: str) -> tuple[str, str | None]:
     """Parse a channel name into ``(family, address)``.

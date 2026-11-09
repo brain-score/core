@@ -183,12 +183,7 @@ class LegacyBenchmarkFacade:
                                   time_bins=self._time_bins)
         session.settings = dict(settings)
         self._subject.participate(session)
-        measured = {channel: session.collect(channel) for channel in channels}
-        from brainscore_core._evaluation.measures import is_behavior_channel, note_measure
-        for channel, assembly in measured.items():
-            if is_behavior_channel(channel):
-                note_measure(assembly)
-        return measured
+        return {channel: session.collect(channel) for channel in channels}
 
 
 def mark_legacy_benchmark(benchmark):

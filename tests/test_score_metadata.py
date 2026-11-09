@@ -264,3 +264,93 @@ def test_brainscore_model_stamps_do_not_change(model_factory, task_kwargs, expec
     # The stamp the previous private-flag read gave for the same model.
     old = 'behavior:generation' if model._use_generation_for_task else 'behavior:readout'
     assert old == expected
+
+
+# --- direct sessions, nesting, mixed collection --------------------------
+
+def test_direct_session_with_a_generation_model_is_recorded():
+    """participate + collect, without behavioral_response or the facade."""
+    from brainscore_core.streaming import BufferedSession
+
+    model = _generation_model()
+    task = TaskContext(fitting_stimuli=_stimuli(), metadata={'stimulus_set': _stimuli()},
+                       **_GENERATION_TASK)
+    with record_measures() as measures:
+        session = BufferedSession(task_context=task, requested_output_channels=['behavior'])
+        model.participate(session)
+        session.collect('behavior')
+
+    assert _protocol(model, measures) == 'behavior:generation'
+
+
+@pytest.mark.parametrize('kind, expected', [('reply', 'behavior:generation'),
+                                            ('likelihood', 'behavior:likelihood')])
+def test_direct_response_task_sessions_are_recorded(kind, expected):
+    from tests.test_task_responses import _ask, _model
+    from brainscore_core.responses import Choice
+
+    if kind == 'reply':
+        model, _ = _model(replies={s: 'cat' for s in 'abcd'})
+        task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog']))
+        channels = ['behavior:choice']
+    else:
+        model, _ = _model(scores={s: {'cat': -1.0, 'dog': -2.0} for s in 'abcd'})
+        task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog'], probabilities=True))
+        channels = ['behavior:choice', 'behavior:probabilities']
+    with record_measures() as measures:
+        session = _ask(model, task, channels)
+        for channel in channels:
+            session.collect(channel)
+
+    assert _protocol(model, measures) == expected
+
+
+def test_mixed_measures_in_one_collection_are_all_recorded():
+    """An implied event then a reported event on one channel: concat keeps
+    only the first assembly's attrs, so each event is noted on its own."""
+    from brainscore_core.streaming import BufferedSession
+
+    def event(measure, stimulus):
+        return StreamEvent('behavior', BehavioralAssembly(
+            [[1.0, 0.0]], coords={'stimulus_id': ('presentation', [stimulus]),
+                                  'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'], attrs={'measure': measure}), None)
+
+    with record_measures() as measures:
+        session = BufferedSession(requested_output_channels=['behavior'])
+        session.respond(event({'kind': 'implied', 'source': 'readout'}, 's0'))
+        session.respond(event({'kind': 'reported', 'source': 'reply'}, 's1'))
+        session.collect('behavior')
+    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'},
+                                 protocol=_protocol(_Subject(), measures),
+                                 harness_id='test', measures=measures)
+
+    assert score.attrs['measure'] == ('implied', 'reported')
+    assert score.attrs['protocol'] == 'behavior:generation'
+
+
+def test_an_inner_score_passes_its_measures_to_the_outer_score():
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    with record_measures() as outer:
+        with record_measures() as inner:      # an inner score() call
+            behavioral_response(subject, task)
+        assert inner.measures == {('reported', 'reply')}
+
+    assert _protocol(subject, outer) == 'behavior:generation'
+
+
+def test_a_failed_inner_run_restores_the_outer_record():
+    subject = _Answerer({'kind': 'implied', 'source': 'likelihood'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    with record_measures() as outer:
+        with pytest.raises(RuntimeError):
+            with record_measures():
+                behavioral_response(subject, task)
+                raise RuntimeError('benchmark failed')
+        subject.measure = {'kind': 'reported', 'source': 'reply'}
+        behavioral_response(subject, task)     # still lands in the outer record
+
+    assert outer.measures == {('implied', 'likelihood'), ('reported', 'reply')}

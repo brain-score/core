@@ -114,12 +114,9 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
                            fitting_stimuli=train, metadata={'stimulus_set': test})
         behavior = behavioral_response(subject, task)
     """
-    from .._evaluation.measures import note_measure
     session = behavior_session(task_context)
     subject.participate(session)
-    behavior = session.collect("behavior")
-    note_measure(behavior)
-    return behavior
+    return session.collect("behavior")
 
 
 def apply_state_change(subject, state_change: StateChange):
