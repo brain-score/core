@@ -583,6 +583,10 @@ class BrainScoreModel(UnifiedModel):
             # across several bins, as legacy vision models do.
             from brainscore_core._evaluation.legacy_facade import repeat_over_time_bins
             output = repeat_over_time_bins(output, time_bins)
+        from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+        if isinstance(output, BehavioralAssembly):
+            from brainscore_core._evaluation.measures import note_measure
+            note_measure(output)
         return output
 
     def participate(self, session) -> None:

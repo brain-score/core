@@ -368,7 +368,7 @@ class BehavioralReadout:
     def predict_probabilities(self, stimuli):
         """Return a BehavioralAssembly of per-label probabilities."""
         features = self.owner._extract_behavioral_features(stimuli)
-        return self.readout_classifier.predict_proba(features)
+        return _implied(self.readout_classifier.predict_proba(features), 'readout')
 
     def _start_response_task(self, task_context) -> None:
         """Choose how a Choice, Scale or Text answer is produced, before any compute."""
@@ -711,7 +711,7 @@ class BehavioralReadout:
         if raw and isinstance(self.task_context.response, Scale):
             behavior = [(float(v), None) for v in self.readout_classifier.predict(features)]
         else:
-            behavior = self.readout_classifier.predict_proba(features)
+            behavior = _implied(self.readout_classifier.predict_proba(features), 'readout')
         neural = {}
         for region, region_layers in layers.items():
             per_layer = [extracted.isel(neuroid=layer_of == layer) for layer in region_layers]
@@ -790,6 +790,7 @@ class BehavioralReadout:
                 'choice': label_set,
             },
             dims=['presentation', 'choice'],
+            attrs={'measure': {'kind': 'reported', 'source': 'answer'}},
         )
 
 
