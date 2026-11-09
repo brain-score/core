@@ -51,9 +51,10 @@ class BehavioralReadout:
         """The fitting table's columns, cell values and stimulus paths.
 
         An in-place edit of any of them gives a new value, so the readout
-        fits again. A table that cannot be hashed gives a value equal to
-        nothing, so it always fits again. Not a table: the readout cannot
-        fit on it, so its content does not matter.
+        fits again. A table that pandas cannot hash (e.g. a list-valued
+        column) falls back to the earlier check, its stimulus ids and
+        labels, so it never fits more often than before. Not a table: the
+        readout cannot fit on it, so its content does not matter.
         """
         if getattr(fitting, 'columns', None) is None:
             return None
@@ -65,7 +66,23 @@ class BehavioralReadout:
             return (tuple(str(column) for column in fitting.columns),
                     tuple(pd.util.hash_pandas_object(fitting, index=True)), paths)
         except Exception:
-            return object()
+            return ('ids-and-labels',) + BehavioralReadout._ids_and_labels(fitting)
+
+    @staticmethod
+    def _ids_and_labels(fitting) -> tuple:
+        """The fitting rows and labels: the check used before table contents were hashed."""
+        rows = labels = None
+        try:
+            columns = fitting.columns
+            if 'stimulus_id' in columns:
+                rows = tuple(fitting['stimulus_id'])
+            for column in ('image_label', 'label'):
+                if column in columns:
+                    labels = tuple(fitting[column])
+                    break
+        except (TypeError, KeyError, AttributeError):
+            rows = labels = None
+        return rows, labels
 
     @classmethod
     def _fingerprint(cls, task_context: TaskContext) -> tuple:

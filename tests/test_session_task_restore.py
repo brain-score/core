@@ -180,3 +180,21 @@ def test_a_reset_inside_a_session_stands(monkeypatch):
     assert model._behavioral.readout_classifier is None
     model.start_recording('IT')
     assert not isinstance(model.process(_images()), BehavioralAssembly)
+
+
+def test_an_unhashable_fitting_table_fits_no_more_often_than_before():
+    """Review round 2, P1: a list-valued column falls back to the id-and-label check (rule 10.1)."""
+    from brainscore_core.legacy_facade import LegacyBenchmarkFacade
+    model, extractor = _model()
+    fitting = _labelled()
+    fitting['boxes'] = [[0, 1], [2, 3], [4, 5], [6, 7]]    # pandas cannot hash lists
+    facade = LegacyBenchmarkFacade(model, visual_degrees=8)
+    facade.start_task('probabilities', fitting_stimuli=fitting)
+    facade.look_at(_images())
+    facade.look_at(_images())
+    assert _fits(extractor) == 1                         # the base count
+    task = TaskContext(task_type='probabilities', fitting_stimuli=fitting,
+                       metadata={'stimulus_set': _images()})
+    behavioral_response(model, task)
+    behavioral_response(model, task)
+    assert _fits(extractor) == 2                         # a new task object fits once
