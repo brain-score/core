@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Deque, Iterable, Optional
 
+from brainscore_core._evaluation.measures import note_response
+
 
 _FAMILY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _ADDRESS_RE = re.compile(r"^[A-Za-z0-9_./\-\[\]:]+$")
@@ -17,13 +19,6 @@ class StreamEvent:
     payload: Any
     t_ms: Optional[float]  # None when an environment has no physical time scale.
     meta: dict = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        # Every session output passes through here, so one event's measure is
-        # noted before any session concatenates payloads (a scoring run only).
-        from brainscore_core._evaluation.measures import is_behavior_channel, note_measure
-        if is_behavior_channel(self.channel):
-            note_measure(self.payload)
 
 
 def parse_channel(name: str) -> tuple[str, str | None]:
@@ -222,6 +217,7 @@ class BufferedSession(Session):
     def respond(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
+        note_response(event)
         self.emitted.append(event)
 
 
