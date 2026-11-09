@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Deque, Iterable, Optional
 
+from brainscore_core._evaluation.measures import note_response
+
 
 _FAMILY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _ADDRESS_RE = re.compile(r"^[A-Za-z0-9_./\-\[\]:]+$")
@@ -215,6 +217,7 @@ class BufferedSession(Session):
     def respond(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
+        note_response(event)
         self.emitted.append(event)
 
 

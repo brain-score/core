@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Any, Optional, Sequence, Union
+from .._evaluation.measures import note_response
 from ..streaming import Session, StreamEvent
 from ..supported_data_standards.brainio.assemblies import NeuroidAssembly
 from .payloads import (
@@ -52,6 +53,7 @@ class StreamingStimulusSetSession(Session):
     def emit(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
+        note_response(event)
         self.emitted.append(event)
 
     def collect(
@@ -150,6 +152,7 @@ class WindowedStreamSession(Session):
     def emit(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
+        note_response(event)
         self.emitted.append(event)
 
     def collect(
@@ -269,6 +272,7 @@ class RealTimeStreamSession(Session):
     def emit(self, event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
+        note_response(event)
         self.emitted.append(event)
 
     @property

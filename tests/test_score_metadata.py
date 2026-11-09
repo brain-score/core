@@ -1,8 +1,22 @@
+import numpy as np
+import pytest
+
+from brainscore_core.contract import Subject, TaskContext
+from brainscore_core.legacy_facade import LegacyBenchmarkFacade
 from brainscore_core.metrics import Score
+from brainscore_core.model_interface import BrainScoreModel
 from brainscore_core.score_metadata import (
     infer_score_protocol,
+    record_measures,
     requested_output_channels_for_score,
     stamp_score_metadata,
+)
+from brainscore_core.streaming import StreamEvent
+from brainscore_core.streaming_helpers import behavioral_response
+from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+from tests.test_behavioral_readout import (
+    _fake_preprocessor_returning,
+    _make_image_stimulus_set,
 )
 
 
@@ -78,10 +92,309 @@ def test_infer_score_protocol_from_requested_channels():
     ) == "perturbation"
 
 
-def test_infer_score_protocol_distinguishes_behavior_generation():
-    subject = _Subject()
-    subject._use_generation_for_task = True
+# --- behavioral protocol from the measures the responses state ------------
 
-    assert infer_score_protocol(subject, _Benchmark(), {"behavior"}) == (
-        "behavior:generation"
-    )
+class _Answerer(Subject):
+    """A participate-only subject (not a BrainScoreModel) with a fixed measure."""
+
+    identifier = 'answerer'
+    in_channels = {'vision'}
+    out_channels = {'behavior'}
+    required_channels = set()
+
+    def __init__(self, measure):
+        self.measure = measure
+
+    def participate(self, session):
+        while session.next_input() is not None:
+            pass
+        stimuli = (session.stimulus_set if getattr(session, 'stimulus_set', None) is not None
+                   else session.task_context.metadata['stimulus_set'])
+        n = len(stimuli)
+        payload = BehavioralAssembly(
+            np.tile([1.0, 0.0], (n, 1)),
+            coords={'stimulus_id': ('presentation', list(stimuli['stimulus_id'])),
+                    'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'], attrs={'measure': self.measure})
+        for channel in session.requested_output_channels:
+            session.respond(StreamEvent(channel, payload, None))
+
+    def reset(self):
+        pass
+
+
+def _protocol(subject, measures):
+    return infer_score_protocol(subject, _Benchmark(), {'behavior'}, measures=measures)
+
+
+def _stimuli():
+    return _make_image_stimulus_set(['cat'] * 3 + ['dog'] * 3, identifier='measure-test')
+
+
+def test_generation_subject_without_brainscore_model_is_stamped_generation():
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       instruction='Which animal?', metadata={'stimulus_set': _stimuli()})
+    with record_measures() as measures:
+        behavioral_response(subject, task)
+
+    score = stamp_score_metadata(Score(0.5), subject, {'behavior'},
+                                 protocol=_protocol(subject, measures),
+                                 harness_id='test', measures=measures)
+
+    assert score.attrs['protocol'] == 'behavior:generation'
+    assert score.attrs['measure'] == 'reported'
+
+
+def test_likelihood_subject_is_not_stamped_readout():
+    subject = _Answerer({'kind': 'implied', 'source': 'likelihood'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    with record_measures() as measures:
+        behavioral_response(subject, task)
+
+    assert _protocol(subject, measures) == 'behavior:likelihood'
+
+
+def test_implied_measure_without_a_known_source_does_not_claim_readout():
+    subject = _Answerer({'kind': 'implied'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    with record_measures() as measures:
+        behavioral_response(subject, task)
+
+    assert _protocol(subject, measures) == 'behavior:implied'
+
+
+def test_legacy_facade_behavioral_benchmark_gets_measure_attr():
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+
+    def benchmark(candidate):          # a legacy behavioral benchmark
+        candidate.start_task('probabilities', fitting_stimuli=_stimuli())
+        candidate.look_at(_stimuli())
+        return Score(0.5)
+
+    with record_measures() as measures:
+        score = benchmark(LegacyBenchmarkFacade(subject, visual_degrees=8))
+    stamp_score_metadata(score, subject, {'behavior'},
+                         protocol=_protocol(subject, measures),
+                         harness_id='test', measures=measures)
+
+    assert score.attrs['measure'] == 'reported'
+    assert score.attrs['protocol'] == 'behavior:generation'
+
+
+def test_reported_and_implied_measures_stamp_a_sorted_tuple():
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    with record_measures() as measures:
+        for measure in ({'kind': 'reported', 'source': 'reply'},
+                        {'kind': 'implied', 'source': 'likelihood'}):
+            subject.measure = measure
+            behavioral_response(subject, TaskContext(
+                task_type='probabilities', label_set=['cat', 'dog'],
+                metadata={'stimulus_set': _stimuli()}))
+    score = stamp_score_metadata(Score(0.5), subject, {'behavior'},
+                                 protocol=_protocol(subject, measures),
+                                 harness_id='test', measures=measures)
+
+    assert score.attrs['measure'] == ('implied', 'reported')
+    assert score.attrs['protocol'] == 'behavior:generation'
+
+
+def test_nothing_recorded_keeps_the_old_default_stamp():
+    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'},
+                                 protocol=infer_score_protocol(_Subject(), _Benchmark(),
+                                                               {'behavior'}),
+                                 harness_id='test')
+
+    assert score.attrs['protocol'] == 'behavior:readout'
+    assert 'measure' not in score.attrs
+
+
+def test_measures_outside_a_run_are_not_recorded():
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    behavioral_response(subject, task)            # no run open: nothing kept
+    with record_measures() as measures:
+        pass
+
+    assert measures.measures == set()
+
+
+def _generation_model():
+    return BrainScoreModel(
+        identifier='test-vlm', model=None, region_layer_map={},
+        preprocessors={'vision': lambda *a, **kw: None},
+        generation_fn=lambda stimulus_row, instruction, label_set: 'cat')
+
+
+def _readout_model():
+    features = np.random.default_rng(0).normal(size=(6, 8))
+    return BrainScoreModel(
+        identifier='test-readout', model=None, region_layer_map={},
+        preprocessors={'vision': _fake_preprocessor_returning(features)},
+        behavioral_readout_layer='some_layer')
+
+
+_GENERATION_TASK = dict(task_type='probabilities', label_set=['cat', 'dog'],
+                        instruction='What animal is this?')
+
+
+@pytest.mark.parametrize('model_factory, task_kwargs, expected', [
+    (_generation_model, _GENERATION_TASK, 'behavior:generation'),
+    (_readout_model, dict(task_type='probabilities', label_set=['cat', 'dog']),
+     'behavior:readout'),
+])
+@pytest.mark.parametrize('route', ['process', 'facade'])
+def test_brainscore_model_stamps_do_not_change(model_factory, task_kwargs, expected, route):
+    model = model_factory()
+    task = TaskContext(fitting_stimuli=_stimuli(), **task_kwargs)
+    with record_measures() as measures:
+        if route == 'process':
+            model.start_task(task)
+            model.process(_stimuli())
+        else:
+            facade = LegacyBenchmarkFacade(model, visual_degrees=8)
+            facade.start_task(task)
+            facade.look_at(_stimuli())
+
+    assert measures.measures, 'the run recorded no measure'
+    # `expected` is the stamp the previous private-flag read gave for this model.
+    assert _protocol(model, measures) == expected
+
+
+# --- direct sessions, nesting, mixed collection --------------------------
+
+def test_direct_session_with_a_generation_model_is_recorded():
+    """participate + collect, without behavioral_response or the facade."""
+    from brainscore_core.streaming import BufferedSession
+
+    model = _generation_model()
+    task = TaskContext(fitting_stimuli=_stimuli(), metadata={'stimulus_set': _stimuli()},
+                       **_GENERATION_TASK)
+    with record_measures() as measures:
+        session = BufferedSession(task_context=task, requested_output_channels=['behavior'])
+        model.participate(session)
+        session.collect('behavior')
+
+    assert _protocol(model, measures) == 'behavior:generation'
+
+
+@pytest.mark.parametrize('kind, expected', [('reply', 'behavior:generation'),
+                                            ('likelihood', 'behavior:likelihood')])
+def test_direct_response_task_sessions_are_recorded(kind, expected):
+    from tests.test_task_responses import _ask, _model
+    from brainscore_core.responses import Choice
+
+    if kind == 'reply':
+        model, _ = _model(replies={s: 'cat' for s in 'abcd'})
+        task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog']))
+        channels = ['behavior:choice']
+    else:
+        model, _ = _model(scores={s: {'cat': -1.0, 'dog': -2.0} for s in 'abcd'})
+        task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog'], probabilities=True))
+        channels = ['behavior:choice', 'behavior:probabilities']
+    with record_measures() as measures:
+        session = _ask(model, task, channels)
+        for channel in channels:
+            session.collect(channel)
+
+    assert _protocol(model, measures) == expected
+
+
+def test_mixed_measures_in_one_collection_are_all_recorded():
+    """An implied event then a reported event on one channel: concat keeps
+    only the first assembly's attrs, so each event is noted on its own."""
+    from brainscore_core.streaming import BufferedSession
+
+    def event(measure, stimulus):
+        return StreamEvent('behavior', BehavioralAssembly(
+            [[1.0, 0.0]], coords={'stimulus_id': ('presentation', [stimulus]),
+                                  'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'], attrs={'measure': measure}), None)
+
+    with record_measures() as measures:
+        session = BufferedSession(requested_output_channels=['behavior'])
+        session.respond(event({'kind': 'implied', 'source': 'readout'}, 's0'))
+        session.respond(event({'kind': 'reported', 'source': 'reply'}, 's1'))
+        session.collect('behavior')
+    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'},
+                                 protocol=_protocol(_Subject(), measures),
+                                 harness_id='test', measures=measures)
+
+    assert score.attrs['measure'] == ('implied', 'reported')
+    assert score.attrs['protocol'] == 'behavior:generation'
+
+
+def test_an_inner_score_passes_its_measures_to_the_outer_score():
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    with record_measures() as outer:
+        with record_measures() as inner:      # an inner score() call
+            behavioral_response(subject, task)
+        assert inner.measures == {('reported', 'reply')}
+
+    assert _protocol(subject, outer) == 'behavior:generation'
+
+
+def test_a_failed_inner_run_passes_nothing_to_the_outer_record():
+    """Only a successful inner score reaches the outer result, so only its
+    measures are passed on; the outer record is restored either way."""
+    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
+                       metadata={'stimulus_set': _stimuli()})
+    with record_measures() as outer:
+        with pytest.raises(RuntimeError):
+            with record_measures():
+                behavioral_response(subject, task)
+                raise RuntimeError('benchmark failed')
+        subject.measure = {'kind': 'implied', 'source': 'likelihood'}
+        behavioral_response(subject, task)     # lands in the outer record
+
+    assert outer.measures == {('implied', 'likelihood')}
+
+
+def test_a_decoded_saved_generation_record_does_not_change_a_readout_stamp():
+    """Events built but never accepted by a session (a decoded run record, a
+    fixture, a copy) are not responses of this run."""
+    model = _readout_model()
+    task = TaskContext(fitting_stimuli=_stimuli(), task_type='probabilities',
+                       label_set=['cat', 'dog'])
+    saved = BehavioralAssembly(
+        [[1.0, 0.0]], coords={'stimulus_id': ('presentation', ['s0']),
+                              'choice': ['cat', 'dog']},
+        dims=['presentation', 'choice'],
+        attrs={'measure': {'kind': 'reported', 'source': 'reply'}})
+    with record_measures() as measures:
+        StreamEvent('behavior', saved, 0.0, meta={'decoded': True})   # read, not sent
+        model.start_task(task)
+        model.process(_stimuli())
+
+    assert measures.measures == {('implied', 'readout')}
+    assert _protocol(model, measures) == 'behavior:readout'
+
+
+def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
+    from brainscore_core.streaming import BufferedSession
+
+    made_earlier = StreamEvent('behavior', BehavioralAssembly(
+        [[1.0, 0.0]], coords={'stimulus_id': ('presentation', ['s0']),
+                              'choice': ['cat', 'dog']},
+        dims=['presentation', 'choice'],
+        attrs={'measure': {'kind': 'reported', 'source': 'reply'}}), None)
+
+    class _Replayer(_Answerer):
+        def participate(self, session):
+            while session.next_input() is not None:
+                pass
+            session.respond(made_earlier)
+
+    subject = _Replayer(measure=None)
+    with record_measures() as measures:
+        session = BufferedSession(requested_output_channels=['behavior'])
+        subject.participate(session)
+        session.collect('behavior')
+
+    assert _protocol(subject, measures) == 'behavior:generation'
