@@ -134,3 +134,49 @@ def test_an_edited_task_in_a_later_session_fits_again():
     assert _fits(extractor) == 4
     behavioral_response(model, task)                 # unchanged since: reused
     assert _fits(extractor) == 4
+
+
+def test_a_failed_task_setup_never_leaves_a_half_built_readout():
+    """Review finding P2: a fit that fails part way is not remembered or reused."""
+    model, _ = _model()
+    a = _task(labels=('bird', 'fish'))
+    model.start_task(a)
+    one_class = _task(labels=('cat', 'cat'))
+    with pytest.raises(ValueError):
+        behavioral_response(model, one_class)        # the classifier cannot fit one class
+    assert model._behavioral.task_context is a
+    with pytest.raises(ValueError):
+        model.start_task(one_class)                  # the same failure, outside a session
+    model.start_task(_task(labels=('cat', 'dog')))   # another task, configured directly
+    model.start_task(a)
+    assert sorted(model.process(_images())['choice'].values) == ['bird', 'fish']
+
+
+def test_a_neutral_session_keeps_the_remembered_readout():
+    """Review finding P2: a session that configures no task does not cost a refit."""
+    model, extractor = _model()
+    model.start_task(_task(labels=('bird', 'fish')))  # the caller's task A
+    model.start_recording('IT')
+    b = _task()
+    behavioral_response(model, b)
+    assert _fits(extractor) == 2
+    neural_response(model, _images(), record='IT')
+    behavioral_response(model, b)
+    assert _fits(extractor) == 2
+    assert sorted(model.process(_images())['choice'].values) == ['bird', 'fish']
+
+
+def test_a_reset_inside_a_session_stands(monkeypatch):
+    """Review finding P2: the scope does not bring back a task that reset() cleared."""
+    from brainscore_core.capabilities.sessions import NeuralSessions
+    from brainscore_core.streaming import BufferedSession
+    model, _ = _model()
+    model.start_task(_task(labels=('bird', 'fish')))
+    monkeypatch.setattr(NeuralSessions, 'participate',
+                        lambda self, subject, session: subject.reset())
+    model.participate(BufferedSession(stimulus_set=_images(),
+                                      requested_output_channels=['neural:IT']))
+    assert model._behavioral.task_context is None
+    assert model._behavioral.readout_classifier is None
+    model.start_recording('IT')
+    assert not isinstance(model.process(_images()), BehavioralAssembly)
