@@ -597,7 +597,9 @@ class BrainScoreModel(UnifiedModel):
             from .capabilities.registry import _setup_once
             from brainscore_core._sessions.view import DeclaredInputSession
             _setup_once(self, handler)
-            handler.participate(self, DeclaredInputSession(session, self.in_channels))
+            # A task the session configures ends with the session (rule 4.5).
+            with self._behavioral.session_scope():
+                handler.participate(self, DeclaredInputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -660,24 +662,35 @@ class BrainScoreModel(UnifiedModel):
         Fitting stimuli reach the readout with only the input modalities this
         model declares (rule 5.5); the caller's table is never changed. The
         same TaskContext object sent again, as a facade session does for every
-        measurement, keeps the fitted readout; a new context, or any context
-        after a state change, fits anew.
+        measurement, keeps the fitted readout; a new context, an edited one,
+        or any context after a state change or reset, fits anew. The last
+        configuration that completed is recalled for the same unchanged
+        task after a session gave the caller's task back.
         """
         from dataclasses import replace
         from brainscore_core._sessions.view import declared_only
         if isinstance(task_context, TaskContext):
-            if self._behavioral.is_configured_for(task_context):
+            if (self._behavioral.is_configured_for(task_context)
+                    or self._behavioral.recall(task_context)):
                 return
             fitting = task_context.fitting_stimuli
             projected = declared_only(fitting, self.in_channels)
             context = (task_context if projected is fitting
                        else replace(task_context, fitting_stimuli=projected))
-            self._behavioral.start_task(context, **kwargs)
+            try:
+                self._behavioral.start_task(context, **kwargs)
+            except BaseException:
+                self._behavioral.abandon()   # a half-built task is never reused
+                raise
             self._behavioral.mark_configured(task_context)
             return
-        self._behavioral.start_task(task_context,
-                                    declared_only(fitting_stimuli, self.in_channels),
-                                    **kwargs)
+        try:
+            self._behavioral.start_task(task_context,
+                                        declared_only(fitting_stimuli, self.in_channels),
+                                        **kwargs)
+        except BaseException:
+            self._behavioral.abandon()
+            raise
         # The context built from (task, fitting) is what a facade sends back.
         self._behavioral.mark_configured(self._behavioral.task_context)
 

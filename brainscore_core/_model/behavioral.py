@@ -31,40 +31,84 @@ class BehavioralReadout:
         # Response tasks (TaskContext.response): how the answer and probabilities are produced.
         self.response_path: Optional[str] = None
         self.probability_source: Optional[str] = None
+        # The last configuration that completed (mark_configured), so the same
+        # task can reuse it after a session gave the caller's task back.
+        # Dropped when the model changes or is reset.
+        self._remembered: Optional[Dict[str, Any]] = None
+        self._changes = 0   # counts invalidations, so a session can see one happen
+        self._resets = 0    # counts resets, so a session does not undo one
+
+    _STATE = ('task_context', 'readout_classifier', 'use_generation_for_task',
+              'configured_from', '_configured_as', '_stale', 'history',
+              'response_path', 'probability_source')
 
     @classmethod
     def requires_behavioral_readout(cls, task_type: str) -> bool:
         return task_type in cls.BEHAVIORAL_TASK_TYPES
 
     @staticmethod
-    def _fingerprint(task_context: TaskContext) -> tuple:
-        """Everything the fitted readout depends on: task, fitting rows and labels, generation settings."""
-        fitting = task_context.fitting_stimuli
+    def _fitting_content(fitting) -> Any:
+        """The fitting table's columns, cell values and stimulus paths.
+
+        An in-place edit of any of them gives a new value, so the readout
+        fits again. A table that pandas cannot hash (e.g. a list-valued
+        column) falls back to the earlier check, its stimulus ids and
+        labels, so it never fits more often than before. Not a table: the
+        readout cannot fit on it, so its content does not matter.
+        """
+        if getattr(fitting, 'columns', None) is None:
+            return None
+        try:
+            import pandas as pd
+            paths = getattr(fitting, 'stimulus_paths', None)
+            paths = (tuple(sorted((str(key), str(value)) for key, value in paths.items()))
+                     if isinstance(paths, dict) else None)
+            return (tuple(str(column) for column in fitting.columns),
+                    tuple(pd.util.hash_pandas_object(fitting, index=True)), paths)
+        except Exception:
+            return ('ids-and-labels',) + BehavioralReadout._ids_and_labels(fitting)
+
+    @staticmethod
+    def _ids_and_labels(fitting) -> tuple:
+        """The fitting rows and labels: the check used before table contents were hashed."""
         rows = labels = None
-        columns = getattr(fitting, 'columns', None)
-        if columns is not None:
-            try:
-                if 'stimulus_id' in columns:
-                    rows = tuple(fitting['stimulus_id'])
-                for column in ('image_label', 'label'):
-                    if column in columns:
-                        labels = tuple(fitting[column])
-                        break
-            except (TypeError, KeyError, AttributeError):
-                rows = labels = None  # not a table; identity alone must do
+        try:
+            columns = fitting.columns
+            if 'stimulus_id' in columns:
+                rows = tuple(fitting['stimulus_id'])
+            for column in ('image_label', 'label'):
+                if column in columns:
+                    labels = tuple(fitting[column])
+                    break
+        except (TypeError, KeyError, AttributeError):
+            rows = labels = None
+        return rows, labels
+
+    @classmethod
+    def _fingerprint(cls, task_context: TaskContext) -> tuple:
+        """Every TaskContext field the configuration depends on, and the fitting table's content.
+
+        ``metadata`` is left out: it carries the scored stimuli and the
+        benchmark's settings, which the configuration does not read.
+        """
+        fitting = task_context.fitting_stimuli
         label_set = task_context.label_set
-        return (task_context.task_type, id(fitting), rows, labels, task_context.instruction,
+        present = task_context.present
+        return (task_context.task_type, id(fitting), cls._fitting_content(fitting),
+                task_context.instruction,
                 tuple(label_set) if label_set is not None else None,
-                task_context.prefer_path or 'auto')
+                task_context.prefer_path or 'auto', task_context.readout_fit,
+                repr(task_context.response),
+                tuple(present) if present is not None else None)
 
     def is_configured_for(self, task_context: TaskContext) -> bool:
         """Whether ``task_context`` is the task already configured, unchanged since.
 
         True for the object the configuration came from and for the context
         this component holds (the same task after input projection), as long
-        as its task, fitting table, labels and generation settings are the
-        ones fitted. TaskContext is mutable: a caller that swaps the fitting
-        table or relabels it and calls start_task again gets a new fit.
+        as every field in ``_fingerprint`` is the one fitted. TaskContext is
+        mutable: a caller that swaps or edits the fitting table, relabels it
+        or changes a setting and calls start_task again gets a new fit.
         """
         if self._stale or self.task_context is None or not self._configured_as:
             return False
@@ -81,10 +125,60 @@ class BehavioralReadout:
             if self.task_context is not None and self.task_context is not task_context:
                 self._configured_as.add(self._fingerprint(self.task_context))
         self._stale = False
+        # Only a configuration that completed is remembered for recall.
+        self._remembered = (dict(self._snapshot(), history=[])   # memory spans one session
+                            if task_context is not None else None)
+
+    def abandon(self) -> None:
+        """A start_task failed part way: no task counts as configured, so the next one fits."""
+        self.configured_from = None
+        self._configured_as = None
 
     def invalidate(self) -> None:
         """The model changed (a state change was applied or undone): fit again next time."""
         self._stale = True
+        self._remembered = None
+        self._changes += 1
+
+    def _snapshot(self) -> Dict[str, Any]:
+        return {name: getattr(self, name) for name in self._STATE}
+
+    def _restore(self, state: Dict[str, Any]) -> None:
+        for name, value in state.items():
+            setattr(self, name, value)
+
+    @contextmanager
+    def session_scope(self):
+        """Give back the task state this model had before a session (rules 4.5, 8.3).
+
+        A session may configure its own task; when the session ends, on
+        success or on error, the caller's task, readout and history return.
+        A reset during the session stands: no task comes back. The memo for
+        ``recall`` is set only by ``mark_configured``, never here.
+        """
+        prior, changes, resets = self._snapshot(), self._changes, self._resets
+        try:
+            yield
+        finally:
+            if self._resets != resets:
+                self._clear_task()
+            else:
+                self._restore(prior)
+                if self._changes != changes:
+                    # The model changed during the session: the caller's readout
+                    # was fitted on the model as it was before.
+                    self._stale = True
+
+    def recall(self, task_context: TaskContext) -> bool:
+        """Reinstate the configuration a past session fitted for ``task_context``, if still valid."""
+        if self._remembered is None:
+            return False
+        current = self._snapshot()
+        self._restore(self._remembered)
+        if self.is_configured_for(task_context):
+            return True
+        self._restore(current)
+        return False
 
     def start_task(self, task_context_or_task, fitting_stimuli=None,
                    **kwargs) -> None:
@@ -183,7 +277,7 @@ class BehavioralReadout:
                 f"with BrainScoreModel(answer=...)) (needed for generation path)."
             )
 
-    def reset(self) -> None:
+    def _clear_task(self) -> None:
         self.history = []
         self.response_path = self.probability_source = None
         self.task_context = None
@@ -192,6 +286,11 @@ class BehavioralReadout:
         self.configured_from = None
         self._configured_as = None
         self._stale = False
+
+    def reset(self) -> None:
+        self._clear_task()
+        self._remembered = None
+        self._resets += 1
 
     def fit_behavioral_readout(self, fitting_stimuli) -> None:
         """Extract readout-layer features and fit a probabilities classifier."""
