@@ -51,10 +51,11 @@ def test_without_memory_every_trial_is_alone():
 def test_memory_lasts_one_session():
     model = BrainScoreModel('remembers', supported_modalities={'text'}, reply=one_back, memory='session')
     _answers(model)
-    assert len(model._behavioral.history) == 6
+    assert model._behavioral.history == []                   # the session leaves no history (rule 4.5)
+    assert _answers(model)[1:] == ONE_BACK[1:]               # a new session starts fresh
     model.reset()
     assert model._behavioral.history == []
-    assert _answers(model)[1:] == ONE_BACK[1:]               # a new session starts fresh
+    assert _answers(model)[1:] == ONE_BACK[1:]
 
 
 class _MemoryBenchmark:

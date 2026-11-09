@@ -31,6 +31,15 @@ class BehavioralReadout:
         # Response tasks (TaskContext.response): how the answer and probabilities are produced.
         self.response_path: Optional[str] = None
         self.probability_source: Optional[str] = None
+        # The configuration the last session fitted, kept after the session
+        # gave the caller's task back, so the same task in a later session
+        # does not fit again. Dropped when the model changes.
+        self._remembered: Optional[Dict[str, Any]] = None
+        self._changes = 0   # counts invalidations, so a session can see one happen
+
+    _STATE = ('task_context', 'readout_classifier', 'use_generation_for_task',
+              'configured_from', '_configured_as', '_stale', 'history',
+              'response_path', 'probability_source')
 
     @classmethod
     def requires_behavioral_readout(cls, task_type: str) -> bool:
@@ -85,6 +94,48 @@ class BehavioralReadout:
     def invalidate(self) -> None:
         """The model changed (a state change was applied or undone): fit again next time."""
         self._stale = True
+        self._remembered = None
+        self._changes += 1
+
+    def _snapshot(self) -> Dict[str, Any]:
+        return {name: getattr(self, name) for name in self._STATE}
+
+    def _restore(self, state: Dict[str, Any]) -> None:
+        for name, value in state.items():
+            setattr(self, name, value)
+
+    @contextmanager
+    def session_scope(self):
+        """Give back the task state this model had before a session (rules 4.5, 8.3).
+
+        A session may configure its own task; when the session ends, on
+        success or on error, the caller's task, readout and history return.
+        The session's fitted configuration is remembered, so ``recall`` can
+        reuse it when a later session sends the same task.
+        """
+        prior, changes = self._snapshot(), self._changes
+        try:
+            yield
+        finally:
+            configured = self._snapshot()
+            if configured['task_context'] is not None and not configured['_stale']:
+                self._remembered = dict(configured, history=[])   # memory spans one session
+            self._restore(prior)
+            if self._changes != changes:
+                # The model changed during the session: the caller's readout
+                # was fitted on the model as it was before.
+                self._stale = True
+
+    def recall(self, task_context: TaskContext) -> bool:
+        """Reinstate the configuration a past session fitted for ``task_context``, if still valid."""
+        if self._remembered is None:
+            return False
+        current = self._snapshot()
+        self._restore(self._remembered)
+        if self.is_configured_for(task_context):
+            return True
+        self._restore(current)
+        return False
 
     def start_task(self, task_context_or_task, fitting_stimuli=None,
                    **kwargs) -> None:
@@ -192,6 +243,8 @@ class BehavioralReadout:
         self.configured_from = None
         self._configured_as = None
         self._stale = False
+        self._remembered = None
+        self._changes += 1
 
     def fit_behavioral_readout(self, fitting_stimuli) -> None:
         """Extract readout-layer features and fit a probabilities classifier."""

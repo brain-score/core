@@ -597,7 +597,9 @@ class BrainScoreModel(UnifiedModel):
             from .capabilities.registry import _setup_once
             from brainscore_core._sessions.view import DeclaredInputSession
             _setup_once(self, handler)
-            handler.participate(self, DeclaredInputSession(session, self.in_channels))
+            # A task the session configures ends with the session (rule 4.5).
+            with self._behavioral.session_scope():
+                handler.participate(self, DeclaredInputSession(session, self.in_channels))
 
     def _handle_environment_step(self, input_event: 'EnvironmentStep') -> OutputEvent:
         return self._dispatcher.handle_environment_step(input_event)
@@ -666,7 +668,8 @@ class BrainScoreModel(UnifiedModel):
         from dataclasses import replace
         from brainscore_core._sessions.view import declared_only
         if isinstance(task_context, TaskContext):
-            if self._behavioral.is_configured_for(task_context):
+            if (self._behavioral.is_configured_for(task_context)
+                    or self._behavioral.recall(task_context)):
                 return
             fitting = task_context.fitting_stimuli
             projected = declared_only(fitting, self.in_channels)
