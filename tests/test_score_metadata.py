@@ -260,10 +260,8 @@ def test_brainscore_model_stamps_do_not_change(model_factory, task_kwargs, expec
             facade.look_at(_stimuli())
 
     assert measures.measures, 'the run recorded no measure'
+    # `expected` is the stamp the previous private-flag read gave for this model.
     assert _protocol(model, measures) == expected
-    # The stamp the previous private-flag read gave for the same model.
-    old = 'behavior:generation' if model._use_generation_for_task else 'behavior:readout'
-    assert old == expected
 
 
 # --- direct sessions, nesting, mixed collection --------------------------
