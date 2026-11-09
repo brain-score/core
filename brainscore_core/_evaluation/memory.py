@@ -375,6 +375,11 @@ def _probe_regions(model, benchmark):
     modality a single-tower wrapper can't serve). A model's ``region_layer_map``
     order is kept when it has one. ``[None]`` means no neural output is declared
     (e.g. a behavioral candidate) — nothing to probe.
+
+    A subject that declares ``probe_safe_regions`` (the regions it can record
+    without first running work the benchmark may never ask for, e.g. a legacy
+    model's lazy layer search) is probed only at those regions when the
+    benchmark does not name what it measures.
     """
     region = getattr(benchmark, 'region', None)
     if region is not None:
@@ -383,6 +388,12 @@ def _probe_regions(model, benchmark):
     channels = getattr(benchmark, 'requested_output_channels', None)
     if channels is None:
         channels = model.out_channels
+        # Optional public declaration; subjects without it keep this fallback.
+        probe_safe = getattr(model, 'probe_safe_regions', None)
+        if probe_safe is not None:
+            probe_safe = set(probe_safe)
+            channels = {channel for channel in channels
+                        if channel.startswith('neural:') and channel.split(':', 1)[1] in probe_safe}
     regions = [channel.split(':', 1)[1] for channel in sorted(channels)
                if channel.startswith('neural:')]
     if region_map:
@@ -453,7 +464,9 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
         try:
             if region is None:
                 raise ValueError('Feature-width probe requires a neural output '
-                                 'channel (neural:<region>)')
+                                 'channel (neural:<region>); for a benchmark that names '
+                                 'none, only the subject\'s probe_safe_regions are '
+                                 'probed when it declares them')
             result = neural_response(model, one, record=region, time_bins=time_bins)
         except Exception as e:
             last_error = e

@@ -907,3 +907,107 @@ class TestProbeThroughParticipate:
         behavioral = BrainScoreModel('policy', policy=lambda step: None)
         assert _probe_regions(behavioral, SimpleNamespace(identifier='b')) == [None]
         assert _probe_feature_dim(behavioral, SimpleNamespace(identifier='b'), self._stimuli()) == (None, None)
+
+
+class TestProbeSafeRegions:
+    """``probe_safe_regions`` narrows the probe only where a benchmark names no region.
+
+    A subject that declares it (the vision legacy adapter: its committed
+    layers) is probed only at those regions on a benchmark that declares no
+    outputs, so the probe never starts a lazy layer search. Every other case
+    keeps the existing probe exactly.
+    """
+
+    def _subject(self, region_layer_map=None, probe_safe_regions=None, failing=()):
+        """A subject declaring neural:V4, neural:EXTRA, neural:IT that counts its sessions."""
+        import numpy as np
+        from brainscore_core.model_interface import Subject
+        from brainscore_core.streaming import StreamEvent
+        from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+
+        class Counting(Subject):
+            identifier = 'counting'
+            in_channels = {'vision'}
+            out_channels = {'neural:V4', 'neural:EXTRA', 'neural:IT', 'behavior'}
+            required_channels = set()
+
+            def __init__(self):
+                self.sessions = []
+
+            def participate(self, session):
+                channel, = session.requested_output_channels
+                self.sessions.append(channel)
+                if channel in failing:
+                    raise RuntimeError(f'{channel} unavailable')
+                n = 0
+                while session.next_input() is not None:
+                    n += 1
+                session.respond(StreamEvent(channel, NeuroidAssembly(
+                    np.zeros((n, 9)), dims=['presentation', 'neuroid'],
+                    coords={'stimulus_id': ('presentation', list(range(n))),
+                            'neuroid_id': ('neuroid', list(range(9)))}), None))
+
+        subject = Counting()
+        if region_layer_map is not None:
+            subject.region_layer_map = region_layer_map
+        if probe_safe_regions is not None:
+            subject.probe_safe_regions = probe_safe_regions
+        return subject
+
+    def _bench(self, **declarations):
+        from types import SimpleNamespace
+        return SimpleNamespace(identifier='bench', **declarations)
+
+    def _probe(self, subject, benchmark):
+        from brainscore_core.memory import _probe_feature_dim
+        return _probe_feature_dim(subject, benchmark, FakeStimulusSet(n=3))
+
+    def test_all_committed_regions_safe_probes_as_before(self):
+        from brainscore_core.memory import _probe_regions
+        full = {'V4': 'a', 'EXTRA': 'b', 'IT': 'c'}
+        plain = self._subject(full)
+        declared = self._subject(full, probe_safe_regions=list(full))
+        assert _probe_regions(declared, self._bench()) == _probe_regions(plain, self._bench()) == ['V4', 'EXTRA', 'IT']
+        assert self._probe(declared, self._bench()) == self._probe(plain, self._bench()) == (9, 'V4')
+        assert declared.sessions == plain.sessions == ['neural:V4']
+
+    def test_no_safe_region_means_no_probe_on_an_undeclared_benchmark(self, caplog):
+        import logging
+        subject = self._subject({}, probe_safe_regions=[])  # a lazy map before any search
+        with caplog.at_level(logging.WARNING, logger='brainscore_core.memory'):
+            check_memory(subject, FakeBenchmark(identifier='Kar2019-ost', n_stimuli=4))
+        assert subject.sessions == []
+        assert any('probe_safe_regions' in r.getMessage() for r in caplog.records)
+
+    def test_only_safe_regions_are_probed_on_an_undeclared_benchmark(self):
+        from brainscore_core.memory import _probe_regions
+        subject = self._subject({'IT': 'c'}, probe_safe_regions=['IT'])
+        assert _probe_regions(subject, self._bench()) == ['IT']
+
+    def test_subject_without_the_declaration_keeps_the_fallback(self):
+        # No map: every declared neural region, sorted.
+        from brainscore_core.memory import _probe_regions
+        assert _probe_regions(self._subject(), self._bench()) == ['EXTRA', 'IT', 'V4']
+        # Partial map: map order first, then the remaining declared regions.
+        subject = self._subject({'V4': 'a'}, failing=('neural:V4',))
+        assert _probe_regions(subject, self._bench()) == ['V4', 'EXTRA', 'IT']
+        assert self._probe(subject, self._bench()) == (9, 'EXTRA')
+        assert subject.sessions == ['neural:V4', 'neural:EXTRA']
+
+    def test_declared_benchmark_ignores_probe_safe_regions(self):
+        from brainscore_core.memory import _probe_regions
+        subject = self._subject({}, probe_safe_regions=[])
+        assert _probe_regions(subject, self._bench(region='IT')) == ['IT']
+        assert _probe_regions(subject, self._bench(requested_output_channels={'neural:IT', 'behavior'})) == ['IT']
+
+    @pytest.mark.parametrize('requested', [frozenset({'behavior'}), frozenset()])
+    def test_declared_outputs_without_a_neural_channel_mean_no_probe(self, requested):
+        subject = self._subject({'V4': 'a', 'IT': 'c'}, probe_safe_regions=['V4', 'IT'])
+        assert self._probe(subject, self._bench(requested_output_channels=requested)) == (None, None)
+        assert subject.sessions == []
+
+    def test_region_keeps_precedence_over_requested_channels(self):
+        from brainscore_core.memory import _probe_regions
+        subject = self._subject({'V4': 'a', 'IT': 'c'})
+        assert _probe_regions(subject, self._bench(region='IT', requested_output_channels={'neural:V4'})) == ['IT']
+        assert _probe_regions(subject, self._bench(region='IT', requested_output_channels={'behavior'})) == ['IT']
