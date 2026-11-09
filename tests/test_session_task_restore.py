@@ -115,3 +115,22 @@ def test_a_new_task_in_a_later_session_fits_again():
     behavioral_response(model, _task())
     behavioral_response(model, _task(labels=('bird', 'fish')))
     assert _fits(extractor) == 2
+
+
+def test_an_edited_task_in_a_later_session_fits_again():
+    """Review finding P1: a remembered readout is reused only for the full, unchanged task."""
+    model, extractor = _model()
+    task = _task()
+    behavioral_response(model, task)
+    assert _fits(extractor) == 1
+    task.readout_fit = 'intact'                     # a setting the old fingerprint left out
+    behavioral_response(model, task)
+    assert _fits(extractor) == 2
+    task.fitting_stimuli['image_path'] = [f'/tmp/other{i}.png' for i in range(4)]  # edited in place
+    behavioral_response(model, task)
+    assert _fits(extractor) == 3
+    task.fitting_stimuli.stimulus_paths = {'f0': '/tmp/elsewhere.png'}
+    behavioral_response(model, task)
+    assert _fits(extractor) == 4
+    behavioral_response(model, task)                 # unchanged since: reused
+    assert _fits(extractor) == 4

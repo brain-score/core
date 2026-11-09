@@ -46,34 +46,51 @@ class BehavioralReadout:
         return task_type in cls.BEHAVIORAL_TASK_TYPES
 
     @staticmethod
-    def _fingerprint(task_context: TaskContext) -> tuple:
-        """Everything the fitted readout depends on: task, fitting rows and labels, generation settings."""
+    def _fitting_content(fitting) -> Any:
+        """The fitting table's columns, cell values and stimulus paths.
+
+        An in-place edit of any of them gives a new value, so the readout
+        fits again. A table that cannot be hashed gives a value equal to
+        nothing, so it always fits again. Not a table: the readout cannot
+        fit on it, so its content does not matter.
+        """
+        if getattr(fitting, 'columns', None) is None:
+            return None
+        try:
+            import pandas as pd
+            paths = getattr(fitting, 'stimulus_paths', None)
+            paths = (tuple(sorted((str(key), str(value)) for key, value in paths.items()))
+                     if isinstance(paths, dict) else None)
+            return (tuple(str(column) for column in fitting.columns),
+                    tuple(pd.util.hash_pandas_object(fitting, index=True)), paths)
+        except Exception:
+            return object()
+
+    @classmethod
+    def _fingerprint(cls, task_context: TaskContext) -> tuple:
+        """Every TaskContext field the configuration depends on, and the fitting table's content.
+
+        ``metadata`` is left out: it carries the scored stimuli and the
+        benchmark's settings, which the configuration does not read.
+        """
         fitting = task_context.fitting_stimuli
-        rows = labels = None
-        columns = getattr(fitting, 'columns', None)
-        if columns is not None:
-            try:
-                if 'stimulus_id' in columns:
-                    rows = tuple(fitting['stimulus_id'])
-                for column in ('image_label', 'label'):
-                    if column in columns:
-                        labels = tuple(fitting[column])
-                        break
-            except (TypeError, KeyError, AttributeError):
-                rows = labels = None  # not a table; identity alone must do
         label_set = task_context.label_set
-        return (task_context.task_type, id(fitting), rows, labels, task_context.instruction,
+        present = task_context.present
+        return (task_context.task_type, id(fitting), cls._fitting_content(fitting),
+                task_context.instruction,
                 tuple(label_set) if label_set is not None else None,
-                task_context.prefer_path or 'auto')
+                task_context.prefer_path or 'auto', task_context.readout_fit,
+                repr(task_context.response),
+                tuple(present) if present is not None else None)
 
     def is_configured_for(self, task_context: TaskContext) -> bool:
         """Whether ``task_context`` is the task already configured, unchanged since.
 
         True for the object the configuration came from and for the context
         this component holds (the same task after input projection), as long
-        as its task, fitting table, labels and generation settings are the
-        ones fitted. TaskContext is mutable: a caller that swaps the fitting
-        table or relabels it and calls start_task again gets a new fit.
+        as every field in ``_fingerprint`` is the one fitted. TaskContext is
+        mutable: a caller that swaps or edits the fitting table, relabels it
+        or changes a setting and calls start_task again gets a new fit.
         """
         if self._stale or self.task_context is None or not self._configured_as:
             return False
