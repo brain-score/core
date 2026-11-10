@@ -14,11 +14,12 @@ import xarray as xr
 
 from brainscore_core.environment import ArraySpec, MappingSpec
 from brainscore_core.events import EnvironmentResponse, EnvironmentStep
-from brainscore_core.model_interface import BrainScoreModel, TaskContext
+from brainscore_core.model_interface import Subject, TaskContext
+from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
-    EnvironmentSession, behavioral_response, neural_response,
+    EnvironmentSession, behavioral_response, drain_session_inputs, neural_response, session_stimuli,
 )
-from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly, NeuroidAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 manifest = json.loads(Path(sys.argv[1]).read_text())
@@ -79,13 +80,51 @@ class Extractor:
         )
 
 
+class NeuralSubject(Subject):
+    """Records one region with the fixture extractor; defined here, so it is the same in both wheels."""
+    identifier = 'fixture-neural'
+    in_channels = {'text'}
+    out_channels = {'neural:language_system'}
+
+    def participate(self, session):
+        events = drain_session_inputs(session)
+        output = Extractor()(session_stimuli(session, events), ['fixture'])
+        session.emit(StreamEvent('neural:language_system', output, 0.0))
+
+
+class AnswerSubject(Subject):
+    """Answers 'yes' to each task stimulus."""
+    identifier = 'fixture-answer'
+    in_channels = {'text', 'instruction'}
+    out_channels = {'behavior'}
+
+    def participate(self, session):
+        drain_session_inputs(session)
+        ids = list(session.task_context.fitting_stimuli['stimulus_id'])
+        output = BehavioralAssembly(['yes'] * len(ids), coords={'stimulus_id': ('presentation', ids)},
+                                    dims=['presentation'])
+        session.emit(StreamEvent('behavior', output, 0.0))
+
+
+class PolicySubject(Subject):
+    """Adds 0.25 to the observed state at each step."""
+    identifier = 'fixture-policy'
+    in_channels = {'observation'}
+    out_channels = {'motor'}
+
+    def participate(self, session):
+        step = session.next_input()
+        while step is not None and not step.is_last:
+            action = EnvironmentResponse(action=step.observation['state'] + np.float32(0.25))
+            session.emit(StreamEvent('motor', action, None, meta={'step_num': step.step_num}))
+            step = session.next_input()
+
+
 stimuli = StimulusSet({'stimulus_id': ['s0', 's1'], 'sentence': ['one', 'two']})
 stimuli.identifier = 'layout-control'
-neural = BrainScoreModel(identifier='fixture-neural', extractor={'text': Extractor()},
-                         region_layer_map={'language_system': 'fixture'})
+neural = NeuralSubject()
 neural_values = neural_response(neural, stimuli, record='language_system')
-answer = BrainScoreModel(identifier='fixture-answer', supported_modalities={'text'},
-                         answer=lambda stimulus_row, instruction, label_set: 'yes')
+answer = AnswerSubject()
 task = TaskContext(task_type='label', label_set=['yes', 'no'], fitting_stimuli=stimuli,
                    instruction='Respond yes or no')
 behavior_values = behavioral_response(answer, task)
@@ -113,8 +152,7 @@ class Environment:
         return self.observation()
 
 
-policy = BrainScoreModel(identifier='fixture-policy', policy=lambda step: EnvironmentResponse(
-    action=step.observation['state'] + np.float32(0.25)))
+policy = PolicySubject()
 with EnvironmentSession(environment=Environment(), seed=0, require_specs=True) as session:
     policy.participate(session)
     environment_values = {
