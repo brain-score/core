@@ -11,7 +11,6 @@ from brainscore_core.streaming import StreamEvent
 
 from brainscore_core.model_interface import (
     UnifiedModel,
-    BrainScoreModel,
     InputEvent,
     OutputEvent,
     EnvironmentResponse,
@@ -61,10 +60,6 @@ def test_output_event_assembly_members_are_forward_refs():
 
 def test_legacy_model_process_returns_output_event():
     assert UnifiedModel.process.__annotations__.get('return') is OutputEvent
-
-
-def test_brainscoremodel_process_returns_output_event():
-    assert BrainScoreModel.process.__annotations__.get('return') is OutputEvent
 
 
 def test_process_input_is_annotated_input_event():

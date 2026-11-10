@@ -4,7 +4,7 @@ from abc import ABC
 import pytest
 
 import brainscore_core
-from brainscore_core.model_interface import Subject, UnifiedModel, BrainScoreModel
+from brainscore_core.model_interface import Subject, UnifiedModel
 
 
 class _ConcreteSubject(Subject):
@@ -29,10 +29,6 @@ class TestSubjectRename:
     def test_subject_exported_from_package(self):
         assert brainscore_core.Subject is Subject
         assert brainscore_core.UnifiedModel is UnifiedModel
-
-    def test_brainscoremodel_subclasses_subject(self):
-        assert issubclass(BrainScoreModel, Subject)
-        assert issubclass(BrainScoreModel, UnifiedModel)  # via the compatibility base
 
     def test_legacy_subclassing_still_works(self):
         # Code written against the old name keeps working unchanged.

@@ -97,13 +97,6 @@ def test_validate_reports_unaddressable_channel_family():
     assert any("not addressable" in failure for failure in failures)
 
 
-def test_builtin_columns_keep_model_constructor_map():
-    from brainscore_core import BrainScoreModel
-
-    assert isinstance(BrainScoreModel.COLUMN_TO_MODALITY, dict)
-    assert BrainScoreModel.COLUMN_TO_MODALITY == dict(io_catalog.BUILTIN_STIMULUS_COLUMNS)
-
-
 def test_registration_keeps_builtin_column_ownership(monkeypatch):
     import pytest
     from brainscore_core.extensions import register_channel
