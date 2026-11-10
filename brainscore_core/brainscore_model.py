@@ -11,7 +11,7 @@ from ._model.behavioral import BehavioralReadout
 from ._model.capability_config import normalize_capability_config
 from .contract import UnifiedModel, TaskContext
 from ._model.dispatch import InputDispatcher, register_input_handler
-from .io_catalog import canonical_modality
+from .io_catalog import BUILTIN_STIMULUS_COLUMNS, canonical_modality
 from .events import (
     EnvironmentStep,
     InputEvent,
@@ -97,17 +97,7 @@ class BrainScoreModel(UnifiedModel):
     ``process`` is a typed convenience and the legacy benchmark methods forward
     to :class:`~brainscore_core.legacy_facade.LegacyBenchmarkFacade`."""
 
-    COLUMN_TO_MODALITY: Dict[str, str] = {
-        'image_file_name': 'vision',
-        'image_path': 'vision',
-        'filename': 'vision',
-        'sentence': 'text',
-        'text': 'text',
-        'video_path': 'vision',  # video is temporal vision -> the one visual channel
-        'audio_path': 'audio',
-        'audio_file_name': 'audio',
-        'audio_file': 'audio',
-    }
+    COLUMN_TO_MODALITY: Dict[str, str] = dict(BUILTIN_STIMULUS_COLUMNS)
 
     MODALITY_PRIORITY: Tuple[str, ...] = ('vision', 'text', 'audio')
 
