@@ -13,8 +13,9 @@ The clock is injected, so none of this sleeps.
 import pytest
 
 from brainscore_core.streaming_helpers import (
-    RealTimeStreamSession,
-    WindowedStreamSession,
+    PacingReport,
+    paced_stream,
+    windowed_stream,
 )
 
 
@@ -41,14 +42,32 @@ def _feed(n):
 
 def _windowed(n_frames=90, window_ms=1000):
     # 30 fps, 1000 ms windows -> 30 frames each
-    return WindowedStreamSession(_feed(n_frames), fps=30, window_ms=window_ms,
-                                 record='IT')
+    return windowed_stream(_feed(n_frames), fps=30, window_ms=window_ms)
+
+
+class _Paced:
+    """A paced stream and its report, read one window at a time."""
+
+    def __init__(self, windows, policy, clock=None, sleep=None, window_ms=1000):
+        self.report_object = PacingReport()
+        self._events = paced_stream(windows, window_ms=window_ms, policy=policy, clock=clock,
+                                    sleep=sleep, report=self.report_object)
+
+    def next_input(self):
+        return next(self._events, None)
+
+    def report(self):
+        return self.report_object.report()
+
+    @property
+    def realtime_factor(self):
+        return self.report_object.realtime_factor
 
 
 @pytest.mark.unit
 def test_fast_model_keeps_up_and_drops_nothing():
     clock = _FakeClock()
-    rt = RealTimeStreamSession(_windowed(), policy='drop',
+    rt = _Paced(_windowed(), policy='drop',
                                clock=clock, sleep=clock.sleep)
     while True:
         event = rt.next_input()
@@ -65,7 +84,7 @@ def test_fast_model_keeps_up_and_drops_nothing():
 @pytest.mark.unit
 def test_slow_model_with_drop_policy_skips_to_stay_current():
     clock = _FakeClock()
-    rt = RealTimeStreamSession(_windowed(n_frames=300), policy='drop',
+    rt = _Paced(_windowed(n_frames=300), policy='drop',
                                clock=clock, sleep=clock.sleep)
     delivered = 0
     while True:
@@ -86,7 +105,7 @@ def test_lag_policy_never_drops_even_when_slow():
     """Offline semantics: complete coverage, delay allowed to grow."""
     clock = _FakeClock()
     inner = _windowed(n_frames=150)          # 5 windows
-    rt = RealTimeStreamSession(inner, policy='lag', clock=clock, sleep=clock.sleep)
+    rt = _Paced(inner, policy='lag', clock=clock, sleep=clock.sleep)
     while True:
         event = rt.next_input()
         if event is None:
@@ -101,7 +120,7 @@ def test_lag_policy_never_drops_even_when_slow():
 @pytest.mark.unit
 def test_error_policy_refuses_when_the_budget_is_missed():
     clock = _FakeClock()
-    rt = RealTimeStreamSession(_windowed(n_frames=300), policy='error',
+    rt = _Paced(_windowed(n_frames=300), policy='error',
                                clock=clock, sleep=clock.sleep)
     with pytest.raises(RuntimeError, match="real-time budget missed"):
         while True:
@@ -114,7 +133,7 @@ def test_error_policy_refuses_when_the_budget_is_missed():
 @pytest.mark.unit
 def test_realtime_factor_is_processing_over_material():
     clock = _FakeClock()
-    rt = RealTimeStreamSession(_windowed(n_frames=90), policy='lag',
+    rt = _Paced(_windowed(n_frames=90), policy='lag',
                                clock=clock, sleep=clock.sleep)
     while True:
         event = rt.next_input()
@@ -128,7 +147,7 @@ def test_realtime_factor_is_processing_over_material():
 def test_pacing_does_not_deliver_a_window_before_the_world_produced_it():
     """A fast model must WAIT, not race ahead of the feed."""
     clock = _FakeClock()
-    rt = RealTimeStreamSession(_windowed(n_frames=90), policy='lag',
+    rt = _Paced(_windowed(n_frames=90), policy='lag',
                                clock=clock, sleep=clock.sleep)
     rt.next_input()                       # window 0 at t=0
     rt.next_input()                       # window 1 starts at 1000 ms
@@ -140,4 +159,4 @@ def test_pacing_does_not_deliver_a_window_before_the_world_produced_it():
 @pytest.mark.unit
 def test_invalid_policy_fails_fast():
     with pytest.raises(ValueError, match="policy must be one of"):
-        RealTimeStreamSession(_windowed(), policy='whatever')
+        _Paced(_windowed(), policy='whatever')

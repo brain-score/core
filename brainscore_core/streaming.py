@@ -1,10 +1,9 @@
 """Streaming primitives for the Unified Model Interface session contract."""
 
-from abc import ABC, abstractmethod
-from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import re
-from typing import Any, Deque, Iterable, Optional
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional
 
 from brainscore_core._evaluation.measures import note_response
 
@@ -19,6 +18,15 @@ class StreamEvent:
     payload: Any
     t_ms: Optional[float]  # None when an environment has no physical time scale.
     meta: dict = field(default_factory=dict)
+
+
+def channel_declared(channel: str, declared) -> bool:
+    """True when ``channel`` is one of the ``declared`` channels, by exact string.
+
+    The one match rule for pre-flight and for the session input filter: a bare
+    family such as ``vision`` does not stand for ``vision:image``.
+    """
+    return channel in declared
 
 
 def parse_channel(name: str) -> tuple[str, str | None]:
@@ -58,58 +66,289 @@ def parse_channel(name: str) -> tuple[str, str | None]:
     return family, address
 
 
-class Session(ABC):
-    """Input delivery, requested outputs, task settings, and result collection.
+# Control channel (input direction): one catalog entry whose payload is one of
+# ``begin``, ``respond`` or ``end``. ``end`` carries ``meta['reason']``.
+CONTROL_CHANNEL = 'control'
+BEGIN, RESPOND, END = 'begin', 'respond', 'end'
+END_REASONS = ('terminal', 'truncated', 'failure')
 
-    Sources implement next_input and respond. The optional settings below are the
-    common configuration consumed by BrainScoreModel and experiment replay.
 
-    ``complete`` says whether the inputs ran to the end of the episode. Fixed
-    inputs are always complete; an environment session stays False until a
-    terminal step. Runners must not accept an incomplete session as a measurement.
+def begin_event(t_ms: Optional[float] = None) -> StreamEvent:
+    """The control event that opens an episode."""
+    return StreamEvent(CONTROL_CHANNEL, BEGIN, t_ms)
+
+
+def respond_event(t_ms: Optional[float] = None) -> StreamEvent:
+    """The control event that asks the subject to respond now."""
+    return StreamEvent(CONTROL_CHANNEL, RESPOND, t_ms)
+
+
+def end_event(reason: str, t_ms: Optional[float] = None) -> StreamEvent:
+    """The control event that closes an episode, with why it closed."""
+    if reason not in END_REASONS:
+        raise ValueError(f"end reason must be one of {END_REASONS}; got {reason!r}")
+    return StreamEvent(CONTROL_CHANNEL, END, t_ms, meta={'reason': reason})
+
+
+# Closed-loop steps are rows: a plain mapping of channel -> payload. One stream
+# per channel is ``row[channel] = payload``. Several named streams on one channel
+# (two cameras) are ``row['vision:image'] = NamedStreams({'wrist': a, 'exterior': b})``;
+# the events carry the name in ``meta[STREAM_NAME_KEY]`` and the receiving side
+# regroups them. Episode signals are not row keys: ``begin`` and ``end(reason)``
+# are control events, and ``reward`` is an input channel of its own.
+STREAM_NAME_KEY = 'camera'
+
+
+class NamedStreams(dict):
+    """Marks a row payload as several named streams on one channel."""
+
+
+def row_events(row: Mapping[str, Any], t_ms: Optional[float] = None,
+               meta: Optional[Mapping[str, Mapping]] = None,
+               **common_meta: Any) -> list[StreamEvent]:
+    """The events of one row: one per channel, one per name for ``NamedStreams``.
+
+    ``meta`` maps a channel to extra event meta (for example ``{'reward':
+    {'discount': 0.99}}``); ``common_meta`` goes on every event.
+    """
+    events = []
+    for channel, payload in row.items():
+        parse_channel(channel)
+        own = {**common_meta, **(meta or {}).get(channel, {})}
+        if isinstance(payload, NamedStreams):
+            events.extend(StreamEvent(channel, value, t_ms, {**own, STREAM_NAME_KEY: name})
+                          for name, value in payload.items())
+        else:
+            events.append(StreamEvent(channel, payload, t_ms, own))
+    return events
+
+
+def events_row(events: Iterable[StreamEvent]) -> dict:
+    """The row of one step: events on one channel with names become ``{name: payload}``.
+
+    Control events are skipped. Two unnamed events on one channel are an error.
+    """
+    row: dict = {}
+    for event in events:
+        if event.channel == CONTROL_CHANNEL:
+            continue
+        name = event.meta.get(STREAM_NAME_KEY)
+        if name is not None:
+            row.setdefault(event.channel, {})[name] = event.payload
+        elif event.channel in row:
+            raise ValueError(f'Two events on channel {event.channel!r} in one step; '
+                             f'name them with meta[{STREAM_NAME_KEY!r}].')
+        else:
+            row[event.channel] = event.payload
+    return row
+
+
+class Source:
+    """Where a session's input events come from.
+
+    ``next_input`` returns the next event, or ``None`` at end of input. It is
+    synchronous: a live source waits for its next event or raises on timeout;
+    temporary unavailability must not return ``None``. ``respond`` receives each
+    subject response, so a closed-loop source can advance on it; fixed input
+    ignores it. A source may return the event the session should keep in place of
+    the response (a receipt). ``complete`` says whether the input ran to the end of
+    its episode; ``history_limit`` bounds how many responses the session keeps.
     """
     complete: bool = True
-    requested_output_channels: Optional[tuple[str, ...]] = None
-    stimulus_set: Any = None
-    task_context: Any = None
-    time_bins: Any = None
-    streaming = False
-    # Per-measurement settings a legacy facade attaches (trial count, variance
-    # request, recording type, legacy text). None when the session has none.
-    settings: Any = None
+    history_limit: Optional[int] = None
+
+    def next_input(self) -> Optional[StreamEvent]:
+        raise NotImplementedError
+
+    def respond(self, event: StreamEvent) -> Optional[StreamEvent]:
+        """Receive a subject response. A no-op for fixed input."""
+        return None
+
+    def close(self) -> None:
+        """Release what the source holds. A no-op for fixed input."""
+
+
+class FixedSource(Source):
+    """Input that does not depend on responses: any iterable of events.
+
+    A list or tuple is known up front, so it is checked against the channel
+    catalog now (rule 3.4). A lazy iterator is read one event at a time and is
+    never materialized.
+    """
+
+    def __init__(self, events: Iterable[Any] = ()) -> None:
+        if isinstance(events, (list, tuple)):
+            _validate_inputs(events)
+        self._events: Iterator[Any] = iter(events)
+
+    def next_input(self) -> Optional[StreamEvent]:
+        return next(self._events, None)
+
+
+class Session(Source):
+    """Input delivery, requested outputs, task settings, and result collection.
+
+    ``source`` is a ``Source`` or any iterable of events (made a ``FixedSource``).
+    The other arguments are the common configuration consumed by
+    ``BrainScoreModel`` and experiment replay; a stimulus table or task is kept
+    on the session so the batch drivers can answer it in one ``process`` call.
+
+    ``complete`` asks the source whether the inputs ran to the end of the episode.
+    Fixed inputs are always complete; a closed-loop source stays False until a
+    terminal step. Runners must not accept an incomplete session as a measurement.
+    """
     context_fields = ('requested_output_channels', 'stimulus_set', 'task_context',
                       'time_bins', 'streaming', 'settings')
 
-    def collect(self, channel: Optional[str] = None) -> Any:
-        """Return emitted events; specialized sources may assemble their payloads."""
-        events = getattr(self, 'emitted', ())
-        return [event for event in events if channel is None or event.channel == channel]
+    def __init__(self, source: Any, requested_output_channels: Optional[Iterable[str]] = None,
+                 task_context: Any = None, *, stimulus_set: Any = None, time_bins: Any = None,
+                 streaming: bool = False, settings: Any = None, record: Any = None,
+                 state_change: Any = None, scoring_stimuli: Any = None) -> None:
+        self.source = source if isinstance(source, Source) else FixedSource(source)
+        self.requested_output_channels: Optional[tuple[str, ...]] = None
+        if requested_output_channels is not None:
+            if isinstance(requested_output_channels, str):
+                raise TypeError('requested_output_channels must be a sequence of channel names.')
+            self.requested_output_channels = tuple(requested_output_channels)
+            for channel in self.requested_output_channels:
+                parse_channel(channel)
+        self.task_context = task_context
+        self.stimulus_set = stimulus_set
+        self.time_bins = time_bins
+        self.streaming = streaming
+        # Per-measurement settings a legacy facade attaches (trial count, variance
+        # request, recording type, legacy text). None when the session has none.
+        self.settings = settings
+        self.record = record
+        self.state_change = state_change
+        self.scoring_stimuli = scoring_stimuli
+        self.dropped = 0
+        self.emitted: list[StreamEvent] = []
+        self._declared: Optional[frozenset] = None
+        self._observers: list[tuple] = []
+        self._rewriters: list[Any] = []
 
-    @abstractmethod
+    def declare_inputs(self, channels: Iterable[str]) -> 'Session':
+        """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
+
+        Events on other channels are skipped (exact match, see ``channel_declared``),
+        and the stimulus table loses the columns of undeclared modalities. Control
+        events always pass. A second call narrows further. Returns ``self``.
+        """
+        from brainscore_core._sessions.view import declared_only
+        declared = frozenset(channels)
+        self._declared = declared if self._declared is None else self._declared & declared
+        self.stimulus_set = declared_only(self.stimulus_set, self._declared)
+        return self
+
+    @contextmanager
+    def observe(self, on_input: Optional[Callable] = None, on_output: Optional[Callable] = None,
+                on_error: Optional[Callable] = None):
+        """Call ``on_input(event)`` for every event the source delivers, before the
+        input filter, and ``on_output(event)`` for every response, before it is kept.
+        ``on_error(event, error)`` runs when the source cannot accept a response."""
+        hooks = (on_input, on_output, on_error)
+        self._observers.append(hooks)
+        try:
+            yield self
+        finally:
+            self._observers.remove(hooks)
+
+    @contextmanager
+    def rewriting_responses(self, rewrite: Callable[[StreamEvent], StreamEvent]):
+        """Pass every response through ``rewrite(event) -> event`` while the block runs."""
+        self._rewriters.append(rewrite)
+        try:
+            yield self
+        finally:
+            self._rewriters.remove(rewrite)
+
+    def _notify(self, index: int, *args: Any) -> None:
+        for hooks in tuple(self._observers):
+            if hooks[index] is not None:
+                hooks[index](*args)
+
     def next_input(self) -> Optional[StreamEvent]:
-        """Return the next input event, or ``None`` at end of input.
+        while (event := self.source.next_input()) is not None:
+            self._notify(0, event)
+            if (self._declared is None or not isinstance(event, StreamEvent)
+                    or event.channel == CONTROL_CHANNEL
+                    or channel_declared(event.channel, self._declared)):
+                return event
+        return None
 
-        This is a synchronous contract. A live source waits for its next event
-        or raises on timeout; temporary unavailability must not return None."""
+    @property
+    def complete(self) -> bool:
+        return self.source.complete
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        # Old source implementations fulfill the same response contract. Adapt
-        # their method at class creation, before ABC checks abstract methods.
-        if 'emit' in cls.__dict__ and 'respond' not in cls.__dict__:
-            cls.respond = cls.__dict__['emit']
-        elif 'respond' in cls.__dict__ and 'emit' not in cls.__dict__:
-            # Bind the alias to this implementation, so super().emit() in an
-            # existing subclass does not re-enter that subclass's override.
-            cls.emit = cls.__dict__['respond']
-        super().__init_subclass__(**kwargs)
+    def close(self) -> None:
+        self.source.close()
 
-    @abstractmethod
+    def __enter__(self) -> 'Session':
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.close()
+        return False
+
     def respond(self, event: StreamEvent) -> None:
-        """Accept a subject response; environments may advance in response."""
+        if not isinstance(event, StreamEvent):
+            raise TypeError("event must be a StreamEvent")
+        for rewrite in tuple(self._rewriters):
+            event = rewrite(event)
+        try:
+            kept = self.source.respond(event)
+        except BaseException as error:
+            self._notify(2, event, error)
+            raise
+        kept = event if kept is None else kept
+        self._notify(1, kept)
+        note_response(kept)
+        self.emitted.append(kept)
+        limit = self.source.history_limit
+        if limit is not None and len(self.emitted) > limit:
+            del self.emitted[0]
+            self.dropped += 1
 
-    def emit(self, event: StreamEvent) -> None:
-        """Compatibility spelling of respond for existing subjects."""
-        self.respond(event)
+    def collect(self, channel: Optional[str] = None) -> Any:
+        """Return the responses, shaped by the channel family.
+
+        ``neural`` and ``behavior`` give an assembly (one, or all concatenated along
+        ``presentation``); ``perturbation`` gives its single payload (or the
+        ``handle_id``); any other channel gives its events. With no channel: the
+        events when nothing was requested, one result for one requested channel,
+        else a dict keyed by requested channel.
+        """
+        if channel is None:
+            channels = self.requested_output_channels
+            if not channels:
+                return list(self.emitted)
+            if len(channels) == 1:
+                return self.collect(channels[0])
+            return {name: self.collect(name) for name in channels}
+        if self.dropped:
+            raise RuntimeError(
+                f"history_limit={self.source.history_limit} dropped {self.dropped} "
+                "response(s); stream them with observe() instead of collect()")
+        events = [event for event in self.emitted if event.channel == channel]
+        if not events:
+            raise ValueError(f'No emitted events for channel {channel!r}.')
+        family, _ = parse_channel(channel)
+        if family in ('neural', 'behavior'):
+            from brainscore_core._sessions.payloads import _collect_behavior_events, _collect_neural_events
+            if all('presentation' in getattr(event.payload, 'dims', ()) for event in events):
+                if len(events) == 1:
+                    return events[0].payload
+                import xarray as xr
+                return xr.concat([event.payload for event in events], dim='presentation')
+            return (_collect_neural_events(channel, events) if family == 'neural'
+                    else _collect_behavior_events(events))
+        if family == 'perturbation':
+            if len(events) != 1:
+                raise ValueError(f"Expected one emitted event for channel {channel!r}; got {len(events)}.")
+            event = events[0]
+            return event.payload if event.payload is not None else event.meta.get('handle_id')
+        return events
 
 
 def _validate_inputs(inputs) -> None:
@@ -127,7 +366,7 @@ def _validate_inputs(inputs) -> None:
     problems, notes = [], []
     for event in inputs:
         if not isinstance(event, StreamEvent):
-            continue  # e.g. replayed EnvironmentSteps; validated by their harness
+            continue
         family = event.channel.split(":", 1)[0]
         if not io_catalog.has(family):
             notes.append(f"{event.channel}: unregistered channel family")
@@ -148,78 +387,3 @@ def _validate_inputs(inputs) -> None:
     if notes:
         warnings.warn("Session inputs not fully covered by the channel catalog: "
                       + "; ".join(sorted(set(notes))[:5]), stacklevel=3)
-
-
-class BufferedSession(Session):
-    """Deliver fixed inputs and collect responses without environment feedback."""
-
-    def __init__(self, inputs: Iterable[StreamEvent] = (), *,
-                 requested_output_channels: Optional[Iterable[str]] = None,
-                 stimulus_set: Any = None, task_context: Any = None,
-                 time_bins: Any = None, streaming: bool = False) -> None:
-        from brainscore_core._sessions.helpers import _stimulus_events, _behavior_events, _behavior_stimuli_to_score
-        inputs = tuple(inputs)
-        if stimulus_set is not None:
-            if inputs:
-                raise ValueError('Provide input events or a stimulus table, not both.')
-            inputs = _stimulus_events(stimulus_set)
-        elif task_context is not None and not inputs:
-            stimulus_set = _behavior_stimuli_to_score(task_context)
-            inputs = _behavior_events(task_context, stimulus_set)
-        _validate_inputs(inputs)
-        if requested_output_channels is not None:
-            if isinstance(requested_output_channels, str):
-                raise TypeError('requested_output_channels must be a sequence of channel names.')
-            self.requested_output_channels = tuple(requested_output_channels)
-            for channel in self.requested_output_channels:
-                parse_channel(channel)
-        # Compatibility subclasses install their settings before calling super.
-        if stimulus_set is not None:
-            self.stimulus_set = stimulus_set
-        if task_context is not None:
-            self.task_context = task_context
-        if time_bins is not None:
-            self.time_bins = time_bins
-        if streaming:
-            self.streaming = True
-        self._inputs: Deque[StreamEvent] = deque(inputs)
-        self.emitted: list[StreamEvent] = []
-
-    def collect(self, channel: Optional[str] = None) -> Any:
-        """Collect neural/behavioral assemblies, or events for other channels."""
-        from brainscore_core._sessions.helpers import _collect_neural_events, _collect_behavior_events
-        if channel is None:
-            channels = self.requested_output_channels
-            if not channels:
-                return list(self.emitted)
-            if len(channels) == 1:
-                return self.collect(channels[0])
-            return {name: self.collect(name) for name in channels}
-        events = super().collect(channel)
-        if not events:
-            raise ValueError(f'No emitted events for channel {channel!r}.')
-        family, _ = parse_channel(channel)
-        if family in ('neural', 'behavior'):
-            if all('presentation' in getattr(event.payload, 'dims', ()) for event in events):
-                if len(events) == 1:
-                    return events[0].payload
-                import xarray as xr
-                return xr.concat([event.payload for event in events], dim='presentation')
-            return (_collect_neural_events(channel, events) if family == 'neural'
-                    else _collect_behavior_events(events))
-        return events
-
-    def next_input(self) -> Optional[StreamEvent]:
-        if not self._inputs:
-            return None
-        return self._inputs.popleft()
-
-    def respond(self, event: StreamEvent) -> None:
-        if not isinstance(event, StreamEvent):
-            raise TypeError("event must be a StreamEvent")
-        note_response(event)
-        self.emitted.append(event)
-
-
-# Compatibility import; BufferedSession is the name used in new examples.
-InMemorySession = BufferedSession

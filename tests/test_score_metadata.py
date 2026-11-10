@@ -240,7 +240,7 @@ _GENERATION_TASK = dict(task_type='probabilities', label_set=['cat', 'dog'],
 def test_mixed_measures_in_one_collection_are_all_recorded():
     """An implied event then a reported event on one channel: concat keeps
     only the first assembly's attrs, so each event is noted on its own."""
-    from brainscore_core.streaming import BufferedSession
+    from brainscore_core.streaming import Session
 
     def event(measure, stimulus):
         return StreamEvent('behavior', BehavioralAssembly(
@@ -249,7 +249,7 @@ def test_mixed_measures_in_one_collection_are_all_recorded():
             dims=['presentation', 'choice'], attrs={'measure': measure}), None)
 
     with record_measures() as measures:
-        session = BufferedSession(requested_output_channels=['behavior'])
+        session = Session((), requested_output_channels=['behavior'])
         session.respond(event({'kind': 'implied', 'source': 'readout'}, 's0'))
         session.respond(event({'kind': 'reported', 'source': 'reply'}, 's1'))
         session.collect('behavior')
@@ -291,7 +291,7 @@ def test_a_failed_inner_run_passes_nothing_to_the_outer_record():
 
 
 def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
-    from brainscore_core.streaming import BufferedSession
+    from brainscore_core.streaming import Session
 
     made_earlier = StreamEvent('behavior', BehavioralAssembly(
         [[1.0, 0.0]], coords={'stimulus_id': ('presentation', ['s0']),
@@ -307,7 +307,7 @@ def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
 
     subject = _Replayer(measure=None)
     with record_measures() as measures:
-        session = BufferedSession(requested_output_channels=['behavior'])
+        session = Session((), requested_output_channels=['behavior'])
         subject.participate(session)
         session.collect('behavior')
 

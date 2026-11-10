@@ -117,11 +117,11 @@ class TestPayloadTypes:
     def test_seeded_families_declare_payload_types(self):
         from pathlib import Path
         import numpy as np
-        from brainscore_core.events import EnvironmentStep, StateChange
+        from brainscore_core.events import StateChange
         assert io_catalog.get("text").payload_type is str
         assert io_catalog.get("vision").payload_type == (str, Path, np.ndarray)
         assert io_catalog.get("lesion").payload_type is StateChange
-        assert io_catalog.get("observation").payload_type is EnvironmentStep
+        assert io_catalog.get("observation").payload_type is None  # harness-defined
         assert io_catalog.get("pupil").payload_type is None  # unchecked families stay unchecked
 
     def test_payload_type_notes_report_a_mismatch_and_nothing_else(self):

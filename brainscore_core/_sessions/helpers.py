@@ -13,10 +13,8 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from brainscore_core.contract import Subject, TaskContext, UnifiedModel  # noqa: F401  (re-exported)
 from brainscore_core.io_catalog import modalities_to_input_channels
-from brainscore_core.streaming import BufferedSession, Session, StreamEvent, parse_channel
+from brainscore_core.streaming import Session, StreamEvent, parse_channel
 from brainscore_core.events import (
-    EnvironmentResponse,
-    EnvironmentStep,
     PerturbationApplied,
     StateChange,
 )
@@ -26,35 +24,30 @@ from brainscore_core.supported_data_standards.brainio.assemblies import (
 )
 
 from brainscore_core._sessions.buffered import (
-    BehavioralSession,
-    StateChangeSession,
-    StimulusSetSession,
     apply_state_change,
     behavior_session,
     behavioral_response,
     neural_response,
     state_change_session,
     stimulus_session,
+    table_session,
 )
 
 from brainscore_core._sessions.environment import (
-    EnvironmentSession,
-    _coerce_environment_step,
+    EnvironmentSource,
     drive_environment_session,
     _drive_environment_via_process,
-    _environment_step_event,
-    _environment_step_terminates,
-    _environment_time,
-    _motor_action_payload,
     environment_session,
     run_environment,
+    send_outputs,
 )
 
 from brainscore_core._sessions.perception import (
-    RealTimeStreamSession,
-    StreamingStimulusSetSession,
-    WindowedStreamSession,
+    PacingReport,
     _default_window_to_stimuli,
+    paced_stream,
+    streaming_stimulus_session,
+    windowed_stream,
 )
 
 from brainscore_core._sessions.drivers import (
@@ -87,7 +80,6 @@ from brainscore_core._sessions.payloads import (
     _channel_for_stimulus_column,
     _collect_behavior_events,
     _collect_neural_events,
-    _collect_requested_channels,
     _drain_stream_events,
     _is_label_payload,
     _is_neural_assembly_payload,

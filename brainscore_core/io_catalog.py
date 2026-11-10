@@ -1,8 +1,7 @@
 """The Input/Output Catalog: documented, queryable contracts for the allowable
 inputs and outputs of a Brain-Score subject.
 
-v1.5 keeps the typed events (``StimulusSet``, ``StateChange``,
-``EnvironmentStep``) and the lightweight methods (``process``,
+v1.5 keeps the typed events (``StimulusSet``, ``StateChange``) and the lightweight methods (``process``,
 ``start_recording``, ``start_task``). The catalog is documentation layered over
 them, not a dispatch mechanism. It records, for every allowable input and
 output: what carries it, what its payload contains, which harness interprets it,
@@ -341,10 +340,21 @@ _SEED = [
                  "a video model harness (VideoWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(4,),
                  materializers=("StimulusSet",)),
-    CatalogEntry("instruction", INPUT, "TaskContext.instruction or EnvironmentStep.instruction",
+    CatalogEntry("instruction", INPUT, "TaskContext.instruction or a closed-loop row entry",
                  "a Python str framing the task",
                  "the model's generation or policy path",
-                 materializers=("TaskContext", "EnvironmentStep")),
+                 materializers=("TaskContext", "EnvironmentSource")),
+    # Episode control, not a sensory stream: a source marks where an episode
+    # begins, where the subject is asked to respond, and where it ends (the
+    # end event says why in meta['reason']). Every subject receives it.
+    CatalogEntry("control", INPUT, "StreamEvent",
+                 "one of 'begin', 'respond', 'end'; 'end' carries meta['reason'] "
+                 "in ('terminal', 'truncated', 'failure')",
+                 "the session; a subject never has to declare it",
+                 meta_keys=("reason",), payload_type=str,
+                 shape_validator=lambda payload: (
+                     [] if payload in ('begin', 'respond', 'end')
+                     else [f"control payload must be 'begin', 'respond' or 'end'; got {payload!r}"])),
     # --- inputs: direct neural (carried by StateChange) ---
     CatalogEntry("stimulation", INPUT, "StateChange",
                  "a perturbation spec (kind, scale, replacement) applied to selected units",
@@ -362,18 +372,24 @@ _SEED = [
                  addressing="address is a unit selector or agent",
                  owner="core",
                  materializers=("StateChange",)),
-    # --- inputs: closed-loop (carried by EnvironmentStep, harness-defined payload) ---
+    # --- inputs: closed-loop (carried by a row of an environment, harness-defined payload) ---
     # Retained legacy v1.5 channel; not a canonical v2 seed family.
-    CatalogEntry("observation", INPUT, "EnvironmentStep.observation",
+    CatalogEntry("observation", INPUT, "a closed-loop row entry",
                  "harness-defined; the environment harness documents its own structure",
                  "the environment harness (e.g. robotics, Atari, browser)",
                  owner="environment harness",
-                 materializers=("EnvironmentStep",)),
-    CatalogEntry("proprioception", INPUT, "EnvironmentStep (robot body state)",
+                 materializers=("EnvironmentSource",)),
+    CatalogEntry("proprioception", INPUT, "a closed-loop row entry (robot body state)",
                  "harness-defined robot state (joint position, end-effector pose, gripper)",
                  "the robotics environment harness",
                  owner="environment harness",
-                 materializers=("EnvironmentStep",)),
+                 materializers=("EnvironmentSource",)),
+    CatalogEntry("reward", INPUT, "a closed-loop row entry",
+                 "a Python float, the environment's reward for the last action",
+                 "the environment harness",
+                 meta_keys=("discount",), payload_type=(int, float),
+                 owner="environment harness",
+                 materializers=("EnvironmentSource",)),
     # --- outputs: neural measurement (carried by start_recording + process) ---
     CatalogEntry("neural", OUTPUT, "start_recording(target) + process(stimuli)",
                  "(units,) or (units, time) activations packaged into a NeuroidAssembly",
@@ -389,13 +405,13 @@ _SEED = [
                  addressing=("address is the kind of answer a TaskContext response asks for: "
                              "choice, probabilities, confidence, rating, rt or text"),
                  materializers=("start_task", "BehavioralAssembly")),
-    # --- outputs: motor (carried by EnvironmentResponse, harness-defined) ---
-    CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",
+    # --- outputs: motor (answered by a policy, harness-defined) ---
+    CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
                  "harness-defined continuous action / control vector",
-                 "the model's action_fn, decoded by the environment harness",
+                 "the model's policy, decoded by the environment harness",
                  meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
-                 materializers=("EnvironmentResponse",)),
+                 materializers=("policy",)),
     # --- outputs: perturbation record (carried by PerturbationApplied) ---
     CatalogEntry("perturbation", OUTPUT, "PerturbationApplied",
                  "PerturbationApplied record with a handle_id for undoing one change",
@@ -446,7 +462,7 @@ def _declare_payload_types() -> None:
     from dataclasses import replace as _replace
     from pathlib import Path
     import numpy as np
-    from .events import EnvironmentResponse, EnvironmentStep, PerturbationApplied, StateChange
+    from .events import PerturbationApplied, StateChange
     from .supported_data_standards.brainio.assemblies import DataAssembly
 
     sensory = (str, Path, np.ndarray)
@@ -454,9 +470,8 @@ def _declare_payload_types() -> None:
         'vision': sensory, 'video': sensory, 'audio': sensory,
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
-        'observation': EnvironmentStep,
         'neural': DataAssembly, 'behavior': DataAssembly,
-        'motor': EnvironmentResponse, 'perturbation': PerturbationApplied,
+        'perturbation': PerturbationApplied,
     }
     for family, payload_type in payload_types.items():
         register(_replace(get(family), payload_type=payload_type), replace=True)

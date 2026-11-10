@@ -32,7 +32,7 @@ from typing import Dict, FrozenSet, Optional, Set
 from brainscore_core import io_catalog
 from brainscore_core.io_catalog import canonical_modality, modalities_to_input_channels
 from brainscore_core.model_interface import Subject
-from brainscore_core.streaming import parse_channel
+from brainscore_core.streaming import channel_declared, parse_channel
 
 
 class CompatibilityError(Exception):
@@ -144,7 +144,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             )
         raise CompatibilityError(message)
 
-    consumed = bench_inputs & subject_in
+    consumed = {channel for channel in bench_inputs if channel_declared(channel, subject_in)}
     if bench_inputs and not consumed:
         raise CompatibilityError(
             f"Subject '{subject_id}' takes in none of the inputs benchmark "
@@ -180,7 +180,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         subject=subject_id,
         benchmark=benchmark_id,
         consumed_inputs=frozenset(consumed),
-        dropped_inputs=frozenset(bench_inputs - subject_in),
+        dropped_inputs=frozenset(bench_inputs - consumed),
         requested_outputs=frozenset(bench_requested),
     )
 

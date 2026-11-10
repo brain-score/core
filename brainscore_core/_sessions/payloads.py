@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Optional
 import numpy as np
 from ..io_catalog import modalities_to_input_channels
-from ..streaming import StreamEvent, parse_channel
+from ..streaming import CONTROL_CHANNEL, StreamEvent, parse_channel
 from ..events import PerturbationApplied, StateChange
 from ..supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
@@ -86,8 +86,8 @@ def preserve_stimulus_set_type(original, sliced):
 def drain_session_inputs(session: Any) -> list[StreamEvent]:
     """Read every input event from ``session`` until it returns ``None``.
 
-    Events come back in the order the session sent them. Anything that is not
-    a ``StreamEvent`` raises ``TypeError``. Use this when a subject answers the
+    Events come back in the order the session sent them; control events are
+    skipped. Anything that is not a ``StreamEvent`` raises ``TypeError``. Use this when a subject answers the
     whole session at once rather than one input at a time.
     """
     events: list[StreamEvent] = []
@@ -100,7 +100,8 @@ def drain_session_inputs(session: Any) -> list[StreamEvent]:
                 "neural participate expects StreamEvent inputs; got "
                 f"{type(event).__name__}."
             )
-        events.append(event)
+        if event.channel != CONTROL_CHANNEL:
+            events.append(event)
 
 
 def session_stimuli(session: Any, events: list[StreamEvent]) -> Any:
@@ -159,14 +160,6 @@ def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
             row.setdefault("stimulus_id", event.meta["stimulus_id"])
 
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
-
-
-def _collect_requested_channels(session):
-    """Keep single-output collection simple without dropping other regions."""
-    channels = session.requested_output_channels
-    if len(channels) == 1:
-        return session.collect(channel=channels[0])
-    return {channel: session.collect(channel=channel) for channel in channels}
 
 
 def _neural_channels(record) -> tuple:

@@ -10,15 +10,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tupl
 import warnings
 
 from .events import (
-    CameraFrame,
-    EnvironmentResponse,
-    EnvironmentStep,
     InputEvent,
-    Message,
     OutputEvent,
     Perturbation,
     PerturbationApplied,
-    Proprioception,
     Selection,
     StateChange,
     dispatch_metric,

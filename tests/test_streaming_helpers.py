@@ -13,7 +13,7 @@ from brainscore_core.model_interface import (
     UnifiedModel,
     TaskContext,
 )
-from brainscore_core.events import CameraFrame, EnvironmentResponse, EnvironmentStep, Proprioception
+from brainscore_core.streaming import NamedStreams
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     apply_state_change,
@@ -43,32 +43,17 @@ def _make_image_stimulus_set(labels, identifier='test_stim'):
     return stimuli
 
 
-def _droid_step(step_num: int = 0, instruction: str = "pick up the red block"):
-    cameras = {
-        'exterior_1': CameraFrame(rgb=np.zeros((180, 320, 3), dtype=np.uint8)),
-        'exterior_2': CameraFrame(rgb=np.zeros((180, 320, 3), dtype=np.uint8)),
-        'wrist': CameraFrame(rgb=np.zeros((180, 320, 3), dtype=np.uint8)),
+def _droid_row(step_num: int = 0, instruction: str = "pick up the red block"):
+    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+    return {
+        'vision:image': NamedStreams({'exterior_1': frame, 'exterior_2': frame, 'wrist': frame}),
+        'proprioception': {'joint_position': np.zeros(7), 'gripper_position': np.zeros(1)},
+        'instruction': instruction,
     }
-    proprio = Proprioception(
-        joint_position=np.zeros(7, dtype=np.float64),
-        cartesian_position=np.zeros(6, dtype=np.float64),
-        gripper_position=np.zeros(1, dtype=np.float64),
-    )
-    return EnvironmentStep(
-        cameras=cameras,
-        proprioception=proprio,
-        instruction=instruction,
-        step_num=step_num,
-        is_first=(step_num == 0),
-    )
 
 
-def _droid_action_fn(env_step):
-    return EnvironmentResponse(
-        action=np.zeros(7, dtype=np.float64),
-        metadata={'step_num_seen': env_step.step_num,
-                  'instruction_seen': env_step.instruction},
-    )
+def _droid_policy(row):
+    return {'motor': np.zeros(7, dtype=np.float64)}
 
 
 
@@ -127,7 +112,7 @@ class _SyntheticSubject(UnifiedModel):
 class _NonNativeEnvironmentSubject(UnifiedModel):
     def __init__(self, action_fn):
         self.action_fn = action_fn
-        self.processed_steps = []
+        self.processed_rows = []
 
     @property
     def identifier(self):
@@ -142,7 +127,7 @@ class _NonNativeEnvironmentSubject(UnifiedModel):
         return {"vision", "proprioception"}
 
     def process(self, input_event):
-        self.processed_steps.append(input_event.step_num)
+        self.processed_rows.append(input_event)
         return self.action_fn(input_event)
 
 
@@ -180,13 +165,13 @@ def test_stimulus_session_exposes_time_bins():
 
 def test_collect_packages_raw_neural_events_as_neuroid_assembly():
     session = stimulus_session(_stimulus_set(), record="IT")
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="neural:IT",
         payload=np.array([1.0, 2.0]),
         t_ms=0.0,
         meta={"stimulus_id": "s0"},
     ))
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="neural:IT",
         payload=np.array([3.0, 4.0]),
         t_ms=1.0,
@@ -205,18 +190,22 @@ def test_collect_packages_raw_neural_events_as_neuroid_assembly():
 @pytest.mark.parametrize('regions', ['IT', ['V4', 'IT']])
 @pytest.mark.parametrize('kind', ['batch', 'streaming', 'windowed'])
 def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
+    from brainscore_core.streaming import Session
     from brainscore_core.streaming_helpers import (
-        StimulusSetSession, StreamingStimulusSetSession, WindowedStreamSession,
+        stimulus_session, streaming_stimulus_session, windowed_stream,
     )
     if kind == 'windowed':
-        session = WindowedStreamSession(iter([]), fps=30, window_ms=1000, record=regions)
+        channels = ([f'neural:{regions}'] if isinstance(regions, str)
+                    else [f'neural:{region}' for region in regions])
+        session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels,
+                          streaming=True)
     else:
-        session_type = StimulusSetSession if kind == 'batch' else StreamingStimulusSetSession
-        session = session_type(_stimulus_set(), record=regions)
+        builder = stimulus_session if kind == 'batch' else streaming_stimulus_session
+        session = builder(_stimulus_set(), record=regions)
     expected = {}
     for channel in session.requested_output_channels:
         expected[channel] = _assembly()
-        session.emit(StreamEvent(channel=channel, payload=expected[channel], t_ms=0))
+        session.respond(StreamEvent(channel=channel, payload=expected[channel], t_ms=0))
     collected = session.collect()
     if isinstance(regions, str):
         xr.testing.assert_identical(collected, expected['neural:IT'])
@@ -242,7 +231,7 @@ def test_neural_response_matches_process_assembly_exactly():
 def test_collect_returns_emitted_assembly_without_repackaging():
     expected = _assembly()
     session = stimulus_session(_stimulus_set(), record="IT")
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="neural:IT",
         payload=expected,
         t_ms=0.0,
@@ -327,13 +316,13 @@ def test_behavioral_response_falls_back_for_non_native_subject():
 
 def test_behavior_collect_packages_raw_label_events():
     session = behavior_session(TaskContext(task_type="probabilities"))
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="behavior",
         payload="cat",
         t_ms=0.0,
         meta={"stimulus_id": "s0", "label_set": ["cat", "dog"]},
     ))
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="behavior",
         payload="dog",
         t_ms=1.0,
@@ -351,13 +340,13 @@ def test_behavior_collect_packages_raw_label_events():
 
 def test_behavior_collect_packages_raw_probability_events():
     session = behavior_session(TaskContext(task_type="probabilities"))
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="behavior",
         payload=np.array([0.25, 0.75]),
         t_ms=0.0,
         meta={"stimulus_id": "s0", "label_set": ["cat", "dog"]},
     ))
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="behavior",
         payload=np.array([0.8, 0.2]),
         t_ms=1.0,
@@ -379,73 +368,60 @@ def test_behavior_collect_rejects_missing_channel():
 
 
 class _SyntheticEnvironment:
-    def __init__(self, steps):
-        self.steps = list(steps)
+    def __init__(self, count):
+        self.count = count
         self.actions = []
         self.reset_calls = 0
 
     def reset(self):
         self.reset_calls += 1
-        if not self.steps:
-            return None
-        return self.steps[0]
+        return _droid_row(0, "reach the goal")
 
-    def step(self, action):
-        self.actions.append(action)
-        next_index = len(self.actions)
-        if next_index >= len(self.steps):
-            return None
-        return self.steps[next_index]
-
-
-def _environment_steps(count):
-    steps = []
-    for step_num in range(count):
-        step = _droid_step(step_num=step_num, instruction="reach the goal")
-        step.is_last = step_num == count - 1
-        step.is_terminal = step.is_last
-        steps.append(step)
-    return steps
+    def step(self, outputs):
+        self.actions.append(outputs['motor'])
+        done = len(self.actions) >= self.count
+        return _droid_row(len(self.actions), "reach the goal"), 'terminal' if done else None
 
 
 def test_environment_session_advances_after_motor_emit():
-    session = environment_session(_SyntheticEnvironment(_environment_steps(2)))
+    session = environment_session(_SyntheticEnvironment(2))
 
     assert session.requested_output_channels == ("motor",)
 
-    first_step = session.next_input()
-    assert first_step.step_num == 0
-    assert session.input_events[0].channel == "observation"
+    events = []
+    while (event := session.next_input()).channel != 'control' or event.payload != 'respond':
+        events.append(event)
+    assert [e.channel for e in events[:2]] == ['control', 'vision:image']
+    assert {e.meta['camera'] for e in events if e.channel == 'vision:image'} == {
+        'exterior_1', 'exterior_2', 'wrist'}
     with pytest.raises(RuntimeError, match="Emit an action"):
         session.next_input()
 
-    session.emit(StreamEvent(
+    session.respond(StreamEvent(
         channel="motor",
         payload=np.zeros(7, dtype=np.float64),
         t_ms=0.0,
     ))
-    second_step = session.next_input()
-
-    assert second_step.step_num == 1
+    assert session.next_input().channel == 'vision:image'
+    assert session.source.input_events[-1].meta['step_num'] == 1
 
 
 def test_run_environment_falls_back_for_non_native_subjects():
-    subject = _NonNativeEnvironmentSubject(_droid_action_fn)
-    env = _SyntheticEnvironment(_environment_steps(3))
+    subject = _NonNativeEnvironmentSubject(_droid_policy)
+    env = _SyntheticEnvironment(3)
 
     trajectory = run_environment(subject, env)
 
     assert type(subject).participate is UnifiedModel.participate
-    assert subject.processed_steps == [0, 1]
-    assert [response.metadata["step_num_seen"] for response in trajectory] == [
-        0, 1,
-    ]
+    assert len(subject.processed_rows) == 3 and len(trajectory) == 3
+    assert set(subject.processed_rows[0]['vision:image']) == {'exterior_1', 'exterior_2', 'wrist'}
+    assert subject.processed_rows[1]['instruction'] == "reach the goal"
 
 
 def test_run_environment_rejects_objects_without_participate():
     subject = SimpleNamespace(process=lambda step: pytest.fail("process() reached"))
     with pytest.raises(TypeError, match="participate"):
-        run_environment(subject, _SyntheticEnvironment(_environment_steps(2)))
+        run_environment(subject, _SyntheticEnvironment(2))
 
 
 def _ablation_state_change():
@@ -554,10 +530,9 @@ class TestRecordAcceptsSeveralRegions:
         session = stimulus_session(self._stimuli(), record='IT')
         assert requested_output_channels(session) == ['neural:IT']
 
-    def test_windowed_session_also_splits(self):
-        from brainscore_core.streaming_helpers import WindowedStreamSession
-        session = WindowedStreamSession(iter([]), fps=30, window_ms=100,
-                                        record=['V4', 'IT'])
+    def test_streaming_session_also_splits(self):
+        from brainscore_core.streaming_helpers import streaming_stimulus_session
+        session = streaming_stimulus_session(self._stimuli(), record=['V4', 'IT'])
         assert list(session.requested_output_channels) == ['neural:V4', 'neural:IT']
 
     def test_empty_record_raises(self):
@@ -612,11 +587,11 @@ class TestPublicSessionHelpers:
         assert helpers._drive_behavior_session_via_process is helpers.drive_behavior_session
 
     def test_drain_returns_every_input_in_order_then_none(self):
-        from brainscore_core.streaming import BufferedSession
+        from brainscore_core.streaming import Session
         from brainscore_core.streaming_helpers import drain_session_inputs
         events = [StreamEvent('vision', f'p{index}', float(index), {'i': index})
                   for index in range(3)]
-        session = BufferedSession(events, requested_output_channels=('neural:IT',))
+        session = Session(events, ('neural:IT',))
         assert drain_session_inputs(session) == events
         assert session.next_input() is None
         assert drain_session_inputs(session) == []

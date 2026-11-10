@@ -59,11 +59,11 @@ def test_subject_channel_properties_are_overridable():
 
 
 def test_typed_participate_default_runs_sessions_and_rejects_unknown_outputs():
-    from brainscore_core.streaming import BufferedSession
+    from brainscore_core.streaming import Session
 
     subject = _ChannelSubject()
     with pytest.raises(NotImplementedError, match="runs sessions requesting"):
-        subject.participate(BufferedSession(requested_output_channels=["pupil"]))
+        subject.participate(Session((), requested_output_channels=["pupil"]))
 
 
 def test_legacy_subclass_still_instantiates_without_participate():

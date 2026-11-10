@@ -13,10 +13,10 @@ The properties that matter, and that these tests pin:
 import numpy as np
 import pytest
 
-from brainscore_core.streaming import StreamEvent
+from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.streaming_helpers import (
-    WindowedStreamSession,
     drive_neural_session_streaming,
+    windowed_stream,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 
@@ -38,6 +38,11 @@ class _RecordingSubject:
             dims=['presentation', 'neuroid'])
 
 
+def _session(frames, stats=None, **kwargs):
+    return Session(windowed_stream(frames, stats=stats, **kwargs), ('neural:IT',),
+                   streaming=True)
+
+
 def _counting_feed(n, counter):
     """A generator that records how many frames were actually pulled."""
     for i in range(n):
@@ -49,12 +54,12 @@ def _counting_feed(n, counter):
 def test_windows_batch_frames_instead_of_one_at_a_time():
     counter = {'pulled': 0}
     # 30 fps, 1000 ms window -> 30 frames per window; 90 frames -> 3 windows
-    session = WindowedStreamSession(_counting_feed(90, counter), fps=30,
-                                    window_ms=1000, record='IT')
+    stats = {}
+    session = _session(_counting_feed(90, counter), stats, fps=30, window_ms=1000)
     subject = _RecordingSubject()
     drive_neural_session_streaming(subject, session)
     assert subject.window_sizes == [30, 30, 30]
-    assert session.windows_emitted == 3
+    assert stats['windows_emitted'] == 3
 
 
 @pytest.mark.unit
@@ -63,10 +68,10 @@ def test_memory_held_is_bounded_by_the_window_not_the_feed():
     held = []
     for n_frames in (60, 600):
         counter = {'pulled': 0}
-        session = WindowedStreamSession(_counting_feed(n_frames, counter), fps=30,
-                                        window_ms=1000, record='IT')
+        stats = {}
+        session = _session(_counting_feed(n_frames, counter), stats, fps=30, window_ms=1000)
         drive_neural_session_streaming(_RecordingSubject(), session)
-        held.append(session.max_frames_held)
+        held.append(stats['max_frames_held'])
     assert held[0] == held[1] == 30, (
         f"frames held grew with feed length ({held}); the feed is being buffered")
 
@@ -75,8 +80,8 @@ def test_memory_held_is_bounded_by_the_window_not_the_feed():
 def test_feed_is_consumed_lazily():
     """A lazy decoder must stay lazy -- the session must not list() the iterator."""
     counter = {'pulled': 0}
-    session = WindowedStreamSession(_counting_feed(300, counter), fps=30,
-                                    window_ms=1000, record='IT')
+    session = _session(_counting_feed(300, counter), fps=30,
+                                    window_ms=1000)
     # pull exactly one window, then stop
     first = session.next_input()
     assert first is not None
@@ -88,8 +93,8 @@ def test_feed_is_consumed_lazily():
 @pytest.mark.unit
 def test_each_window_carries_alignment_timing():
     counter = {'pulled': 0}
-    session = WindowedStreamSession(_counting_feed(90, counter), fps=30,
-                                    window_ms=1000, record='IT')
+    session = _session(_counting_feed(90, counter), fps=30,
+                                    window_ms=1000)
     windows = []
     event = session.next_input()
     while event is not None:
@@ -105,8 +110,8 @@ def test_each_window_carries_alignment_timing():
 def test_overlapping_windows_slide_by_stride():
     counter = {'pulled': 0}
     # 1000 ms window, 500 ms stride -> 50% overlap
-    session = WindowedStreamSession(_counting_feed(90, counter), fps=30,
-                                    window_ms=1000, stride_ms=500, record='IT')
+    session = _session(_counting_feed(90, counter), fps=30,
+                                    window_ms=1000, stride_ms=500)
     starts = []
     event = session.next_input()
     while event is not None:
@@ -119,8 +124,8 @@ def test_overlapping_windows_slide_by_stride():
 def test_trailing_partial_window_is_emitted_not_dropped():
     """70 frames at 30/window = 2 full + 10 left over. Those 10 are real material."""
     counter = {'pulled': 0}
-    session = WindowedStreamSession(_counting_feed(70, counter), fps=30,
-                                    window_ms=1000, record='IT')
+    session = _session(_counting_feed(70, counter), fps=30,
+                                    window_ms=1000)
     subject = _RecordingSubject()
     drive_neural_session_streaming(subject, session)
     assert subject.window_sizes == [30, 30, 10]
@@ -142,8 +147,7 @@ def test_custom_window_converter_is_used():
         }))
 
     counter = {'pulled': 0}
-    session = WindowedStreamSession(_counting_feed(60, counter), fps=30, window_ms=1000,
-                                    record='IT', window_to_stimuli=as_single_clip)
+    session = _session(_counting_feed(60, counter), fps=30, window_ms=1000, window_to_stimuli=as_single_clip)
     subject = _RecordingSubject()
     drive_neural_session_streaming(subject, session)
     assert subject.window_sizes == [1, 1]
@@ -155,4 +159,4 @@ def test_invalid_window_config_fails_fast():
                    {'fps': 30, 'window_ms': 0},
                    {'fps': 30, 'window_ms': 1000, 'stride_ms': 0}):
         with pytest.raises(ValueError):
-            WindowedStreamSession(iter([]), record='IT', **kwargs)
+            _session(iter([]), **kwargs)

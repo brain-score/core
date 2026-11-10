@@ -12,18 +12,13 @@ EXPECTED_PUBLIC_NAMES = {
     'ABC',
     'Any',
     'Callable',
-    'CameraFrame',
     'Dict',
-    'EnvironmentResponse',
-    'EnvironmentStep',
     'InputEvent',
     'List',
-    'Message',
     'Optional',
     'OutputEvent',
     'Perturbation',
     'PerturbationApplied',
-    'Proprioception',
     'Selection',
     'Set',
     'StateChange',
@@ -72,7 +67,6 @@ import json
 
 
 _COMPONENT_MODULES = {
-    'temporal': '_sessions.temporal',
     'streaming_helpers': '_sessions.helpers',
     'session_view': '_sessions.view',
     'compatibility': '_evaluation.compatibility',
@@ -141,17 +135,19 @@ def test_session_facade_preserves_implementation_identity():
     from brainscore_core._sessions import buffered, drivers, environment, payloads, perception
 
     pairs = [
-        (public.StimulusSetSession, buffered.StimulusSetSession),
-        (public.BehavioralSession, buffered.BehavioralSession),
-        (public.StateChangeSession, buffered.StateChangeSession),
+        (public.stimulus_session, buffered.stimulus_session),
+        (public.behavior_session, buffered.behavior_session),
+        (public.state_change_session, buffered.state_change_session),
+        (public.table_session, buffered.table_session),
         (public.neural_response, buffered.neural_response),
         (public.behavioral_response, buffered.behavioral_response),
         (public.apply_state_change, buffered.apply_state_change),
-        (public.EnvironmentSession, environment.EnvironmentSession),
+        (public.EnvironmentSource, environment.EnvironmentSource),
         (public.run_environment, environment.run_environment),
-        (public.StreamingStimulusSetSession, perception.StreamingStimulusSetSession),
-        (public.WindowedStreamSession, perception.WindowedStreamSession),
-        (public.RealTimeStreamSession, perception.RealTimeStreamSession),
+        (public.streaming_stimulus_session, perception.streaming_stimulus_session),
+        (public.windowed_stream, perception.windowed_stream),
+        (public.paced_stream, perception.paced_stream),
+        (public.PacingReport, perception.PacingReport),
         (public.drive_neural_session, drivers.drive_neural_session),
         (public.drive_behavior_session, drivers.drive_behavior_session),
         (public.drive_typed_session, drivers.drive_typed_session),
@@ -167,13 +163,11 @@ def test_session_facade_preserves_implementation_identity():
 
 def test_layout_keeps_recorded_contract_type_names():
     from brainscore_core.contract import TaskContext
-    from brainscore_core.events import EnvironmentResponse, EnvironmentStep, StateChange
+    from brainscore_core.events import StateChange
     from brainscore_core.streaming import StreamEvent
 
     assert Subject.__module__ == TaskContext.__module__ == 'brainscore_core.contract'
     assert StreamEvent.__module__ == 'brainscore_core.streaming'
-    assert EnvironmentStep.__module__ == 'brainscore_core.events'
-    assert EnvironmentResponse.__module__ == 'brainscore_core.events'
     assert StateChange.__module__ == 'brainscore_core.events'
 
 
@@ -184,7 +178,6 @@ def test_layout_keeps_recorded_contract_type_names():
     ('legacy_facade', 'LegacyBenchmarkFacade'),
     ('memory', 'MemoryError'),
     ('multimodal', 'MultimodalStimulusSet'),
-    ('temporal', 'Window'),
 ])
 def test_moved_types_keep_public_pickle_references(module_name, type_name):
     import pickle

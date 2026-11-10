@@ -1,81 +1,50 @@
-"""Buffered convenience sessions and typed measurement helpers."""
+"""Builders for the one ``Session`` and the typed measurement helpers."""
 
 from __future__ import annotations
 from typing import Sequence, Union
-from ..streaming import BufferedSession
+from ..streaming import Session
 from ..events import StateChange
 from ..supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
     NeuroidAssembly,
 )
-from .payloads import _neural_channels, _state_change_event
+from .payloads import (
+    _behavior_events,
+    _behavior_stimuli_to_score,
+    _neural_channels,
+    _state_change_event,
+    _stimulus_events,
+)
 
 
-class StimulusSetSession(BufferedSession):
-    """Compatibility convenience; configure BufferedSession for new experiments."""
+def table_session(stimulus_set, requested_output_channels=None, *, task_context=None,
+                  time_bins=None, settings=None, record=None) -> Session:
+    """One session that presents every row of ``stimulus_set``.
 
-    def __init__(self, stimulus_set, record: Union[str, Sequence[str]] = "IT", time_bins=None):
-        self.record = record
-        super().__init__(stimulus_set=stimulus_set,
-                         requested_output_channels=_neural_channels(record),
-                         time_bins=time_bins)
-
-    @classmethod
-    def from_stimulus_set(cls, stimulus_set, record: Union[str, Sequence[str]] = "IT",
-                          time_bins=None):
-        return cls(stimulus_set, record=record, time_bins=time_bins)
-
-
-class BehavioralSession(BufferedSession):
-    """Compatibility convenience; configure BufferedSession(task_context=...)."""
-
-    def __init__(self, task_context):
-        super().__init__(task_context=task_context, requested_output_channels=('behavior',))
-        self.scoring_stimuli = self.stimulus_set
-
-    @classmethod
-    def from_task_context(cls, task_context):
-        return cls(task_context)
-
-    def collect(self, channel: str = "behavior") -> BehavioralAssembly:
-        if channel != "behavior":
-            raise ValueError(f"BehavioralSession.collect only supports 'behavior'; got {channel!r}.")
-        return super().collect(channel)
-
-
-class StateChangeSession(BufferedSession):
-    """Compatibility convenience for a single intervention event."""
-
-    def __init__(self, state_change: StateChange):
-        self.state_change = state_change
-        super().__init__([_state_change_event(state_change)],
-                         requested_output_channels=('perturbation',))
-
-    @classmethod
-    def from_state_change(cls, state_change: StateChange):
-        return cls(state_change)
-
-    def collect(self, channel: str = "perturbation"):
-        matching = super().collect(channel)
-        if len(matching) != 1:
-            raise ValueError(f"Expected one emitted event for channel {channel!r}; got {len(matching)}.")
-        event = matching[0]
-        return event.payload if event.payload is not None else event.meta.get("handle_id")
+    The table stays on the session, so the batch drivers answer it with one
+    ``process`` call; ``task_context``, ``time_bins`` and ``settings`` ride along.
+    """
+    return Session(_stimulus_events(stimulus_set), requested_output_channels, task_context,
+                   stimulus_set=stimulus_set, time_bins=time_bins, settings=settings,
+                   record=record)
 
 
 def stimulus_session(stimulus_set, record: Union[str, Sequence[str]] = "IT",
-                     time_bins=None) -> StimulusSetSession:
-    return StimulusSetSession.from_stimulus_set(
-        stimulus_set, record=record, time_bins=time_bins
-    )
+                     time_bins=None) -> Session:
+    return table_session(stimulus_set, _neural_channels(record), time_bins=time_bins,
+                         record=record)
 
 
-def behavior_session(task_context) -> BehavioralSession:
-    return BehavioralSession.from_task_context(task_context)
+def behavior_session(task_context) -> Session:
+    """A session whose events are the task's instruction, fitting and scoring stimuli."""
+    scoring = _behavior_stimuli_to_score(task_context)
+    return Session(_behavior_events(task_context, scoring), ('behavior',), task_context,
+                   stimulus_set=scoring, scoring_stimuli=scoring)
 
 
-def state_change_session(state_change: StateChange) -> StateChangeSession:
-    return StateChangeSession.from_state_change(state_change)
+def state_change_session(state_change: StateChange) -> Session:
+    return Session([_state_change_event(state_change)], ('perturbation',),
+                   state_change=state_change)
 
 
 def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "IT",

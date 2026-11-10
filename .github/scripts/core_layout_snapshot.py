@@ -13,11 +13,10 @@ import numpy as np
 import xarray as xr
 
 from brainscore_core.environment import ArraySpec, MappingSpec
-from brainscore_core.events import EnvironmentResponse, EnvironmentStep
 from brainscore_core.model_interface import Subject, TaskContext
-from brainscore_core.streaming import StreamEvent
+from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.streaming_helpers import (
-    EnvironmentSession, behavioral_response, drain_session_inputs, neural_response, session_stimuli,
+    EnvironmentSource, behavioral_response, drain_session_inputs, neural_response, session_stimuli,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly, NeuroidAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
@@ -89,7 +88,7 @@ class NeuralSubject(Subject):
     def participate(self, session):
         events = drain_session_inputs(session)
         output = Extractor()(session_stimuli(session, events), ['fixture'])
-        session.emit(StreamEvent('neural:language_system', output, 0.0))
+        session.respond(StreamEvent('neural:language_system', output, 0.0))
 
 
 class AnswerSubject(Subject):
@@ -103,7 +102,7 @@ class AnswerSubject(Subject):
         ids = list(session.task_context.fitting_stimuli['stimulus_id'])
         output = BehavioralAssembly(['yes'] * len(ids), coords={'stimulus_id': ('presentation', ids)},
                                     dims=['presentation'])
-        session.emit(StreamEvent('behavior', output, 0.0))
+        session.respond(StreamEvent('behavior', output, 0.0))
 
 
 class PolicySubject(Subject):
@@ -113,11 +112,13 @@ class PolicySubject(Subject):
     out_channels = {'motor'}
 
     def participate(self, session):
-        step = session.next_input()
-        while step is not None and not step.is_last:
-            action = EnvironmentResponse(action=step.observation['state'] + np.float32(0.25))
-            session.emit(StreamEvent('motor', action, None, meta={'step_num': step.step_num}))
-            step = session.next_input()
+        row = {}
+        while (event := session.next_input()) is not None:
+            if event.channel != 'control':
+                row[event.channel] = event.payload
+            elif event.payload == 'respond':
+                action = row['observation']['state'] + np.float32(0.25)
+                session.respond(StreamEvent('motor', action, None))
 
 
 stimuli = StimulusSet({'stimulus_id': ['s0', 's1'], 'sentence': ['one', 'two']})
@@ -142,24 +143,22 @@ class Environment:
         return self.observation()
 
     def observation(self):
-        return EnvironmentStep(
-            observation={'state': np.array([self.count], dtype=np.float32)},
-            step_num=self.count, is_first=self.count == 0, is_last=self.count == 2,
-        )
+        return {'observation': {'state': np.array([self.count], dtype=np.float32)}}
 
-    def step(self, action):
+    def step(self, outputs):
         self.count += 1
-        return self.observation()
+        return self.observation(), 'terminal' if self.count == 2 else None
 
 
 policy = PolicySubject()
-with EnvironmentSession(environment=Environment(), seed=0, require_specs=True) as session:
+source = EnvironmentSource(Environment(), seed=0, require_specs=True)
+with Session(source, ('motor',)) as session:
     policy.participate(session)
     environment_values = {
-        'inputs': encode(session.input_events),
+        'inputs': encode(source.input_events),
         'proposals': encode(session.emitted),
-        'receipts': encode(session.action_events),
-        'actions': encode(session.collect()),
+        'receipts': encode(source.action_events),
+        'actions': encode(session.collect('motor')),
         'complete': session.complete,
     }
 

@@ -10,10 +10,11 @@ import inspect
 
 from brainscore_core import io_catalog
 from brainscore_core.contract import Subject
-from brainscore_core.streaming import Session, StreamEvent
+from brainscore_core.streaming import Session, Source, StreamEvent
 
 
 PINNED_SEED_CHANNELS = {
+    "control": (io_catalog.INPUT, "core"),
     "audio": (io_catalog.INPUT, "core"),
     "behavior": (io_catalog.OUTPUT, "core"),
     "instruction": (io_catalog.INPUT, "core"),
@@ -25,6 +26,7 @@ PINNED_SEED_CHANNELS = {
     "pharmacological": (io_catalog.INPUT, "core"),
     "proprioception": (io_catalog.INPUT, "environment harness"),
     "pupil": (io_catalog.OUTPUT, "human harness"),
+    "reward": (io_catalog.INPUT, "environment harness"),
     "skin_conductance": (io_catalog.OUTPUT, "human harness"),
     "stimulation": (io_catalog.INPUT, "core"),
     "text": (io_catalog.INPUT, "core"),
@@ -89,8 +91,10 @@ def test_stream_event_field_contract_is_pinned():
     assert all(field.default is MISSING for field in stream_fields[:3])
 
 
-def test_session_abc_contract_is_minimal():
-    assert Session.__abstractmethods__ == {"next_input", "respond"}
+def test_session_is_concrete_over_a_two_method_source():
+    assert not getattr(Session, "__abstractmethods__", None)
+    assert issubclass(Session, Source)
+    assert callable(Source.next_input) and callable(Source.respond)
     assert callable(Session.collect)
 
 

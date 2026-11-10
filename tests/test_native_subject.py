@@ -9,7 +9,7 @@ import pytest
 from brainscore_core import Subject, TaskContext
 from brainscore_core.compatibility import CompatibilityError, check_compatibility
 from brainscore_core.memory import _probe_feature_dim
-from brainscore_core.streaming import InMemorySession, Session, StreamEvent
+from brainscore_core.streaming import Session, Source, StreamEvent
 from brainscore_core.streaming_helpers import behavioral_response, neural_response
 
 
@@ -27,11 +27,11 @@ class TextSubject(Subject):
             self.seen.append(event)
             if event.channel != "text":
                 continue
-            session.emit(StreamEvent(
+            session.respond(StreamEvent(
                 "neural:language_network", np.array([len(event.payload), 1.0]),
                 event.t_ms, dict(event.meta),
             ))
-            session.emit(StreamEvent(
+            session.respond(StreamEvent(
                 "behavior", event.payload.upper(), event.t_ms, dict(event.meta),
             ))
 
@@ -58,7 +58,7 @@ def test_minimal_subject_consumes_and_emits_timestamped_events():
     for name in ("process", "start_task", "start_recording", "region_layer_map",
                  "supported_modalities", "check_session_support"):
         assert not hasattr(subject, name)
-    session = InMemorySession([StreamEvent("text", "cat", 12.0, {"stimulus_id": "a"})])
+    session = Session([StreamEvent("text", "cat", 12.0, {"stimulus_id": "a"})])
     subject.participate(session)
     assert [event.channel for event in session.emitted] == [
         "neural:language_network", "behavior",
@@ -70,7 +70,7 @@ def test_minimal_subject_consumes_and_emits_timestamped_events():
 
 
 def test_minimal_live_session_needs_no_collection_or_model_probe():
-    class FeedbackSession(Session):
+    class Feedback(Source):
         def __init__(self):
             self.responses = []
 
@@ -80,13 +80,13 @@ def test_minimal_live_session_needs_no_collection_or_model_probe():
             text = "cat" if not self.responses else self.responses[-1]
             return StreamEvent("text", text, float(len(self.responses)))
 
-        def emit(self, event):
+        def respond(self, event):
             if event.channel == "behavior":
                 self.responses.append(event.payload)
 
-    session = FeedbackSession()
-    TextSubject().participate(session)
-    assert session.responses == ["CAT", "CAT"]
+    source = Feedback()
+    TextSubject().participate(Session(source))
+    assert source.responses == ["CAT", "CAT"]
 
 
 @pytest.mark.parametrize("missing", ["identifier", "in_channels", "out_channels", "participate"])
