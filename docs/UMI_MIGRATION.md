@@ -9,7 +9,7 @@ match each answer to the stimulus that produced it.
 
 ```python
 from brainscore_core import Subject
-from brainscore_core.streaming import BufferedSession, StreamEvent
+from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 
 class EchoSubject(Subject):
@@ -30,9 +30,9 @@ class EchoSubject(Subject):
                 t_ms=event.t_ms, meta=dict(event.meta)))
 
 subject = EchoSubject()
-session = BufferedSession(
-    inputs=[StreamEvent(channel="text", payload="hello", t_ms=0.0,
-                        meta={"stimulus_id": "s1"})],
+session = Session(
+    [StreamEvent(channel="text", payload="hello", t_ms=0.0,
+                 meta={"stimulus_id": "s1"})],
     requested_output_channels=["behavior"])
 subject.participate(session=session)
 response = session.emitted[0].payload
@@ -44,9 +44,15 @@ subject.reset()
 
 A native subject does not need `process()`, `start_recording()`, `start_task()`,
 a layer map, modality properties, or `check_session_support()`. Scoring preflight
-uses channel declarations. A custom session only needs `next_input()` and
-`respond()`; collection belongs to the session or the benchmark helper.
-(`InMemorySession` and `emit()` are accepted compatibility spellings.)
+uses channel declarations. There is one session class, `Session`. It takes the
+input events (any list, iterator or generator), the outputs you request, and
+the task. It passes the subject only the channels the subject declares.
+Channels match by exact name: `vision:image` and `vision:video` are two
+channels, and `vision` is a third.
+
+A session built from a stimulus table also sends control events on the
+`control` channel: `begin`, `respond` and `end`. A subject that reads its inputs
+in a loop can skip them (`event.channel == 'control'`).
 
 For table-based evaluations, `neural_response` and `behavioral_response` in
 `brainscore_core.streaming_helpers` build sessions and collect assemblies. The
