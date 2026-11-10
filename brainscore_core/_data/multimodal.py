@@ -11,7 +11,7 @@ be scorable on the same benchmark using only the streams they support.
 
 The schema is intentionally thin — a pandas DataFrame with:
 - per-row media columns (one column per modality stream, following the
-  conventions already registered in BrainScoreModel.COLUMN_TO_MODALITY:
+  conventions already registered in io_catalog.BUILTIN_STIMULUS_COLUMNS:
   ``image_path`` / ``video_path`` / ``audio_path`` / ``sentence``),
 - per-modality sampling-rate metadata (a dict stored as an attribute
   rather than a per-row column, because it typically applies uniformly
@@ -39,7 +39,7 @@ from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 # Canonical mapping: modality name -> list of column names that carry
 # that modality's content. Order matters: the first column that is
 # present in the DataFrame wins as the primary column for that modality.
-# This mirrors (and consolidates with) BrainScoreModel.COLUMN_TO_MODALITY
+# This mirrors (and consolidates with) io_catalog.BUILTIN_STIMULUS_COLUMNS
 # while keeping the *stimulus* side authoritative about what columns
 # signal what modality.
 MODALITY_COLUMN_CANDIDATES: Dict[str, tuple] = {

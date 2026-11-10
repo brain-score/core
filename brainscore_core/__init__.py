@@ -4,18 +4,10 @@ from .model_interface import (
     TaskContext,
     Subject,
     UnifiedModel,  # compatibility base for the legacy typed interface
-    BrainScoreModel,
-    UnitSelector,
-    LayerSelector,
-    CompositeSelector,
     Selection,
     Perturbation,
     StateChange,
     PerturbationApplied,
-    UnitSelection,
-    FunctionalSelection,
-    RandomSelection,
-    IndexSelection,
     EnvironmentStep,
     EnvironmentResponse,
     Message,
@@ -34,12 +26,6 @@ from .io_catalog import CatalogEntry
 
 # Established imports share the actual implementation module and its state.
 import sys as _sys
-from ._model import behavior
-from ._model import behavioral
-from ._model import capability_config
-from ._model import dispatch
-from ._model import perturbation
-from ._model import recording
 from ._sessions import temporal
 from ._sessions import helpers as streaming_helpers
 from ._sessions import view as session_view
@@ -62,12 +48,6 @@ from ._runtime import hf_compat
 from ._runtime import extensions
 
 for _name, _module in (
-    ('behavior', behavior),
-    ('behavioral', behavioral),
-    ('capability_config', capability_config),
-    ('dispatch', dispatch),
-    ('perturbation', perturbation),
-    ('recording', recording),
     ('temporal', temporal),
     ('streaming_helpers', streaming_helpers),
     ('session_view', session_view),
