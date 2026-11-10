@@ -864,8 +864,8 @@ def test_environment_session_emits_motor_events_for_multistep_rollout():
     session = environment_session(_SyntheticEnvironment(_environment_steps(3)))
     model = _make_environment_model(action_fn=_droid_action_fn)
 
-    from brainscore_core.streaming_helpers import _drive_environment_session_via_process
-    _drive_environment_session_via_process(model, session)
+    from brainscore_core.streaming_helpers import drive_environment_session
+    drive_environment_session(model, session)
 
     assert [event.channel for event in session.emitted] == [
         "motor", "motor",
@@ -1118,15 +1118,15 @@ class TestRecordAcceptsSeveralRegions:
 
     def test_list_record_yields_one_channel_per_region(self):
         from brainscore_core.streaming_helpers import (
-            stimulus_session, _requested_output_channels)
+            stimulus_session, requested_output_channels)
         session = stimulus_session(self._stimuli(), record=['V4', 'IT'])
-        assert _requested_output_channels(session) == ['neural:V4', 'neural:IT']
+        assert requested_output_channels(session) == ['neural:V4', 'neural:IT']
 
     def test_single_region_string_unchanged(self):
         from brainscore_core.streaming_helpers import (
-            stimulus_session, _requested_output_channels)
+            stimulus_session, requested_output_channels)
         session = stimulus_session(self._stimuli(), record='IT')
-        assert _requested_output_channels(session) == ['neural:IT']
+        assert requested_output_channels(session) == ['neural:IT']
 
     def test_windowed_session_also_splits(self):
         from brainscore_core.streaming_helpers import WindowedStreamSession

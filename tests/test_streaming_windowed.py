@@ -16,7 +16,7 @@ import pytest
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     WindowedStreamSession,
-    _drive_neural_session_streaming,
+    drive_neural_session_streaming,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 
@@ -52,7 +52,7 @@ def test_windows_batch_frames_instead_of_one_at_a_time():
     session = WindowedStreamSession(_counting_feed(90, counter), fps=30,
                                     window_ms=1000, record='IT')
     subject = _RecordingSubject()
-    _drive_neural_session_streaming(subject, session)
+    drive_neural_session_streaming(subject, session)
     assert subject.window_sizes == [30, 30, 30]
     assert session.windows_emitted == 3
 
@@ -65,7 +65,7 @@ def test_memory_held_is_bounded_by_the_window_not_the_feed():
         counter = {'pulled': 0}
         session = WindowedStreamSession(_counting_feed(n_frames, counter), fps=30,
                                         window_ms=1000, record='IT')
-        _drive_neural_session_streaming(_RecordingSubject(), session)
+        drive_neural_session_streaming(_RecordingSubject(), session)
         held.append(session.max_frames_held)
     assert held[0] == held[1] == 30, (
         f"frames held grew with feed length ({held}); the feed is being buffered")
@@ -122,7 +122,7 @@ def test_trailing_partial_window_is_emitted_not_dropped():
     session = WindowedStreamSession(_counting_feed(70, counter), fps=30,
                                     window_ms=1000, record='IT')
     subject = _RecordingSubject()
-    _drive_neural_session_streaming(subject, session)
+    drive_neural_session_streaming(subject, session)
     assert subject.window_sizes == [30, 30, 10]
     partial = [e for e in session.emitted if e.channel == 'neural:IT']
     assert len(partial) == 3
@@ -145,7 +145,7 @@ def test_custom_window_converter_is_used():
     session = WindowedStreamSession(_counting_feed(60, counter), fps=30, window_ms=1000,
                                     record='IT', window_to_stimuli=as_single_clip)
     subject = _RecordingSubject()
-    _drive_neural_session_streaming(subject, session)
+    drive_neural_session_streaming(subject, session)
     assert subject.window_sizes == [1, 1]
 
 

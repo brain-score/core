@@ -55,7 +55,7 @@ class NeuralSessions(_SessionCapability):
                 return run_neural_channels(model, stimuli, channel_regions,
                                            time_bins, multi_modality)
             if getattr(session, 'streaming', False):
-                _drivers._drive_neural_session_streaming(
+                _drivers.drive_neural_session_streaming(
                     model, session, channel_runner=runner)
             else:
                 _drivers.drive_neural_session(model, session, allow_multi_modality=True,
@@ -96,12 +96,12 @@ class BehaviorSessions(_SessionCapability):
             f'neural:{region}' for region in model.region_layer_map}
 
     def participate(self, model, session) -> None:
-        requested = set(_drivers._requested_output_channels(session))
+        requested = set(_drivers.requested_output_channels(session))
         task = getattr(session, 'task_context', None)
         if requested != {'behavior'} or (task is not None and task.response is not None):
             _drivers.drive_behavior_and_neural_session(model, session)
         elif getattr(session, 'streaming', False):
-            _drivers._drive_behavior_session_streaming(model, session)
+            _drivers.drive_behavior_session_streaming(model, session)
         else:
             _drivers.drive_behavior_session(model, session)
 
@@ -122,7 +122,7 @@ class MotorSessions(_SessionCapability):
         return set(channels) == {'motor'}
 
     def participate(self, model, session) -> None:
-        _drivers._drive_environment_session_via_process(model, session)
+        _drivers.drive_environment_session(model, session)
 
 
 class PerturbationSessions(_SessionCapability):
@@ -141,7 +141,7 @@ class PerturbationSessions(_SessionCapability):
         return set(channels) == {'perturbation'}
 
     def participate(self, model, session) -> None:
-        _drivers._drive_state_change_session_via_process(model, session)
+        _drivers.drive_state_change_session(model, session)
 
 
 for _capability in (NeuralSessions(), BehaviorSessions(), MotorSessions(),

@@ -25,8 +25,8 @@ from .selection import CompositeSelector, LayerSelector, UnitSelector, _promote_
 from .streaming import StreamEvent
 from brainscore_core._sessions.helpers import (
     drain_session_inputs as _drain_neural_stream_events,
-    _reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
-    _requested_output_channels,
+    reconstruct_stimulus_set_from_events as _reconstruct_neural_stimulus_set,
+    requested_output_channels,
     session_stimuli as _neural_stimuli_from_stream_session,
 )
 
@@ -597,7 +597,7 @@ class BrainScoreModel(UnifiedModel):
         before it reaches any part (Contract Rules v3, rule 5.5).
         """
         with _one_session_at_a_time(self):
-            handler = self.check_session_support(_requested_output_channels(session))
+            handler = self.check_session_support(requested_output_channels(session))
             from .capabilities.registry import _setup_once
             from brainscore_core._sessions.view import DeclaredInputSession
             _setup_once(self, handler)
