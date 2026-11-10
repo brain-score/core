@@ -55,6 +55,7 @@ from ._data import assembly_builder
 from ._data import clock
 from ._data import multimodal
 from ._data import text
+from ._data import time_axis
 from ._runtime import environment_check
 from ._runtime import extraction_cache
 from ._runtime import hf_compat
@@ -82,6 +83,7 @@ for _name, _module in (
     ('clock', clock),
     ('multimodal', multimodal),
     ('text', text),
+    ('time_axis', time_axis),
     ('environment_check', environment_check),
     ('extraction_cache', extraction_cache),
     ('hf_compat', hf_compat),

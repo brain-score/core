@@ -218,6 +218,7 @@ _COMPONENT_MODULES = {
     'clock': '_data.clock',
     'multimodal': '_data.multimodal',
     'text': '_data.text',
+    'time_axis': '_data.time_axis',
     'environment_check': '_runtime.environment_check',
     'extraction_cache': '_runtime.extraction_cache',
     'hf_compat': '_runtime.hf_compat',
