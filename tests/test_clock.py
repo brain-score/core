@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import brainscore_core
@@ -238,3 +239,105 @@ def test_validation_does_not_change_the_assembly():
     before = dict(a.attrs)
     clk.validate_time_axis(a, duration_ms=3000.0)
     assert a.attrs == before and list(a['time_bin_start_ms'].values) == [0, 750]
+
+
+# --- review round: Codex 2026-11-09 ---------------------------------------
+
+def test_empty_time_axis_is_rejected():
+    a = assembly([], [])
+    assert clk.validate_time_axis(a, media_clock()) == ['empty time axis']
+
+
+def test_non_increasing_explicit_centers_are_rejected():
+    # Bins increase and each center lies in its bin, but the centers do not increase.
+    a = assembly([0, 100], [200, 300], centers=[150, 120])
+    assert any('not strictly increasing' in p for p in clk.validate_time_axis(a, media_clock()))
+
+
+def test_derived_centers_follow_validate_stream():
+    # Without time_bin_center_ms, centers are (start + end) / 2 and must increase.
+    a = assembly([0, 10], [100, 20])
+    problems = clk.validate_time_axis(a, media_clock())
+    assert any('not strictly increasing' in p for p in problems)
+
+
+@pytest.mark.parametrize('bad', [np.inf, -np.inf, np.nan])
+def test_non_finite_times_are_rejected(bad):
+    a = assembly([0, 750], [750, 1500], centers=[375, bad])
+    assert clk.validate_time_axis(a, media_clock()) == ['non-finite timestamps']
+
+
+def test_duration_tolerance_matches_validate_stream():
+    assert clk.DURATION_TOLERANCE_MS == 1e-6
+    inside = assembly([0, 1500], [1500, 3000 + 5e-7])
+    assert clk.validate_time_axis(inside, media_clock(), duration_ms=3000.0) == []
+    outside = assembly([0, 1500], [1500, 3000 + 1e-3])
+    assert any('past the duration' in p
+               for p in clk.validate_time_axis(outside, media_clock(), duration_ms=3000.0))
+
+
+def test_negative_times_without_duration_are_allowed():
+    a = assembly([-200, 0], [0, 200])
+    assert clk.validate_time_axis(a, media_clock(origin='trial_onset',
+                                                 reference_input=None)) == []
+
+
+def test_non_numeric_coordinate_is_a_problem_not_an_error():
+    a = assembly(['a', 'b'], [750, 1500])
+    assert clk.validate_time_axis(a, media_clock()) == ['time_bin_start_ms is not numeric']
+
+
+def test_multiindex_level_coordinates_are_read():
+    a = assembly([0, 750, 1500], [750, 1500, 2250], [375, 1125, 1875], attrs=media_clock())
+    index = a.indexes['time_bin']
+    assert isinstance(index, pd.MultiIndex)
+    assert {'time_bin_start_ms', 'time_bin_end_ms', 'time_bin_center_ms'} <= set(index.names)
+    assert clk.validate_time_axis(a, duration_ms=2250.0) == []
+    bad = assembly([0, 750, 1500], [750, 1500, 2250], [375, 1125, 2250], attrs=media_clock())
+    assert isinstance(bad.indexes['time_bin'], pd.MultiIndex)
+    assert clk.validate_time_axis(bad) == ['a center lies outside its [start, end) bin']
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -1.0, '10', None])
+def test_invalid_requested_tolerance_is_a_reason_not_an_error(value):
+    if value is None:
+        assert clk.check_clock_compatibility(media_clock(), media_clock(), tolerance_ms=value)
+        return
+    match = clk.check_clock_compatibility(media_clock(), media_clock(), tolerance_ms=value)
+    assert not match
+    assert any('requested tolerance_ms' in reason for reason in match.reasons)
+
+
+def test_coverage_overlapping_missing_is_reported():
+    clock = media_clock(coverage_ms=[[0.0, 1000.0]], missing_ms=[[900.0, 1200.0]])
+    assert any('overlaps coverage_ms' in p for p in clk.validate_clock(clock))
+    touching = media_clock(coverage_ms=[[0.0, 1000.0]], missing_ms=[[1000.0, 1200.0]])
+    assert clk.validate_clock(touching) == []
+
+
+def test_unknown_accuracy_fails_a_tolerance_check():
+    a, b = media_clock(), media_clock(accuracy='unknown')
+    assert clk.check_clock_compatibility(a, b)
+    match = clk.check_clock_compatibility(a, b, tolerance_ms=100.0)
+    assert not match and "accuracy 'unknown'" in match.reasons[0]
+
+
+def test_reference_sha256_and_media_offset_keys():
+    a = media_clock(reference_sha256='aa' * 32, media_offset_ms=1250.0)
+    assert clk.validate_clock(a) == []
+    assert clk.check_clock_compatibility(a, media_clock(reference_sha256='aa' * 32))
+    assert clk.check_clock_compatibility(a, media_clock())  # one side unstated
+    assert clk.check_clock_compatibility(a, {**a, 'media_offset_ms': 0.0})  # not compared
+    match = clk.check_clock_compatibility(a, media_clock(reference_sha256='bb' * 32))
+    assert not match and match.reasons[0].startswith('reference_sha256 differs')
+    assert clk.validate_clock(media_clock(reference_sha256=''))
+    assert clk.validate_clock(media_clock(media_offset_ms=float('nan')))
+    built = clk.clock_descriptor(origin='media_start', reference_input='audio', anchor='center',
+                                 accuracy='approximate', description='x',
+                                 reference_sha256='cc' * 32, media_offset_ms=0.0)
+    assert built['reference_sha256'] == 'cc' * 32 and built['media_offset_ms'] == 0.0
+
+
+def test_docstrings_state_the_compatibility_meaning_and_migration():
+    assert 'not proof that the timing' in clk.check_clock_compatibility.__doc__
+    assert 'Migration note' in clk.__doc__ and 'arange(n) * TR' in clk.__doc__
