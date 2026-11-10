@@ -68,11 +68,11 @@ def _single_row_stimuli(session, event: StreamEvent, stream_index: int):
             except KeyError:
                 row = None
             if row is not None and len(row) == 1:
-                return _preserve_stimulus_set_type(stimulus_set, row)
-    return _reconstruct_stimulus_set_from_events([event])
+                return preserve_stimulus_set_type(stimulus_set, row)
+    return reconstruct_stimulus_set_from_events([event])
 
 
-def _preserve_stimulus_set_type(original, sliced):
+def preserve_stimulus_set_type(original, sliced):
     """Keep StimulusSet-specific attributes (stimulus_paths) across a row slice."""
     for attribute in ("stimulus_paths", "identifier", "name"):
         if hasattr(original, attribute):
@@ -113,7 +113,7 @@ def session_stimuli(session: Any, events: list[StreamEvent]) -> Any:
     """
     if getattr(session, "stimulus_set", None) is not None:
         return session.stimulus_set
-    return _reconstruct_stimulus_set_from_events(events)
+    return reconstruct_stimulus_set_from_events(events)
 
 
 def _spans_several_inputs(events: list[StreamEvent]) -> bool:
@@ -125,7 +125,7 @@ def _spans_several_inputs(events: list[StreamEvent]) -> bool:
     return len(families) > 1
 
 
-def _reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
+def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     """Rebuild a minimal StimulusSet from event-carried input columns.
 
     This fallback preserves only input-channel payload columns plus
@@ -193,7 +193,7 @@ def _neural_channels(record) -> tuple:
     return tuple(f"neural:{region}" for region in regions)
 
 
-def _requested_output_channels(session) -> list[str]:
+def requested_output_channels(session) -> list[str]:
     requested = getattr(session, "requested_output_channels", None)
     if requested is not None:
         return list(requested)
@@ -208,7 +208,7 @@ def _requested_output_channels(session) -> list[str]:
     )
 
 
-def _behavior_stimuli_from_session(session, task_context):
+def behavior_stimuli_from_session(session, task_context):
     events = [event for event in drain_session_inputs(session)
               if event.channel != 'instruction' and event.meta.get('role') != 'fitting']
     if events or getattr(session, 'stimulus_set', None) is not None:
@@ -319,7 +319,7 @@ def _table_row_position(session, event: StreamEvent) -> Optional[int]:
 def _table_row_stimuli(session, position: int):
     """A one-row slice of the session's table, selected by position."""
     table = session.stimulus_set
-    return _preserve_stimulus_set_type(table, table.iloc[[position]])
+    return preserve_stimulus_set_type(table, table.iloc[[position]])
 
 
 def _behavior_events(task_context, scoring_stimuli) -> list[StreamEvent]:

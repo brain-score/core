@@ -1,6 +1,6 @@
 """Tier 1 streaming perception: consume a perception session one input at a time.
 
-The motor path already streamed (`_drive_environment_session_via_process` pulls,
+The motor path already streamed (`drive_environment_session` pulls,
 processes, emits, pulls again). The perception path drained the whole session up front
 and made a single `process()` call, so "UMI streams" was only true for one of the four
 drivers. These tests cover the perception twin.
@@ -117,13 +117,13 @@ def test_batch_multi_region_records_once_and_demultiplexes_channels():
 
 @pytest.mark.unit
 def test_streaming_multi_region_records_once_and_demultiplexes_each_window():
-    from brainscore_core.streaming_helpers import _drive_neural_session_streaming
+    from brainscore_core.streaming_helpers import drive_neural_session_streaming
 
     subject = _MultiRegionSubject()
     session = _request_two_regions(StreamingStimulusSetSession(
         _stimulus_set(3), record='early'))
 
-    _drive_neural_session_streaming(subject, session)
+    drive_neural_session_streaming(subject, session)
 
     assert subject.recording_calls == [['early', 'late']]
     assert subject.process_calls == 3
@@ -162,8 +162,8 @@ def test_streaming_multi_region_rejects_missing_layer_provenance():
 def test_streaming_session_processes_one_stimulus_at_a_time():
     subject = _CountingSubject()
     session = StreamingStimulusSetSession(_stimulus_set(4), record='IT')
-    from brainscore_core.streaming_helpers import _drive_neural_session_streaming
-    _drive_neural_session_streaming(subject, session)
+    from brainscore_core.streaming_helpers import drive_neural_session_streaming
+    drive_neural_session_streaming(subject, session)
     # four stimuli -> four separate process() calls, each of exactly one row
     assert subject.call_sizes == [1, 1, 1, 1]
 
@@ -173,8 +173,8 @@ def test_streaming_session_never_materializes_the_whole_stream():
     """The point of streaming: inputs need not all exist at once."""
     session = StreamingStimulusSetSession(_stimulus_set(50), record='IT')
     subject = _CountingSubject()
-    from brainscore_core.streaming_helpers import _drive_neural_session_streaming
-    _drive_neural_session_streaming(subject, session)
+    from brainscore_core.streaming_helpers import drive_neural_session_streaming
+    drive_neural_session_streaming(subject, session)
     # one row carries a single input column here, so at most one event is ever buffered
     assert session.max_events_held <= 1, (
         f"held {session.max_events_held} events at once; the stream was pre-drained "
@@ -185,8 +185,8 @@ def test_streaming_session_never_materializes_the_whole_stream():
 def test_streaming_emits_one_output_event_per_input():
     subject = _CountingSubject()
     session = StreamingStimulusSetSession(_stimulus_set(3), record='IT')
-    from brainscore_core.streaming_helpers import _drive_neural_session_streaming
-    _drive_neural_session_streaming(subject, session)
+    from brainscore_core.streaming_helpers import drive_neural_session_streaming
+    drive_neural_session_streaming(subject, session)
     emitted = [e for e in session.emitted if e.channel == 'neural:IT']
     assert len(emitted) == 3
     assert [e.meta['stream_index'] for e in emitted] == [0, 1, 2]
@@ -201,7 +201,7 @@ def test_streaming_and_batch_agree():
     interface change, not a scientific one.
     """
     from brainscore_core.streaming_helpers import (
-        _drive_neural_session_streaming, _drive_neural_session_via_process)
+        drive_neural_session_streaming, _drive_neural_session_via_process)
 
     stim = _stimulus_set(5)
 
@@ -212,7 +212,7 @@ def test_streaming_and_batch_agree():
 
     stream_subject = _CountingSubject()
     stream_session = StreamingStimulusSetSession(stim, record='IT')
-    _drive_neural_session_streaming(stream_subject, stream_session)
+    drive_neural_session_streaming(stream_subject, stream_session)
     stream_out = stream_session.collect('neural:IT')
 
     assert batch_out.shape == stream_out.shape
@@ -234,7 +234,7 @@ def test_streaming_preserves_presentation_metadata():
             return super().process(stimuli)
 
     session = StreamingStimulusSetSession(stim, record='IT')
-    from brainscore_core.streaming_helpers import _drive_neural_session_streaming
-    _drive_neural_session_streaming(_MetaSubject(), session)
+    from brainscore_core.streaming_helpers import drive_neural_session_streaming
+    drive_neural_session_streaming(_MetaSubject(), session)
     assert 'object_name' in seen['columns'], (
         "streamed rows lost presentation metadata; metrics keyed on it would break")

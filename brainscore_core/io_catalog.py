@@ -21,9 +21,17 @@ replaces the type system, it only flags obvious payload mismatches early.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from types import MappingProxyType
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from .streaming import parse_channel
+
+# Preserve the column ownership used by model construction and registration.
+BUILTIN_STIMULUS_COLUMNS: Mapping[str, str] = MappingProxyType({
+    'image_file_name': 'vision', 'image_path': 'vision', 'filename': 'vision',
+    'sentence': 'text', 'text': 'text', 'video_path': 'vision',
+    'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio',
+})
 
 INPUT = "input"
 OUTPUT = "output"

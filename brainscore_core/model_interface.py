@@ -1,7 +1,7 @@
-"""Compatibility facade for the Brain-Score model interface.
+"""Public names of the Brain-Score subject contract and its events.
 
-The implementation lives in smaller modules, but all names historically
-importable from ``brainscore_core.model_interface`` remain importable here.
+The concrete ``BrainScoreModel``, its unit selectors and its capability
+registry live in the unified ``brainscore`` package.
 """
 
 from abc import ABC, abstractmethod
@@ -24,16 +24,4 @@ from .events import (
     dispatch_metric,
     output_event_kind,
 )
-from .selection import (
-    CompositeSelector,
-    FunctionalSelection,
-    IndexSelection,
-    LayerSelector,
-    RandomSelection,
-    UnitSelection,
-    UnitSelector,
-    _promote_to_selector,
-)
 from .contract import Subject, TaskContext, UnifiedModel
-from .extractor import Extractor  # noqa: F401  (public protocol)
-from .brainscore_model import BrainScoreModel

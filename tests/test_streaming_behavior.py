@@ -14,7 +14,7 @@ import pytest
 from brainscore_core.contract import TaskContext
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
-    _drive_behavior_session_streaming,
+    drive_behavior_session_streaming,
     _drive_behavior_session_via_process,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
@@ -72,7 +72,7 @@ def _context(stimuli):
 def test_streaming_behavior_runs_one_trial_at_a_time():
     stimuli = _stimuli(5)
     subject, session = _Subject(), _Session(_context(stimuli), streaming=True)
-    _drive_behavior_session_streaming(subject, session)
+    drive_behavior_session_streaming(subject, session)
     assert subject.process_sizes == [1, 1, 1, 1, 1]
     assert len(session.emitted) == 5
 
@@ -82,7 +82,7 @@ def test_start_task_runs_exactly_once_not_per_trial():
     """Refitting the readout on every trial would change what is measured."""
     stimuli = _stimuli(8)
     subject, session = _Subject(), _Session(_context(stimuli), streaming=True)
-    _drive_behavior_session_streaming(subject, session)
+    drive_behavior_session_streaming(subject, session)
     assert subject.start_task_calls == 1, (
         f"start_task ran {subject.start_task_calls} times; the behavioral readout is "
         "fit there, so running it inside the trial loop refits per trial")
@@ -97,7 +97,7 @@ def test_streaming_and_batch_behavior_agree():
     batch_out = batch_session.emitted[0].payload
 
     stream_subject, stream_session = _Subject(), _Session(_context(stimuli), streaming=True)
-    _drive_behavior_session_streaming(stream_subject, stream_session)
+    drive_behavior_session_streaming(stream_subject, stream_session)
     import xarray as xr
     stream_out = xr.concat([e.payload for e in stream_session.emitted], dim='presentation')
 
@@ -109,7 +109,7 @@ def test_streaming_and_batch_behavior_agree():
 def test_each_trial_is_tagged_with_its_index():
     stimuli = _stimuli(4)
     subject, session = _Subject(), _Session(_context(stimuli), streaming=True)
-    _drive_behavior_session_streaming(subject, session)
+    drive_behavior_session_streaming(subject, session)
     assert [e.meta['trial_index'] for e in session.emitted] == [0, 1, 2, 3]
     assert all(e.meta['streaming'] is True for e in session.emitted)
     assert all(e.channel == 'behavior' for e in session.emitted)
@@ -125,4 +125,4 @@ def test_missing_task_context_fails_fast():
             self.task_context = None
 
     with pytest.raises(ValueError, match="task_context"):
-        _drive_behavior_session_streaming(_Subject(), _NoContext())
+        drive_behavior_session_streaming(_Subject(), _NoContext())

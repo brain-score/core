@@ -22,7 +22,7 @@ def declared_only(stimulus_set, channels):
     """
     if stimulus_set is None:
         return None
-    from brainscore_core._sessions.helpers import _channel_for_stimulus_column, _preserve_stimulus_set_type
+    from brainscore_core._sessions.helpers import _channel_for_stimulus_column, preserve_stimulus_set_type
     declared = frozenset(channels)
 
     def is_declared(channel):
@@ -35,7 +35,7 @@ def declared_only(stimulus_set, channels):
             omitted.append(column)
     if not omitted:
         return stimulus_set
-    return _preserve_stimulus_set_type(stimulus_set, stimulus_set.drop(columns=omitted))
+    return preserve_stimulus_set_type(stimulus_set, stimulus_set.drop(columns=omitted))
 
 
 class DeclaredInputSession(Session):

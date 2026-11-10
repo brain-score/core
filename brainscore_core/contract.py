@@ -9,7 +9,6 @@ from .io_catalog import modalities_to_input_channels
 
 if TYPE_CHECKING:
     from .streaming import Session
-    from .selection import UnitSelector
 
 
 @dataclass
@@ -166,7 +165,7 @@ class UnifiedModel(Subject):
 
     @property
     @abstractmethod
-    def region_layer_map(self) -> Mapping[str, Union[str, "UnitSelector"]]:
+    def region_layer_map(self) -> Mapping[str, Any]:
         ...
 
     @property

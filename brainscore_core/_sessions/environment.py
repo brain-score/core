@@ -285,10 +285,10 @@ def run_environment(subject, environment, *, seed=None, options=None,
 
 def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
     """Drive an environment for a subject that exposes process()."""
-    _drive_environment_session_via_process(subject, session, driver="process")
+    drive_environment_session(subject, session, driver="process")
 
 
-def _drive_environment_session_via_process(
+def drive_environment_session(
     subject, session: EnvironmentSession, driver: str = "interact"
 ) -> None:
     """Drive a live environment session through existing EnvironmentStep dispatch."""

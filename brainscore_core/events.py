@@ -9,7 +9,6 @@ if TYPE_CHECKING:  # annotation-only; resolved against the vendored brainio
     from brainscore_core.supported_data_standards.brainio.assemblies import (
         NeuroidAssembly, BehavioralAssembly)
     from brainscore_core._data.multimodal import MultimodalStimulusSet
-    from .selection import UnitSelection
 
 
 @dataclass
@@ -116,7 +115,7 @@ class StateChange:
         model.process(StateChange(kind='reset', handle_id=applied.handle_id))
     """
     kind: str
-    target: Optional[Union['Selection', 'UnitSelection']] = None
+    target: Optional[Union['Selection', Any]] = None
     perturbation: Optional['Perturbation'] = None
     handle_id: Optional[str] = None  # for kind='reset', identifies what to undo
     metadata: Dict[str, Any] = field(default_factory=dict)

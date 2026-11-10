@@ -11,7 +11,6 @@ def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
     Existing registrations require explicit replacement.
     """
     from brainscore_core.streaming import parse_channel
-    from brainscore_core.brainscore_model import BrainScoreModel
     _, address = parse_channel(entry.name)
     if address is not None:
         raise ValueError("Register a channel family, not an addressed instance")
@@ -23,7 +22,7 @@ def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
     for column in columns:
         if not isinstance(column, str) or not column:
             raise ValueError('Stimulus columns must be nonempty strings')
-        existing = {**BrainScoreModel.COLUMN_TO_MODALITY, **io_catalog.stimulus_columns()}.get(column)
+        existing = {**io_catalog.BUILTIN_STIMULUS_COLUMNS, **io_catalog.stimulus_columns()}.get(column)
         if existing is not None and existing != entry.name and not replace:
             raise ValueError(f'Column {column!r} already belongs to {existing!r}')
     io_catalog.register(entry, replace=replace)
