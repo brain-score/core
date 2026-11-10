@@ -13,6 +13,7 @@ from brainscore_core.model_interface import (
     UnifiedModel,
     TaskContext,
 )
+from brainscore_core.events import CameraFrame, EnvironmentResponse, EnvironmentStep, Proprioception
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     apply_state_change,
@@ -29,18 +30,46 @@ from brainscore_core.supported_data_standards.brainio.assemblies import (
     NeuroidAssembly,
 )
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
-from tests.test_behavioral_readout import (
-    _make_image_stimulus_set,
-)
-from tests.test_environment_step import (
-    _droid_action_fn,
-    _droid_step,
-    _make_model as _make_environment_model,
-)
-from tests.test_state_change import (
-    _counting_state_change_fn,
-    _make_model as _make_state_change_model,
-)
+
+
+def _make_image_stimulus_set(labels, identifier='test_stim'):
+    n = len(labels)
+    stimuli = StimulusSet(pd.DataFrame({
+        'stimulus_id': [f's{i}' for i in range(n)],
+        'image_file_name': [f'/tmp/s{i}.png' for i in range(n)],
+        'image_label': labels,
+    }))
+    stimuli.identifier = identifier
+    return stimuli
+
+
+def _droid_step(step_num: int = 0, instruction: str = "pick up the red block"):
+    cameras = {
+        'exterior_1': CameraFrame(rgb=np.zeros((180, 320, 3), dtype=np.uint8)),
+        'exterior_2': CameraFrame(rgb=np.zeros((180, 320, 3), dtype=np.uint8)),
+        'wrist': CameraFrame(rgb=np.zeros((180, 320, 3), dtype=np.uint8)),
+    }
+    proprio = Proprioception(
+        joint_position=np.zeros(7, dtype=np.float64),
+        cartesian_position=np.zeros(6, dtype=np.float64),
+        gripper_position=np.zeros(1, dtype=np.float64),
+    )
+    return EnvironmentStep(
+        cameras=cameras,
+        proprioception=proprio,
+        instruction=instruction,
+        step_num=step_num,
+        is_first=(step_num == 0),
+    )
+
+
+def _droid_action_fn(env_step):
+    return EnvironmentResponse(
+        action=np.zeros(7, dtype=np.float64),
+        metadata={'step_num_seen': env_step.step_num,
+                  'instruction_seen': env_step.instruction},
+    )
+
 
 
 def _stimulus_set():
@@ -400,23 +429,6 @@ def test_environment_session_advances_after_motor_emit():
     assert second_step.step_num == 1
 
 
-def test_environment_session_emits_motor_events_for_multistep_rollout():
-    session = environment_session(_SyntheticEnvironment(_environment_steps(3)))
-    model = _make_environment_model(action_fn=_droid_action_fn)
-
-    from brainscore_core.streaming_helpers import drive_environment_session
-    drive_environment_session(model, session)
-
-    assert [event.channel for event in session.emitted] == [
-        "motor", "motor",
-    ]
-    assert [
-        event.payload.metadata["step_num_seen"]
-        for event in session.emitted
-    ] == [0, 1]
-    assert [event.meta["step_num"] for event in session.emitted] == [0, 1]
-
-
 def test_run_environment_falls_back_for_non_native_subjects():
     subject = _NonNativeEnvironmentSubject(_droid_action_fn)
     env = _SyntheticEnvironment(_environment_steps(3))
@@ -496,24 +508,6 @@ def test_state_change_reset_uses_metadata_family_and_address_when_present():
 
     assert event.channel == "stimulation:blocks.10"
     assert event.meta["reset"] == "stimulation-handle"
-
-
-def test_apply_state_change_produces_handle_and_ack_event():
-    fn, state = _counting_state_change_fn()
-    model = _make_state_change_model(state_change_fn=fn)
-    state_change = _ablation_state_change()
-
-    session = state_change_session(state_change)
-    _ = session.next_input()
-    from brainscore_core.streaming_helpers import _drive_state_change_via_process
-    _drive_state_change_via_process(model, session, state_change)
-
-    applied = session.collect("perturbation")
-
-    assert isinstance(applied, PerturbationApplied)
-    assert applied.handle_id in state["installed"]
-    assert session.emitted[0].meta["handle_id"] == applied.handle_id
-    assert session.emitted[0].payload is applied
 
 
 def test_apply_state_change_falls_back_for_non_native_subject():

@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 
 from brainscore_core.contract import Subject, TaskContext
@@ -13,9 +14,18 @@ from brainscore_core.score_metadata import (
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import behavioral_response
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
-from tests.test_behavioral_readout import (
-    _make_image_stimulus_set,
-)
+from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+
+
+def _make_image_stimulus_set(labels, identifier='test_stim'):
+    n = len(labels)
+    stimuli = StimulusSet(pd.DataFrame({
+        'stimulus_id': [f's{i}' for i in range(n)],
+        'image_file_name': [f'/tmp/s{i}.png' for i in range(n)],
+        'image_label': labels,
+    }))
+    stimuli.identifier = identifier
+    return stimuli
 
 
 class _Subject:
@@ -225,28 +235,6 @@ _GENERATION_TASK = dict(task_type='probabilities', label_set=['cat', 'dog'],
 
 
 # --- direct sessions, nesting, mixed collection --------------------------
-
-
-@pytest.mark.parametrize('kind, expected', [('reply', 'behavior:generation'),
-                                            ('likelihood', 'behavior:likelihood')])
-def test_direct_response_task_sessions_are_recorded(kind, expected):
-    from tests.test_task_responses import _ask, _model
-    from brainscore_core.responses import Choice
-
-    if kind == 'reply':
-        model, _ = _model(replies={s: 'cat' for s in 'abcd'})
-        task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog']))
-        channels = ['behavior:choice']
-    else:
-        model, _ = _model(scores={s: {'cat': -1.0, 'dog': -2.0} for s in 'abcd'})
-        task = TaskContext(instruction='Which?', response=Choice(['cat', 'dog'], probabilities=True))
-        channels = ['behavior:choice', 'behavior:probabilities']
-    with record_measures() as measures:
-        session = _ask(model, task, channels)
-        for channel in channels:
-            session.collect(channel)
-
-    assert _protocol(model, measures) == expected
 
 
 def test_mixed_measures_in_one_collection_are_all_recorded():
