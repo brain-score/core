@@ -57,8 +57,12 @@ benchmark applies its metric to those responses. `apply_state_change` and
 
 `UnifiedModel` is a `Subject` base with task, recording, and `process()` methods.
 It requires `identifier`, `region_layer_map`, and `supported_modalities`, and
-derives channel declarations from the modalities. Use `BrainScoreModel` for a
-configurable implementation with extraction helpers.
+derives channel declarations from the modalities. Use `BrainScoreModel` from the
+unified `brainscore` package (`from brainscore import BrainScoreModel`) for a
+configurable implementation with extraction helpers. Core no longer contains
+it: `brainscore_core.BrainScoreModel`, the unit selectors and
+`brainscore_core.capabilities` moved to `brainscore`, `brainscore.selection`
+and `brainscore.capabilities`.
 
 `UnifiedModel` is a subclass of `Subject`, not an alias. `BrainScoreModel` and
 the vision and language adapters inherit this compatibility base, so they
