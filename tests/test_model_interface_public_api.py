@@ -68,6 +68,7 @@ def test_extractor_is_not_a_subject_member():
 
 # Keep the existing imports usable as implementation files move into packages.
 import importlib
+import json
 
 
 _COMPONENT_MODULES = {
@@ -102,20 +103,37 @@ def test_component_imports_share_the_same_module(name, implementation):
     assert public is organized
 
 
-@pytest.mark.parametrize('name,implementation', _COMPONENT_MODULES.items())
-@pytest.mark.parametrize('first', ['public', 'implementation'])
-def test_component_import_order_stays_framework_free(name, implementation, first):
-    paths = ['brainscore_core.' + name, 'brainscore_core.' + implementation]
-    if first == 'implementation':
-        paths.reverse()
-    code = (
-        'import importlib, sys\n'
-        f'first = importlib.import_module({paths[0]!r})\n'
-        f'second = importlib.import_module({paths[1]!r})\n'
-        'assert first is second\n'
-        "assert not {'torch', 'transformers', 'tensorflow', 'jax'} & sys.modules.keys()\n"
-    )
-    subprocess.run([sys.executable, '-I', '-c', code], check=True)
+_IMPORT_ORDER_SCRIPT = """
+import importlib, json, sys
+modules = json.loads(sys.argv[1])
+frameworks = {'torch', 'transformers', 'tensorflow', 'jax'}
+failures = []
+for name, implementation in modules.items():
+    for first in ('public', 'implementation'):
+        # Forget the package so each case imports in a clean state.
+        for loaded in [m for m in sys.modules if m == 'brainscore_core' or m.startswith('brainscore_core.')]:
+            del sys.modules[loaded]
+        paths = ['brainscore_core.' + name, 'brainscore_core.' + implementation]
+        if first == 'implementation':
+            paths.reverse()
+        try:
+            one = importlib.import_module(paths[0])
+            two = importlib.import_module(paths[1])
+            assert one is two, 'public and implementation modules differ'
+            assert not frameworks & sys.modules.keys(), 'a framework was imported'
+        except Exception as error:
+            failures.append(f'{name} ({first} first): {type(error).__name__}: {error}')
+print(json.dumps(failures))
+"""
+
+
+def test_component_import_order_stays_framework_free():
+    # One interpreter checks every module and order; a failure names each one.
+    run = subprocess.run([sys.executable, '-I', '-c', _IMPORT_ORDER_SCRIPT, json.dumps(_COMPONENT_MODULES)],
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    failures = json.loads(run.stdout.strip().splitlines()[-1])
+    assert not failures, '\n'.join(failures)
 
 
 def test_session_facade_preserves_implementation_identity():
