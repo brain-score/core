@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Sequence, Union
-from ..streaming import Session
+from ..streaming import Session, with_trial_protocol
 from ..events import StateChange
 from ..supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
@@ -17,14 +17,21 @@ from .payloads import (
 )
 
 
+def _protocol(task_context) -> str:
+    return 'independent' if task_context is None else task_context.trial_protocol
+
+
 def table_session(stimulus_set, requested_output_channels=None, *, task_context=None,
                   time_bins=None, settings=None, record=None) -> Session:
     """One session that presents every row of ``stimulus_set``.
 
     The table stays on the session, so the batch drivers answer it with one
     ``process`` call; ``task_context``, ``time_bins`` and ``settings`` ride along.
+    The events mark the trials with ``begin`` / ``end`` as ``task_context.trial_protocol``
+    says (``independent`` without a task context).
     """
-    return Session(_stimulus_events(stimulus_set), requested_output_channels, task_context,
+    events = list(with_trial_protocol(_stimulus_events(stimulus_set), _protocol(task_context)))
+    return Session(events, requested_output_channels, task_context,
                    stimulus_set=stimulus_set, time_bins=time_bins, settings=settings,
                    record=record)
 
@@ -38,7 +45,9 @@ def stimulus_session(stimulus_set, record: Union[str, Sequence[str]] = "IT",
 def behavior_session(task_context) -> Session:
     """A session whose events are the task's instruction, fitting and scoring stimuli."""
     scoring = _behavior_stimuli_to_score(task_context)
-    return Session(_behavior_events(task_context, scoring), ('behavior',), task_context,
+    events = list(with_trial_protocol(_behavior_events(task_context, scoring),
+                                      _protocol(task_context)))
+    return Session(events, ('behavior',), task_context,
                    stimulus_set=scoring, scoring_stimuli=scoring)
 
 

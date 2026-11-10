@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from ..contract import TaskContext
-from ..streaming import CONTROL_CHANNEL, Session, StreamEvent, parse_channel
+from ..streaming import BEGIN, CONTROL_CHANNEL, Session, StreamEvent, parse_channel
 from ..events import StateChange
 from .environment import EnvironmentSource, drive_environment_session
 from .payloads import (
@@ -182,6 +182,7 @@ def _demultiplex_neural_output(output, channel_regions):
 def drive_neural_session_streaming(
     subject, session, driver: str = "interact_streaming",
     channel_runner: Optional[Callable] = None,
+    on_begin: Optional[Callable[[], None]] = None,
 ) -> None:
     """Pull one session input event, process it, emit its outputs, and repeat.
 
@@ -203,6 +204,9 @@ def drive_neural_session_streaming(
     last input column arrives. Every other event, and every event whose
     marker does not match the session's own table, is presented alone, as
     before. No event is dropped.
+
+    ``on_begin()`` runs at each ``begin`` control event, after the row before it
+    was presented.
     """
     channels = requested_output_channels(session)
     channel_regions = []
@@ -265,6 +269,9 @@ def drive_neural_session_streaming(
                 f"{type(event).__name__}."
             )
         if event.channel == CONTROL_CHANNEL:
+            present_row()                    # an episode mark ends the row before it
+            if on_begin is not None and event.payload == BEGIN:
+                on_begin()
             event = session.next_input()     # episode marks carry no stimulus
             continue
         position = _table_row_position(session, event)
@@ -402,7 +409,7 @@ def refuse_variance(subject, session) -> None:
 
 def drive_behavior_session(
     subject: Any, session: Any, task_context: Optional[TaskContext] = None,
-    driver: str = "interact",
+    driver: str = "interact", on_begin: Optional[Callable[[], None]] = None,
 ) -> None:
     """Answer a session's ``behavior`` request with ``start_task`` then one ``process`` call.
 
@@ -415,7 +422,8 @@ def drive_behavior_session(
     and instructions are not scored; the scored trials are the session's
     ``stimulus_set``, or the task's own stimuli when the session sends none.
     A request for trial-to-trial variance is refused before any compute. The
-    single response is sent on the ``behavior`` channel.
+    single response is sent on the ``behavior`` channel. ``on_begin()`` runs once
+    before the trials: this path keeps no history between them.
     """
     if task_context is None:
         task_context = getattr(session, "task_context", None)
@@ -425,6 +433,8 @@ def drive_behavior_session(
         )
     refuse_variance(subject, session)
     subject.start_task(task_context)
+    if on_begin is not None:
+        on_begin()
     stimuli = behavior_stimuli_from_session(session, task_context)
     if stimuli is None:
         raise ValueError(
@@ -448,7 +458,7 @@ _drive_behavior_session_via_process = drive_behavior_session
 
 def drive_behavior_session_streaming(
     subject, session: Session, task_context=None,
-    driver: str = "interact_streaming"
+    driver: str = "interact_streaming", on_begin: Optional[Callable[[], None]] = None,
 ) -> None:
     """Behavioral trials delivered one at a time.
 
@@ -459,7 +469,9 @@ def drive_behavior_session_streaming(
     outside the loop.
 
     Same responses as the batch driver; what changes is that the trial set need not
-    exist in full before the first response is produced.
+    exist in full before the first response is produced. ``on_begin()`` runs
+    before each trial under ``independent`` and once before the first under
+    ``conversation`` (``task_context.trial_protocol``).
     """
     if task_context is None:
         task_context = getattr(session, "task_context", None)
@@ -475,6 +487,9 @@ def drive_behavior_session_streaming(
             "task_context.metadata['stimulus_set'] or fitting_stimuli."
         )
     for trial_index, (row_index, _row) in enumerate(stimuli.iterrows()):
+        if on_begin is not None and (trial_index == 0
+                                     or task_context.trial_protocol == 'independent'):
+            on_begin()
         trial = preserve_stimulus_set_type(stimuli, stimuli.loc[[row_index]])
         output = subject.process(trial)
         session.respond(StreamEvent(

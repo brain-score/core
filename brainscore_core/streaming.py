@@ -90,6 +90,39 @@ def end_event(reason: str, t_ms: Optional[float] = None) -> StreamEvent:
     return StreamEvent(CONTROL_CHANNEL, END, t_ms, meta={'reason': reason})
 
 
+def with_trial_protocol(events: Iterable[Any], protocol: str = 'independent') -> Iterator[Any]:
+    """Mark the trials in ``events`` with ``begin`` / ``end('terminal')`` control events.
+
+    A trial is the run of events of one stimulus-table row: events with
+    ``meta['stimulus_index']`` that share ``meta['role']`` and ``meta['table_row']``
+    (rows of one input column carry none) and name no input column twice. Other events (an instruction, fitting rows) are not
+    trials and pass through. ``independent`` wraps each trial in its own episode;
+    ``conversation`` opens one episode at the first trial and closes it after the
+    last event. Lazy: nothing is read ahead of the trial being wrapped.
+    """
+    from brainscore_core.contract import TRIAL_PROTOCOLS
+    if protocol not in TRIAL_PROTOCOLS:
+        raise ValueError(f'trial_protocol must be one of {TRIAL_PROTOCOLS}; got {protocol!r}')
+    opened, key, columns = False, None, set()
+    for event in events:
+        meta = event.meta if isinstance(event, StreamEvent) else {}
+        is_trial = 'stimulus_index' in meta and meta.get('role') != 'fitting'
+        new_key = (meta.get('role'), meta.get('table_row'))
+        starts_row = is_trial and (new_key != key or meta.get('column') in columns)
+        if protocol == 'independent' and opened and (starts_row or not is_trial):
+            yield end_event('terminal')
+            opened = False
+        if is_trial and not opened:
+            yield begin_event(event.t_ms)
+            opened = True
+        if is_trial:
+            columns = {meta.get('column')} if starts_row else columns | {meta.get('column')}
+            key = new_key
+        yield event
+    if opened:
+        yield end_event('terminal')
+
+
 # Closed-loop steps are rows: a plain mapping of channel -> payload. One stream
 # per channel is ``row[channel] = payload``. Several named streams on one channel
 # (two cameras) are ``row['vision:image'] = NamedStreams({'wrist': a, 'exterior': b})``;

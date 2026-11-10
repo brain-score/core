@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Set
 
 from brainscore_core import io_catalog
+from brainscore_core.contract import required_traits_for
 from brainscore_core.io_catalog import canonical_modality, modalities_to_input_channels
 from brainscore_core.model_interface import Subject
 from brainscore_core.streaming import channel_declared, parse_channel
@@ -160,7 +161,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"'{benchmark_id}' sends {_format_channels(bench_inputs)}."
         )
 
-    required_traits = set(getattr(benchmark, 'required_traits', None) or ())
+    required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
+                                          getattr(benchmark, 'trial_protocol', 'independent'))
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
     if missing_traits:
         raise CompatibilityError(

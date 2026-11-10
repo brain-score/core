@@ -83,7 +83,7 @@ def test_static_neural_helper_runs_a_participate_only_subject():
     subject = _ParticipateOnly()
     out = neural_response(subject, _images(3), record='IT')
     assert out is subject.payloads[0]
-    assert len(subject.inputs) == 3
+    assert len([e for e in subject.inputs if e.channel != 'control']) == 3
 
 
 def test_static_behavior_helper_runs_a_participate_only_subject():

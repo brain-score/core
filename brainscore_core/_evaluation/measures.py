@@ -27,10 +27,19 @@ _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', de
 
 
 class MeasureRecord:
-    """The ``(kind, source)`` pairs seen during one scoring run."""
+    """The ``(kind, source)`` pairs seen during one scoring run, and the perturbation
+    handles its sessions applied and undid (``perturbation`` responses carry a
+    ``handle_id``; ``meta['kind'] == 'reset'`` marks an undo)."""
 
     def __init__(self) -> None:
         self.measures: Set[Tuple[str, Optional[str]]] = set()
+        self.applied: Set[str] = set()
+        self.undone: Set[str] = set()
+
+    @property
+    def unreleased(self) -> Set[str]:
+        """Handles applied during the run and not undone by it."""
+        return self.applied - self.undone
 
     @property
     def kinds(self) -> Set[str]:
@@ -61,6 +70,8 @@ def record_measures() -> Iterator[MeasureRecord]:
         _active.reset(token)
         if succeeded and outer is not None:
             outer.measures |= record.measures
+            outer.applied |= record.applied
+            outer.undone |= record.undone
 
 
 def note_measure(assembly) -> None:
@@ -76,9 +87,14 @@ def note_measure(assembly) -> None:
 
 
 def note_response(event) -> None:
-    """Note a response event a session accepts, if it is on a behavior channel."""
-    if is_behavior_channel(getattr(event, 'channel', None)):
+    """Note a response event a session accepts: a behavior measure, or a perturbation handle."""
+    channel = getattr(event, 'channel', None)
+    if is_behavior_channel(channel):
         note_measure(event.payload)
+    elif channel == 'perturbation':
+        record, meta = _active.get(), event.meta
+        if record is not None and meta.get('handle_id') is not None:
+            (record.undone if meta.get('kind') == 'reset' else record.applied).add(meta['handle_id'])
 
 
 def is_behavior_channel(channel) -> bool:

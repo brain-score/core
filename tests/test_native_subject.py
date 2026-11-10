@@ -158,4 +158,4 @@ def test_optional_model_specific_probe_is_still_honored():
 def test_memory_feature_probe_uses_native_session_without_layer_map():
     subject = TextSubject()
     assert _probe_feature_dim(subject, benchmark(), stimuli()) == (2, "language_network")
-    assert len(subject.seen) == 1
+    assert len([e for e in subject.seen if e.channel != 'control']) == 1

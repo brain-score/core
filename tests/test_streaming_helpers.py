@@ -141,6 +141,14 @@ def test_stimulus_session_emits_input_events_per_stimulus_column():
             break
         events.append(event)
 
+    # Each stimulus row is one independent trial: begin, its columns, end.
+    assert [event.channel for event in events] == [
+        "control", "vision", "text", "control", "control", "vision", "text", "control",
+    ]
+    assert [event.payload for event in events if event.channel == "control"] == [
+        "begin", "end", "begin", "end",
+    ]
+    events = [event for event in events if event.channel != "control"]
     assert [event.channel for event in events] == [
         "vision", "text", "vision", "text",
     ]
@@ -276,7 +284,11 @@ def test_behavior_session_emits_instruction_fitting_and_scoring_events():
     assert events[0].payload == "Choose the animal"
     assert events[0].meta["role"] == "instruction"
 
-    stimulus_events = events[1:]
+    # Fitting rows are not trials; each scoring row is one begin ... end.
+    assert [event.payload for event in events if event.channel == "control"] == [
+        "begin", "end", "begin", "end",
+    ]
+    stimulus_events = [event for event in events[1:] if event.channel != "control"]
     assert [event.channel for event in stimulus_events] == [
         "vision", "vision", "vision", "vision",
     ]
