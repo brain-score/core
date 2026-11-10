@@ -215,6 +215,7 @@ _COMPONENT_MODULES = {
     'legacy_facade': '_evaluation.legacy_facade',
     'nulls': '_evaluation.nulls',
     'assembly_builder': '_data.assembly_builder',
+    'clock': '_data.clock',
     'multimodal': '_data.multimodal',
     'text': '_data.text',
     'environment_check': '_runtime.environment_check',
