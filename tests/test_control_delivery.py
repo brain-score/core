@@ -10,7 +10,7 @@ from brainscore_core._evaluation.compatibility import CompatibilityError, check_
 from brainscore_core.streaming import (
     Session, StreamEvent, begin_event, end_event, respond_event,
 )
-from brainscore_core.streaming_helpers import EnvironmentSource, table_session
+from brainscore_core.streaming_helpers import EnvironmentSource, stimulus_session
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 
@@ -40,14 +40,14 @@ class _Reader(Subject):
 
 def test_a_subject_that_answers_every_event_gets_one_event_per_row():
     subject = _Reader()
-    session = table_session(_table(), ['behavior'])
+    session = stimulus_session(_table(), ['behavior'])
     subject.participate(session)
     assert subject.seen == ['text'] * 4 and len(session.emitted) == 4
 
 
 def test_a_subject_that_declares_control_receives_the_signals():
     subject = _Reader(control=True)
-    session = table_session(_table(2), ['behavior'])
+    session = stimulus_session(_table(2), ['behavior'])
     subject.participate(session)
     assert subject.seen == ['control', 'text', 'control'] * 2
 
@@ -58,7 +58,7 @@ def test_a_session_nobody_declared_for_delivers_no_control_events():
 
 
 def test_answering_a_trial_twice_names_the_channel_and_the_trial():
-    session = table_session(_table(), ['behavior'])
+    session = stimulus_session(_table(), ['behavior'])
     with pytest.raises(ValueError, match=r"'behavior'.*trial 1"):
         _Reader(answers=2).participate(session)
 
@@ -73,7 +73,7 @@ def test_several_channels_per_trial_and_a_late_batch_answer_are_fine():
             for event in events:
                 session.respond(StreamEvent('behavior', 'yes', event.t_ms))
                 session.respond(StreamEvent('neural:IT', np.zeros(2), event.t_ms))
-    session = table_session(_table(), ['behavior', 'neural:IT'])
+    session = stimulus_session(_table(), ['behavior', 'neural:IT'])
     Both().participate(session)
     assert len(session.emitted) == 8
 

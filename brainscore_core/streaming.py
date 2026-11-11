@@ -94,10 +94,10 @@ def _with_trial_memory(events: Iterable[Any], memory: str = 'none') -> Iterator[
     """Mark the trials in ``events`` with ``begin`` / ``end('terminal')`` control events.
 
     A trial is the run of events of one stimulus-table row: events with
-    ``meta['stimulus_index']`` that share ``meta['role']`` and ``meta['table_row']``
-    (rows of one input column carry none) and name no input column twice. Other events (an instruction, fitting rows) are not
-    trials and pass through. ``none`` wraps each trial in its own episode;
-    ``conversation`` opens one episode at the first trial and closes it after the
+    ``meta['stimulus_index']`` that share ``meta['table_row']``
+    (rows of one input column carry none) and name no input column twice.
+    Events without ``meta['stimulus_index']`` are not trials and pass through. ``none`` wraps each trial in its own episode;
+    ``history`` opens one episode at the first trial and closes it after the
     last event. Lazy: nothing is read ahead of the trial being wrapped.
     """
     from brainscore_core.contract import _TRIAL_MEMORIES
@@ -106,8 +106,8 @@ def _with_trial_memory(events: Iterable[Any], memory: str = 'none') -> Iterator[
     opened, key, columns = False, None, set()
     for event in events:
         meta = event.meta if isinstance(event, StreamEvent) else {}
-        is_trial = 'stimulus_index' in meta and meta.get('role') != 'fitting'
-        new_key = (meta.get('role'), meta.get('table_row'))
+        is_trial = 'stimulus_index' in meta
+        new_key = meta.get('table_row')
         starts_row = is_trial and (new_key != key or meta.get('column') in columns)
         if memory == 'none' and opened and (starts_row or not is_trial):
             yield end_event('terminal')
@@ -246,8 +246,7 @@ class Session(Source):
 
     def __init__(self, source: Any, requested_output_channels: Optional[Iterable[str]] = None,
                  task_context: Any = None, *, stimulus_set: Any = None, time_bins: Any = None,
-                 streaming: bool = False, settings: Any = None, record: Any = None,
-                 state_change: Any = None, scoring_stimuli: Any = None) -> None:
+                 streaming: bool = False, settings: Any = None) -> None:
         self.source = source if isinstance(source, Source) else FixedSource(source)
         self.requested_output_channels: Optional[tuple[str, ...]] = None
         if requested_output_channels is not None:
@@ -259,13 +258,13 @@ class Session(Source):
         self.task_context = task_context
         self.stimulus_set = stimulus_set
         self.time_bins = time_bins
-        self.streaming = streaming
+        self._streaming = streaming
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.
         self.settings = settings
-        self.record = record
-        self.state_change = state_change
-        self.scoring_stimuli = scoring_stimuli
+        # The last state change the subject received; a perturbation response
+        # without a handle or kind of its own is read against it.
+        self._state_change: Any = None
         self.dropped = 0
         self.emitted: list[StreamEvent] = []
         self._declared: Optional[frozenset] = None
@@ -277,6 +276,16 @@ class Session(Source):
         self.one_answer_per_trial = False
         self._observers: list[tuple] = []
         self._rewriters: list[Any] = []
+
+    @property
+    def streaming(self) -> bool:
+        """Answer one event at a time. Always so without a stimulus table: the inputs
+        then exist only as events, so there is nothing to answer in one call."""
+        return self._streaming or self.stimulus_set is None
+
+    @streaming.setter
+    def streaming(self, value: bool) -> None:
+        self._streaming = value
 
     def declare_inputs(self, channels: Iterable[str]) -> 'Session':
         """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
@@ -350,15 +359,20 @@ class Session(Source):
                     return event
             elif self._declared is None or channel_declared(event.channel, self._declared):
                 self._note_row(event)
+                self._note_state_change(event)
                 return event
         self._read_all = True
         return None
 
+    def _note_state_change(self, event: StreamEvent) -> None:
+        from .events import StateChange
+        if isinstance(event.payload, StateChange):
+            self._state_change = event.payload
+
     def _note_row(self, event: StreamEvent) -> None:
         # The row identity of the open trial: its first stimulus event names it.
         meta = event.meta
-        if (self._rows and self._rows[-1] is None and 'stimulus_index' in meta
-                and meta.get('role') != 'fitting'):
+        if self._rows and self._rows[-1] is None and 'stimulus_index' in meta:
             self._rows[-1] = meta['stimulus_index']
 
     @property
@@ -401,7 +415,7 @@ class Session(Source):
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
-        note_response(kept, self.state_change)
+        note_response(kept, self._state_change)
         self.emitted.append(kept)
         limit = self.source.history_limit
         if limit is not None and len(self.emitted) > limit:
@@ -411,7 +425,7 @@ class Session(Source):
     def _check_answered_once(self, event: StreamEvent) -> None:
         """Refuse a second answer for one trial on one channel.
 
-        Only a table session with ``trial_memory='none'`` marks its trials, so
+        Only a stimulus session with ``trial_memory='none'`` marks its trials, so
         only it sets ``one_answer_per_trial``. An answer belongs to the trial
         named by the ``stimulus_index`` in its meta, which is how a subject that
         reads every row first answers each row later. A label that repeats across

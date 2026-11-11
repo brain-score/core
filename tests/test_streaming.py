@@ -38,8 +38,8 @@ def test_parse_channel_valid_unaddressed(name, expected):
     [
         ("neural:IT", ("neural", "IT")),
         ("neural:language_network", ("neural", "language_network")),
-        ("lesion:layer20[0:256]", ("lesion", "layer20[0:256]")),
-        ("stimulation:language_model.layers.20", ("stimulation", "language_model.layers.20")),
+        ("neural:layer20[0:256]", ("neural", "layer20[0:256]")),
+        ("neural:language_model.layers.20", ("neural", "language_model.layers.20")),
     ],
 )
 def test_parse_channel_valid_addressed(name, expected):

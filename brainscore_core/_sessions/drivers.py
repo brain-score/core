@@ -190,11 +190,10 @@ def drive_neural_session_streaming(
     The batch driver drains the whole session up front and makes a single
     ``process()`` call, which is faster but requires every input to exist before
     scoring starts. This driver does not buffer ahead: the session decides whether
-    an event contains one stimulus, a bounded window, or a real-time delivery.
+    an event contains one stimulus, or a bounded window.
 
-    ``streaming_stimulus_session`` collapses batch size to one and may be slower;
-    ``windowed_stream`` restores bounded batches; ``paced_stream`` can additionally
-    drop or reject late windows according to its policy.
+    ``stimulus_session(..., streaming=True)`` collapses batch size to one and may be slower;
+    ``windowed_stream`` restores bounded batches.
 
     A session opts into this driver with ``streaming=True``.
 
@@ -359,11 +358,11 @@ def drive_state_change_session(
                     f"{type(event.payload).__name__}."
                 )
             state_change = event.payload
-        else:
-            state_change = getattr(session, "state_change", None)
     if state_change is None:
         raise ValueError(
-            "perturbation participate requires a StateChange input event."
+            "perturbation participate requires a StateChange input event. A subject "
+            "receives one only on a channel it declares: add 'lesion', 'stimulation' "
+            "or 'pharmacological' to its in_channels."
         )
     result = subject.process(state_change)
     handle_id = _state_change_handle_id(state_change, result)
@@ -420,9 +419,9 @@ def drive_behavior_session(
     The contract does not require ``process``: an arbitrary ``Subject`` only
     implements ``participate`` and never needs this.
 
-    Uses ``task_context`` when given, otherwise the session's. Fitting inputs
-    and instructions are not scored; the scored trials are the session's
-    ``stimulus_set``, or the task's own stimuli when the session sends none.
+    Uses ``task_context`` when given, otherwise the session's. The scored
+    trials are the session's ``stimulus_set``, or the task's own stimuli when
+    the session sends none. An ``instruction`` event is not scored.
     A request for trial-to-trial variance is refused before any compute. The
     single response is sent on the ``behavior`` channel. ``on_begin()`` runs once
     before the trials: this path keeps no history between them.
@@ -473,7 +472,7 @@ def drive_behavior_session_streaming(
     Same responses as the batch driver; what changes is that the trial set need not
     exist in full before the first response is produced. ``on_begin()`` runs
     before each trial under ``none`` and once before the first under
-    ``conversation`` (``task_context.trial_memory``).
+    ``history`` (``task_context.trial_memory``).
     """
     if task_context is None:
         task_context = getattr(session, "task_context", None)

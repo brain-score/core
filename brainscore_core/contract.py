@@ -13,10 +13,10 @@ if TYPE_CHECKING:
 
 # How a session groups its trials into episodes (begin ... end). ``none``:
 # every trial is its own episode, so a subject keeps nothing from earlier trials.
-# ``conversation``: all trials are one episode, so a subject with the
+# ``history``: all trials are one episode, so a subject with the
 # ``memory:trial_history`` trait sees its earlier trials and responses.
-_TRIAL_MEMORIES = ('none', 'conversation')
-_MEMORY_REQUIRED_TRAITS = {'none': frozenset(), 'conversation': frozenset({'memory:trial_history'})}
+_TRIAL_MEMORIES = ('none', 'history')
+_MEMORY_REQUIRED_TRAITS = {'none': frozenset(), 'history': frozenset({'memory:trial_history'})}
 
 
 def required_traits_for(declared, trial_memory: str = 'none') -> Set[str]:
@@ -72,9 +72,9 @@ class TaskContext:
     ``trial_memory`` says how long a subject keeps its trials:
     ``'none'`` (default) wraps each trial (one stimulus row and its
     response) in ``begin`` ... ``end('terminal')``, so a subject starts every
-    trial with empty history; ``'conversation'`` sends one ``begin``, all trials,
+    trial with empty history; ``'history'`` sends one ``begin``, all trials,
     one ``end('terminal')``, so a subject with the ``memory:trial_history``
-    trait sees its earlier trials. A benchmark that uses ``'conversation'``
+    trait sees its earlier trials. A benchmark that uses ``'history'``
     also sets the same ``trial_memory`` attribute on itself; pre-flight
     derives the required trait from it (``required_traits_for``).
 
@@ -93,7 +93,7 @@ class TaskContext:
     readout_fit: str = 'current'  # 'current' | 'intact'
     response: Any = None  # a brainscore_core.responses Choice, Scale or Text
     present: Optional[Tuple[str, ...]] = None  # order of a trial's parts: 'text', 'image', 'video', 'audio'
-    trial_memory: str = 'none'  # 'none' | 'conversation'
+    trial_memory: str = 'none'  # 'none' | 'history'
 
     def __post_init__(self):
         if self.trial_memory not in _TRIAL_MEMORIES:
@@ -167,7 +167,7 @@ class Subject(ABC):
         ``'memory:trial_history'``: the subject keeps earlier trials, earlier
         steps and its responses from ``begin`` until ``end``. A subject without
         it always starts a trial with empty history. A benchmark that needs a
-        trait lists it in ``required_traits`` (a ``conversation`` trial memory
+        trait lists it in ``required_traits`` (a ``history`` trial memory
         implies this one); a subject without it is N/A.
         """
         return set()

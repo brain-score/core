@@ -3,14 +3,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from brainscore_core._sessions.buffered import table_session
+from brainscore_core._sessions.buffered import stimulus_session
 from brainscore_core.streaming import StreamEvent
 
 
 def _session(channels=('behavior',), rows=3):
     table = pd.DataFrame({'stimulus_id': [f's{i}' for i in range(rows)],
                           'image_path': [f'p{i}.png' for i in range(rows)]})
-    return table_session(table, channels)
+    return stimulus_session(table, channels)
 
 
 def _read_trial(session):
@@ -71,7 +71,7 @@ def _repeated(labels=(0, 1, 0, 1)):
     table = pd.DataFrame({'stimulus_id': [f's{i}' for i in range(len(labels))],
                           'image_path': [f'p{i}.png' for i in range(len(labels))]},
                          index=list(labels))
-    return table_session(table, ('behavior', 'neural:IT'))
+    return stimulus_session(table, ('behavior', 'neural:IT'))
 
 
 def _answer_copying(session, event):

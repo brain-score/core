@@ -369,20 +369,19 @@ _SEED = [
                      [] if payload in ('begin', 'respond', 'end')
                      else [f"control payload must be 'begin', 'respond' or 'end'; got {payload!r}"])),
     # --- inputs: direct neural (carried by StateChange) ---
+    # Not addressable: the target is in the StateChange payload, because a
+    # benchmark can find it while it runs.
     CatalogEntry("stimulation", INPUT, "StateChange",
                  "a perturbation spec (kind, scale, replacement) applied to selected units",
                  "the model's state_change_fn",
-                 addressing="address is a unit selector (layer path, optional indices)",
                  materializers=("StateChange",)),
     CatalogEntry("lesion", INPUT, "StateChange",
                  "an ablation spec applied to selected units",
                  "the model's state_change_fn",
-                 addressing="address is a unit selector (layer path, optional indices)",
                  materializers=("StateChange",)),
     CatalogEntry("pharmacological", INPUT, "StateChange",
                  "a pharmacological perturbation spec applied to an agent or selected units",
                  "the model's state_change_fn",
-                 addressing="address is a unit selector or agent",
                  owner="core",
                  materializers=("StateChange",)),
     # --- inputs: closed-loop (carried by a row of an environment, harness-defined payload) ---

@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 from brainscore_core._sessions.payloads import _stimulus_events, _table_row_position
-from brainscore_core._sessions.perception import streaming_stimulus_session
+from brainscore_core._sessions.buffered import stimulus_session
 from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
@@ -61,7 +61,7 @@ KINDS = ['streaming', 'buffered', 'compat']
 def test_one_column_events_carry_no_new_metadata(producer):
     stimuli = table(two=False)
     events = (_stimulus_events(stimuli) if producer == 'buffered'
-              else drain(streaming_stimulus_session(stimuli, record='A')))
+              else drain(stimulus_session(stimuli, ['neural:A'], streaming=True)))
     assert [event.meta for event in events] == [
         {'stimulus_id': 'a', 'stimulus_index': 0, 'column': 'sentence'},
         {'stimulus_id': 'b', 'stimulus_index': 1, 'column': 'sentence'}]
@@ -71,7 +71,7 @@ def test_one_column_events_carry_no_new_metadata(producer):
 def test_two_column_events_mark_their_row_position(producer):
     stimuli = table(index=[10, 10])
     events = (_stimulus_events(stimuli) if producer == 'buffered'
-              else drain(streaming_stimulus_session(stimuli, record='A')))
+              else drain(stimulus_session(stimuli, ['neural:A'], streaming=True)))
     assert [(e.meta['column'], e.meta['stimulus_index'], e.meta['table_row']) for e in events] == [
         ('sentence', 10, 0), ('text', 10, 0), ('sentence', 10, 1), ('text', 10, 1)]
 

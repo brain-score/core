@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from brainscore_core.model_interface import UnifiedModel
-from brainscore_core.streaming_helpers import table_session
+from brainscore_core.streaming_helpers import stimulus_session
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 
@@ -25,6 +25,6 @@ def test_typed_subclass_instantiates_without_process_and_fails_clearly():
     subject = NoProcess()  # no abstract method stops instantiation
     stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a'], 'image_path': ['/tmp/a.png']}))
     stimuli.identifier = 'one'
-    session = table_session(stimuli, ['neural:IT'])
+    session = stimulus_session(stimuli, ['neural:IT'])
     with pytest.raises(NotImplementedError, match='defines no process'):
         subject.participate(session)
