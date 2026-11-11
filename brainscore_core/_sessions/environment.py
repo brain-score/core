@@ -333,7 +333,7 @@ def drive_environment_session(subject, session: Session, driver: str = "interact
     """Drive a live session through ``subject.process(row) -> outputs``.
 
     Events between ``respond`` controls form one row; ``outputs`` is a mapping of
-    output channel -> payload, answered on every requested channel it holds.
+    output channel -> payload, answered on every channel it holds.
     ``on_begin`` runs when an episode begins (a stateful policy clears itself).
     """
     session._request_control('A closed-loop session')
@@ -356,17 +356,16 @@ def drive_environment_session(subject, session: Session, driver: str = "interact
 
 def send_outputs(session: Session, outputs: Mapping[str, Any], t_ms: Optional[float],
                  meta: Mapping[str, Any]) -> None:
-    """Answer a step: one response per requested output channel a policy returned.
+    """Answer a step: one response per output channel a policy returned.
+
+    The session refuses a channel that was not requested.
 
     A value that is already a ``StreamEvent`` keeps its own meta (telemetry).
     """
     if not isinstance(outputs, Mapping):
         raise TypeError("A policy returns a mapping of output channel -> payload; "
                         f"got {type(outputs).__name__}.")
-    requested = session.requested_output_channels
     for channel, value in outputs.items():
-        if requested is not None and channel not in requested:
-            continue
         if isinstance(value, StreamEvent):
             session.respond(replace(value, channel=channel, t_ms=t_ms, meta={**meta, **value.meta}))
         else:

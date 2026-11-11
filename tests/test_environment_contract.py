@@ -171,6 +171,13 @@ def test_unrequested_outputs_are_refused_and_do_not_advance_the_environment():
     assert env.actions == [] and session.emitted == []
 
 
+def test_a_policy_output_that_was_not_requested_is_an_error():
+    env = Environment()
+    subject = _typed_subject(lambda row: {'motor': 1, 'neural:V4': 'activity'})
+    with pytest.raises(ValueError, match='not requested'):
+        run_environment(subject, env)
+
+
 def test_a_source_over_another_output_channel_needs_no_motor():
     class Talking:
         def __init__(self):
