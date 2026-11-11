@@ -17,7 +17,8 @@ never enter it. :func:`check_compatibility` returns the match as data
 An incompatible pair raises :class:`CompatibilityError` and is scored N/A.
 
 Benchmark inputs are ``required_input_channels`` when declared, otherwise the
-channels of ``required_modalities`` plus ``accepted_modalities``. Requested
+channels of ``required_modalities`` plus ``accepted_modalities``. A benchmark with no
+input channels is rejected. Requested
 outputs are ``requested_output_channels`` when declared, otherwise
 ``neural:<region>`` for a benchmark with a ``region``.
 
@@ -119,6 +120,12 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
                 f"benchmarks do not read, so it was not checked. Use {field_name}."
             )
 
+    if not bench_inputs:
+        raise CompatibilityError(
+            f"Benchmark '{benchmark_id}' declares no input channels. A benchmark "
+            f"states what it sends: set required_input_channels (rule 5.1)."
+        )
+
     validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
     validate_channels(subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels")
     validate_channels(subject_required, io_catalog.INPUT,
@@ -146,7 +153,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         raise CompatibilityError(message)
 
     consumed = {channel for channel in bench_inputs if channel_declared(channel, subject_in)}
-    if bench_inputs and not consumed:
+    if not consumed:
         raise CompatibilityError(
             f"Subject '{subject_id}' takes in none of the inputs benchmark "
             f"'{benchmark_id}' sends: {_format_channels(bench_inputs)}. "

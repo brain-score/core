@@ -92,10 +92,17 @@ class TestRequiredModalities:
         assert match.dropped_inputs == frozenset()
         assert match.as_attrs()['match'] == 'full'
 
-    def test_no_required_modalities_on_benchmark(self):
+    def test_benchmark_without_inputs_is_rejected_by_name(self):
         model = FakeModel(modalities={'vision'})
-        bench = FakeBenchmark()  # no required_modalities attribute
-        check_compatibility(model, bench)  # should not raise
+        bench = FakeBenchmark(identifier='silent-bench')  # no input declaration
+        with pytest.raises(CompatibilityError, match="'silent-bench' declares no input channels"):
+            check_compatibility(model, bench)
+
+    def test_empty_declared_inputs_are_rejected(self):
+        bench = FakeBenchmark(identifier='empty-bench')
+        bench.required_input_channels = frozenset()
+        with pytest.raises(CompatibilityError, match="'empty-bench' declares no input channels"):
+            check_compatibility(FakeModel(modalities={'vision'}), bench)
 
     @pytest.mark.parametrize('name, field', [
         ('input_channels', 'required_input_channels'),
@@ -115,7 +122,7 @@ class TestRequiredModalities:
             check_compatibility(FakeModel(modalities={'vision'}), bench)
 
     def test_unrelated_legacy_metadata_is_ignored(self):
-        bench = FakeBenchmark()
+        bench = FakeBenchmark(required_modalities={'vision'})
         bench.input_channels = 3  # e.g. image color channels, not channel names
         check_compatibility(FakeModel(modalities={'vision'}), bench)
 
