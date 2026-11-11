@@ -502,3 +502,14 @@ def test_no_session_subclass_exists_in_core():
         except Exception:
             continue
     assert Session.__subclasses__() == []
+
+
+@pytest.mark.parametrize('reason', ['terminal', 'truncated'])
+def test_run_environment_with_reset_reason_returns_no_actions(reason):
+    env = Environment(reset_reason=reason)
+    calls = []
+    inner = SimpleNamespace(process=lambda row: calls.append(row) or {'motor': 1})
+    subject = SimpleNamespace(
+        participate=lambda session: _drive_environment_via_process(inner, session))
+    assert run_environment(subject, env) == []
+    assert calls == [] and env.actions == [] and env.closed == 1

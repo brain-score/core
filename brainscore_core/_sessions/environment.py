@@ -318,6 +318,8 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
         participate(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
+        if not session.emitted:  # episode ended at reset, no action was sent
+            return []
         return [event.payload for event in session.collect(action_channel)]
 
 

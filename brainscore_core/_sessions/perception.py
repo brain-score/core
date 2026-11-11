@@ -7,7 +7,7 @@ Each is a plain generator over an iterable of inputs. Hand the generator to
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Optional, Sequence, Union
-from ..streaming import Session, StreamEvent
+from ..streaming import Session, StreamEvent, _with_trial_memory
 from .payloads import (
     _neural_channels,
     _stimulus_input_columns,
@@ -16,13 +16,16 @@ from .payloads import (
 
 
 def streaming_stimulus_session(stimulus_set, record: Union[str, Sequence[str]] = "IT",
-                               time_bins=None) -> Session:
+                               time_bins=None, task_context=None) -> Session:
     """Open-loop session that creates one stimulus event at a time.
 
     ``stimulus_session`` lists every event up front. This one keeps the caller's
     stimulus table but builds its events lazily from a row iterator, so event
     buffering stays bounded. Truly generated feeds that do not already exist as
     a table use ``windowed_stream`` instead.
+
+    Trials are marked with ``begin`` / ``end`` as ``task_context.trial_memory`` says
+    (``none`` without a task context), exactly as ``table_session`` does.
 
     ``streaming=True`` is what routes ``participate`` to the one-at-a-time driver.
     """
@@ -34,8 +37,12 @@ def streaming_stimulus_session(stimulus_set, record: Union[str, Sequence[str]] =
         for position, (row_index, row) in enumerate(stimulus_set.iterrows()):
             yield from _table_row_events(columns, position, row_index, row)
 
-    return Session(events(), _neural_channels(record), stimulus_set=stimulus_set,
-                   time_bins=time_bins, streaming=True, record=record)
+    memory = 'none' if task_context is None else task_context.trial_memory
+    session = Session(_with_trial_memory(events(), memory), _neural_channels(record),
+                      task_context, stimulus_set=stimulus_set, time_bins=time_bins,
+                      streaming=True, record=record)
+    session.one_answer_per_trial = memory == 'none'
+    return session
 
 
 def windowed_stream(frames: Iterable[Any], *, fps: float, window_ms: float,

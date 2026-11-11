@@ -1,6 +1,6 @@
 """Streaming primitives for the Unified Model Interface session contract."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 import re
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional
@@ -203,6 +203,12 @@ class Source:
     def close(self) -> None:
         """Release what the source holds. A no-op for fixed input."""
 
+    @contextmanager
+    def observe_actions(self, callback: Callable):
+        """Call ``callback(event)`` for each action proposal and receipt the source
+        records. A no-op for a source that records none."""
+        yield
+
 
 class FixedSource(Source):
     """Input that does not depend on responses: any iterable of events.
@@ -265,7 +271,9 @@ class Session(Source):
         self._declared: Optional[frozenset] = None
         self._control = False
         self._trial = 0
-        self._answered: dict = {}
+        self._rows: list = []
+        self._read_all = False
+        self._answered: set = set()
         self.one_answer_per_trial = False
         self._observers: list[tuple] = []
         self._rewriters: list[Any] = []
@@ -297,14 +305,18 @@ class Session(Source):
 
     @contextmanager
     def observe(self, on_input: Optional[Callable] = None, on_output: Optional[Callable] = None,
-                on_error: Optional[Callable] = None):
+                on_error: Optional[Callable] = None, on_action: Optional[Callable] = None):
         """Call ``on_input(event)`` for every event the source delivers, before the
         input filter, and ``on_output(event)`` for every response, before it is kept.
-        ``on_error(event, error)`` runs when the source cannot accept a response."""
+        ``on_error(event, error)`` runs when the source cannot accept a response.
+        ``on_action(event)`` runs for each action proposal and receipt the source
+        records, including a rejected or unknown-status one; a receipt is also the
+        response ``on_output`` gets, as the same object."""
         hooks = (on_input, on_output, on_error)
         self._observers.append(hooks)
         try:
-            yield self
+            with (self.source.observe_actions(on_action) if on_action else nullcontext()):
+                yield self
         finally:
             self._observers.remove(hooks)
 
@@ -333,11 +345,21 @@ class Session(Source):
             if event.channel == CONTROL_CHANNEL:
                 if event.payload == BEGIN:
                     self._trial += 1
+                    self._rows.append(None)
                 if self._control:
                     return event
             elif self._declared is None or channel_declared(event.channel, self._declared):
+                self._note_row(event)
                 return event
+        self._read_all = True
         return None
+
+    def _note_row(self, event: StreamEvent) -> None:
+        # The row identity of the open trial: its first stimulus event names it.
+        meta = event.meta
+        if (self._rows and self._rows[-1] is None and 'stimulus_index' in meta
+                and meta.get('role') != 'fitting'):
+            self._rows[-1] = meta['stimulus_index']
 
     @property
     def complete(self) -> bool:
@@ -379,7 +401,7 @@ class Session(Source):
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
-        note_response(kept)
+        note_response(kept, self.state_change)
         self.emitted.append(kept)
         limit = self.source.history_limit
         if limit is not None and len(self.emitted) > limit:
@@ -387,21 +409,37 @@ class Session(Source):
             self.dropped += 1
 
     def _check_answered_once(self, event: StreamEvent) -> None:
-        """Refuse more answers on one channel than trials the session has opened.
+        """Refuse a second answer for one trial on one channel.
 
         Only a table session with ``trial_memory='none'`` marks its trials, so
-        only it sets ``one_answer_per_trial``. The count is of ``begin`` events
-        read so far; a subject that reads every row first and answers after is
-        fine, one that answers a trial twice is not. A session read by a batch
-        driver (no events read) is not checked.
+        only it sets ``one_answer_per_trial``. An answer belongs to the trial
+        named by the ``stimulus_index`` in its meta, which is how a subject that
+        reads every row first answers each row later. A label that repeats across
+        rows names the open trial if it has the label, else the first trial with
+        it not yet answered. With no such identity it
+        belongs to the trial open now (the latest ``begin``); once the subject
+        has read every event it is a delayed answer and belongs to the first
+        trial not yet answered on that channel, so delayed answers must come in
+        row order. A session read by a batch driver (no events read) is not checked.
         """
         if not (self.one_answer_per_trial and self._trial):
             return
-        count = self._answered[event.channel] = self._answered.get(event.channel, 0) + 1
-        if count > self._trial:
-            raise ValueError(f"Channel {event.channel!r} was answered {count} times, but the "
-                             f"session has opened {self._trial} trial(s) (trial {self._trial} "
-                             "is answered twice). Answer each requested channel once per trial.")
+        trial = self._trial
+        if event.meta and 'stimulus_index' in event.meta:
+            # The label can repeat across rows: prefer the open trial, then
+            # the first trial with this label not yet answered on the channel.
+            known = [i + 1 for i, row in enumerate(self._rows) if row == event.meta['stimulus_index']]
+            free = [t for t in known if (t, event.channel) not in self._answered]
+            if known:
+                trial = (self._trial if self._trial in free else
+                         free[0] if free else known[-1])
+        elif self._read_all:
+            trial = next((t for t in range(1, self._trial + 1)
+                          if (t, event.channel) not in self._answered), trial)
+        if (trial, event.channel) in self._answered:
+            raise ValueError(f"Channel {event.channel!r} was answered twice for trial {trial}. "
+                             "Answer each requested channel once per trial.")
+        self._answered.add((trial, event.channel))
 
     def collect(self, channel: Optional[str] = None) -> Any:
         """Return the responses, shaped by the channel family.

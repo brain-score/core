@@ -86,15 +86,27 @@ def note_measure(assembly) -> None:
         record.measures.add((measure['kind'], None if source is None else str(source)))
 
 
-def note_response(event) -> None:
-    """Note a response event a session accepts: a behavior measure, or a perturbation handle."""
+def note_response(event, request=None) -> None:
+    """Note a response event a session accepts: a behavior measure, or a perturbation handle.
+
+    ``request`` is the ``StateChange`` the session delivered, if any. The handle
+    comes from a typed ``PerturbationApplied`` payload, else the response meta,
+    else the request; the response is an undo when the request or the meta says
+    ``kind == 'reset'``.
+    """
     channel = getattr(event, 'channel', None)
     if is_behavior_channel(channel):
         note_measure(event.payload)
     elif channel == 'perturbation':
+        from ..events import PerturbationApplied
         record, meta = _active.get(), event.meta
-        if record is not None and meta.get('handle_id') is not None:
-            (record.undone if meta.get('kind') == 'reset' else record.applied).add(meta['handle_id'])
+        if record is None:
+            return
+        handle = event.payload.handle_id if isinstance(event.payload, PerturbationApplied) else None
+        handle = handle or meta.get('handle_id') or getattr(request, 'handle_id', None)
+        if handle is not None:
+            undo = meta.get('kind') == 'reset' or getattr(request, 'kind', None) == 'reset'
+            (record.undone if undo else record.applied).add(handle)
 
 
 def is_behavior_channel(channel) -> bool:
