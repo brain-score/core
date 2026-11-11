@@ -61,6 +61,22 @@ For table-based evaluations, `neural_response` and `behavioral_response` in
 benchmark applies its metric to those responses. `apply_state_change` and
 `run_environment` do the same for interventions and environment episodes.
 
+To build a session yourself, use one of two builders with the same shape:
+
+```python
+session = stimulus_session(stimuli, ['neural:IT'], task, time_bins=[(70, 170)])
+session = stimulus_session(stimuli, ['behavior', 'neural:IT'], task, streaming=True)
+session = environment_session(environment, ['motor'], task, seed=0)
+```
+
+`stimulus_session` presents the rows of a stimulus table. With
+`streaming=True` it makes the events one row at a time, and the subject
+answers each row before it gets the next. `environment_session` runs a closed
+loop; its outputs default to the action channel. For a stream, give
+`Session` a generator of events. `TaskContext.trial_memory` is `'none'` (each
+trial is its own episode) or `'history'` (all trials are one episode; the
+subject needs the trait `memory:trial_history`).
+
 ## Choose helpers for your subject
 
 `UnifiedModel` is a `Subject` base with task, recording, and `process()` methods.

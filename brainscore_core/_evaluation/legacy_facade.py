@@ -20,7 +20,7 @@ import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from brainscore_core.contract import TaskContext
-from brainscore_core._sessions.buffered import table_session
+from brainscore_core._sessions.buffered import stimulus_session
 
 PASSIVE = 'passive'
 
@@ -169,16 +169,17 @@ class LegacyBenchmarkFacade:
         if not isinstance(self._record, str):
             raise ValueError(
                 f'{method} returns one region; several were requested '
-                f'({list(self._record)}). Use neural_response(..., record=[...]) '
-                f'or process() for several regions.')
+                f'({list(self._record)}). Use a session with one neural channel per region, '
+                "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']), "
+                'or process() for several regions.')
         return f'neural:{self._record}'
 
     def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
         """One session: the recorded task object, the time bins and the measurement settings."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        session = table_session(stimuli, channels, task_context=self._task_context(),
-                                time_bins=self._time_bins, settings=dict(settings))
+        session = stimulus_session(stimuli, channels, self._task_context(),
+                                   time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
 

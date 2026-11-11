@@ -21,10 +21,10 @@ from brainscore_core.streaming_helpers import (
     environment_session,
     behavioral_response,
     neural_response,
-    state_change_session,
     stimulus_session,
     run_environment,
 )
+from brainscore_core._sessions.buffered import _state_change_session
 from brainscore_core.supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
     NeuroidAssembly,
@@ -132,7 +132,7 @@ class _NonNativeEnvironmentSubject(UnifiedModel):
 
 
 def test_stimulus_session_emits_input_events_per_stimulus_column():
-    session = stimulus_session(_stimulus_set(), record="IT").declare_inputs(
+    session = stimulus_session(_stimulus_set(), ['neural:IT']).declare_inputs(
         {'control', 'vision:image', 'text'})
 
     events = []
@@ -167,7 +167,7 @@ def test_stimulus_session_emits_input_events_per_stimulus_column():
 def test_a_video_column_gives_events_on_the_video_channel():
     table = StimulusSet(pd.DataFrame({'stimulus_id': ['v0'], 'video_path': ['/x.mp4']}))
     table.identifier = 'one-video'
-    session = stimulus_session(table, record='IT').declare_inputs(
+    session = stimulus_session(table, ['neural:IT']).declare_inputs(
         {'control', 'vision:image', 'vision:video'})
     channels = [event.channel for event in iter(session.next_input, None)]
     assert [c for c in channels if c != 'control'] == ['vision:video']
@@ -176,7 +176,7 @@ def test_a_video_column_gives_events_on_the_video_channel():
 def test_an_image_column_gives_events_on_the_image_channel():
     table = StimulusSet(pd.DataFrame({'stimulus_id': ['i0'], 'image_path': ['/x.png']}))
     table.identifier = 'one-image'
-    session = stimulus_session(table, record='IT').declare_inputs(
+    session = stimulus_session(table, ['neural:IT']).declare_inputs(
         {'control', 'vision:image', 'vision:video'})
     channels = [event.channel for event in iter(session.next_input, None)]
     assert [c for c in channels if c != 'control'] == ['vision:image']
@@ -190,14 +190,14 @@ def test_a_session_refuses_an_input_event_on_bare_vision():
 
 def test_stimulus_session_exposes_time_bins():
     time_bins = [(70, 170), (170, 270)]
-    session = stimulus_session(_stimulus_set(), record="IT",
+    session = stimulus_session(_stimulus_set(), ['neural:IT'],
                                time_bins=time_bins)
 
     assert session.time_bins == time_bins
 
 
 def test_collect_packages_raw_neural_events_as_neuroid_assembly():
-    session = stimulus_session(_stimulus_set(), record="IT")
+    session = stimulus_session(_stimulus_set(), ['neural:IT'])
     session.respond(StreamEvent(
         channel="neural:IT",
         payload=np.array([1.0, 2.0]),
@@ -224,17 +224,14 @@ def test_collect_packages_raw_neural_events_as_neuroid_assembly():
 @pytest.mark.parametrize('kind', ['batch', 'streaming', 'windowed'])
 def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
     from brainscore_core.streaming import Session
-    from brainscore_core.streaming_helpers import (
-        stimulus_session, streaming_stimulus_session, windowed_stream,
-    )
+    from brainscore_core.streaming_helpers import stimulus_session, windowed_stream
+    channels = ([f'neural:{regions}'] if isinstance(regions, str)
+                else [f'neural:{region}' for region in regions])
     if kind == 'windowed':
-        channels = ([f'neural:{regions}'] if isinstance(regions, str)
-                    else [f'neural:{region}' for region in regions])
         session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels,
                           streaming=True)
     else:
-        builder = stimulus_session if kind == 'batch' else streaming_stimulus_session
-        session = builder(_stimulus_set(), record=regions)
+        session = stimulus_session(_stimulus_set(), channels, streaming=kind == 'streaming')
     expected = {}
     for channel in session.requested_output_channels:
         expected[channel] = _assembly()
@@ -263,7 +260,7 @@ def test_neural_response_matches_process_assembly_exactly():
 
 def test_collect_returns_emitted_assembly_without_repackaging():
     expected = _assembly()
-    session = stimulus_session(_stimulus_set(), record="IT")
+    session = stimulus_session(_stimulus_set(), ['neural:IT'])
     session.respond(StreamEvent(
         channel="neural:IT",
         payload=expected,
@@ -275,7 +272,7 @@ def test_collect_returns_emitted_assembly_without_repackaging():
 
 
 def test_collect_rejects_missing_channel():
-    session = stimulus_session(_stimulus_set(), record="IT")
+    session = stimulus_session(_stimulus_set(), ['neural:IT'])
 
     with pytest.raises(ValueError, match="No emitted events"):
         session.collect("neural:IT")
@@ -472,7 +469,7 @@ def _ablation_state_change():
 
 
 def test_state_change_session_emits_lesion_event_with_address():
-    session = state_change_session(_ablation_state_change())
+    session = _state_change_session(_ablation_state_change())
     event = session.next_input()
 
     assert session.requested_output_channels == ("perturbation",)
@@ -488,7 +485,7 @@ def test_state_change_session_routes_pharmacological_event_to_registry_channel()
         metadata={"address": "ketamine"},
         perturbation=Perturbation(kind="dose", scale=0.1),
     )
-    session = state_change_session(state_change)
+    session = _state_change_session(state_change)
     event = session.next_input()
 
     assert event.channel == "pharmacological:ketamine"
@@ -503,7 +500,7 @@ def test_state_change_session_routes_lesion_kind_to_lesion_channel():
         target=Selection(layer="blocks.10"),
         perturbation=Perturbation(kind="zero"),
     )
-    session = state_change_session(state_change)
+    session = _state_change_session(state_change)
     event = session.next_input()
 
     assert event.channel == "lesion:blocks.10"
@@ -518,7 +515,7 @@ def test_state_change_reset_uses_metadata_family_and_address_when_present():
             "address": "blocks.10",
         },
     )
-    session = state_change_session(reset)
+    session = _state_change_session(reset)
     event = session.next_input()
 
     assert event.channel == "stimulation:blocks.10"
@@ -541,13 +538,12 @@ def test_apply_state_change_falls_back_for_non_native_subject():
     assert result is applied
 
 
-class TestRecordAcceptsSeveralRegions:
-    """`record` mirrors start_recording: a region name OR a sequence of them.
+class TestRequestedNeuralChannels:
+    """A stimulus session takes the requested channels as given: one per region.
 
-    Regression for a silent failure: the session constructors formatted `record`
-    straight into the channel string, so a list produced ONE channel literally
-    named "neural:['V4', 'IT']". Nothing raised; the channel simply matched no
-    region, and callers got an empty or wrong result.
+    The ``record`` argument that turned region names into channels is gone. A
+    caller names the channels, so a list of regions can no longer collapse into
+    one channel named "neural:['V4', 'IT']".
     """
 
     @staticmethod
@@ -557,34 +553,34 @@ class TestRecordAcceptsSeveralRegions:
         return StimulusSet(pd.DataFrame([
             {'stimulus_id': 'a', 'image_file_name': 'a.png'}]))
 
-    def test_list_record_yields_one_channel_per_region(self):
+    def test_several_channels_stay_one_channel_per_region(self):
         from brainscore_core.streaming_helpers import (
             stimulus_session, requested_output_channels)
-        session = stimulus_session(self._stimuli(), record=['V4', 'IT'])
+        session = stimulus_session(self._stimuli(), ['neural:V4', 'neural:IT'])
         assert requested_output_channels(session) == ['neural:V4', 'neural:IT']
 
-    def test_single_region_string_unchanged(self):
+    def test_single_channel_unchanged(self):
         from brainscore_core.streaming_helpers import (
             stimulus_session, requested_output_channels)
-        session = stimulus_session(self._stimuli(), record='IT')
+        session = stimulus_session(self._stimuli(), ['neural:IT'])
         assert requested_output_channels(session) == ['neural:IT']
 
-    def test_streaming_session_also_splits(self):
-        from brainscore_core.streaming_helpers import streaming_stimulus_session
-        session = streaming_stimulus_session(self._stimuli(), record=['V4', 'IT'])
+    def test_streaming_session_keeps_the_channels(self):
+        from brainscore_core.streaming_helpers import stimulus_session
+        session = stimulus_session(self._stimuli(), ['neural:V4', 'neural:IT'], streaming=True)
         assert list(session.requested_output_channels) == ['neural:V4', 'neural:IT']
 
-    def test_empty_record_raises(self):
+    def test_a_bare_channel_string_raises(self):
         import pytest
         from brainscore_core.streaming_helpers import stimulus_session
-        with pytest.raises(ValueError, match='at least one region'):
-            stimulus_session(self._stimuli(), record=[])
+        with pytest.raises(TypeError, match='sequence of channel names'):
+            stimulus_session(self._stimuli(), 'neural:IT')
 
-    def test_non_string_region_raises(self):
+    def test_non_string_channel_raises(self):
         import pytest
         from brainscore_core.streaming_helpers import stimulus_session
-        with pytest.raises(TypeError, match='region name'):
-            stimulus_session(self._stimuli(), record=[1, 2])
+        with pytest.raises(TypeError, match='must be a string'):
+            stimulus_session(self._stimuli(), [1, 2])
 
     def test_neural_response_rejects_several_regions(self):
         """It returns one assembly, so it must not silently pick a region."""
@@ -648,7 +644,7 @@ class TestPublicSessionHelpers:
         from brainscore_core.streaming_helpers import (
             drain_session_inputs, session_stimuli)
         stimuli = _stimulus_set()
-        session = stimulus_session(stimuli, record='IT')
+        session = stimulus_session(stimuli, ['neural:IT'])
         assert session_stimuli(session, drain_session_inputs(session)) is stimuli
 
     def test_session_stimuli_rebuilds_inputs_without_a_table(self):
@@ -667,7 +663,7 @@ class TestPublicSessionHelpers:
         stimuli = _stimulus_set()
         output = _assembly()
         subject = _TypedSubject(output)
-        session = stimulus_session(stimuli, record='IT', time_bins=[(70, 170)])
+        session = stimulus_session(stimuli, ['neural:IT'], time_bins=[(70, 170)])
         drive_neural_session(subject, session)
         assert subject.calls == [('start_recording', 'IT', [(70, 170)]),
                                  ('process', stimuli, {})]
@@ -679,7 +675,7 @@ class TestPublicSessionHelpers:
     def test_drive_neural_session_refuses_variance_before_compute(self):
         from brainscore_core.streaming_helpers import drive_neural_session
         subject = _TypedSubject()
-        session = stimulus_session(_stimulus_set(), record='IT')
+        session = stimulus_session(_stimulus_set(), ['neural:IT'])
         session.settings = {'require_variance': True, 'number_of_trials': 3}
         with pytest.raises(NotImplementedError, match='number_of_trials=3'):
             drive_neural_session(subject, session)

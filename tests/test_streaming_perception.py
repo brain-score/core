@@ -12,10 +12,7 @@ import pandas as pd
 import pytest
 
 from brainscore_core.streaming import StreamEvent
-from brainscore_core.streaming_helpers import (
-    stimulus_session,
-    streaming_stimulus_session,
-)
+from brainscore_core.streaming_helpers import stimulus_session
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
@@ -99,8 +96,7 @@ def test_batch_multi_region_records_once_and_demultiplexes_channels():
     from brainscore_core.streaming_helpers import _drive_neural_session_via_process
 
     subject = _MultiRegionSubject()
-    session = _request_two_regions(stimulus_session(_stimulus_set(3),
-                                                      record='early'))
+    session = _request_two_regions(stimulus_session(_stimulus_set(3), ['neural:early']))
 
     _drive_neural_session_via_process(subject, session)
 
@@ -120,8 +116,7 @@ def test_streaming_multi_region_records_once_and_demultiplexes_each_window():
     from brainscore_core.streaming_helpers import drive_neural_session_streaming
 
     subject = _MultiRegionSubject()
-    session = _request_two_regions(streaming_stimulus_session(
-        _stimulus_set(3), record='early'))
+    session = _request_two_regions(stimulus_session(_stimulus_set(3), ['neural:early'], streaming=True))
 
     drive_neural_session_streaming(subject, session)
 
@@ -150,8 +145,7 @@ def test_streaming_multi_region_rejects_missing_layer_provenance():
             )
 
     subject = _MissingLayerSubject()
-    session = _request_two_regions(stimulus_session(_stimulus_set(1),
-                                                      record='early'))
+    session = _request_two_regions(stimulus_session(_stimulus_set(1), ['neural:early']))
 
     from brainscore_core.streaming_helpers import _drive_neural_session_via_process
     with pytest.raises(ValueError, match="per-neuroid 'layer' coordinate"):
@@ -161,7 +155,7 @@ def test_streaming_multi_region_rejects_missing_layer_provenance():
 @pytest.mark.unit
 def test_streaming_session_processes_one_stimulus_at_a_time():
     subject = _CountingSubject()
-    session = streaming_stimulus_session(_stimulus_set(4), record='IT')
+    session = stimulus_session(_stimulus_set(4), ['neural:IT'], streaming=True)
     from brainscore_core.streaming_helpers import drive_neural_session_streaming
     drive_neural_session_streaming(subject, session)
     # four stimuli -> four separate process() calls, each of exactly one row
@@ -181,7 +175,7 @@ def test_streaming_session_never_materializes_the_whole_stream():
             yield row
 
     stim.iterrows = counting_rows
-    session = streaming_stimulus_session(stim, record='IT')
+    session = stimulus_session(stim, ['neural:IT'], streaming=True)
     assert pulled['rows'] == 0, "building the session pre-drained the table"
     processed = []
 
@@ -200,7 +194,7 @@ def test_streaming_session_never_materializes_the_whole_stream():
 @pytest.mark.unit
 def test_streaming_emits_one_output_event_per_input():
     subject = _CountingSubject()
-    session = streaming_stimulus_session(_stimulus_set(3), record='IT')
+    session = stimulus_session(_stimulus_set(3), ['neural:IT'], streaming=True)
     from brainscore_core.streaming_helpers import drive_neural_session_streaming
     drive_neural_session_streaming(subject, session)
     emitted = [e for e in session.emitted if e.channel == 'neural:IT']
@@ -222,12 +216,12 @@ def test_streaming_and_batch_agree():
     stim = _stimulus_set(5)
 
     batch_subject = _CountingSubject()
-    batch_session = stimulus_session(stim, record='IT')
+    batch_session = stimulus_session(stim, ['neural:IT'])
     _drive_neural_session_via_process(batch_subject, batch_session)
     batch_out = [e.payload for e in batch_session.emitted if e.channel == 'neural:IT'][0]
 
     stream_subject = _CountingSubject()
-    stream_session = streaming_stimulus_session(stim, record='IT')
+    stream_session = stimulus_session(stim, ['neural:IT'], streaming=True)
     drive_neural_session_streaming(stream_subject, stream_session)
     stream_out = stream_session.collect('neural:IT')
 
@@ -249,7 +243,7 @@ def test_streaming_preserves_presentation_metadata():
             seen.setdefault('columns', set()).update(stimuli.columns)
             return super().process(stimuli)
 
-    session = streaming_stimulus_session(stim, record='IT')
+    session = stimulus_session(stim, ['neural:IT'], streaming=True)
     from brainscore_core.streaming_helpers import drive_neural_session_streaming
     drive_neural_session_streaming(_MetaSubject(), session)
     assert 'object_name' in seen['columns'], (

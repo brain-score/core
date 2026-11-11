@@ -271,16 +271,21 @@ class EnvironmentSource(Source):
         return receipt
 
 
-def environment_session(environment, *, outputs=None, action_channel: str = 'motor',
-                        task_context=None, action_validator=None, seed=None,
+def environment_session(environment, requested_output_channels=None, task_context=None, *,
+                        action_channel: str = 'motor', action_validator=None, seed=None,
                         options=None, require_specs=False,
                         history_limit: Optional[int] = None) -> Session:
-    """A session driving ``environment``; ``outputs`` are the requested output channels."""
+    """A session driving ``environment``.
+
+    ``requested_output_channels`` defaults to the action channel alone.
+    """
     source = EnvironmentSource(
         environment, action_channel=action_channel, action_validator=action_validator,
         seed=seed, options=options, require_specs=require_specs, history_limit=history_limit,
     )
-    return Session(source, (action_channel,) if outputs is None else outputs, task_context)
+    requested = ((action_channel,) if requested_output_channels is None
+                 else requested_output_channels)
+    return Session(source, requested, task_context)
 
 
 def run_environment(subject, environment, *, outputs=None, action_channel: str = 'motor',
@@ -298,8 +303,8 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
     """
     try:
         session = environment_session(
-            environment, outputs=outputs, action_channel=action_channel,
-            task_context=task_context, seed=seed, options=options,
+            environment, outputs, task_context, action_channel=action_channel,
+            seed=seed, options=options,
             action_validator=action_validator, require_specs=require_specs,
         )
     except BaseException:

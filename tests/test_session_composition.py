@@ -12,7 +12,7 @@ from brainscore_core.streaming import (
 )
 from brainscore_core.streaming_helpers import (
     drive_neural_session, drive_neural_session_streaming, drive_state_change_session,
-    paced_stream, stimulus_session, streaming_stimulus_session, windowed_stream,
+    stimulus_session, windowed_stream,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import (
     BehavioralAssembly, NeuroidAssembly,
@@ -69,11 +69,12 @@ def test_batch_and_streaming_drivers_ignore_control_events():
             self.sizes.append(len(stimuli))
             return _neural(list(stimuli['stimulus_id']))
 
-    for driver, build in ((drive_neural_session, stimulus_session),
-                          (drive_neural_session_streaming, streaming_stimulus_session)):
-        session = build(_table(2), record='IT').declare_inputs({'text'})
+    for driver, streaming in ((drive_neural_session, False),
+                              (drive_neural_session_streaming, True)):
+        session = stimulus_session(_table(2), ['neural:IT'],
+                                   streaming=streaming).declare_inputs({'text'})
         data = list(iter(session.next_input, None))
-        session = build(_table(2), record='IT')
+        session = stimulus_session(_table(2), ['neural:IT'], streaming=streaming)
         session.source = FixedSource([
             begin_event(0.0), data[0], respond_event(1.0), end_event('terminal', 2.0),
             begin_event(3.0), data[1], respond_event(4.0), end_event('terminal', 5.0)])
@@ -159,20 +160,11 @@ def test_a_lazy_iterator_source_is_consumed_lazily():
     assert pulled == [0, 1]
 
 
-def test_windowing_and_pacing_compose_with_the_one_session():
+def test_windowing_composes_with_the_one_session():
     stats = {}
-    clock_time = [0.0]
-
-    def clock():
-        return clock_time[0]
-
-    def sleep(seconds):
-        clock_time[0] += seconds
-
     frames = (f'f{i}.png' for i in range(90))
     windows = windowed_stream(frames, fps=30, window_ms=1000, stats=stats)
-    session = Session(paced_stream(windows, window_ms=1000, clock=clock, sleep=sleep),
-                      ['neural:IT'], streaming=True)
+    session = Session(windows, ['neural:IT'], streaming=True)
 
     class Recorder:
         def start_recording(self, region, time_bins=None, recording_type=None):
@@ -184,7 +176,6 @@ def test_windowing_and_pacing_compose_with_the_one_session():
     drive_neural_session_streaming(Recorder(), session)
     assert stats['windows_emitted'] == 3
     assert session.collect().sizes['presentation'] == 90
-    assert clock_time[0] >= 2.0     # the third window was held until the world made it
 
 
 def test_a_new_source_and_a_new_result_channel_need_no_new_class():
@@ -240,8 +231,9 @@ def test_observers_see_filtered_inputs_and_rewritten_responses():
 
 def test_state_change_session_driver_ignores_control_events():
     from brainscore_core.events import StateChange
-    session = Session([begin_event(0.0)], ['perturbation'],
-                      state_change=StateChange(kind='ablation'))
+    from brainscore_core._sessions.payloads import _state_change_event
+    session = Session([begin_event(0.0), _state_change_event(StateChange(kind='ablation'))],
+                      ['perturbation'])
 
     class Subject:
         def process(self, state_change):

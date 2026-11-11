@@ -137,17 +137,12 @@ def test_session_facade_preserves_implementation_identity():
     pairs = [
         (public.stimulus_session, buffered.stimulus_session),
         (public.behavior_session, buffered.behavior_session),
-        (public.state_change_session, buffered.state_change_session),
-        (public.table_session, buffered.table_session),
         (public.neural_response, buffered.neural_response),
         (public.behavioral_response, buffered.behavioral_response),
         (public.apply_state_change, buffered.apply_state_change),
         (public.EnvironmentSource, environment.EnvironmentSource),
         (public.run_environment, environment.run_environment),
-        (public.streaming_stimulus_session, perception.streaming_stimulus_session),
         (public.windowed_stream, perception.windowed_stream),
-        (public.paced_stream, perception.paced_stream),
-        (public.PacingReport, perception.PacingReport),
         (public.drive_neural_session, drivers.drive_neural_session),
         (public.drive_behavior_session, drivers.drive_behavior_session),
         (public.drive_typed_session, drivers.drive_typed_session),
@@ -155,6 +150,13 @@ def test_session_facade_preserves_implementation_identity():
         (public.session_stimuli, payloads.session_stimuli),
     ]
     assert all(left is right for left, right in pairs)
+    assert public.environment_session is environment.environment_session
+
+
+def test_removed_session_builders_are_not_public():
+    from brainscore_core import streaming_helpers as public
+    for name in ('table_session', 'streaming_stimulus_session', 'state_change_session'):
+        assert not hasattr(public, name), name
     assert public._drain_stream_events is public.drain_session_inputs
     assert public._stimuli_from_stream_session is public.session_stimuli
     assert public._drive_neural_session_via_process is public.drive_neural_session

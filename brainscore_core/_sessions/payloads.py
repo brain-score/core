@@ -163,42 +163,12 @@ def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
 
 
-def _neural_channels(record) -> tuple:
-    """Build the requested neural channel names for a ``record`` target.
-
-    ``record`` accepts a single region name or a sequence of them, mirroring
-    ``start_recording``. Formatting a sequence straight into the channel string
-    would produce one channel literally named ``neural:['V4', 'IT']``, which then
-    fails to match any region -- so the sequence case gets one channel each.
-    """
-    if isinstance(record, str):
-        return (f"neural:{record}",)
-    try:
-        regions = list(record)
-    except TypeError:
-        raise TypeError(
-            f"record must be a region name or a sequence of them; got "
-            f"{type(record).__name__}")
-    if not regions:
-        raise ValueError("record must name at least one region")
-    non_str = [r for r in regions if not isinstance(r, str)]
-    if non_str:
-        raise TypeError(f"every record entry must be a region name; got {non_str!r}")
-    return tuple(f"neural:{region}" for region in regions)
-
-
 def requested_output_channels(session) -> list[str]:
     requested = getattr(session, "requested_output_channels", None)
     if requested is not None:
         return list(requested)
-
-    record = getattr(session, "record", None)
-    if record is not None:
-        return list(_neural_channels(record))
-
     raise ValueError(
-        "streaming participate requires the session to declare "
-        "requested_output_channels or record."
+        "participate requires the session to declare requested_output_channels."
     )
 
 

@@ -1,8 +1,8 @@
 """Builders for the one ``Session`` and the typed measurement helpers."""
 
 from __future__ import annotations
-from typing import Sequence, Union
-from ..streaming import Session, _with_trial_memory
+from typing import Iterator, Sequence, Union
+from ..streaming import Session, StreamEvent, _with_trial_memory
 from ..events import StateChange
 from ..supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
@@ -11,9 +11,10 @@ from ..supported_data_standards.brainio.assemblies import (
 from .payloads import (
     _behavior_events,
     _behavior_stimuli_to_score,
-    _neural_channels,
     _state_change_event,
     _stimulus_events,
+    _stimulus_input_columns,
+    _table_row_events,
 )
 
 
@@ -21,27 +22,41 @@ def _memory(task_context) -> str:
     return 'none' if task_context is None else task_context.trial_memory
 
 
-def table_session(stimulus_set, requested_output_channels=None, *, task_context=None,
-                  time_bins=None, settings=None, record=None) -> Session:
+def stimulus_session(stimulus_set, requested_output_channels=None, task_context=None, *,
+                     time_bins=None, settings=None, streaming: bool = False) -> Session:
     """One session that presents every row of ``stimulus_set``.
 
     The table stays on the session, so the batch drivers answer it with one
     ``process`` call; ``task_context``, ``time_bins`` and ``settings`` ride along.
     The events mark the trials with ``begin`` / ``end`` as ``task_context.trial_memory``
     says (``none`` without a task context).
+
+    With ``streaming=True`` the events are made one row at a time from the
+    table, and the session is marked ``streaming``: a subject answers one row
+    and then gets the next. The requested outputs and the task are the same
+    as for a batch session.
     """
-    events = list(_with_trial_memory(_stimulus_events(stimulus_set), _memory(task_context)))
+    memory = _memory(task_context)
+    if streaming:
+        events = _with_trial_memory(_lazy_stimulus_events(stimulus_set), memory)
+    else:
+        events = list(_with_trial_memory(_stimulus_events(stimulus_set), memory))
     session = Session(events, requested_output_channels, task_context,
                       stimulus_set=stimulus_set, time_bins=time_bins, settings=settings,
-                      record=record)
-    session.one_answer_per_trial = _memory(task_context) == 'none'
+                      streaming=streaming)
+    session.one_answer_per_trial = memory == 'none'
     return session
 
 
-def stimulus_session(stimulus_set, record: Union[str, Sequence[str]] = "IT",
-                     time_bins=None) -> Session:
-    return table_session(stimulus_set, _neural_channels(record), time_bins=time_bins,
-                         record=record)
+def _lazy_stimulus_events(stimulus_set) -> Iterator[StreamEvent]:
+    """The events of ``stimulus_set``, one row at a time.
+
+    One event per input column; a several-column row marks its events with
+    ``meta['table_row']`` so the row is presented once.
+    """
+    columns = _stimulus_input_columns(stimulus_set)
+    for position, (row_index, row) in enumerate(stimulus_set.iterrows()):
+        yield from _table_row_events(columns, position, row_index, row)
 
 
 def behavior_session(task_context) -> Session:
@@ -49,15 +64,13 @@ def behavior_session(task_context) -> Session:
     scoring = _behavior_stimuli_to_score(task_context)
     events = list(_with_trial_memory(_behavior_events(task_context, scoring),
                                       _memory(task_context)))
-    session = Session(events, ('behavior',), task_context,
-                      stimulus_set=scoring, scoring_stimuli=scoring)
+    session = Session(events, ('behavior',), task_context, stimulus_set=scoring)
     session.one_answer_per_trial = _memory(task_context) == 'none'
     return session
 
 
-def state_change_session(state_change: StateChange) -> Session:
-    return Session([_state_change_event(state_change)], ('perturbation',),
-                   state_change=state_change)
+def _state_change_session(state_change: StateChange) -> Session:
+    return Session([_state_change_event(state_change)], ('perturbation',))
 
 
 def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "IT",
@@ -72,13 +85,12 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
         raise TypeError(
             "neural_response returns a single assembly and therefore takes a single "
             f"region; got {record!r}. To record several regions, use the session API:\n"
-            "    session = stimulus_session(stimuli, record=['V4', 'IT'])\n"
+            "    session = stimulus_session(stimuli, ['neural:V4', 'neural:IT'])\n"
             "    subject.participate(session)\n"
             "    v4, it = session.collect('neural:V4'), session.collect('neural:IT')\n"
             "Or record them in one pass and split on the region coord:\n"
             "    subject.start_recording(['V4', 'IT']); assembly = subject.process(stimuli)")
-    session = stimulus_session(stimulus_set, record=record,
-                               time_bins=time_bins)
+    session = stimulus_session(stimulus_set, [f"neural:{record}"], time_bins=time_bins)
     subject.participate(session)
     return session.collect(f"neural:{record}")
 
@@ -102,6 +114,6 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
 
 
 def apply_state_change(subject, state_change: StateChange):
-    session = state_change_session(state_change)
+    session = _state_change_session(state_change)
     subject.participate(session)
     return session.collect("perturbation")

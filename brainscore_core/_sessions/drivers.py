@@ -190,11 +190,10 @@ def drive_neural_session_streaming(
     The batch driver drains the whole session up front and makes a single
     ``process()`` call, which is faster but requires every input to exist before
     scoring starts. This driver does not buffer ahead: the session decides whether
-    an event contains one stimulus, a bounded window, or a real-time delivery.
+    an event contains one stimulus, or a bounded window.
 
-    ``streaming_stimulus_session`` collapses batch size to one and may be slower;
-    ``windowed_stream`` restores bounded batches; ``paced_stream`` can additionally
-    drop or reject late windows according to its policy.
+    ``stimulus_session(..., streaming=True)`` collapses batch size to one and may be slower;
+    ``windowed_stream`` restores bounded batches.
 
     A session opts into this driver with ``streaming=True``.
 
@@ -360,7 +359,10 @@ def drive_state_change_session(
                 )
             state_change = event.payload
         else:
-            state_change = getattr(session, "state_change", None)
+            # The subject's input declaration can drop the change event: a
+            # bare family such as 'lesion' does not match 'lesion:<address>'.
+            # The session notes the change its source delivered.
+            state_change = getattr(session, "_state_change", None)
     if state_change is None:
         raise ValueError(
             "perturbation participate requires a StateChange input event."
@@ -473,7 +475,7 @@ def drive_behavior_session_streaming(
     Same responses as the batch driver; what changes is that the trial set need not
     exist in full before the first response is produced. ``on_begin()`` runs
     before each trial under ``none`` and once before the first under
-    ``conversation`` (``task_context.trial_memory``).
+    ``history`` (``task_context.trial_memory``).
     """
     if task_context is None:
         task_context = getattr(session, "task_context", None)

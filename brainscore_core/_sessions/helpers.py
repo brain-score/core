@@ -28,9 +28,7 @@ from brainscore_core._sessions.buffered import (
     behavior_session,
     behavioral_response,
     neural_response,
-    state_change_session,
     stimulus_session,
-    table_session,
 )
 
 from brainscore_core._sessions.environment import (
@@ -43,10 +41,7 @@ from brainscore_core._sessions.environment import (
 )
 
 from brainscore_core._sessions.perception import (
-    PacingReport,
     _default_window_to_stimuli,
-    paced_stream,
-    streaming_stimulus_session,
     windowed_stream,
 )
 
@@ -83,7 +78,6 @@ from brainscore_core._sessions.payloads import (
     _drain_stream_events,
     _is_label_payload,
     _is_neural_assembly_payload,
-    _neural_channels,
     _one_hot,
     _one_row_stimuli,
     preserve_stimulus_set_type,
