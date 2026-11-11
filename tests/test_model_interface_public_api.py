@@ -136,7 +136,6 @@ def test_session_facade_preserves_implementation_identity():
 
     pairs = [
         (public.stimulus_session, buffered.stimulus_session),
-        (public.behavior_session, buffered.behavior_session),
         (public.neural_response, buffered.neural_response),
         (public.behavioral_response, buffered.behavioral_response),
         (public.apply_state_change, buffered.apply_state_change),
@@ -155,7 +154,8 @@ def test_session_facade_preserves_implementation_identity():
 
 def test_removed_session_builders_are_not_public():
     from brainscore_core import streaming_helpers as public
-    for name in ('table_session', 'streaming_stimulus_session', 'state_change_session'):
+    for name in ('table_session', 'streaming_stimulus_session', 'state_change_session',
+                 'behavior_session'):
         assert not hasattr(public, name), name
     assert public._drain_stream_events is public.drain_session_inputs
     assert public._stimuli_from_stream_session is public.session_stimuli

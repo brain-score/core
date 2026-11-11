@@ -174,7 +174,7 @@ def requested_output_channels(session) -> list[str]:
 
 def behavior_stimuli_from_session(session, task_context):
     events = [event for event in drain_session_inputs(session)
-              if event.channel != 'instruction' and event.meta.get('role') != 'fitting']
+              if event.channel != 'instruction']
     if events or getattr(session, 'stimulus_set', None) is not None:
         return session_stimuli(session, events)
     return _behavior_stimuli_to_score(task_context)
@@ -286,49 +286,6 @@ def _table_row_stimuli(session, position: int):
     return preserve_stimulus_set_type(table, table.iloc[[position]])
 
 
-def _behavior_events(task_context, scoring_stimuli) -> list[StreamEvent]:
-    events: list[StreamEvent] = []
-    if task_context.instruction:
-        events.append(StreamEvent(
-            channel="instruction",
-            payload=task_context.instruction,
-            t_ms=0.0,
-            meta={"task_type": task_context.task_type, "role": "instruction"},
-        ))
-
-    if task_context.fitting_stimuli is not None:
-        events.extend(
-            _tag_events(
-                _stimulus_events(task_context.fitting_stimuli),
-                role="fitting",
-            )
-        )
-
-    if scoring_stimuli is not None:
-        events.extend(
-            _tag_events(
-                _stimulus_events(scoring_stimuli),
-                role="scoring",
-            )
-        )
-
-    return events
-
-
-def _tag_events(events: list[StreamEvent], role: str) -> list[StreamEvent]:
-    tagged = []
-    for event in events:
-        meta = dict(event.meta)
-        meta["role"] = role
-        tagged.append(StreamEvent(
-            channel=event.channel,
-            payload=event.payload,
-            t_ms=event.t_ms,
-            meta=meta,
-        ))
-    return tagged
-
-
 def _behavior_stimuli_to_score(task_context):
     for key in ("stimulus_set", "stimuli", "scoring_stimuli", "test_stimuli"):
         if key in task_context.metadata:
@@ -350,9 +307,8 @@ def _state_change_event(state_change: StateChange) -> StreamEvent:
 
 
 def _state_change_channel(state_change: StateChange) -> str:
-    family = _state_change_family(state_change)
-    address = _state_change_address(state_change)
-    return f"{family}:{address}" if address else family
+    """The plain family channel; the target is in the ``StateChange`` payload."""
+    return _state_change_family(state_change)
 
 
 def _state_change_family(state_change: StateChange) -> str:
@@ -372,28 +328,6 @@ def _state_change_family(state_change: StateChange) -> str:
 
     # Unknown apply kinds use lesion as the generic perturbation fallback.
     return "lesion"
-
-
-def _state_change_address(state_change: StateChange) -> Optional[str]:
-    target = state_change.target
-    if target is not None:
-        layer = getattr(target, "layer", None)
-        if layer:
-            indices = getattr(target, "indices", None)
-            if indices:
-                start = indices[0]
-                stop = indices[-1] + 1
-                return f"{layer}[{start}:{stop}]"
-            return str(layer)
-
-    for key in ("address", "channel_address"):
-        if state_change.metadata.get(key):
-            return str(state_change.metadata[key])
-
-    if state_change.handle_id:
-        return str(state_change.handle_id)
-
-    return None
 
 
 def _state_change_handle_id(state_change: StateChange, result) -> Optional[str]:

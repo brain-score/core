@@ -94,9 +94,9 @@ def _with_trial_memory(events: Iterable[Any], memory: str = 'none') -> Iterator[
     """Mark the trials in ``events`` with ``begin`` / ``end('terminal')`` control events.
 
     A trial is the run of events of one stimulus-table row: events with
-    ``meta['stimulus_index']`` that share ``meta['role']`` and ``meta['table_row']``
-    (rows of one input column carry none) and name no input column twice. Other events (an instruction, fitting rows) are not
-    trials and pass through. ``none`` wraps each trial in its own episode;
+    ``meta['stimulus_index']`` that share ``meta['table_row']``
+    (rows of one input column carry none) and name no input column twice.
+    Events without ``meta['stimulus_index']`` are not trials and pass through. ``none`` wraps each trial in its own episode;
     ``history`` opens one episode at the first trial and closes it after the
     last event. Lazy: nothing is read ahead of the trial being wrapped.
     """
@@ -106,8 +106,8 @@ def _with_trial_memory(events: Iterable[Any], memory: str = 'none') -> Iterator[
     opened, key, columns = False, None, set()
     for event in events:
         meta = event.meta if isinstance(event, StreamEvent) else {}
-        is_trial = 'stimulus_index' in meta and meta.get('role') != 'fitting'
-        new_key = (meta.get('role'), meta.get('table_row'))
+        is_trial = 'stimulus_index' in meta
+        new_key = meta.get('table_row')
         starts_row = is_trial and (new_key != key or meta.get('column') in columns)
         if memory == 'none' and opened and (starts_row or not is_trial):
             yield end_event('terminal')
@@ -262,7 +262,7 @@ class Session(Source):
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.
         self.settings = settings
-        # The last state change the source delivered; a perturbation response
+        # The last state change the subject received; a perturbation response
         # without a handle or kind of its own is read against it.
         self._state_change: Any = None
         self.dropped = 0
@@ -341,7 +341,6 @@ class Session(Source):
             self._notify(0, event)
             if not isinstance(event, StreamEvent):
                 return event
-            self._note_state_change(event)
             if event.channel == CONTROL_CHANNEL:
                 if event.payload == BEGIN:
                     self._trial += 1
@@ -350,13 +349,12 @@ class Session(Source):
                     return event
             elif self._declared is None or channel_declared(event.channel, self._declared):
                 self._note_row(event)
+                self._note_state_change(event)
                 return event
         self._read_all = True
         return None
 
     def _note_state_change(self, event: StreamEvent) -> None:
-        if event.channel == CONTROL_CHANNEL:
-            return
         from .events import StateChange
         if isinstance(event.payload, StateChange):
             self._state_change = event.payload
@@ -364,8 +362,7 @@ class Session(Source):
     def _note_row(self, event: StreamEvent) -> None:
         # The row identity of the open trial: its first stimulus event names it.
         meta = event.meta
-        if (self._rows and self._rows[-1] is None and 'stimulus_index' in meta
-                and meta.get('role') != 'fitting'):
+        if self._rows and self._rows[-1] is None and 'stimulus_index' in meta:
             self._rows[-1] = meta['stimulus_index']
 
     @property

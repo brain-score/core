@@ -208,8 +208,8 @@ def test_a_perturbation_answer_without_meta_is_read_against_the_delivered_change
     assert record.undone == {'h'} and record.applied == set()
 
 
-def test_the_state_change_driver_reads_the_change_the_source_delivered():
-    """A declared bare family drops an addressed change event; the driver still reads it."""
+def test_a_subject_that_declares_the_family_receives_the_change():
+    """The event is on the plain 'lesion' channel, so the declared family matches it."""
     from brainscore_core._sessions.buffered import _state_change_session
     from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
     from brainscore_core.streaming_helpers import drive_state_change_session
@@ -226,3 +226,55 @@ def test_the_state_change_driver_reads_the_change_the_source_delivered():
     drive_state_change_session(_Subject(), session)
     assert seen == [change]
     assert session.collect('perturbation').handle_id == 'h'
+
+
+def test_behavioral_response_sends_the_rows_and_keeps_the_instruction_on_the_task():
+    from brainscore_core.contract import Subject
+    from brainscore_core.streaming_helpers import behavioral_response
+    task = TaskContext(task_type='probabilities', label_set=['a', 'b'], instruction='Pick one',
+                       fitting_stimuli=_table(2), metadata={'stimulus_set': _table(3)})
+
+    class _Reader(Subject):
+        identifier = 'reader'
+        in_channels = {'text', 'instruction'}
+        out_channels = {'behavior'}
+
+        def participate(self, session):
+            session.declare_inputs(self.in_channels)
+            self.seen = [(e.channel, e.payload) for e in iter(session.next_input, None)]
+            self.instruction = session.task_context.instruction
+            ids = list(session.stimulus_set['stimulus_id'])
+            session.respond(StreamEvent('behavior', _behavior(ids), 0.0))
+
+    subject = _Reader()
+    result = behavioral_response(subject, task)
+    assert subject.seen == [('text', 'word 0'), ('text', 'word 1'), ('text', 'word 2')]
+    assert subject.instruction == 'Pick one'
+    assert result.sizes['presentation'] == 3
+
+
+def test_behavioral_response_without_stimuli_raises_before_participate():
+    from brainscore_core.streaming_helpers import behavioral_response
+
+    class _Never:
+        def participate(self, session):
+            raise AssertionError('participate reached')
+    with pytest.raises(ValueError, match='requires stimuli'):
+        behavioral_response(_Never(), TaskContext(task_type='probabilities'))
+
+
+def test_a_subject_that_does_not_declare_the_family_never_receives_the_change():
+    from brainscore_core._sessions.buffered import _state_change_session
+    from brainscore_core.events import Perturbation, Selection, StateChange
+    from brainscore_core.streaming_helpers import drive_state_change_session
+    change = StateChange(kind='ablation', target=Selection(layer='blocks.1'),
+                         perturbation=Perturbation(kind='zero'))
+    session = _state_change_session(change).declare_inputs({'text', 'stimulation'})
+
+    class _Subject:
+        def process(self, state_change):
+            raise AssertionError('the change reached process')
+
+    with pytest.raises(ValueError, match="add 'lesion'"):
+        drive_state_change_session(_Subject(), session)
+    assert session.emitted == []

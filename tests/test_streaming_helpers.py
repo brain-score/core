@@ -17,7 +17,6 @@ from brainscore_core.streaming import NamedStreams
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     apply_state_change,
-    behavior_session,
     environment_session,
     behavioral_response,
     neural_response,
@@ -288,39 +287,30 @@ def _behavior_context(fitting_stimuli, scoring_stimuli):
     )
 
 
-def test_behavior_session_emits_instruction_fitting_and_scoring_events():
+def test_a_behavior_session_sends_only_the_stimulus_rows():
+    """The instruction and the fitting stimuli stay on the task context; they are not events."""
     fitting = _make_image_stimulus_set(["cat", "dog"], identifier="fit")
     scoring = _make_image_stimulus_set(["cat", "dog"], identifier="score")
-    session = behavior_session(_behavior_context(fitting, scoring)).declare_inputs(
+    context = _behavior_context(fitting, scoring)
+    session = stimulus_session(scoring, ["behavior"], context).declare_inputs(
         {'control', 'instruction', 'vision:image'})
 
     assert session.requested_output_channels == ("behavior",)
+    assert session.task_context.instruction == "Choose the animal"
+    assert session.task_context.fitting_stimuli is fitting
+    assert session.stimulus_set is scoring
 
-    events = []
-    while True:
-        event = session.next_input()
-        if event is None:
-            break
-        events.append(event)
+    events = list(iter(session.next_input, None))
 
-    assert events[0].channel == "instruction"
-    assert events[0].payload == "Choose the animal"
-    assert events[0].meta["role"] == "instruction"
-
-    # Fitting rows are not trials; each scoring row is one begin ... end.
+    assert "instruction" not in {event.channel for event in events}
+    # Each scoring row is one begin ... end.
     assert [event.payload for event in events if event.channel == "control"] == [
         "begin", "end", "begin", "end",
     ]
-    stimulus_events = [event for event in events[1:] if event.channel != "control"]
-    assert [event.channel for event in stimulus_events] == [
-        "vision:image", "vision:image", "vision:image", "vision:image",
-    ]
-    assert [event.meta["role"] for event in stimulus_events] == [
-        "fitting", "fitting", "scoring", "scoring",
-    ]
-    assert [event.meta["stimulus_id"] for event in stimulus_events] == [
-        "s0", "s1", "s0", "s1",
-    ]
+    stimulus_events = [event for event in events if event.channel != "control"]
+    assert [event.channel for event in stimulus_events] == ["vision:image", "vision:image"]
+    assert [event.meta["stimulus_id"] for event in stimulus_events] == ["s0", "s1"]
+    assert all("role" not in event.meta for event in stimulus_events)
 
 
 def test_behavioral_response_falls_back_for_non_native_subject():
@@ -350,7 +340,7 @@ def test_behavioral_response_falls_back_for_non_native_subject():
 
 
 def test_behavior_collect_packages_raw_label_events():
-    session = behavior_session(TaskContext(task_type="probabilities"))
+    session = stimulus_session(_stimulus_set(), ["behavior"], TaskContext(task_type="probabilities"))
     session.respond(StreamEvent(
         channel="behavior",
         payload="cat",
@@ -374,7 +364,7 @@ def test_behavior_collect_packages_raw_label_events():
 
 
 def test_behavior_collect_packages_raw_probability_events():
-    session = behavior_session(TaskContext(task_type="probabilities"))
+    session = stimulus_session(_stimulus_set(), ["behavior"], TaskContext(task_type="probabilities"))
     session.respond(StreamEvent(
         channel="behavior",
         payload=np.array([0.25, 0.75]),
@@ -396,7 +386,7 @@ def test_behavior_collect_packages_raw_probability_events():
 
 
 def test_behavior_collect_rejects_missing_channel():
-    session = behavior_session(TaskContext(task_type="probabilities"))
+    session = stimulus_session(_stimulus_set(), ["behavior"], TaskContext(task_type="probabilities"))
 
     with pytest.raises(ValueError, match="No emitted events"):
         session.collect("behavior")
@@ -468,13 +458,15 @@ def _ablation_state_change():
     )
 
 
-def test_state_change_session_emits_lesion_event_with_address():
-    session = _state_change_session(_ablation_state_change())
+def test_state_change_session_emits_lesion_event_on_the_plain_channel_with_the_target_in_the_payload():
+    change = _ablation_state_change()
+    session = _state_change_session(change)
     event = session.next_input()
 
     assert session.requested_output_channels == ("perturbation",)
-    assert event.channel == "lesion:blocks.10[1:4]"
-    assert isinstance(event.payload, StateChange)
+    assert event.channel == "lesion"
+    assert event.payload is change
+    assert event.payload.target == Selection(layer="blocks.10", indices=[1, 2, 3])
     assert event.meta == {"kind": "ablation"}
     assert session.next_input() is None
 
@@ -488,7 +480,8 @@ def test_state_change_session_routes_pharmacological_event_to_registry_channel()
     session = _state_change_session(state_change)
     event = session.next_input()
 
-    assert event.channel == "pharmacological:ketamine"
+    assert event.channel == "pharmacological"
+    assert event.payload.metadata["address"] == "ketamine"
     assert io_catalog.validate(
         event.channel, event.payload, direction=io_catalog.INPUT
     ) == []
@@ -503,10 +496,10 @@ def test_state_change_session_routes_lesion_kind_to_lesion_channel():
     session = _state_change_session(state_change)
     event = session.next_input()
 
-    assert event.channel == "lesion:blocks.10"
+    assert event.channel == "lesion"
 
 
-def test_state_change_reset_uses_metadata_family_and_address_when_present():
+def test_state_change_reset_uses_the_metadata_family():
     reset = StateChange(
         kind="reset",
         handle_id="stimulation-handle",
@@ -518,7 +511,7 @@ def test_state_change_reset_uses_metadata_family_and_address_when_present():
     session = _state_change_session(reset)
     event = session.next_input()
 
-    assert event.channel == "stimulation:blocks.10"
+    assert event.channel == "stimulation"
     assert event.meta["reset"] == "stimulation-handle"
 
 
@@ -694,7 +687,7 @@ class TestPublicSessionHelpers:
                     'choice': ('choice', ['a', 'b'])},
             dims=['presentation', 'choice'])
         subject = _TypedSubject(output)
-        session = behavior_session(context)
+        session = stimulus_session(scored, ['behavior'], context)
         drive_behavior_session(subject, session)
         assert subject.calls == [('start_task', context), ('process', scored, {})]
         event, = session.emitted
@@ -707,7 +700,7 @@ class TestPublicSessionHelpers:
         context = TaskContext(task_type='probabilities',
                               metadata={'stimulus_set': _stimulus_set()})
         subject = _TypedSubject()
-        session = behavior_session(context)
+        session = stimulus_session(context.metadata['stimulus_set'], ['behavior'], context)
         session.settings = {'require_variance': True}
         with pytest.raises(NotImplementedError, match='trial-to-trial variance'):
             drive_behavior_session(subject, session)

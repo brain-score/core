@@ -25,7 +25,6 @@ from brainscore_core.supported_data_standards.brainio.assemblies import (
 
 from brainscore_core._sessions.buffered import (
     apply_state_change,
-    behavior_session,
     behavioral_response,
     neural_response,
     stimulus_session,
@@ -68,7 +67,6 @@ from brainscore_core._sessions.payloads import (
     STIMULUS_COLUMN_TO_MODALITY,
     _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY,
     _STIMULUS_INPUT_CHANNEL_FAMILIES,
-    _behavior_events,
     _behavior_label_set,
     behavior_stimuli_from_session,
     _behavior_stimuli_to_score,
@@ -86,14 +84,12 @@ from brainscore_core._sessions.payloads import (
     _row_value,
     _single_row_stimuli,
     _spans_several_inputs,
-    _state_change_address,
     _state_change_channel,
     _state_change_event,
     _state_change_family,
     _state_change_handle_id,
     _stimuli_from_stream_session,
     _stimulus_events,
-    _tag_events,
     drain_session_inputs,
     session_stimuli,
 )

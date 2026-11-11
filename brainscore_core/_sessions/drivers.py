@@ -358,14 +358,11 @@ def drive_state_change_session(
                     f"{type(event.payload).__name__}."
                 )
             state_change = event.payload
-        else:
-            # The subject's input declaration can drop the change event: a
-            # bare family such as 'lesion' does not match 'lesion:<address>'.
-            # The session notes the change its source delivered.
-            state_change = getattr(session, "_state_change", None)
     if state_change is None:
         raise ValueError(
-            "perturbation participate requires a StateChange input event."
+            "perturbation participate requires a StateChange input event. A subject "
+            "receives one only on a channel it declares: add 'lesion', 'stimulation' "
+            "or 'pharmacological' to its in_channels."
         )
     result = subject.process(state_change)
     handle_id = _state_change_handle_id(state_change, result)
@@ -422,9 +419,9 @@ def drive_behavior_session(
     The contract does not require ``process``: an arbitrary ``Subject`` only
     implements ``participate`` and never needs this.
 
-    Uses ``task_context`` when given, otherwise the session's. Fitting inputs
-    and instructions are not scored; the scored trials are the session's
-    ``stimulus_set``, or the task's own stimuli when the session sends none.
+    Uses ``task_context`` when given, otherwise the session's. The scored
+    trials are the session's ``stimulus_set``, or the task's own stimuli when
+    the session sends none. An ``instruction`` event is not scored.
     A request for trial-to-trial variance is refused before any compute. The
     single response is sent on the ``behavior`` channel. ``on_begin()`` runs once
     before the trials: this path keeps no history between them.

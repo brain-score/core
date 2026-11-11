@@ -45,8 +45,17 @@ class TestLookup:
 
     def test_addressed_label_resolves_to_family(self):
         assert io_catalog.get("neural:IT").name == "neural"
-        assert io_catalog.get("lesion:V4").name == "lesion"
-        assert io_catalog.get("stimulation:layer20").name == "stimulation"
+        assert io_catalog.get("behavior:choice").name == "behavior"
+
+    @pytest.mark.parametrize("family", ["lesion", "stimulation", "pharmacological"])
+    def test_intervention_channels_are_not_addressable(self, family):
+        from brainscore_core.events import StateChange
+        assert io_catalog.get(family).addressing is None
+        assert io_catalog.validate(family, StateChange(kind="ablation"),
+                                   direction=io_catalog.INPUT) == []
+        problems = io_catalog.validate(f"{family}:blocks.10", StateChange(kind="ablation"),
+                                       direction=io_catalog.INPUT)
+        assert any("not addressable" in problem for problem in problems)
 
     def test_has(self):
         assert io_catalog.has("neural:IT")

@@ -107,6 +107,11 @@ reach any subject the same way:
 For a `BrainScoreModel`, configure the parts by name: `extractor=` for
 recorded activity, `answer=` for instruction-following behavior, `policy=`
 for environment actions, and `intervention=` for lesions or stimulation.
+A lesion, a stimulation or a pharmacological change arrives on the plain
+channel `lesion`, `stimulation` or `pharmacological`. The target is in the
+`StateChange` payload, not in the channel name. A subject that takes changes
+declares the plain family; a subject that does not declare it never receives
+the change.
 
 Writing an adapter for a model that already has those typed methods? Its
 `participate(session)` can use the public functions in

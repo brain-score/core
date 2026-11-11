@@ -9,7 +9,6 @@ from ..supported_data_standards.brainio.assemblies import (
     NeuroidAssembly,
 )
 from .payloads import (
-    _behavior_events,
     _behavior_stimuli_to_score,
     _state_change_event,
     _stimulus_events,
@@ -59,16 +58,6 @@ def _lazy_stimulus_events(stimulus_set) -> Iterator[StreamEvent]:
         yield from _table_row_events(columns, position, row_index, row)
 
 
-def behavior_session(task_context) -> Session:
-    """A session whose events are the task's instruction, fitting and scoring stimuli."""
-    scoring = _behavior_stimuli_to_score(task_context)
-    events = list(_with_trial_memory(_behavior_events(task_context, scoring),
-                                      _memory(task_context)))
-    session = Session(events, ('behavior',), task_context, stimulus_set=scoring)
-    session.one_answer_per_trial = _memory(task_context) == 'none'
-    return session
-
-
 def _state_change_session(state_change: StateChange) -> Session:
     return Session([_state_change_event(state_change)], ('perturbation',))
 
@@ -107,8 +96,16 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
         task = TaskContext(task_type='probabilities', label_set=['real', 'pseudo'],
                            fitting_stimuli=train, metadata={'stimulus_set': test})
         behavior = behavioral_response(subject, task)
+
+    The session presents only the stimuli to answer. The instruction and the
+    fitting stimuli are not sent as events; they stay on ``session.task_context``.
     """
-    session = behavior_session(task_context)
+    stimuli = _behavior_stimuli_to_score(task_context)
+    if stimuli is None:
+        raise ValueError(
+            "behavioral_response requires stimuli to elicit a response. Provide "
+            "task_context.metadata['stimulus_set'] or fitting_stimuli.")
+    session = stimulus_session(stimuli, ['behavior'], task_context)
     subject.participate(session)
     return session.collect("behavior")
 
