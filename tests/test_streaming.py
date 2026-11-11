@@ -8,10 +8,10 @@ from brainscore_core.streaming import (
 
 
 def test_stream_event_construction():
-    event = StreamEvent(channel="vision", payload={"id": "stim-0"}, t_ms=12.5)
+    event = StreamEvent(channel="vision:image", payload={"id": "stim-0"}, t_ms=12.5)
     other = StreamEvent(channel="text", payload="caption", t_ms=13.0)
 
-    assert event.channel == "vision"
+    assert event.channel == "vision:image"
     assert event.payload == {"id": "stim-0"}
     assert event.t_ms == 12.5
     assert event.meta == {}
@@ -81,7 +81,7 @@ def test_session_is_one_concrete_class_over_a_source():
 
 def test_session_drives_inputs_and_records_responses():
     inputs = [
-        StreamEvent(channel="vision", payload="image-0", t_ms=0.0),
+        StreamEvent(channel="vision:image", payload="image-0", t_ms=0.0),
         StreamEvent(channel="instruction", payload="choose", t_ms=5.0),
     ]
     session = Session(inputs)

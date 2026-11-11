@@ -38,7 +38,8 @@ _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY = {
 
 
 _STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
-    modalities_to_input_channels(STIMULUS_COLUMN_TO_MODALITY.values())
+    parse_channel(channel)[0]
+    for channel in modalities_to_input_channels(STIMULUS_COLUMN_TO_MODALITY.values())
 )
 
 

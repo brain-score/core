@@ -82,7 +82,7 @@ class TestRequiredModalities:
         bench = FakeBenchmark(required_modalities={'vision', 'text'})
         match = check_compatibility(model, bench)
         assert match.kind == 'partial'
-        assert match.consumed_inputs == {'vision'}
+        assert match.consumed_inputs == {'vision:image'}
         assert match.dropped_inputs == {'text'}
 
     def test_full_match_reports_full(self):
@@ -148,8 +148,9 @@ class TestAcceptedModalities:
         check_compatibility(FakeModel(modalities={'audio', 'video'}), bench)
         check_compatibility(FakeModel(modalities={'audio', 'vision'}), bench)
         # Missing audio or missing both visual formats: partial, still runs.
-        assert check_compatibility(FakeModel(modalities={'video'}), bench).dropped_inputs == {'audio'}
-        assert check_compatibility(FakeModel(modalities={'audio'}), bench).dropped_inputs == {'vision'}
+        assert check_compatibility(FakeModel(modalities={'video'}), bench).dropped_inputs == {'audio', 'vision:image'}
+        assert check_compatibility(FakeModel(modalities={'audio'}), bench).dropped_inputs == {
+            'vision:image', 'vision:video'}
         with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
             check_compatibility(FakeModel(modalities={'text'}), bench)
 
@@ -161,17 +162,29 @@ class TestAcceptedModalities:
         check_compatibility(model, bench)  # should not raise
 
 
-class TestVideoVisionUnification:
-    """video folds into vision; the two are interchangeable for compatibility."""
+class TestVisualFormsAreSeparateChannels:
+    """image and video are two channels; neither stands for the other."""
 
-    def test_video_benchmark_runs_a_vision_model(self):
-        # bench requires 'video', model reports canonical 'vision' -> compatible
-        check_compatibility(FakeModel(modalities={'vision'}),
-                            FakeBenchmark(required_modalities={'video'}))
+    def test_video_benchmark_does_not_run_an_image_only_model(self):
+        with pytest.raises(CompatibilityError):
+            check_compatibility(FakeModel(modalities={'vision'}),
+                                FakeBenchmark(required_modalities={'video'}))
 
-    def test_vision_benchmark_runs_a_video_model(self):
-        check_compatibility(FakeModel(modalities={'video'}),
-                            FakeBenchmark(required_modalities={'vision'}))
+    def test_image_benchmark_does_not_run_a_video_only_model(self):
+        with pytest.raises(CompatibilityError):
+            check_compatibility(FakeModel(modalities={'video'}),
+                                FakeBenchmark(required_modalities={'vision'}))
+
+    def test_benchmark_with_both_forms_runs_either_model(self):
+        bench = FakeBenchmark(accepted_modalities={'vision', 'video'})
+        check_compatibility(FakeModel(modalities={'vision'}), bench)
+        check_compatibility(FakeModel(modalities={'video'}), bench)
+
+    def test_a_bare_vision_declaration_is_refused(self):
+        bench = FakeBenchmark()
+        bench.required_input_channels = {'vision'}
+        with pytest.raises(CompatibilityError, match="names its form"):
+            check_compatibility(FakeModel(modalities={'vision'}), bench)
 
 
 # ── Deprecated benchmark.available_modalities ────────────────────────

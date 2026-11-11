@@ -48,7 +48,8 @@ reads the channel declarations. There is one session class, `Session`. It takes
 a source of input events (a list, iterator or generator), the outputs you
 request, and the task. The subject calls `session.declare_inputs(in_channels)`
 to receive only the channels it declares. Channels match by exact name:
-`vision:image` and `vision:video` are two channels, and `vision` is a third.
+`vision:image` and `vision:video` are two channels. There is no bare `vision`
+channel: a subject declares the visual form it takes, or both.
 
 A session built from a stimulus table also holds control events on the
 `control` channel: `begin`, `respond` and `end`. A subject gets them only if it

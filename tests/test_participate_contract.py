@@ -43,7 +43,7 @@ class _ParticipateOnly(Subject):
     """Implements only the contract: no process, look_at or start_recording."""
 
     identifier = 'participate-only'
-    in_channels = {'vision', 'observation', 'control'}
+    in_channels = {'vision:image', 'observation', 'control'}
     out_channels = {'neural:IT', 'behavior', 'motor'}
 
     def __init__(self):

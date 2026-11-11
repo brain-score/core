@@ -15,7 +15,7 @@ class TestSeedCatalog:
     def test_expected_families_present(self):
         names = {e.name for e in io_catalog.all_entries()}
         expected = {
-            "vision", "text", "audio", "video", "instruction",
+            "vision", "text", "audio", "instruction",
             "stimulation", "lesion", "observation", "proprioception",
             "neural", "behavior", "motor",
         }

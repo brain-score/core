@@ -38,11 +38,9 @@ INPUT = "input"
 OUTPUT = "output"
 BOTH = "both"
 REGISTRY_VERSION = "2.0"
-# ``video`` is a temporal sub-kind of ``vision`` (a still image is a 1-frame
-# clip). The contract exposes a single visual channel, ``vision``, that covers
-# static and dynamic input; ``video`` is kept as a recognized alias so existing
-# registrations and benchmarks keep working. Everything canonicalizes via
-# ``canonical_modality`` before it is used as a lookup / compatibility key.
+# ``video`` is a modality name that folds into ``vision`` for lookups
+# (``canonical_modality``). A visual input channel names its form instead:
+# ``vision:image`` or ``vision:video`` (see ``MODALITY_TO_INPUT_CHANNEL``).
 MODALITY_ALIASES = {
     "video": "vision",
 }
@@ -53,11 +51,12 @@ def canonical_modality(modality: str) -> str:
     return MODALITY_ALIASES.get(modality, modality)
 
 
+# A visual input names its form: an image or a video (Contract Rules 3.7, 5.9).
 MODALITY_TO_INPUT_CHANNEL = {
-    "vision": "vision",
+    "vision": "vision:image",
     "text": "text",
     "audio": "audio",
-    "video": "vision",  # temporal vision -> the one visual channel
+    "video": "vision:video",
 }
 
 _DIRECTIONS = (INPUT, OUTPUT, BOTH)
@@ -67,7 +66,7 @@ ShapeValidator = Callable[[Any], object]
 @dataclass(frozen=True)
 class CatalogEntry:
     """One allowable input or output and its payload contract."""
-    name: str                          # channel-style label, e.g. 'vision', 'neural:IT'
+    name: str                          # channel-style label, e.g. 'text', 'neural:IT'
     kind: str                          # INPUT, OUTPUT, or BOTH
     carried_by: str                    # the typed envelope or method that carries it
     payload_contract: str              # human-readable dtype / shape / units
@@ -127,6 +126,20 @@ def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
     return entry.direction in (direction, BOTH)
 
 
+# A family listed here has no bare channel: each channel names one of these forms.
+CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({"vision": ("image", "video")})
+
+
+def form_problem(channel: str) -> Optional[str]:
+    """Why ``channel`` does not name a form its family needs, or None."""
+    family, address = parse_channel(channel)
+    forms = CHANNEL_FORMS.get(family)
+    if forms is None or address in forms:
+        return None
+    names = " or ".join(f"'{family}:{form}'" for form in forms)
+    return f"{channel}: a '{family}' channel names its form; use {names}"
+
+
 def modalities_to_input_channels(modalities) -> set[str]:
     """Map v1.5 modality names onto v2 input channel families."""
     return {
@@ -138,7 +151,7 @@ def modalities_to_input_channels(modalities) -> set[str]:
 def get(label: str) -> CatalogEntry:
     """Look up the catalog entry for a label.
 
-    A plain label (``'vision'``) resolves directly. An addressed label
+    A plain label (``'text'``) resolves directly. An addressed label
     (``'neural:IT'``) resolves to its family entry (``'neural'``), which holds
     the payload contract; the address is interpreted by the handler.
     """
@@ -266,6 +279,9 @@ def validate(
 
     if address is not None and entry.addressing is None:
         warnings.append(f"{channel}: channel family '{family}' is not addressable")
+    problem = form_problem(channel)
+    if problem:
+        warnings.append(problem)
 
     if direction is not None:
         _check_direction(direction)
@@ -318,8 +334,8 @@ TABLE_ROW_META_KEYS = ("stimulus_id", "stimulus_index", "column", "table_row")
 
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
-    # `vision` is the one visual channel: a still is a 1-frame clip, so it
-    # accepts both static (H, W, 3) and temporal (T, H, W, 3) payloads.
+    # `vision` is a channel family with no bare channel: `vision:image` takes
+    # (H, W, 3) payloads and `vision:video` takes (T, H, W, 3) payloads.
     CatalogEntry("vision", INPUT, "StimulusSet column",
                  "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, a table of frames, or a path to one",
                  "image/video preprocessor + a vision model harness (wrapper)",
@@ -336,14 +352,6 @@ _SEED = [
                  "(samples,) float32 waveform, or a path; sample rate read from the file header",
                  "an audio model harness (AudioWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS + ("sample_rate_hz",), expected_ndim=(1,),
-                 materializers=("StimulusSet",)),
-    # `video` is a backward-compatible alias of `vision` (temporal vision); it
-    # canonicalizes to `vision` via ``canonical_modality``. New registrations
-    # should use `vision`, which accepts both static and temporal payloads.
-    CatalogEntry("video", INPUT, "StimulusSet column",
-                 "(T, H, W, 3) uint8 clip, or a path (alias of the vision channel)",
-                 "a video model harness (VideoWrapper)",
-                 meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(4,),
                  materializers=("StimulusSet",)),
     CatalogEntry("instruction", INPUT, "TaskContext.instruction or a closed-loop row entry",
                  "a Python str framing the task",
@@ -469,7 +477,7 @@ def _declare_payload_types() -> None:
 
     sensory = (str, Path, np.ndarray, StimulusSet)  # a StimulusSet is a window of frames
     payload_types = {
-        'vision': sensory, 'video': sensory, 'audio': sensory,
+        'vision': sensory, 'audio': sensory,
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
         'neural': (DataAssembly, np.ndarray),

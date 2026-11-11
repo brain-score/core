@@ -30,7 +30,7 @@ class _ChannelSubject(UnifiedModel):
 def test_subject_derives_channel_identity_from_v1_contract():
     subject = _ChannelSubject()
 
-    assert subject.in_channels == {"vision", "text"}
+    assert subject.in_channels == {"vision:image", "text"}
     # Contract v3 rule 2.2: outputs come from declarations, never from private
     # attribute names. The fixture's ``_behavioral_readout_layer`` declares nothing.
     assert subject.out_channels == {"neural:V1", "neural:IT"}
@@ -41,7 +41,7 @@ def test_subject_channel_properties_are_overridable():
     class ExplicitChannelSubject(_ChannelSubject):
         @property
         def in_channels(self):
-            return {"vision", "instruction"}
+            return {"vision:image", "instruction"}
 
         @property
         def out_channels(self):
@@ -53,7 +53,7 @@ def test_subject_channel_properties_are_overridable():
 
     subject = ExplicitChannelSubject()
 
-    assert subject.in_channels == {"vision", "instruction"}
+    assert subject.in_channels == {"vision:image", "instruction"}
     assert subject.out_channels == {"behavior"}
     assert subject.required_channels == {"instruction"}
 
@@ -86,7 +86,7 @@ def test_legacy_subclass_still_instantiates_without_participate():
     subject = ExistingSubject()
 
     assert subject.process(None) == "ok"
-    assert subject.in_channels == {"vision"}
+    assert subject.in_channels == {"vision:image"}
 
 
 def test_unifiedmodel_remains_a_subject():
