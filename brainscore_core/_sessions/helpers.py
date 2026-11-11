@@ -57,6 +57,7 @@ from brainscore_core._sessions.drivers import (
     _drive_via_process,
     refuse_variance,
     _start_recording,
+    stream_trials,
     drive_behavior_session,
     drive_neural_session,
     drive_typed_session,

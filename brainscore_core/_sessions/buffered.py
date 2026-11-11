@@ -1,6 +1,7 @@
 """Builders for the one ``Session`` and the typed measurement helpers."""
 
 from __future__ import annotations
+from dataclasses import replace
 from typing import Iterator, Sequence, Union
 from ..streaming import Session, StreamEvent, _with_trial_memory
 from ..events import StateChange
@@ -10,6 +11,7 @@ from ..supported_data_standards.brainio.assemblies import (
 )
 from .payloads import (
     _behavior_stimuli_to_score,
+    _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY,
     _state_change_event,
     _stimulus_events,
     _stimulus_input_columns,
@@ -110,7 +112,16 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
     return session.collect("behavior")
 
 
+
+
 def apply_state_change(subject, state_change: StateChange):
+    if state_change.kind == "reset" and "family" not in state_change.metadata:
+        # A reset that carries only a handle names no channel family. It goes on an
+        # intervention channel the subject declares, so the subject receives it.
+        declared = [family for family in dict.fromkeys(_STATE_CHANGE_KIND_TO_CHANNEL_FAMILY.values())
+                    if family in subject.in_channels]
+        if declared:
+            state_change = replace(state_change, metadata={**state_change.metadata, "family": declared[0]})
     session = _state_change_session(state_change)
     subject.participate(session)
     return session.collect("perturbation")
