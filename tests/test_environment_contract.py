@@ -159,12 +159,13 @@ def test_truncated_ends_complete_and_failure_does_not():
     assert session.next_input() is None and not session.complete
 
 
-def test_unrequested_outputs_are_kept_and_do_not_advance_the_environment():
+def test_unrequested_outputs_are_refused_and_do_not_advance_the_environment():
     env = Environment()
     session, _ = make(env)
     advance(session)
-    session.respond(StreamEvent('neural:V4', 'activity', None))
-    assert env.actions == [] and len(session.emitted) == 1
+    with pytest.raises(ValueError, match='not requested'):
+        session.respond(StreamEvent('neural:V4', 'activity', None))
+    assert env.actions == [] and session.emitted == []
 
 
 def test_a_source_over_another_output_channel_needs_no_motor():
@@ -176,15 +177,15 @@ def test_a_source_over_another_output_channel_needs_no_motor():
             return {'observation': 0}
 
         def step(self, outputs):
-            self.actions.append(outputs['text'])
+            self.actions.append(outputs['behavior:text'])
             return {'observation': 1}, 'terminal'
     env = Talking()
-    source = EnvironmentSource(env, action_channel='text')
-    session = Session(source, ('text',))
+    source = EnvironmentSource(env, action_channel='behavior:text')
+    session = Session(source, ('behavior:text',))
     advance(session)
-    session.respond(StreamEvent('text', 'hello', None))
+    session.respond(StreamEvent('behavior:text', 'hello', None))
     assert env.actions == ['hello']
-    assert [e.payload for e in session.collect('text')] == ['hello']
+    assert [e.payload for e in session.emitted] == ['hello']
 
 
 def _typed_subject(process):

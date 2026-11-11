@@ -112,14 +112,15 @@ class TestRegister:
 
 
 class TestPayloadTypes:
-    """Contract v3 rule 3.2: a family declares its payload type; mismatches warn first."""
+    """Contract v3 rule 3.2: a family declares its payload type; a mismatch fails validation."""
 
     def test_seeded_families_declare_payload_types(self):
         from pathlib import Path
         import numpy as np
         from brainscore_core.events import StateChange
         assert io_catalog.get("text").payload_type is str
-        assert io_catalog.get("vision").payload_type == (str, Path, np.ndarray)
+        vision = io_catalog.get("vision").payload_type
+        assert np.ndarray in vision and str in vision and Path in vision
         assert io_catalog.get("lesion").payload_type is StateChange
         assert io_catalog.get("observation").payload_type is None  # harness-defined
         assert io_catalog.get("pupil").payload_type is None  # unchecked families stay unchecked
@@ -131,7 +132,6 @@ class TestPayloadTypes:
         notes = io_catalog.payload_type_notes("text", 42)
         assert notes == ["text: payload is int, not str (a Python str)"]
 
-    def test_type_mismatch_never_enters_validate_failures(self):
-        # Warn-first: validate() stays as it was, so callers that raise on its
-        # failures do not start rejecting payloads of an unexpected type.
-        assert io_catalog.validate("text", 42, direction=INPUT) == []
+    def test_type_mismatch_is_a_validate_failure(self):
+        assert io_catalog.validate("text", 42, direction=INPUT) == [
+            "text: payload is int, not str (a Python str)"]

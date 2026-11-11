@@ -53,7 +53,7 @@ def test_control_constructors_and_end_reasons():
 
 
 def test_a_bad_control_payload_fails_at_construction():
-    with pytest.raises(ValueError, match='catalog validation'):
+    with pytest.raises(ValueError, match='channel catalog'):
         Session([StreamEvent(CONTROL_CHANNEL, 'jump', 0.0)])
 
 

@@ -186,7 +186,10 @@ class Source:
     ignores it. A source may return the event the session should keep in place of
     the response (a receipt). ``complete`` says whether the input ran to the end of
     its episode; ``history_limit`` bounds how many responses the session keeps.
+    ``checked`` says the source already checked its events against the catalog;
+    otherwise the session checks each event as it delivers it.
     """
+    checked: bool = False
     complete: bool = True
     history_limit: Optional[int] = None
 
@@ -206,12 +209,14 @@ class FixedSource(Source):
 
     A list or tuple is known up front, so it is checked against the channel
     catalog now (rule 3.4). A lazy iterator is read one event at a time and is
-    never materialized.
+    never materialized; the session checks each event when it delivers it.
     """
+    checked = False
 
     def __init__(self, events: Iterable[Any] = ()) -> None:
         if isinstance(events, (list, tuple)):
             _validate_inputs(events)
+            self.checked = True
         self._events: Iterator[Any] = iter(events)
 
     def next_input(self) -> Optional[StreamEvent]:
@@ -303,6 +308,9 @@ class Session(Source):
 
     def next_input(self) -> Optional[StreamEvent]:
         while (event := self.source.next_input()) is not None:
+            if not self.source.checked and isinstance(event, StreamEvent):
+                from . import io_catalog
+                check_event(event, io_catalog.INPUT)
             self._notify(0, event)
             if (self._declared is None or not isinstance(event, StreamEvent)
                     or event.channel == CONTROL_CHANNEL
@@ -325,10 +333,23 @@ class Session(Source):
         return False
 
     def respond(self, event: StreamEvent) -> None:
+        """Accept one subject response.
+
+        When outputs were requested, the response must be on one of them (exact
+        string match) and its payload must pass the catalog check for its
+        channel; otherwise it raises ``ValueError``. When no outputs were
+        requested (``None``) nothing is checked and any response is kept.
+        """
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
         for rewrite in tuple(self._rewriters):
             event = rewrite(event)
+        if self.requested_output_channels is not None:
+            if event.channel not in self.requested_output_channels:
+                raise ValueError(f"response on {event.channel!r} was not requested; "
+                                 f"requested: {list(self.requested_output_channels)}")
+            from . import io_catalog
+            check_event(event, io_catalog.OUTPUT)
         try:
             kept = self.source.respond(event)
         except BaseException as error:
@@ -384,39 +405,33 @@ class Session(Source):
         return events
 
 
+def check_event(event: StreamEvent, direction: str) -> None:
+    """Raise ``ValueError`` unless ``event`` passes the channel catalog.
+
+    The channel must be a catalog family, addressed as the family allows, used in
+    ``direction`` (``io_catalog.INPUT`` or ``OUTPUT``), and its payload must pass
+    the family's type, ndim, dtype and validator checks. An entry with none of
+    those checks nothing. An input control event skips the payload checks; its
+    payload must be one of ``begin``, ``respond`` or ``end``.
+    """
+    from . import io_catalog
+    if direction == io_catalog.INPUT and event.channel == CONTROL_CHANNEL:
+        problems = ([] if event.payload in (BEGIN, RESPOND, END) else
+                    [f"control payload must be 'begin', 'respond' or 'end'; got {event.payload!r}"])
+    else:
+        problems = io_catalog.validate(event.channel, event.payload, direction=direction)
+    if problems:
+        raise ValueError(f"{direction} event on {event.channel!r} failed the channel catalog: "
+                         + "; ".join(problems[:5]))
+
+
 def _validate_inputs(inputs) -> None:
     """Check known inputs against the channel catalog before any is delivered.
 
     Contract Rules v3, rule 3.4: a session whose inputs are known up front
-    fails at construction, not at the first event the subject reads. A wrong
-    direction, a bad address or a failed family validator is an error. An
-    unregistered family (allowed in exploratory experiments; benchmark scoring
-    rejects it at pre-flight), the catalog's documented ndim/dtype hints and a
-    payload whose type differs from the family's ``payload_type`` only warn.
+    fails at construction, not at the first event the subject reads.
     """
-    import warnings
     from . import io_catalog
-    problems, notes = [], []
     for event in inputs:
-        if not isinstance(event, StreamEvent):
-            continue
-        family = event.channel.split(":", 1)[0]
-        if not io_catalog.has(family):
-            notes.append(f"{event.channel}: unregistered channel family")
-            continue
-        notes.extend(io_catalog.payload_type_notes(event.channel, event.payload))
-        found = io_catalog.validate(event.channel, event.payload,
-                                    direction=io_catalog.INPUT)
-        if not found:
-            continue
-        documented = io_catalog.check_payload(event.channel, event.payload)
-        notes.extend(m for m in found if m in documented)
-        problems.extend(m for m in found if m not in documented)
-    if problems:
-        shown = sorted(set(problems))
-        more = f" (+{len(shown) - 5} more)" if len(shown) > 5 else ""
-        raise ValueError("Session inputs failed catalog validation: "
-                         + "; ".join(shown[:5]) + more)
-    if notes:
-        warnings.warn("Session inputs not fully covered by the channel catalog: "
-                      + "; ".join(sorted(set(notes))[:5]), stacklevel=3)
+        if isinstance(event, StreamEvent):
+            check_event(event, io_catalog.INPUT)

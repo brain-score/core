@@ -27,13 +27,12 @@ class TextSubject(Subject):
             self.seen.append(event)
             if event.channel != "text":
                 continue
-            session.respond(StreamEvent(
-                "neural:language_network", np.array([len(event.payload), 1.0]),
-                event.t_ms, dict(event.meta),
-            ))
-            session.respond(StreamEvent(
-                "behavior", event.payload.upper(), event.t_ms, dict(event.meta),
-            ))
+            answers = {"neural:language_network": np.array([len(event.payload), 1.0]),
+                       "behavior": event.payload.upper()}
+            for channel, payload in answers.items():
+                requested = session.requested_output_channels
+                if requested is None or channel in requested:
+                    session.respond(StreamEvent(channel, payload, event.t_ms, dict(event.meta)))
 
     def reset(self):
         self.seen.clear()

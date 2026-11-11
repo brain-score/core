@@ -23,6 +23,8 @@ from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+import numpy as np
+
 from .streaming import parse_channel
 
 # Preserve the column ownership used by model construction and registration.
@@ -207,17 +209,19 @@ def check_payload(label: str, payload) -> List[str]:
     ``.dtype`` when the entry declares an expectation and the payload exposes
     them. It never raises on a normal mismatch and never replaces the type
     system; it exists so a benchmark can surface an obvious wrong-shape payload
-    at session start instead of deep inside extraction.
+    at session start instead of deep inside extraction. The ndim and dtype
+    hints describe raw arrays: a table (``StimulusSet``) or an assembly has its
+    own shape and is not held to them.
     """
     e = get(label)
     warnings: List[str] = []
-    if e.expected_ndim and hasattr(payload, "ndim"):
+    if e.expected_ndim and isinstance(payload, np.ndarray):
         if payload.ndim not in e.expected_ndim:
             warnings.append(
                 f"{label}: payload ndim {payload.ndim} not in expected "
                 f"{e.expected_ndim} ({e.payload_contract})"
             )
-    if e.expected_dtype and hasattr(payload, "dtype"):
+    if e.expected_dtype and isinstance(payload, np.ndarray):
         if str(payload.dtype) != e.expected_dtype:
             warnings.append(
                 f"{label}: payload dtype {payload.dtype} is not the documented "
@@ -272,6 +276,7 @@ def validate(
             )
 
     warnings.extend(check_payload(channel, payload))
+    warnings.extend(payload_type_notes(channel, payload))
 
     if entry.shape_validator is not None:
         warnings.extend(
@@ -316,7 +321,7 @@ _SEED = [
     # `vision` is the one visual channel: a still is a 1-frame clip, so it
     # accepts both static (H, W, 3) and temporal (T, H, W, 3) payloads.
     CatalogEntry("vision", INPUT, "StimulusSet column",
-                 "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, or a path to one",
+                 "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, a table of frames, or a path to one",
                  "image/video preprocessor + a vision model harness (wrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(3, 4), expected_dtype="uint8",
                  addressing=("address is the form a subject takes natively: 'image' "
@@ -438,10 +443,7 @@ for _entry in _SEED:
 def payload_type_notes(label: str, payload) -> List[str]:
     """Report a payload whose type does not match its family's ``payload_type``.
 
-    Warn-first (Contract Rules v3, rule 3.2): a mismatch is a note, never a
-    failure, so sessions that run today keep running while the catalog's
-    types are checked against the notebooks and examples. Promote to an error
-    by moving this check into :func:`validate` once that review is done.
+    :func:`validate` includes this check, so a session treats a mismatch as an error.
     """
     entry = get(label)
     if entry.payload_type is None or isinstance(payload, entry.payload_type):
@@ -461,17 +463,18 @@ def _declare_payload_types() -> None:
     """
     from dataclasses import replace as _replace
     from pathlib import Path
-    import numpy as np
     from .events import PerturbationApplied, StateChange
+    from .supported_data_standards.brainio.stimuli import StimulusSet
     from .supported_data_standards.brainio.assemblies import DataAssembly
 
-    sensory = (str, Path, np.ndarray)
+    sensory = (str, Path, np.ndarray, StimulusSet)  # a StimulusSet is a window of frames
     payload_types = {
         'vision': sensory, 'video': sensory, 'audio': sensory,
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
-        'neural': DataAssembly, 'behavior': DataAssembly,
-        'perturbation': PerturbationApplied,
+        'neural': (DataAssembly, np.ndarray),
+        'behavior': (DataAssembly, str, np.ndarray),
+        'perturbation': (PerturbationApplied, type(None)),
     }
     for family, payload_type in payload_types.items():
         register(_replace(get(family), payload_type=payload_type), replace=True)

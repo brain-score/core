@@ -104,20 +104,18 @@ def test_session_rejects_wrong_direction_at_construction():
         Session([StreamEvent("behavior", "x", 0.0)])
 
 
-def test_session_warns_on_unregistered_family():
+def test_session_rejects_unregistered_family():
     import pytest
     from brainscore_core.streaming import Session, StreamEvent
-    with pytest.warns(UserWarning, match="unregistered channel family"):
+    with pytest.raises(ValueError, match="No Input/Output Catalog entry"):
         Session([StreamEvent("not_a_family", 1, 0.0)])
 
 
-def test_session_warns_on_payload_type_mismatch_and_still_delivers():
-    """Payload types are checked warn-first: a mismatch is reported, not rejected."""
+def test_session_rejects_payload_type_mismatch():
     import pytest
     from brainscore_core.streaming import Session, StreamEvent
-    with pytest.warns(UserWarning, match="payload is int, not str"):
-        session = Session([StreamEvent("text", 42, 0.0)])
-    assert session.next_input().payload == 42
+    with pytest.raises(ValueError, match="payload is int, not str"):
+        Session([StreamEvent("text", 42, 0.0)])
 
 
 def test_measurement_settings_are_a_saved_session_context_field():
