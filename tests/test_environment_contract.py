@@ -11,10 +11,13 @@ from brainscore_core.streaming_helpers import (
 )
 
 
+ENV_INPUTS = ('control', 'observation', 'proprioception', 'reward', 'instruction')
+
+
 def make(env, **kwargs):
     """A session over ``env``; returns (session, source)."""
     source = EnvironmentSource(env, **kwargs)
-    return Session(source, ('motor',)), source
+    return Session(source, ('motor',)).declare_inputs(ENV_INPUTS), source
 
 
 def advance(session):
@@ -181,7 +184,7 @@ def test_a_source_over_another_output_channel_needs_no_motor():
             return {'observation': 1}, 'terminal'
     env = Talking()
     source = EnvironmentSource(env, action_channel='behavior:text')
-    session = Session(source, ('behavior:text',))
+    session = Session(source, ('behavior:text',)).declare_inputs(ENV_INPUTS)
     advance(session)
     session.respond(StreamEvent('behavior:text', 'hello', None))
     assert env.actions == ['hello']
@@ -465,7 +468,7 @@ def test_invalid_history_limit_fails_before_reset(limit, error):
 
 def test_completion_is_declared_by_the_source():
     assert Session(()).complete is True
-    with Session(EnvironmentSource(Environment()), ('motor',)) as session:
+    with Session(EnvironmentSource(Environment()), ('motor',)).declare_inputs(ENV_INPUTS) as session:
         assert session.complete is False
 
 
@@ -477,7 +480,7 @@ def test_a_subject_that_does_not_declare_proprioception_never_receives_it():
     received = []
 
     def participate(session):
-        session.declare_inputs({'observation'})
+        session.declare_inputs({'observation', 'control'})
         while (event := session.next_input()) is not None:
             if event.channel == 'control' and event.payload == 'respond':
                 session.respond(motor(1))

@@ -11,23 +11,23 @@ if TYPE_CHECKING:
     from .streaming import Session
 
 
-# How a session groups its trials into episodes (begin ... end). ``independent``:
+# How a session groups its trials into episodes (begin ... end). ``none``:
 # every trial is its own episode, so a subject keeps nothing from earlier trials.
 # ``conversation``: all trials are one episode, so a subject with the
 # ``memory:trial_history`` trait sees its earlier trials and responses.
-TRIAL_PROTOCOLS = ('independent', 'conversation')
-PROTOCOL_REQUIRED_TRAITS = {'independent': frozenset(), 'conversation': frozenset({'memory:trial_history'})}
+_TRIAL_MEMORIES = ('none', 'conversation')
+_MEMORY_REQUIRED_TRAITS = {'none': frozenset(), 'conversation': frozenset({'memory:trial_history'})}
 
 
-def required_traits_for(declared, trial_protocol: str = 'independent') -> Set[str]:
-    """The traits a subject needs: the ``declared`` ones plus those the protocol implies.
+def required_traits_for(declared, trial_memory: str = 'none') -> Set[str]:
+    """The traits a subject needs: the ``declared`` ones plus those the trial memory implies.
 
-    The one place that derives a required trait from a trial protocol, so a
-    benchmark author names the protocol and never the trait.
+    The one place that derives a required trait from a trial memory, so a
+    benchmark author names the memory and never the trait.
     """
-    if trial_protocol not in TRIAL_PROTOCOLS:
-        raise ValueError(f'trial_protocol must be one of {TRIAL_PROTOCOLS}; got {trial_protocol!r}')
-    return set(declared or ()) | PROTOCOL_REQUIRED_TRAITS[trial_protocol]
+    if trial_memory not in _TRIAL_MEMORIES:
+        raise ValueError(f'trial_memory must be one of {_TRIAL_MEMORIES}; got {trial_memory!r}')
+    return set(declared or ()) | _MEMORY_REQUIRED_TRAITS[trial_memory]
 
 
 @dataclass
@@ -69,13 +69,13 @@ class TaskContext:
     'image:word_2')``. A replying model is
     shown the instruction, those parts in order, then the response's directive.
 
-    ``trial_protocol`` says how the session groups trials into episodes:
-    ``'independent'`` (default) wraps each trial (one stimulus row and its
+    ``trial_memory`` says how long a subject keeps its trials:
+    ``'none'`` (default) wraps each trial (one stimulus row and its
     response) in ``begin`` ... ``end('terminal')``, so a subject starts every
     trial with empty history; ``'conversation'`` sends one ``begin``, all trials,
     one ``end('terminal')``, so a subject with the ``memory:trial_history``
     trait sees its earlier trials. A benchmark that uses ``'conversation'``
-    also sets the same ``trial_protocol`` attribute on itself; pre-flight
+    also sets the same ``trial_memory`` attribute on itself; pre-flight
     derives the required trait from it (``required_traits_for``).
 
     ``readout_fit`` says which network a readout is fitted on while a change
@@ -93,11 +93,11 @@ class TaskContext:
     readout_fit: str = 'current'  # 'current' | 'intact'
     response: Any = None  # a brainscore_core.responses Choice, Scale or Text
     present: Optional[Tuple[str, ...]] = None  # order of a trial's parts: 'text', 'image', 'video', 'audio'
-    trial_protocol: str = 'independent'  # 'independent' | 'conversation'
+    trial_memory: str = 'none'  # 'none' | 'conversation'
 
     def __post_init__(self):
-        if self.trial_protocol not in TRIAL_PROTOCOLS:
-            raise ValueError(f'trial_protocol must be one of {TRIAL_PROTOCOLS}; got {self.trial_protocol!r}')
+        if self.trial_memory not in _TRIAL_MEMORIES:
+            raise ValueError(f'trial_memory must be one of {_TRIAL_MEMORIES}; got {self.trial_memory!r}')
         # The response, when given, decides the task type; label lists follow it.
         kinds = {'Choice': 'choice', 'Scale': 'rating', 'Text': 'text'}
         if self.response is not None:
@@ -167,7 +167,7 @@ class Subject(ABC):
         ``'memory:trial_history'``: the subject keeps earlier trials, earlier
         steps and its responses from ``begin`` until ``end``. A subject without
         it always starts a trial with empty history. A benchmark that needs a
-        trait lists it in ``required_traits`` (a ``conversation`` trial protocol
+        trait lists it in ``required_traits`` (a ``conversation`` trial memory
         implies this one); a subject without it is N/A.
         """
         return set()

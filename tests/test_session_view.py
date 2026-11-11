@@ -39,16 +39,23 @@ def test_filter_drops_undeclared_channels_by_exact_match():
     assert seen == ['vision:image', 'text']
 
 
-def test_control_events_always_pass_the_filter():
+def test_control_events_pass_only_when_declared():
     events = [begin_event(0.0), StreamEvent('audio', 'y', 0.0), respond_event(1.0),
               end_event('terminal', 2.0)]
-    session = Session(events).declare_inputs({'text'})
+    session = Session(events).declare_inputs({'text', 'control'})
     delivered = []
     while (event := session.next_input()) is not None:
         delivered.append(event)
     assert [e.channel for e in delivered] == [CONTROL_CHANNEL] * 3
     assert [e.payload for e in delivered] == ['begin', 'respond', 'end']
     assert delivered[-1].meta == {'reason': 'terminal'}
+
+
+def test_control_events_are_not_delivered_unless_asked_for():
+    events = [begin_event(0.0), StreamEvent('text', 'a', 0.0), respond_event(1.0),
+              end_event('terminal', 2.0)]
+    for session in (Session(events), Session(events).declare_inputs({'text'})):
+        assert [e.channel for e in iter(session.next_input, None)] == ['text']
 
 
 def test_a_second_declaration_narrows_the_first():

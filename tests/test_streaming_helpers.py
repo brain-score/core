@@ -132,7 +132,8 @@ class _NonNativeEnvironmentSubject(UnifiedModel):
 
 
 def test_stimulus_session_emits_input_events_per_stimulus_column():
-    session = stimulus_session(_stimulus_set(), record="IT")
+    session = stimulus_session(_stimulus_set(), record="IT").declare_inputs(
+        {'control', 'vision', 'text'})
 
     events = []
     while True:
@@ -269,7 +270,8 @@ def _behavior_context(fitting_stimuli, scoring_stimuli):
 def test_behavior_session_emits_instruction_fitting_and_scoring_events():
     fitting = _make_image_stimulus_set(["cat", "dog"], identifier="fit")
     scoring = _make_image_stimulus_set(["cat", "dog"], identifier="score")
-    session = behavior_session(_behavior_context(fitting, scoring))
+    session = behavior_session(_behavior_context(fitting, scoring)).declare_inputs(
+        {'control', 'instruction', 'vision'})
 
     assert session.requested_output_channels == ("behavior",)
 
@@ -396,7 +398,8 @@ class _SyntheticEnvironment:
 
 
 def test_environment_session_advances_after_motor_emit():
-    session = environment_session(_SyntheticEnvironment(2))
+    session = environment_session(_SyntheticEnvironment(2)).declare_inputs(
+        {'control', 'vision:image', 'proprioception', 'instruction', 'reward', 'observation'})
 
     assert session.requested_output_channels == ("motor",)
 

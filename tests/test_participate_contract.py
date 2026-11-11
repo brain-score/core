@@ -43,7 +43,7 @@ class _ParticipateOnly(Subject):
     """Implements only the contract: no process, look_at or start_recording."""
 
     identifier = 'participate-only'
-    in_channels = {'vision', 'observation'}
+    in_channels = {'vision', 'observation', 'control'}
     out_channels = {'neural:IT', 'behavior', 'motor'}
 
     def __init__(self):
@@ -53,6 +53,7 @@ class _ParticipateOnly(Subject):
     def participate(self, session):
         if 'motor' in session.requested_output_channels:
             # Closed loop: answer each respond request until the episode ends.
+            session.declare_inputs(self.in_channels)
             while (event := session.next_input()) is not None:
                 if event.channel != 'control':
                     self.inputs.append(event)

@@ -219,6 +219,8 @@ def drive_neural_session_streaming(
             )
         channel_regions.append((channel, region))
 
+    if on_begin is not None:
+        session._request_control('An episode reset')
     time_bins = getattr(session, "time_bins", None)
     recording_target = _combined_recording_target(channel_regions)
     _start_recording(subject, recording_target, time_bins=time_bins)
@@ -470,8 +472,8 @@ def drive_behavior_session_streaming(
 
     Same responses as the batch driver; what changes is that the trial set need not
     exist in full before the first response is produced. ``on_begin()`` runs
-    before each trial under ``independent`` and once before the first under
-    ``conversation`` (``task_context.trial_protocol``).
+    before each trial under ``none`` and once before the first under
+    ``conversation`` (``task_context.trial_memory``).
     """
     if task_context is None:
         task_context = getattr(session, "task_context", None)
@@ -488,7 +490,7 @@ def drive_behavior_session_streaming(
         )
     for trial_index, (row_index, _row) in enumerate(stimuli.iterrows()):
         if on_begin is not None and (trial_index == 0
-                                     or task_context.trial_protocol == 'independent'):
+                                     or task_context.trial_memory == 'none'):
             on_begin()
         trial = preserve_stimulus_set_type(stimuli, stimuli.loc[[row_index]])
         output = subject.process(trial)

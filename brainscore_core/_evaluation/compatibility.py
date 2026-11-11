@@ -34,7 +34,7 @@ from brainscore_core import io_catalog
 from brainscore_core.contract import required_traits_for
 from brainscore_core.io_catalog import canonical_modality, modalities_to_input_channels
 from brainscore_core.model_interface import Subject
-from brainscore_core.streaming import channel_declared, parse_channel
+from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_channel
 
 
 class CompatibilityError(Exception):
@@ -100,7 +100,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     subject_in = set(subject.in_channels)
     subject_out = set(subject.out_channels)
     subject_required = set(subject.required_channels)
-    bench_inputs = benchmark_input_channels(benchmark)
+    # The control signals belong to the session, not to what a benchmark presents.
+    bench_inputs = benchmark_input_channels(benchmark) - {CONTROL_CHANNEL}
     bench_requested = benchmark_requested_output_channels(benchmark)
     subject_id = subject.identifier
     benchmark_id = _benchmark_identifier(benchmark)
@@ -169,13 +170,19 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         )
 
     required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
-                                          getattr(benchmark, 'trial_protocol', 'independent'))
+                                           getattr(benchmark, 'trial_memory', 'none'))
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
     if missing_traits:
         raise CompatibilityError(
             f"Benchmark '{benchmark_id}' requires subject traits {sorted(missing_traits)}; "
             f"subject '{subject_id}' declares {sorted(subject.traits) or 'none'}."
         )
+
+    if 'memory:trial_history' in getattr(subject, 'traits', ()) and CONTROL_CHANNEL not in subject_in:
+        raise CompatibilityError(
+            f"Subject '{subject_id}' declares memory:trial_history but not the "
+            f"'{CONTROL_CHANNEL}' input, so it cannot know where a trial starts. "
+            f"Add '{CONTROL_CHANNEL}' to in_channels.")
 
     if getattr(benchmark, "uses_session", False):
         probe = getattr(subject, "check_session_support", None)

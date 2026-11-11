@@ -90,26 +90,26 @@ def end_event(reason: str, t_ms: Optional[float] = None) -> StreamEvent:
     return StreamEvent(CONTROL_CHANNEL, END, t_ms, meta={'reason': reason})
 
 
-def with_trial_protocol(events: Iterable[Any], protocol: str = 'independent') -> Iterator[Any]:
+def _with_trial_memory(events: Iterable[Any], memory: str = 'none') -> Iterator[Any]:
     """Mark the trials in ``events`` with ``begin`` / ``end('terminal')`` control events.
 
     A trial is the run of events of one stimulus-table row: events with
     ``meta['stimulus_index']`` that share ``meta['role']`` and ``meta['table_row']``
     (rows of one input column carry none) and name no input column twice. Other events (an instruction, fitting rows) are not
-    trials and pass through. ``independent`` wraps each trial in its own episode;
+    trials and pass through. ``none`` wraps each trial in its own episode;
     ``conversation`` opens one episode at the first trial and closes it after the
     last event. Lazy: nothing is read ahead of the trial being wrapped.
     """
-    from brainscore_core.contract import TRIAL_PROTOCOLS
-    if protocol not in TRIAL_PROTOCOLS:
-        raise ValueError(f'trial_protocol must be one of {TRIAL_PROTOCOLS}; got {protocol!r}')
+    from brainscore_core.contract import _TRIAL_MEMORIES
+    if memory not in _TRIAL_MEMORIES:
+        raise ValueError(f'trial_memory must be one of {_TRIAL_MEMORIES}; got {memory!r}')
     opened, key, columns = False, None, set()
     for event in events:
         meta = event.meta if isinstance(event, StreamEvent) else {}
         is_trial = 'stimulus_index' in meta and meta.get('role') != 'fitting'
         new_key = (meta.get('role'), meta.get('table_row'))
         starts_row = is_trial and (new_key != key or meta.get('column') in columns)
-        if protocol == 'independent' and opened and (starts_row or not is_trial):
+        if memory == 'none' and opened and (starts_row or not is_trial):
             yield end_event('terminal')
             opened = False
         if is_trial and not opened:
@@ -263,6 +263,10 @@ class Session(Source):
         self.dropped = 0
         self.emitted: list[StreamEvent] = []
         self._declared: Optional[frozenset] = None
+        self._control = False
+        self._trial = 0
+        self._answered: dict = {}
+        self.one_answer_per_trial = False
         self._observers: list[tuple] = []
         self._rewriters: list[Any] = []
 
@@ -271,13 +275,25 @@ class Session(Source):
 
         Events on other channels are skipped (exact match, see ``channel_declared``),
         and the stimulus table loses the columns of undeclared modalities. Control
-        events always pass. A second call narrows further. Returns ``self``.
+        events pass only when ``control`` is declared; a session that was never
+        given a declaration delivers no control events. A second call narrows
+        further. Returns ``self``.
         """
         from brainscore_core._sessions.view import declared_only
         declared = frozenset(channels)
         self._declared = declared if self._declared is None else self._declared & declared
+        self._control = CONTROL_CHANNEL in self._declared
         self.stimulus_set = declared_only(self.stimulus_set, self._declared)
         return self
+
+    def _request_control(self, driver: str) -> None:
+        """For a driver that needs the control signals: ask for them on a session
+        that was never given a declaration; refuse a declaration without them."""
+        if self._declared is None:
+            self._control = True
+        elif not self._control:
+            raise ValueError(f"{driver} needs the 'control' input. Add 'control' to the "
+                             "subject's in_channels and answer on the respond signal.")
 
     @contextmanager
     def observe(self, on_input: Optional[Callable] = None, on_output: Optional[Callable] = None,
@@ -312,9 +328,14 @@ class Session(Source):
                 from . import io_catalog
                 check_event(event, io_catalog.INPUT)
             self._notify(0, event)
-            if (self._declared is None or not isinstance(event, StreamEvent)
-                    or event.channel == CONTROL_CHANNEL
-                    or channel_declared(event.channel, self._declared)):
+            if not isinstance(event, StreamEvent):
+                return event
+            if event.channel == CONTROL_CHANNEL:
+                if event.payload == BEGIN:
+                    self._trial += 1
+                if self._control:
+                    return event
+            elif self._declared is None or channel_declared(event.channel, self._declared):
                 return event
         return None
 
@@ -350,6 +371,7 @@ class Session(Source):
                                  f"requested: {list(self.requested_output_channels)}")
             from . import io_catalog
             check_event(event, io_catalog.OUTPUT)
+        self._check_answered_once(event)
         try:
             kept = self.source.respond(event)
         except BaseException as error:
@@ -363,6 +385,23 @@ class Session(Source):
         if limit is not None and len(self.emitted) > limit:
             del self.emitted[0]
             self.dropped += 1
+
+    def _check_answered_once(self, event: StreamEvent) -> None:
+        """Refuse more answers on one channel than trials the session has opened.
+
+        Only a table session with ``trial_memory='none'`` marks its trials, so
+        only it sets ``one_answer_per_trial``. The count is of ``begin`` events
+        read so far; a subject that reads every row first and answers after is
+        fine, one that answers a trial twice is not. A session read by a batch
+        driver (no events read) is not checked.
+        """
+        if not (self.one_answer_per_trial and self._trial):
+            return
+        count = self._answered[event.channel] = self._answered.get(event.channel, 0) + 1
+        if count > self._trial:
+            raise ValueError(f"Channel {event.channel!r} was answered {count} times, but the "
+                             f"session has opened {self._trial} trial(s) (trial {self._trial} "
+                             "is answered twice). Answer each requested channel once per trial.")
 
     def collect(self, channel: Optional[str] = None) -> Any:
         """Return the responses, shaped by the channel family.

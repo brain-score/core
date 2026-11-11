@@ -174,7 +174,8 @@ class EnvironmentSource(Source):
         if self._done:
             return None
         if self._awaiting:
-            raise RuntimeError("Emit an action before requesting the next observation")
+            raise RuntimeError("Emit an action before requesting the next observation. A closed-loop "
+                               "subject must declare the 'control' input and answer on the respond signal.")
         try:
             if not self._started:
                 self._started = True
@@ -233,7 +234,8 @@ class EnvironmentSource(Source):
         if event.channel != self.action_channel:
             return None  # another output (a recording): the session keeps it
         if not self._awaiting or self._done:
-            raise RuntimeError("No observation is awaiting an action")
+            raise RuntimeError("No observation is awaiting an action. A closed-loop subject must "
+                               "declare the 'control' input and answer once, on the 'respond' signal.")
         meta = {**event.meta, **self._timing, 'step_num': self._step_num,
                 'execution': 'turn_based', 'action_status': 'proposed'}
         proposal = deepcopy(replace(event, t_ms=self._t_ms, meta=meta))
@@ -332,6 +334,7 @@ def drive_environment_session(subject, session: Session, driver: str = "interact
     output channel -> payload, answered on every requested channel it holds.
     ``on_begin`` runs when an episode begins (a stateful policy clears itself).
     """
+    session._request_control('A closed-loop session')
     pending = []
     while (event := session.next_input()) is not None:
         if event.channel != CONTROL_CHANNEL:

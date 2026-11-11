@@ -61,7 +61,7 @@ def test_an_unknown_output_channel_raises():
 
 
 def test_a_bad_control_payload_raises_on_a_lazy_source():
-    session = Session(iter([begin_event(), StreamEvent(CONTROL_CHANNEL, 'jump', 0.0)]))
+    session = Session(iter([begin_event(), StreamEvent(CONTROL_CHANNEL, 'jump', 0.0)])).declare_inputs({'control'})
     assert session.next_input().payload == 'begin'
     with pytest.raises(ValueError, match="control payload must be"):
         session.next_input()

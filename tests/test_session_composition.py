@@ -71,13 +71,12 @@ def test_batch_and_streaming_drivers_ignore_control_events():
 
     for driver, build in ((drive_neural_session, stimulus_session),
                           (drive_neural_session_streaming, streaming_stimulus_session)):
+        session = build(_table(2), record='IT').declare_inputs({'text'})
+        data = list(iter(session.next_input, None))
         session = build(_table(2), record='IT')
-        marks = [begin_event(0.0), respond_event(1.0), end_event('terminal', 2.0)]
-        events = marks[:1]
-        while (event := session.next_input()) is not None:
-            events.append(event)
-        session = build(_table(2), record='IT')
-        session.source = FixedSource(events + marks[1:])
+        session.source = FixedSource([
+            begin_event(0.0), data[0], respond_event(1.0), end_event('terminal', 2.0),
+            begin_event(3.0), data[1], respond_event(4.0), end_event('terminal', 5.0)])
         recorder = Recorder()
         driver(recorder, session)
         assert sum(recorder.sizes) == 2

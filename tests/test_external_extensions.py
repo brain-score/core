@@ -22,7 +22,7 @@ def test_environment_action_validation_precedes_step():
     def validate(action):
         raise ValueError('out of bounds')
     source = EnvironmentSource(Environment(), action_validator=validate)
-    session = Session(source, ('motor',))
+    session = Session(source, ('motor',)).declare_inputs({'control', 'observation'})
     while (event := session.next_input()).channel != 'control' or event.payload != 'respond':
         pass
     assert source.input_events[0].t_ms == 125

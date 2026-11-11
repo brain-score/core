@@ -108,10 +108,11 @@ class AnswerSubject(Subject):
 class PolicySubject(Subject):
     """Adds 0.25 to the observed state at each step."""
     identifier = 'fixture-policy'
-    in_channels = {'observation'}
+    in_channels = {'observation', 'control'}
     out_channels = {'motor'}
 
     def participate(self, session):
+        session.declare_inputs(self.in_channels)
         row = {}
         while (event := session.next_input()) is not None:
             if event.channel != 'control':

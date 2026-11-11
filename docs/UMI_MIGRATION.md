@@ -50,9 +50,10 @@ the task. It passes the subject only the channels the subject declares.
 Channels match by exact name: `vision:image` and `vision:video` are two
 channels, and `vision` is a third.
 
-A session built from a stimulus table also sends control events on the
-`control` channel: `begin`, `respond` and `end`. A subject that reads its inputs
-in a loop can skip them (`event.channel == 'control'`).
+A session built from a stimulus table also holds control events on the
+`control` channel: `begin`, `respond` and `end`. A subject gets them only if it
+passes `control` to `declare_inputs`. A subject that does not declare `control`
+never sees them, so a loop that answers every event stays correct.
 
 For table-based evaluations, `neural_response` and `behavioral_response` in
 `brainscore_core.streaming_helpers` build sessions and collect assemblies. The
