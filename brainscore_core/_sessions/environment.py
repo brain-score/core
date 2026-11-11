@@ -1,7 +1,10 @@
 """Closed-loop input: an environment driven as a session source.
 
 An environment is plain benchmark code with two methods: ``reset(**kwargs) -> row``
-and ``step(outputs) -> (row, reason_or_None)``. A row is a mapping of channel ->
+(or ``(row, reason)``, the form ``step`` uses, for an episode that is already
+complete at reset: the row is delivered if non-empty, then ``end(reason)``, and
+the subject is never asked for an action; a row is a mapping, so a tuple is
+unambiguous) and ``step(outputs) -> (row, reason_or_None)``. A row is a mapping of channel ->
 payload; ``outputs`` is a mapping of output channel -> payload; ``reason`` is
 ``None`` while the episode runs and ``'terminal'``, ``'truncated'`` or
 ``'failure'`` when it ends. Optional: ``observation_spec()`` / ``action_spec()``
@@ -175,7 +178,9 @@ class EnvironmentSource(Source):
         try:
             if not self._started:
                 self._started = True
-                self._enqueue(self.environment.reset(**self.reset_kwargs), None, first=True)
+                result = self.environment.reset(**self.reset_kwargs)
+                row, reason = result if isinstance(result, tuple) else (result, None)
+                self._enqueue(row, reason, first=True)
             else:
                 row, reason = self._pending
                 self._pending = None

@@ -32,8 +32,9 @@ def motor(payload, t_ms=None, **meta):
 
 
 class Environment:
-    def __init__(self, *, error=None):
+    def __init__(self, *, error=None, reset_reason=None):
         self.error = error
+        self.reset_reason = reset_reason
         self.actions = []
         self.closed = 0
         self.reset_args = None
@@ -53,6 +54,8 @@ class Environment:
 
     def reset(self, *, seed=None, options=None):
         self.reset_args = (seed, options)
+        if self.reset_reason:
+            return self.observation(), self.reset_reason
         return self.observation()
 
     def step(self, outputs):
@@ -79,6 +82,48 @@ def test_terminal_observation_is_retained_without_a_policy_call():
     assert [e.meta['action_status'] for e in source.action_events] == ['proposed', 'applied']
     with pytest.raises(RuntimeError, match='No observation'):
         session.respond(motor(1))
+
+
+@pytest.mark.parametrize('reason, complete', [('terminal', True), ('truncated', True), ('failure', False)])
+def test_reset_with_reason_ends_without_a_policy_call(reason, complete):
+    env = Environment(reset_reason=reason)
+    calls = []
+    subject = SimpleNamespace(process=lambda row: calls.append(row) or {'motor': 1})
+    session, source = make(env)
+    with session:
+        _drive_environment_via_process(subject, session)
+    assert calls == [] and env.actions == [] and env.closed == 1
+    assert session.complete is complete and session.emitted == []
+    assert [(e.channel, e.payload) for e in source.input_events] == [
+        ('observation', source.input_events[0].payload)]
+
+
+def test_reset_with_reason_emits_begin_row_end_and_no_respond():
+    class Empty(Environment):
+        def reset(self, **kwargs):
+            return {}, 'terminal'
+    session, source = make(Environment(reset_reason='terminal'))
+    events = advance(session)
+    assert [e.payload for e in events if e.channel == 'control'] == ['begin', 'end']
+    assert events[-1].meta['reason'] == 'terminal' and session.next_input() is None
+    session, source = make(Empty())
+    events = advance(session)
+    assert [e.payload for e in events] == ['begin', 'end'] and session.complete
+
+
+def test_reset_with_reason_validates_the_reason():
+    class Bad(Environment):
+        def reset(self, **kwargs):
+            return self.observation(), 'done'
+    session, _ = make(Bad())
+    with pytest.raises(ValueError, match='end reason'):
+        session.next_input()
+
+
+def test_zero_history_reset_with_reason_collects_empty():
+    session, source = make(Environment(reset_reason='terminal'), history_limit=0)
+    assert advance(session)[-1].payload == 'end' and session.next_input() is None
+    assert session.complete and session.emitted == [] and source.input_events == []
 
 
 def test_source_emits_begin_rows_respond_and_end_in_order():

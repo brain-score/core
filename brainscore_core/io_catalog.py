@@ -319,8 +319,8 @@ _SEED = [
                  "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, or a path to one",
                  "image/video preprocessor + a vision model harness (wrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(3, 4), expected_dtype="uint8",
-                 addressing=("address is the form a subject takes natively: 'still' "
-                             "(images) or 'clip' (video); a subject declares each form it "
+                 addressing=("address is the form a subject takes natively: 'image' "
+                             "(images) or 'video' (video); a subject declares each form it "
                              "has, and a benchmark adapts a stimulus only when a form is missing"),
                  materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
