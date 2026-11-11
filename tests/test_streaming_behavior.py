@@ -42,7 +42,7 @@ class _Session:
     def next_input(self):
         return None
 
-    def emit(self, event):
+    def respond(self, event):
         self.emitted.append(event)
 
 

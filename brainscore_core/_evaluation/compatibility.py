@@ -17,7 +17,8 @@ never enter it. :func:`check_compatibility` returns the match as data
 An incompatible pair raises :class:`CompatibilityError` and is scored N/A.
 
 Benchmark inputs are ``required_input_channels`` when declared, otherwise the
-channels of ``required_modalities`` plus ``accepted_modalities``. Requested
+channels of ``required_modalities`` plus ``accepted_modalities``. A benchmark with no
+input channels is rejected. Requested
 outputs are ``requested_output_channels`` when declared, otherwise
 ``neural:<region>`` for a benchmark with a ``region``.
 
@@ -30,9 +31,10 @@ from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Set
 
 from brainscore_core import io_catalog
+from brainscore_core.contract import required_traits_for
 from brainscore_core.io_catalog import canonical_modality, modalities_to_input_channels
 from brainscore_core.model_interface import Subject
-from brainscore_core.streaming import parse_channel
+from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_channel
 
 
 class CompatibilityError(Exception):
@@ -98,7 +100,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     subject_in = set(subject.in_channels)
     subject_out = set(subject.out_channels)
     subject_required = set(subject.required_channels)
-    bench_inputs = benchmark_input_channels(benchmark)
+    # The control signals belong to the session, not to what a benchmark presents.
+    bench_inputs = benchmark_input_channels(benchmark) - {CONTROL_CHANNEL}
     bench_requested = benchmark_requested_output_channels(benchmark)
     subject_id = subject.identifier
     benchmark_id = _benchmark_identifier(benchmark)
@@ -117,6 +120,12 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
                 f"Benchmark '{benchmark_id}' sets {', '.join(misspelled)}, which "
                 f"benchmarks do not read, so it was not checked. Use {field_name}."
             )
+
+    if not bench_inputs:
+        raise CompatibilityError(
+            f"Benchmark '{benchmark_id}' declares no input channels. A benchmark "
+            f"states what it sends: set required_input_channels (rule 5.1)."
+        )
 
     validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
     validate_channels(subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels")
@@ -144,8 +153,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             )
         raise CompatibilityError(message)
 
-    consumed = bench_inputs & subject_in
-    if bench_inputs and not consumed:
+    consumed = {channel for channel in bench_inputs if channel_declared(channel, subject_in)}
+    if not consumed:
         raise CompatibilityError(
             f"Subject '{subject_id}' takes in none of the inputs benchmark "
             f"'{benchmark_id}' sends: {_format_channels(bench_inputs)}. "
@@ -160,13 +169,20 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"'{benchmark_id}' sends {_format_channels(bench_inputs)}."
         )
 
-    required_traits = set(getattr(benchmark, 'required_traits', None) or ())
+    required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
+                                           getattr(benchmark, 'trial_memory', 'none'))
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
     if missing_traits:
         raise CompatibilityError(
             f"Benchmark '{benchmark_id}' requires subject traits {sorted(missing_traits)}; "
             f"subject '{subject_id}' declares {sorted(subject.traits) or 'none'}."
         )
+
+    if 'memory:trial_history' in getattr(subject, 'traits', ()) and CONTROL_CHANNEL not in subject_in:
+        raise CompatibilityError(
+            f"Subject '{subject_id}' declares memory:trial_history but not the "
+            f"'{CONTROL_CHANNEL}' input, so it cannot know where a trial starts. "
+            f"Add '{CONTROL_CHANNEL}' to in_channels.")
 
     if getattr(benchmark, "uses_session", False):
         probe = getattr(subject, "check_session_support", None)
@@ -180,7 +196,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         subject=subject_id,
         benchmark=benchmark_id,
         consumed_inputs=frozenset(consumed),
-        dropped_inputs=frozenset(bench_inputs - subject_in),
+        dropped_inputs=frozenset(bench_inputs - consumed),
         requested_outputs=frozenset(bench_requested),
     )
 

@@ -11,7 +11,7 @@ Keys:
 - ``units`` (required): ``'ms'``.
 - ``origin`` (required): where time zero is. One of :data:`ORIGINS`.
 - ``reference_input`` (required when ``origin == 'media_start'``): the input
-  channel whose media defines time zero, for example ``'vision:clip'``.
+  channel whose media defines time zero, for example ``'vision:video'``.
 - ``anchor`` (required): which point of a sample the timestamps name. One of
   :data:`ANCHORS`: ``'start'`` (intervals, start and end are primary),
   ``'center'`` (centers are primary, edges may be derived) or ``'instant'``

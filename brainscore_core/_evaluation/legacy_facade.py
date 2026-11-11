@@ -4,7 +4,7 @@ Legacy benchmarks call ``look_at`` / ``visual_degrees`` / ``start_task`` /
 ``start_recording`` (vision) or ``digest_text`` / ``start_neural_recording`` /
 ``start_behavioral_task`` (language). Those benchmarks are never removed, so
 this facade is permanent (Contract Rules v3, rule 11.2). It records each
-legacy setting, presents the stimuli as a ``BufferedSession`` that carries
+legacy setting, presents the stimuli as a ``Session`` that carries
 those settings (time bins, trial count, task, recording type) and runs the
 session through the subject's ``participate``. Nothing here depends on what kind
 of subject is wrapped: a ``BrainScoreModel``, a domain adapter and an
@@ -20,7 +20,7 @@ import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from brainscore_core.contract import TaskContext
-from brainscore_core.streaming import BufferedSession
+from brainscore_core._sessions.buffered import table_session
 
 PASSIVE = 'passive'
 
@@ -177,11 +177,8 @@ class LegacyBenchmarkFacade:
         """One session: the recorded task object, the time bins and the measurement settings."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        session = BufferedSession(stimulus_set=stimuli,
-                                  requested_output_channels=channels,
-                                  task_context=self._task_context(),
-                                  time_bins=self._time_bins)
-        session.settings = dict(settings)
+        session = table_session(stimuli, channels, task_context=self._task_context(),
+                                time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
 

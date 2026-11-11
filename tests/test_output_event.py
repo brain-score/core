@@ -13,7 +13,6 @@ from brainscore_core.model_interface import (
     UnifiedModel,
     InputEvent,
     OutputEvent,
-    EnvironmentResponse,
     PerturbationApplied,
 )
 
@@ -34,9 +33,8 @@ def test_output_event_has_the_current_members():
     assert names == [
         'NeuroidAssembly',       # neural recording
         'BehavioralAssembly',    # behavioral readout / generation
-        'EnvironmentResponse',   # embodied step
         'PerturbationApplied',   # state-change acknowledgement
-        'Message',               # communicative event (also an InputEvent member)
+        'Mapping',               # one closed-loop step's outputs
         'StreamEvent',           # typed payload for external output extensions
     ]
 
@@ -46,7 +44,6 @@ def test_output_event_includes_concrete_runtime_types():
     these are exactly what the embodied / state-change dispatch paths return
     (proven at runtime in test_environment_step.py / test_state_change.py)."""
     args = get_args(OutputEvent)
-    assert EnvironmentResponse in args
     assert PerturbationApplied in args
     assert StreamEvent in args
 

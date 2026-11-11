@@ -8,9 +8,6 @@ from .model_interface import (
     Perturbation,
     StateChange,
     PerturbationApplied,
-    EnvironmentStep,
-    EnvironmentResponse,
-    Message,
     InputEvent,
     OutputEvent,
     output_event_kind,
@@ -26,7 +23,6 @@ from .io_catalog import CatalogEntry
 
 # Established imports share the actual implementation module and its state.
 import sys as _sys
-from ._sessions import temporal
 from ._sessions import helpers as streaming_helpers
 from ._sessions import view as session_view
 from ._evaluation import compatibility
@@ -48,7 +44,6 @@ from ._runtime import hf_compat
 from ._runtime import extensions
 
 for _name, _module in (
-    ('temporal', temporal),
     ('streaming_helpers', streaming_helpers),
     ('session_view', session_view),
     ('compatibility', compatibility),

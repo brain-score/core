@@ -22,6 +22,5 @@
   "session_view": "_sessions.view",
   "streaming": "streaming",
   "streaming_helpers": "_sessions.helpers",
-  "temporal": "_sessions.temporal",
   "text": "_data.text"
 }

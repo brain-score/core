@@ -13,7 +13,7 @@ from brainscore_core._data.assembly_builder import make_assembly
 
 
 def media_clock(**overrides):
-    base = dict(units='ms', origin='media_start', reference_input='vision:clip', anchor='center',
+    base = dict(units='ms', origin='media_start', reference_input='vision:video', anchor='center',
                 interval='half_open', accuracy='approximate',
                 description='decoded-frame PTS, two frames per tubelet', tolerance_ms=20.0)
     base.update(overrides)

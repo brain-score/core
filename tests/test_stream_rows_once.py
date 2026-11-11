@@ -17,8 +17,8 @@ import pandas as pd
 import pytest
 
 from brainscore_core._sessions.payloads import _stimulus_events, _table_row_position
-from brainscore_core._sessions.perception import StreamingStimulusSetSession
-from brainscore_core.streaming import BufferedSession, StreamEvent
+from brainscore_core._sessions.perception import streaming_stimulus_session
+from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 pytestmark = pytest.mark.unit
@@ -61,7 +61,7 @@ KINDS = ['streaming', 'buffered', 'compat']
 def test_one_column_events_carry_no_new_metadata(producer):
     stimuli = table(two=False)
     events = (_stimulus_events(stimuli) if producer == 'buffered'
-              else drain(StreamingStimulusSetSession(stimuli, record='A')))
+              else drain(streaming_stimulus_session(stimuli, record='A')))
     assert [event.meta for event in events] == [
         {'stimulus_id': 'a', 'stimulus_index': 0, 'column': 'sentence'},
         {'stimulus_id': 'b', 'stimulus_index': 1, 'column': 'sentence'}]
@@ -71,7 +71,7 @@ def test_one_column_events_carry_no_new_metadata(producer):
 def test_two_column_events_mark_their_row_position(producer):
     stimuli = table(index=[10, 10])
     events = (_stimulus_events(stimuli) if producer == 'buffered'
-              else drain(StreamingStimulusSetSession(stimuli, record='A')))
+              else drain(streaming_stimulus_session(stimuli, record='A')))
     assert [(e.meta['column'], e.meta['stimulus_index'], e.meta['table_row']) for e in events] == [
         ('sentence', 10, 0), ('text', 10, 0), ('sentence', 10, 1), ('text', 10, 1)]
 
@@ -80,7 +80,7 @@ def test_two_column_events_mark_their_row_position(producer):
 
 
 def test_table_row_position_reads_only_the_event_and_the_table():
-    session = BufferedSession()
+    session = Session(())
     session.stimulus_set = table()
     event = _stimulus_events(table())[0]
     assert _table_row_position(session, event) == 0
@@ -102,7 +102,7 @@ def test_table_row_position_reads_only_the_event_and_the_table():
 
 @pytest.mark.parametrize('hint', ['foreign', 'range', 'index', 'id', 'no_index', 'no_table', 'valid'])
 def test_v7_external_hint_requires_complete_matching_identity(hint):
-    session = BufferedSession()
+    session = Session(())
     if hint != 'no_table':
         session.stimulus_set = table()
     meta = {'table_row': 0, 'stimulus_id': 'a', 'stimulus_index': 0, 'column': 'sentence'}
@@ -125,7 +125,7 @@ def test_v7_external_hint_requires_complete_matching_identity(hint):
 
 @pytest.mark.parametrize('label', [np.nan, pd.NA], ids=['NaN', 'pdNA'])
 def test_null_index_label_is_matched_only_when_present(label):
-    session = BufferedSession()
+    session = Session(())
     session.stimulus_set = table(index=[label, 2])
     event = _stimulus_events(session.stimulus_set)[0]
     assert _table_row_position(session, event) == 0

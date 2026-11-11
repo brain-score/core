@@ -1,7 +1,6 @@
 import pytest
 
 from brainscore_core.streaming import (
-    InMemorySession,
     Session,
     StreamEvent,
     parse_channel,
@@ -72,60 +71,59 @@ def test_parse_channel_rejects_non_string():
         parse_channel(None)
 
 
-def test_session_has_optional_collection_without_new_abstract_methods():
-    assert "next_input" in Session.__dict__
-    assert "emit" in Session.__dict__
-    assert callable(Session.collect)
-    assert Session.__abstractmethods__ == {"next_input", "respond"}
+def test_session_is_one_concrete_class_over_a_source():
+    assert not getattr(Session, "__abstractmethods__", None)
+    assert "emit" not in Session.__dict__
+    session = Session([StreamEvent(channel="text", payload="a", t_ms=0.0)])
+    assert session.next_input().payload == "a"
+    assert session.next_input() is None
 
 
-def test_in_memory_session_drives_inputs_and_records_emits():
+def test_session_drives_inputs_and_records_responses():
     inputs = [
         StreamEvent(channel="vision", payload="image-0", t_ms=0.0),
         StreamEvent(channel="instruction", payload="choose", t_ms=5.0),
     ]
-    session = InMemorySession(inputs)
+    session = Session(inputs)
 
     assert session.next_input() is inputs[0]
     assert session.next_input() is inputs[1]
     assert session.next_input() is None
 
     output = StreamEvent(channel="behavior", payload={"choice": "cat"}, t_ms=12.0)
-    session.emit(output)
+    session.respond(output)
 
     assert session.emitted == [output]
 
 
-def test_buffered_session_rejects_wrong_direction_at_construction():
+def test_session_rejects_wrong_direction_at_construction():
     """Contract v3 rule 3.4: known inputs are validated before delivery."""
     import pytest
-    from brainscore_core.streaming import BufferedSession, StreamEvent
+    from brainscore_core.streaming import Session, StreamEvent
     with pytest.raises(ValueError, match="registry direction"):
-        BufferedSession([StreamEvent("behavior", "x", 0.0)])
+        Session([StreamEvent("behavior", "x", 0.0)])
 
 
-def test_buffered_session_warns_on_unregistered_family():
+def test_session_rejects_unregistered_family():
     import pytest
-    from brainscore_core.streaming import BufferedSession, StreamEvent
-    with pytest.warns(UserWarning, match="unregistered channel family"):
-        BufferedSession([StreamEvent("not_a_family", 1, 0.0)])
+    from brainscore_core.streaming import Session, StreamEvent
+    with pytest.raises(ValueError, match="No Input/Output Catalog entry"):
+        Session([StreamEvent("not_a_family", 1, 0.0)])
 
 
-def test_buffered_session_warns_on_payload_type_mismatch_and_still_delivers():
-    """Payload types are checked warn-first: a mismatch is reported, not rejected."""
+def test_session_rejects_payload_type_mismatch():
     import pytest
-    from brainscore_core.streaming import BufferedSession, StreamEvent
-    with pytest.warns(UserWarning, match="payload is int, not str"):
-        session = BufferedSession([StreamEvent("text", 42, 0.0)])
-    assert session.next_input().payload == 42
+    from brainscore_core.streaming import Session, StreamEvent
+    with pytest.raises(ValueError, match="payload is int, not str"):
+        Session([StreamEvent("text", 42, 0.0)])
 
 
 def test_measurement_settings_are_a_saved_session_context_field():
     """A recorder that saves Session.context_fields keeps per-measurement settings."""
-    from brainscore_core.streaming import BufferedSession, Session, StreamEvent
+    from brainscore_core.streaming import Session, StreamEvent
     assert 'settings' in Session.context_fields
-    assert Session.settings is None
-    session = BufferedSession([StreamEvent('text', 'hello', None)], requested_output_channels=['behavior'])
+    assert Session(()).settings is None
+    session = Session([StreamEvent('text', 'hello', None)], requested_output_channels=['behavior'])
     session.settings = {'number_of_trials': 7, 'require_variance': True}
     saved = {name: getattr(session, name) for name in Session.context_fields
              if getattr(session, name, None) is not None}

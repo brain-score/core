@@ -1,8 +1,7 @@
 """The Input/Output Catalog: documented, queryable contracts for the allowable
 inputs and outputs of a Brain-Score subject.
 
-v1.5 keeps the typed events (``StimulusSet``, ``StateChange``,
-``EnvironmentStep``) and the lightweight methods (``process``,
+v1.5 keeps the typed events (``StimulusSet``, ``StateChange``) and the lightweight methods (``process``,
 ``start_recording``, ``start_task``). The catalog is documentation layered over
 them, not a dispatch mechanism. It records, for every allowable input and
 output: what carries it, what its payload contains, which harness interprets it,
@@ -23,6 +22,8 @@ from dataclasses import dataclass
 from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+
+import numpy as np
 
 from .streaming import parse_channel
 
@@ -208,17 +209,19 @@ def check_payload(label: str, payload) -> List[str]:
     ``.dtype`` when the entry declares an expectation and the payload exposes
     them. It never raises on a normal mismatch and never replaces the type
     system; it exists so a benchmark can surface an obvious wrong-shape payload
-    at session start instead of deep inside extraction.
+    at session start instead of deep inside extraction. The ndim and dtype
+    hints describe raw arrays: a table (``StimulusSet``) or an assembly has its
+    own shape and is not held to them.
     """
     e = get(label)
     warnings: List[str] = []
-    if e.expected_ndim and hasattr(payload, "ndim"):
+    if e.expected_ndim and isinstance(payload, np.ndarray):
         if payload.ndim not in e.expected_ndim:
             warnings.append(
                 f"{label}: payload ndim {payload.ndim} not in expected "
                 f"{e.expected_ndim} ({e.payload_contract})"
             )
-    if e.expected_dtype and hasattr(payload, "dtype"):
+    if e.expected_dtype and isinstance(payload, np.ndarray):
         if str(payload.dtype) != e.expected_dtype:
             warnings.append(
                 f"{label}: payload dtype {payload.dtype} is not the documented "
@@ -273,6 +276,7 @@ def validate(
             )
 
     warnings.extend(check_payload(channel, payload))
+    warnings.extend(payload_type_notes(channel, payload))
 
     if entry.shape_validator is not None:
         warnings.extend(
@@ -317,11 +321,11 @@ _SEED = [
     # `vision` is the one visual channel: a still is a 1-frame clip, so it
     # accepts both static (H, W, 3) and temporal (T, H, W, 3) payloads.
     CatalogEntry("vision", INPUT, "StimulusSet column",
-                 "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, or a path to one",
+                 "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, a table of frames, or a path to one",
                  "image/video preprocessor + a vision model harness (wrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(3, 4), expected_dtype="uint8",
-                 addressing=("address is the form a subject takes natively: 'still' "
-                             "(images) or 'clip' (video); a subject declares each form it "
+                 addressing=("address is the form a subject takes natively: 'image' "
+                             "(images) or 'video' (video); a subject declares each form it "
                              "has, and a benchmark adapts a stimulus only when a form is missing"),
                  materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
@@ -341,10 +345,21 @@ _SEED = [
                  "a video model harness (VideoWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(4,),
                  materializers=("StimulusSet",)),
-    CatalogEntry("instruction", INPUT, "TaskContext.instruction or EnvironmentStep.instruction",
+    CatalogEntry("instruction", INPUT, "TaskContext.instruction or a closed-loop row entry",
                  "a Python str framing the task",
                  "the model's generation or policy path",
-                 materializers=("TaskContext", "EnvironmentStep")),
+                 materializers=("TaskContext", "EnvironmentSource")),
+    # Episode control, not a sensory stream: a source marks where an episode
+    # begins, where the subject is asked to respond, and where it ends (the
+    # end event says why in meta['reason']). Every subject receives it.
+    CatalogEntry("control", INPUT, "StreamEvent",
+                 "one of 'begin', 'respond', 'end'; 'end' carries meta['reason'] "
+                 "in ('terminal', 'truncated', 'failure')",
+                 "the session; a subject never has to declare it",
+                 meta_keys=("reason",), payload_type=str,
+                 shape_validator=lambda payload: (
+                     [] if payload in ('begin', 'respond', 'end')
+                     else [f"control payload must be 'begin', 'respond' or 'end'; got {payload!r}"])),
     # --- inputs: direct neural (carried by StateChange) ---
     CatalogEntry("stimulation", INPUT, "StateChange",
                  "a perturbation spec (kind, scale, replacement) applied to selected units",
@@ -362,18 +377,24 @@ _SEED = [
                  addressing="address is a unit selector or agent",
                  owner="core",
                  materializers=("StateChange",)),
-    # --- inputs: closed-loop (carried by EnvironmentStep, harness-defined payload) ---
+    # --- inputs: closed-loop (carried by a row of an environment, harness-defined payload) ---
     # Retained legacy v1.5 channel; not a canonical v2 seed family.
-    CatalogEntry("observation", INPUT, "EnvironmentStep.observation",
+    CatalogEntry("observation", INPUT, "a closed-loop row entry",
                  "harness-defined; the environment harness documents its own structure",
                  "the environment harness (e.g. robotics, Atari, browser)",
                  owner="environment harness",
-                 materializers=("EnvironmentStep",)),
-    CatalogEntry("proprioception", INPUT, "EnvironmentStep (robot body state)",
+                 materializers=("EnvironmentSource",)),
+    CatalogEntry("proprioception", INPUT, "a closed-loop row entry (robot body state)",
                  "harness-defined robot state (joint position, end-effector pose, gripper)",
                  "the robotics environment harness",
                  owner="environment harness",
-                 materializers=("EnvironmentStep",)),
+                 materializers=("EnvironmentSource",)),
+    CatalogEntry("reward", INPUT, "a closed-loop row entry",
+                 "a Python float, the environment's reward for the last action",
+                 "the environment harness",
+                 meta_keys=("discount",), payload_type=(int, float),
+                 owner="environment harness",
+                 materializers=("EnvironmentSource",)),
     # --- outputs: neural measurement (carried by start_recording + process) ---
     CatalogEntry("neural", OUTPUT, "start_recording(target) + process(stimuli)",
                  "(units,) or (units, time) activations packaged into a NeuroidAssembly",
@@ -389,13 +410,13 @@ _SEED = [
                  addressing=("address is the kind of answer a TaskContext response asks for: "
                              "choice, probabilities, confidence, rating, rt or text"),
                  materializers=("start_task", "BehavioralAssembly")),
-    # --- outputs: motor (carried by EnvironmentResponse, harness-defined) ---
-    CatalogEntry("motor", OUTPUT, "EnvironmentResponse.action",
+    # --- outputs: motor (answered by a policy, harness-defined) ---
+    CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
                  "harness-defined continuous action / control vector",
-                 "the model's action_fn, decoded by the environment harness",
+                 "the model's policy, decoded by the environment harness",
                  meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
-                 materializers=("EnvironmentResponse",)),
+                 materializers=("policy",)),
     # --- outputs: perturbation record (carried by PerturbationApplied) ---
     CatalogEntry("perturbation", OUTPUT, "PerturbationApplied",
                  "PerturbationApplied record with a handle_id for undoing one change",
@@ -422,10 +443,7 @@ for _entry in _SEED:
 def payload_type_notes(label: str, payload) -> List[str]:
     """Report a payload whose type does not match its family's ``payload_type``.
 
-    Warn-first (Contract Rules v3, rule 3.2): a mismatch is a note, never a
-    failure, so sessions that run today keep running while the catalog's
-    types are checked against the notebooks and examples. Promote to an error
-    by moving this check into :func:`validate` once that review is done.
+    :func:`validate` includes this check, so a session treats a mismatch as an error.
     """
     entry = get(label)
     if entry.payload_type is None or isinstance(payload, entry.payload_type):
@@ -445,18 +463,18 @@ def _declare_payload_types() -> None:
     """
     from dataclasses import replace as _replace
     from pathlib import Path
-    import numpy as np
-    from .events import EnvironmentResponse, EnvironmentStep, PerturbationApplied, StateChange
+    from .events import PerturbationApplied, StateChange
+    from .supported_data_standards.brainio.stimuli import StimulusSet
     from .supported_data_standards.brainio.assemblies import DataAssembly
 
-    sensory = (str, Path, np.ndarray)
+    sensory = (str, Path, np.ndarray, StimulusSet)  # a StimulusSet is a window of frames
     payload_types = {
         'vision': sensory, 'video': sensory, 'audio': sensory,
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
-        'observation': EnvironmentStep,
-        'neural': DataAssembly, 'behavior': DataAssembly,
-        'motor': EnvironmentResponse, 'perturbation': PerturbationApplied,
+        'neural': (DataAssembly, np.ndarray),
+        'behavior': (DataAssembly, str, np.ndarray),
+        'perturbation': (PerturbationApplied, type(None)),
     }
     for family, payload_type in payload_types.items():
         register(_replace(get(family), payload_type=payload_type), replace=True)

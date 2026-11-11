@@ -12,7 +12,6 @@ import pandas as pd
 from brainscore_core.compatibility import check_channel_compatibility
 from brainscore_core.contract import Subject, TaskContext, UnifiedModel
 from brainscore_core.environment import DiscreteSpec, MappingSpec, TextSpec
-from brainscore_core.events import EnvironmentStep
 from brainscore_core.legacy_facade import LegacyBenchmarkFacade
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
@@ -44,7 +43,7 @@ class _ParticipateOnly(Subject):
     """Implements only the contract: no process, look_at or start_recording."""
 
     identifier = 'participate-only'
-    in_channels = {'vision', 'observation'}
+    in_channels = {'vision', 'observation', 'control'}
     out_channels = {'neural:IT', 'behavior', 'motor'}
 
     def __init__(self):
@@ -53,10 +52,13 @@ class _ParticipateOnly(Subject):
 
     def participate(self, session):
         if 'motor' in session.requested_output_channels:
-            # Closed loop: answer each observation until the episode says it ended.
-            while (step := session.next_input()) is not None and not step.is_last:
-                self.inputs.append(step)
-                session.respond(StreamEvent('motor', len(self.inputs) % 3, None))
+            # Closed loop: answer each respond request until the episode ends.
+            session.declare_inputs(self.in_channels)
+            while (event := session.next_input()) is not None:
+                if event.channel != 'control':
+                    self.inputs.append(event)
+                elif event.payload == 'respond':
+                    session.respond(StreamEvent('motor', len(self.inputs) % 3, None))
             return
         while (event := session.next_input()) is not None:
             self.inputs.append(event)
@@ -82,7 +84,7 @@ def test_static_neural_helper_runs_a_participate_only_subject():
     subject = _ParticipateOnly()
     out = neural_response(subject, _images(3), record='IT')
     assert out is subject.payloads[0]
-    assert len(subject.inputs) == 3
+    assert len([e for e in subject.inputs if e.channel != 'control']) == 3
 
 
 def test_static_behavior_helper_runs_a_participate_only_subject():
@@ -116,16 +118,14 @@ class _Environment:
         return DiscreteSpec(3)
 
     def _step(self):
-        last = len(self.actions) == 3
-        return EnvironmentStep(observation={'task': 'move'}, step_num=len(self.actions),
-                               is_last=last, is_terminal=last)
+        return {'observation': {'task': 'move'}}
 
     def reset(self, *, seed=None, options=None):
         return self._step()
 
-    def step(self, action):
-        self.actions.append(action)
-        return self._step()
+    def step(self, outputs):
+        self.actions.append(outputs['motor'])
+        return self._step(), 'terminal' if len(self.actions) == 3 else None
 
     def close(self):
         self.closed += 1

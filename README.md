@@ -22,21 +22,22 @@ please [send in a pull request](https://github.com/brain-score/core/pulls).
 
 ## Source layout
 
-| Location | Responsibility |
+| Location | Contents |
 | --- | --- |
-| `contract.py`, `events.py`, `streaming.py` | Subject, event and session definitions |
-| `model_interface.py`, `brainscore_model.py` | Public model imports and model construction |
-| `_model/` | Dispatch, task state, recording state and intervention lifecycle |
-| `_sessions/` | Buffered inputs, environments, perception windows and session drivers |
-| `_evaluation/` | Compatibility, preflight, memory checks and legacy scoring |
-| `_data/` | Assemblies, multimodal stimuli and text helpers |
-| `_runtime/` | Extraction caching, dependency checks and channel registration |
+| `contract.py`, `events.py`, `streaming.py` | `Subject`, `TaskContext`, event types, `StreamEvent`, `Session` |
+| `io_catalog.py`, `responses.py`, `environment.py` | Channel catalog, answer forms, environment specifications |
+| `model_interface.py` | Public names of the subject contract and events |
+| `_sessions/` | Session helpers, environment source, perception windows, session drivers |
+| `_evaluation/` | Compatibility, preflight, memory checks, legacy facade |
+| `_data/` | Assembly builders, multimodal stimuli, text and time helpers |
+| `_runtime/` | Extraction cache, environment checks, extensions |
 
-The package root keeps ten files for public definitions and entry points.
-Existing imports such as `brainscore_core.memory` and
-`brainscore_core.streaming_helpers` remain available and share the same module
-state as their implementations. The underscored folders are internal; use the
-established public imports in integrations.
+`BrainScoreModel` and the temporal analysis functions are in the unified
+`brainscore` package, not in this repository.
+
+Imports such as `brainscore_core.memory` and `brainscore_core.streaming_helpers`
+still work. They point to the modules in the underscored folders. Those
+folders are internal, so import from the public names.
 
 ## License
 

@@ -26,6 +26,7 @@ def stamp_score_metadata(
     measured: ``'reported'``, ``'implied'`` or both as a sorted tuple.
     """
     score.attrs["in_channels"] = _sorted_tuple(getattr(subject, "in_channels", ()))
+    score.attrs["subject_traits"] = _sorted_tuple(getattr(subject, "traits", ()))
     score.attrs["out_channels"] = _sorted_tuple(requested_channels)
     score.attrs["protocol"] = protocol
     score.attrs["subject_id"] = getattr(subject, "identifier", None)

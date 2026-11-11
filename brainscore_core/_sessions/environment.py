@@ -1,43 +1,61 @@
-"""Turn-based environment sessions, action receipts and lifecycle."""
+"""Closed-loop input: an environment driven as a session source.
+
+An environment is plain benchmark code with two methods: ``reset(**kwargs) -> row``
+(or ``(row, reason)``, the form ``step`` uses, for an episode that is already
+complete at reset: the row is delivered if non-empty, then ``end(reason)``, and
+the subject is never asked for an action; a row is a mapping, so a tuple is
+unambiguous) and ``step(outputs) -> (row, reason_or_None)``. A row is a mapping of channel ->
+payload; ``outputs`` is a mapping of output channel -> payload; ``reason`` is
+``None`` while the episode runs and ``'terminal'``, ``'truncated'`` or
+``'failure'`` when it ends. Optional: ``observation_spec()`` / ``action_spec()``
+(``validate`` and ``describe``), ``clock() -> {'t_ms', 'time_source',
+'time_inferred'}`` and ``close()``.
+"""
 
 from __future__ import annotations
+from collections import deque
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
 import inspect
 import time
-from typing import Optional
+from typing import Any, Mapping, Optional
 import numpy as np
-from ..streaming import Session, StreamEvent
-from ..events import EnvironmentResponse, EnvironmentStep
+from ..streaming import (
+    BEGIN, CONTROL_CHANNEL, END_REASONS, RESPOND, Session, Source, StreamEvent,
+    end_event, events_row, respond_event, row_events,
+)
 
 
-class EnvironmentSession(Session):
+class EnvironmentSource(Source):
     """One turn-based episode, with declared spaces and execution receipts.
 
-    Wrappers provide observation_spec()/action_spec() when available. Existing
-    untyped wrappers remain usable unless require_specs=True. Use as a context
-    manager to close the environment; subject reset belongs to the trial owner.
-    Terminal observations are delivered once, without requesting another action.
+    Per episode it emits ``begin``; per step one event per row entry, then
+    ``respond``; after the subject answers on ``action_channel`` it advances the
+    environment; at the end it emits ``end(reason)``. Specs are used when the
+    environment provides them, and required with ``require_specs=True``.
+    Use as a context manager to close the environment; subject reset belongs to
+    the trial owner. Terminal rows are delivered once, without a ``respond``.
 
-    history_limit bounds memory for long episodes: input_events, action_events
-    and emitted each keep only their latest N entries (0 keeps none; None, the
-    default, keeps everything). The model and observe_actions() callbacks still
-    see every event. collect() refuses once an applied action has been dropped,
-    so a truncated history is never returned as a whole episode.
+    ``history_limit`` bounds memory for long episodes: ``input_events`` and
+    ``action_events`` here, and the session's ``emitted``, keep only their latest
+    N entries (0 keeps none; None keeps everything). The subject and
+    ``observe_actions()`` callbacks still see every event. ``Session.collect``
+    refuses once an applied action has been dropped.
+
+    ``complete`` is False until an episode ends as ``terminal`` or ``truncated``.
     """
-    records_action_execution = True
 
-    def __init__(self, environment, *, action_validator=None, seed=None,
-                 options=None, require_specs=False, history_limit: Optional[int] = None):
+    def __init__(self, environment, *, action_channel: str = 'motor', action_validator=None,
+                 seed=None, options=None, require_specs=False,
+                 history_limit: Optional[int] = None):
         if history_limit is not None and (
                 isinstance(history_limit, bool) or not isinstance(history_limit, int)):
             raise TypeError("history_limit must be an int or None")
         if history_limit is not None and history_limit < 0:
             raise ValueError("history_limit must be >= 0")
         self.history_limit = history_limit
-        self._dropped_actions = 0
-        self._described = False
+        self.action_channel = action_channel
         self.environment = environment
         self.action_validator = action_validator
         self.reset_kwargs = {}
@@ -53,19 +71,21 @@ class EnvironmentSession(Session):
             inspect.signature(environment.reset).bind(**self.reset_kwargs)
         self.observation_spec = self._specification('observation_spec', require_specs)
         self.action_spec = self._specification('action_spec', require_specs)
-        self.requested_output_channels = ("motor",)
         self.input_events: list[StreamEvent] = []
-        self.emitted: list[StreamEvent] = []
         self.action_events: list[StreamEvent] = []
         self._action_observers = []
-        self.complete = False
-        self._started = False
-        self._done = False
-        self._closed = False
-        self._awaiting_emit = False
-        self._pending_step = None
-        self._last_step = None
+        self._queue: deque = deque()
+        self._started = self._done = self._closed = self._awaiting = self._failed = False
+        self._complete = False
+        self._pending = None
+        self._step_num = 0
+        self._timing: dict = {}
+        self._t_ms = None
         self._previous_t_ms = None
+
+    @property
+    def complete(self) -> bool:
+        return self._complete
 
     def _specification(self, name, required):
         method = getattr(self.environment, name, None)
@@ -93,7 +113,7 @@ class EnvironmentSession(Session):
         """Observe proposals before execution and receipts afterward.
 
         Observers must not mutate events. A recording error prevents further
-        actions; the session cannot then be counted as complete.
+        actions; the source cannot then be counted as complete.
         """
         self._action_observers.append(callback)
         try:
@@ -101,14 +121,11 @@ class EnvironmentSession(Session):
         finally:
             self._action_observers.remove(callback)
 
-    def _retain(self, history, event) -> bool:
-        """Append within history_limit; return True if an older entry was dropped."""
+    def _retain(self, history, event) -> None:
+        """Append within history_limit, dropping the oldest entry."""
         history.append(event)
-        if self.history_limit is None or len(history) <= self.history_limit:
-            return False
-        # Keep the public history attributes as lists; trimming costs O(history_limit).
-        del history[0]
-        return True
+        if self.history_limit is not None and len(history) > self.history_limit:
+            del history[0]  # keep the public history attributes as lists
 
     def _record_action(self, event):
         self._retain(self.action_events, event)
@@ -116,13 +133,12 @@ class EnvironmentSession(Session):
             for callback in tuple(self._action_observers):
                 callback(event)
         except BaseException:
-            self._done = True
-            self.complete = False
+            self._fail()
             raise
 
     def __enter__(self):
         if self._closed:
-            raise RuntimeError("Session is closed")
+            raise RuntimeError("Environment source is closed")
         return self
 
     def __exit__(self, *exc):
@@ -136,63 +152,98 @@ class EnvironmentSession(Session):
             if callable(close):
                 close()
 
-    def next_input(self) -> Optional[EnvironmentStep]:
+    def _fail(self) -> None:
+        """Stop the episode as a failure; the next input is its ``end('failure')``."""
+        if self._failed:
+            return
+        self._failed = True
+        self._queue.append(end_event('failure', self._t_ms))
+        self._done = True
+        self._awaiting = False
+        self._complete = False
+
+    def next_input(self) -> Optional[StreamEvent]:
+        event = self._next_event()
+        if event is not None and event.channel != CONTROL_CHANNEL and self.history_limit != 0:
+            self._retain(self.input_events, deepcopy(event))
+        return event
+
+    def _next_event(self) -> Optional[StreamEvent]:
+        if self._queue:
+            return self._queue.popleft()
         if self._done:
             return None
-        if self._awaiting_emit:
-            raise RuntimeError("Emit an action before requesting the next observation")
+        if self._awaiting:
+            raise RuntimeError("Emit an action before requesting the next observation. A closed-loop "
+                               "subject must declare the 'control' input and answer on the respond signal.")
         try:
             if not self._started:
                 self._started = True
-                self._pending_step = _coerce_environment_step(
-                    self.environment.reset(**self.reset_kwargs)
-                )
-            step = self._pending_step
-            self._pending_step = None
-            if step is None:
-                self._done = self.complete = True
-                return None
-            if self.observation_spec is not None:
-                step = replace(step, observation=self.observation_spec.validate(step.observation))
-            t_ms, timing = _environment_time(step)
-            if (t_ms is not None and self._previous_t_ms is not None
-                    and t_ms < self._previous_t_ms):
-                raise ValueError("Environment timestamps must not go backwards")
-            if t_ms is not None:
-                self._previous_t_ms = t_ms
-            context = {**step.context, **timing, 't_ms': t_ms}
-            if not self._described:
-                self._described = True
-                context['environment_session'] = self.describe()
-            step = replace(step, context=context)
-            self._last_step = step
-            self._done = self.complete = _environment_step_terminates(step)
-            self._awaiting_emit = not self._done
-            if self.history_limit != 0:
-                self._retain(self.input_events, deepcopy(_environment_step_event(step)))
-            return step
+                result = self.environment.reset(**self.reset_kwargs)
+                row, reason = result if isinstance(result, tuple) else (result, None)
+                self._enqueue(row, reason, first=True)
+            else:
+                row, reason = self._pending
+                self._pending = None
+                self._enqueue(row, reason)
         except BaseException:
-            self._done = True
-            self.complete = False
+            self._fail()
             raise
+        return self._queue.popleft()
 
-    def emit(self, event: StreamEvent) -> None:
-        if not isinstance(event, StreamEvent):
-            raise TypeError("event must be a StreamEvent")
-        if not self._awaiting_emit or self._done:
-            raise RuntimeError("No observation is awaiting an action")
-        if event.channel != "motor":
-            raise ValueError(f"EnvironmentSession.emit only supports 'motor'; got {event.channel!r}.")
-        t_ms, timing = _environment_time(self._last_step)
-        meta = {**event.meta, **timing, 'step_num': self._last_step.step_num,
+    def _clock(self):
+        clock = getattr(self.environment, 'clock', None)
+        info = clock() if callable(clock) else {}
+        t_ms = info.get('t_ms')
+        if t_ms is None:
+            return None, {'time_source': 'step_index', 'time_inferred': False}
+        if isinstance(t_ms, (bool, np.bool_)) or not np.isfinite(t_ms):
+            raise ValueError("Environment time must be finite milliseconds or None")
+        return float(t_ms), {'time_source': info.get('time_source', 'environment'),
+                             'time_inferred': info.get('time_inferred', False)}
+
+    def _enqueue(self, row: Mapping[str, Any], reason: Optional[str], first: bool = False) -> None:
+        if not isinstance(row, Mapping):
+            raise TypeError(f"environment reset/step must return a row (a mapping); got {type(row).__name__}.")
+        if reason is not None and reason not in END_REASONS:
+            raise ValueError(f"end reason must be one of {END_REASONS}; got {reason!r}")
+        row = dict(row)
+        if self.observation_spec is not None and 'observation' in row:
+            row['observation'] = self.observation_spec.validate(row['observation'])
+        t_ms, timing = self._clock()
+        if (t_ms is not None and self._previous_t_ms is not None
+                and t_ms < self._previous_t_ms):
+            raise ValueError("Environment timestamps must not go backwards")
+        if t_ms is not None:
+            self._previous_t_ms = t_ms
+        self._t_ms, self._timing = t_ms, timing
+        if first:
+            self._queue.append(StreamEvent(CONTROL_CHANNEL, BEGIN, t_ms, {
+                **timing, 'environment_session': self.describe()}))
+        self._queue.extend(row_events(row, t_ms, step_num=self._step_num, **timing))
+        if reason is None:
+            self._queue.append(respond_event(t_ms))
+            self._awaiting = True
+        else:
+            self._queue.append(end_event(reason, t_ms))
+            self._done = True
+            self._awaiting = False
+            self._complete = reason != 'failure'
+
+    def respond(self, event: StreamEvent) -> Optional[StreamEvent]:
+        if event.channel != self.action_channel:
+            return None  # another output (a recording): the session keeps it
+        if not self._awaiting or self._done:
+            raise RuntimeError("No observation is awaiting an action. A closed-loop subject must "
+                               "declare the 'control' input and answer once, on the 'respond' signal.")
+        meta = {**event.meta, **self._timing, 'step_num': self._step_num,
                 'execution': 'turn_based', 'action_status': 'proposed'}
-        proposal = deepcopy(replace(event, t_ms=t_ms, meta=meta))
+        proposal = deepcopy(replace(event, t_ms=self._t_ms, meta=meta))
         self._record_action(proposal)
-        action = _motor_action_payload(event.payload)
+        action = event.payload
         attempted = False
         try:
-            if (isinstance(event.payload, EnvironmentResponse)
-                    and event.payload.metadata.get('action_kind') == 'chunk'):
+            if event.meta.get('action_kind') == 'chunk':
                 raise ValueError("Schedule policy chunks before submitting a single environment action")
             if self.action_spec is not None:
                 action = self.action_spec.validate(action)
@@ -201,67 +252,54 @@ class EnvironmentSession(Session):
                 if self.action_spec is not None:
                     action = self.action_spec.validate(action)
             # Snapshot the actual submitted command before an environment can mutate it.
-            payload = replace(deepcopy(event.payload), action=deepcopy(action)) if isinstance(
-                event.payload, EnvironmentResponse
-            ) else deepcopy(action)
+            payload = deepcopy(action)
             attempted = True
-            result = self.environment.step(action)
+            row, reason = self.environment.step({self.action_channel: action})
         except BaseException as error:
             status = 'execution_unknown' if attempted else 'rejected'
-            self._done = True
-            self._awaiting_emit = False
+            self._fail()
             self._record_action(replace(proposal, meta={
                 **meta, 'action_status': status, 'error_type': type(error).__name__,
                 'error': str(error),
             }))
             raise
         receipt = replace(proposal, payload=payload, meta={**meta, 'action_status': 'applied'})
-        self._dropped_actions += self._retain(self.emitted, receipt)
         self._record_action(receipt)
-        self._awaiting_emit = False
-        try:
-            self._pending_step = _coerce_environment_step(result)
-        except BaseException:
-            self._done = True
-            raise
-        if self._pending_step is None:
-            self._done = self.complete = True
-
-    def collect(self, channel: str = "motor") -> list:
-        if channel != "motor":
-            raise ValueError(f"EnvironmentSession.collect only supports 'motor'; got {channel!r}.")
-        if self._dropped_actions:
-            raise RuntimeError(
-                f"history_limit={self.history_limit} dropped {self._dropped_actions} applied "
-                "action(s); stream them with observe_actions() instead of collect()"
-            )
-        return [event.payload for event in self.emitted]
+        self._awaiting = False
+        self._step_num += 1
+        self._pending = (row, reason)
+        return receipt
 
 
-def environment_session(environment, *, action_validator=None, seed=None,
+def environment_session(environment, *, outputs=None, action_channel: str = 'motor',
+                        task_context=None, action_validator=None, seed=None,
                         options=None, require_specs=False,
-                        history_limit: Optional[int] = None) -> EnvironmentSession:
-    return EnvironmentSession(
-        environment, action_validator=action_validator, seed=seed,
-        options=options, require_specs=require_specs, history_limit=history_limit,
+                        history_limit: Optional[int] = None) -> Session:
+    """A session driving ``environment``; ``outputs`` are the requested output channels."""
+    source = EnvironmentSource(
+        environment, action_channel=action_channel, action_validator=action_validator,
+        seed=seed, options=options, require_specs=require_specs, history_limit=history_limit,
     )
+    return Session(source, (action_channel,) if outputs is None else outputs, task_context)
 
 
-def run_environment(subject, environment, *, seed=None, options=None,
-                    action_validator=None, require_specs=False) -> list:
-    """Run one closed-loop episode and close its environment, returning applied actions.
+def run_environment(subject, environment, *, outputs=None, action_channel: str = 'motor',
+                    task_context=None, seed=None, options=None, action_validator=None,
+                    require_specs=False) -> list:
+    """Run one closed-loop episode and close its environment, returning the applied actions.
 
     The subject must implement ``participate(session)``; there is no ``process()``
-    fallback for closed-loop sessions.
+    fallback for closed-loop sessions. The returned list holds the payloads sent on
+    ``action_channel``.
 
     Reset rule: the caller owns ``subject.reset()`` between episodes (or uses
     Experiment with SessionProtocol, which resets before and after each trial).
-    Policy adapters additionally clear their own per-episode memory when a step
-    arrives with ``is_first=True``.
+    A policy that keeps episode state is cleared when the episode begins.
     """
     try:
         session = environment_session(
-            environment, seed=seed, options=options,
+            environment, outputs=outputs, action_channel=action_channel,
+            task_context=task_context, seed=seed, options=options,
             action_validator=action_validator, require_specs=require_specs,
         )
     except BaseException:
@@ -274,81 +312,62 @@ def run_environment(subject, environment, *, seed=None, options=None,
         if not callable(participate):
             raise TypeError(
                 f"{type(subject).__name__} has no participate(session); closed-loop "
-                "sessions require a Subject. Wrap a bare action function as "
+                "sessions require a Subject. Wrap a bare policy function as "
                 "BrainScoreModel(..., policy=fn)."
             )
         participate(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
-        return session.collect("motor")
+        if not session.emitted:  # episode ended at reset, no action was sent
+            return []
+        return [event.payload for event in session.collect(action_channel)]
 
 
-def _drive_environment_via_process(subject, session: EnvironmentSession) -> None:
+def _drive_environment_via_process(subject, session: Session) -> None:
     """Drive an environment for a subject that exposes process()."""
     drive_environment_session(subject, session, driver="process")
 
 
-def drive_environment_session(
-    subject, session: EnvironmentSession, driver: str = "interact"
-) -> None:
-    """Drive a live environment session through existing EnvironmentStep dispatch."""
-    step = session.next_input()
-    while step is not None and not _environment_step_terminates(step):
-        start = time.perf_counter()
-        response = subject.process(step)
-        latency_ms = (time.perf_counter() - start) * 1000
-        t_ms, timing = _environment_time(step)
-        session.emit(StreamEvent(
-            channel="motor",
-            payload=response,
-            t_ms=t_ms,
-            meta={"driver": driver, **timing, "step_num": step.step_num,
-                  "latency_ms": latency_ms, "action_status": "proposed"},
-        ))
-        step = session.next_input()
+def drive_environment_session(subject, session: Session, driver: str = "interact",
+                              on_begin=None) -> None:
+    """Drive a live session through ``subject.process(row) -> outputs``.
+
+    Events between ``respond`` controls form one row; ``outputs`` is a mapping of
+    output channel -> payload, answered on every requested channel it holds.
+    ``on_begin`` runs when an episode begins (a stateful policy clears itself).
+    """
+    session._request_control('A closed-loop session')
+    pending = []
+    while (event := session.next_input()) is not None:
+        if event.channel != CONTROL_CHANNEL:
+            pending.append(event)
+        elif event.payload == BEGIN:
+            pending = []
+            if on_begin is not None:
+                on_begin()
+        elif event.payload == RESPOND:
+            row, pending = events_row(pending), []
+            start = time.perf_counter()
+            outputs = subject.process(row)
+            latency_ms = (time.perf_counter() - start) * 1000
+            send_outputs(session, outputs, event.t_ms, {
+                "driver": driver, "latency_ms": latency_ms, "action_status": "proposed"})
 
 
-def _coerce_environment_step(result) -> Optional[EnvironmentStep]:
-    if result is None:
-        return None
-    if isinstance(result, EnvironmentStep):
-        return result
-    raise TypeError(
-        "environment reset/step must return an EnvironmentStep or None; "
-        f"got {type(result).__name__}."
-    )
+def send_outputs(session: Session, outputs: Mapping[str, Any], t_ms: Optional[float],
+                 meta: Mapping[str, Any]) -> None:
+    """Answer a step: one response per requested output channel a policy returned.
 
-
-def _environment_time(step):
-    t_ms = step.context.get('t_ms')
-    if t_ms is None:
-        return None, {'time_source': 'step_index', 'time_inferred': False}
-    if isinstance(t_ms, (bool, np.bool_)) or not np.isfinite(t_ms):
-        raise ValueError("Environment time must be finite milliseconds or None")
-    return float(t_ms), {
-        'time_source': step.context.get('time_source', 'environment'),
-        'time_inferred': step.context.get('time_inferred', False),
-    }
-
-
-def _environment_step_event(step: EnvironmentStep) -> StreamEvent:
-    t_ms, timing = _environment_time(step)
-    return StreamEvent(
-        channel="observation",
-        payload=step,
-        t_ms=t_ms,
-        meta={**timing, "step_num": step.step_num,
-              "is_first": step.is_first, "is_last": step.is_last,
-              "is_terminal": step.is_terminal,
-              "is_truncated": step.is_last and not step.is_terminal},
-    )
-
-
-def _environment_step_terminates(step: Optional[EnvironmentStep]) -> bool:
-    return step is None or bool(step.is_last or step.is_terminal)
-
-
-def _motor_action_payload(payload):
-    if isinstance(payload, EnvironmentResponse):
-        return payload.action
-    return payload
+    A value that is already a ``StreamEvent`` keeps its own meta (telemetry).
+    """
+    if not isinstance(outputs, Mapping):
+        raise TypeError("A policy returns a mapping of output channel -> payload; "
+                        f"got {type(outputs).__name__}.")
+    requested = session.requested_output_channels
+    for channel, value in outputs.items():
+        if requested is not None and channel not in requested:
+            continue
+        if isinstance(value, StreamEvent):
+            session.respond(replace(value, channel=channel, t_ms=t_ms, meta={**meta, **value.meta}))
+        else:
+            session.respond(StreamEvent(channel, value, t_ms, dict(meta)))
