@@ -9,7 +9,7 @@ from brainscore_core._evaluation.compatibility import check_channel_compatibilit
 from brainscore_core._evaluation.compatibility import CompatibilityError
 from brainscore_core.streaming import Session, StreamEvent
 
-POOL = ['vision', 'vision:image', 'vision:video', 'text', 'audio']
+POOL = ['vision:image', 'vision:video', 'text', 'audio']
 
 
 def _delivered(inputs, declared):
@@ -40,6 +40,7 @@ def test_consumed_inputs_equal_delivered_inputs():
         assert set(match.dropped_inputs) == inputs - delivered
 
 
-def test_bare_family_does_not_stand_for_an_address():
-    assert _delivered({'vision:image'}, {'vision'}) == set()
-    assert _delivered({'vision'}, {'vision:image'}) == set()
+def test_one_form_does_not_stand_for_another():
+    assert _delivered({'vision:image'}, {'vision:video'}) == set()
+    assert _delivered({'vision:video'}, {'vision:image'}) == set()
+    assert _delivered({'vision:image'}, {'vision:image', 'vision:video'}) == {'vision:image'}

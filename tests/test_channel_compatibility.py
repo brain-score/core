@@ -68,12 +68,12 @@ class _Benchmark:
 
 def test_channel_compatible_pair_passes():
     subject = _Subject(
-        in_channels={"vision", "text"},
+        in_channels={"vision:image", "text"},
         out_channels={"neural:IT", "behavior"},
-        required_channels={"vision"},
+        required_channels={"vision:image"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision"},
+        required_input_channels={"vision:image"},
         requested_output_channels={"neural:IT"},
     )
 
@@ -82,11 +82,11 @@ def test_channel_compatible_pair_passes():
 
 def test_partial_input_overlap_runs_and_no_overlap_raises():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision", "text"},
+        required_input_channels={"vision:image", "text"},
         requested_output_channels={"neural:IT"},
     )
 
@@ -105,11 +105,11 @@ def test_partial_input_overlap_runs_and_no_overlap_raises():
 
 def test_missing_requested_output_channel_raises_with_channel_name():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision"},
+        required_input_channels={"vision:image"},
         requested_output_channels={"neural:IT", "behavior"},
     )
 
@@ -119,12 +119,12 @@ def test_missing_requested_output_channel_raises_with_channel_name():
 
 def test_unmet_subject_required_channel_raises_with_channel_name():
     subject = _Subject(
-        in_channels={"vision", "text"},
+        in_channels={"vision:image", "text"},
         out_channels={"neural:IT"},
         required_channels={"text"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision"},
+        required_input_channels={"vision:image"},
         requested_output_channels={"neural:IT"},
     )
 
@@ -134,11 +134,11 @@ def test_unmet_subject_required_channel_raises_with_channel_name():
 
 def test_incompatible_pair_raises_before_compute_not_zero_score():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision"},
+        required_input_channels={"vision:image"},
         requested_output_channels={"behavior"},
     )
 
@@ -150,7 +150,7 @@ def test_incompatible_pair_raises_before_compute_not_zero_score():
 
 def test_required_input_channels_derive_from_required_modalities():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
@@ -158,15 +158,15 @@ def test_required_input_channels_derive_from_required_modalities():
         region="IT",
     )
 
-    assert benchmark_required_input_channels(benchmark) == {"vision"}
+    assert benchmark_required_input_channels(benchmark) == {"vision:image"}
     check_channel_compatibility(subject, benchmark)
 
 
 def test_accepted_input_channels_derive_from_accepted_modalities():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
-        required_channels={"vision"},
+        required_channels={"vision:image"},
     )
     benchmark = _Benchmark(
         accepted_modalities={"vision", "video"},
@@ -174,8 +174,8 @@ def test_accepted_input_channels_derive_from_accepted_modalities():
     )
 
     assert benchmark_required_input_channels(benchmark) == set()
-    # video folds into the unified vision channel, so both modalities map to 'vision'
-    assert benchmark_accepted_input_channels(benchmark) == {"vision"}
+    # each modality names its own form: image or video
+    assert benchmark_accepted_input_channels(benchmark) == {"vision:image", "vision:video"}
     check_channel_compatibility(subject, benchmark)
 
 
@@ -195,7 +195,7 @@ def test_accepted_input_channels_raise_when_subject_has_none():
 
 def test_unknown_channel_declaration_raises():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
@@ -209,7 +209,7 @@ def test_unknown_channel_declaration_raises():
 
 def test_wrong_direction_channel_declaration_raises():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
@@ -237,13 +237,34 @@ def test_invalid_addressed_channel_declaration_raises():
 
 def test_invalid_channel_grammar_raises():
     subject = _Subject(
-        in_channels={"vision"},
+        in_channels={"vision:image"},
         out_channels={"neural:IT"},
     )
     benchmark = _Benchmark(
-        required_input_channels={"vision"},
+        required_input_channels={"vision:image"},
         requested_output_channels={"neural:"},
     )
 
     with pytest.raises(CompatibilityError, match="invalid channel"):
+        check_channel_compatibility(subject, benchmark)
+
+
+def test_bare_vision_declaration_raises_for_subject_and_benchmark():
+    with pytest.raises(CompatibilityError, match="names its form"):
+        check_channel_compatibility(
+            _Subject(in_channels={"vision"}, out_channels={"neural:IT"}),
+            _Benchmark(required_input_channels={"vision:image"},
+                       requested_output_channels={"neural:IT"}))
+    with pytest.raises(CompatibilityError, match="names its form"):
+        check_channel_compatibility(
+            _Subject(in_channels={"vision:image"}, out_channels={"neural:IT"}),
+            _Benchmark(required_input_channels={"vision"},
+                       requested_output_channels={"neural:IT"}))
+
+
+def test_image_subject_and_video_benchmark_do_not_match():
+    subject = _Subject(in_channels={"vision:image"}, out_channels={"neural:IT"})
+    benchmark = _Benchmark(required_input_channels={"vision:video"},
+                           requested_output_channels={"neural:IT"})
+    with pytest.raises(CompatibilityError):
         check_channel_compatibility(subject, benchmark)

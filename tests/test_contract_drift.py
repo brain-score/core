@@ -30,7 +30,6 @@ PINNED_SEED_CHANNELS = {
     "skin_conductance": (io_catalog.OUTPUT, "human harness"),
     "stimulation": (io_catalog.INPUT, "core"),
     "text": (io_catalog.INPUT, "core"),
-    "video": (io_catalog.INPUT, "core"),
     "vision": (io_catalog.INPUT, "core"),
 }
 

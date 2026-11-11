@@ -99,7 +99,7 @@ def _windows(frames, fps, window_ms, stride_ms, window_to_stimuli, stats) -> Ite
         end_ms = start_ms + (len(window) / fps) * 1000.0
         stimuli = window_to_stimuli(window, start_ms, end_ms)
         event = StreamEvent(
-            channel="vision", payload=stimuli, t_ms=start_ms,
+            channel="vision:image", payload=stimuli, t_ms=start_ms,
             meta={"window_index": window_index, "window_start_ms": start_ms,
                   "window_end_ms": end_ms, "n_frames": len(window),
                   "partial": len(window) < window_frames},

@@ -133,7 +133,7 @@ class _NonNativeEnvironmentSubject(UnifiedModel):
 
 def test_stimulus_session_emits_input_events_per_stimulus_column():
     session = stimulus_session(_stimulus_set(), record="IT").declare_inputs(
-        {'control', 'vision', 'text'})
+        {'control', 'vision:image', 'text'})
 
     events = []
     while True:
@@ -144,14 +144,14 @@ def test_stimulus_session_emits_input_events_per_stimulus_column():
 
     # Each stimulus row is one independent trial: begin, its columns, end.
     assert [event.channel for event in events] == [
-        "control", "vision", "text", "control", "control", "vision", "text", "control",
+        "control", "vision:image", "text", "control", "control", "vision:image", "text", "control",
     ]
     assert [event.payload for event in events if event.channel == "control"] == [
         "begin", "end", "begin", "end",
     ]
     events = [event for event in events if event.channel != "control"]
     assert [event.channel for event in events] == [
-        "vision", "text", "vision", "text",
+        "vision:image", "text", "vision:image", "text",
     ]
     assert [event.payload for event in events] == [
         "s0.png", "cat", "s1.png", "dog",
@@ -162,6 +162,30 @@ def test_stimulus_session_emits_input_events_per_stimulus_column():
     assert [event.meta["column"] for event in events] == [
         "image_path", "sentence", "image_path", "sentence",
     ]
+
+
+def test_a_video_column_gives_events_on_the_video_channel():
+    table = StimulusSet(pd.DataFrame({'stimulus_id': ['v0'], 'video_path': ['/x.mp4']}))
+    table.identifier = 'one-video'
+    session = stimulus_session(table, record='IT').declare_inputs(
+        {'control', 'vision:image', 'vision:video'})
+    channels = [event.channel for event in iter(session.next_input, None)]
+    assert [c for c in channels if c != 'control'] == ['vision:video']
+
+
+def test_an_image_column_gives_events_on_the_image_channel():
+    table = StimulusSet(pd.DataFrame({'stimulus_id': ['i0'], 'image_path': ['/x.png']}))
+    table.identifier = 'one-image'
+    session = stimulus_session(table, record='IT').declare_inputs(
+        {'control', 'vision:image', 'vision:video'})
+    channels = [event.channel for event in iter(session.next_input, None)]
+    assert [c for c in channels if c != 'control'] == ['vision:image']
+
+
+def test_a_session_refuses_an_input_event_on_bare_vision():
+    from brainscore_core.streaming import Session
+    with pytest.raises(ValueError, match="names its form"):
+        Session([StreamEvent('vision', 'a.png', 0.0)]).next_input()
 
 
 def test_stimulus_session_exposes_time_bins():
@@ -271,7 +295,7 @@ def test_behavior_session_emits_instruction_fitting_and_scoring_events():
     fitting = _make_image_stimulus_set(["cat", "dog"], identifier="fit")
     scoring = _make_image_stimulus_set(["cat", "dog"], identifier="score")
     session = behavior_session(_behavior_context(fitting, scoring)).declare_inputs(
-        {'control', 'instruction', 'vision'})
+        {'control', 'instruction', 'vision:image'})
 
     assert session.requested_output_channels == ("behavior",)
 
@@ -292,7 +316,7 @@ def test_behavior_session_emits_instruction_fitting_and_scoring_events():
     ]
     stimulus_events = [event for event in events[1:] if event.channel != "control"]
     assert [event.channel for event in stimulus_events] == [
-        "vision", "vision", "vision", "vision",
+        "vision:image", "vision:image", "vision:image", "vision:image",
     ]
     assert [event.meta["role"] for event in stimulus_events] == [
         "fitting", "fitting", "scoring", "scoring",
@@ -604,7 +628,7 @@ class TestPublicSessionHelpers:
     def test_drain_returns_every_input_in_order_then_none(self):
         from brainscore_core.streaming import Session
         from brainscore_core.streaming_helpers import drain_session_inputs
-        events = [StreamEvent('vision', f'p{index}', float(index), {'i': index})
+        events = [StreamEvent('vision:image', f'p{index}', float(index), {'i': index})
                   for index in range(3)]
         session = Session(events, ('neural:IT',))
         assert drain_session_inputs(session) == events
@@ -629,7 +653,7 @@ class TestPublicSessionHelpers:
 
     def test_session_stimuli_rebuilds_inputs_without_a_table(self):
         from brainscore_core.streaming_helpers import session_stimuli
-        events = [StreamEvent('vision', 'a.png', 0.0,
+        events = [StreamEvent('vision:image', 'a.png', 0.0,
                               {'stimulus_id': 's0', 'column': 'image_path'})]
 
         class _Session:

@@ -138,7 +138,7 @@ def test_null_index_label_is_matched_only_when_present(label):
     assert _table_row_position(session, other) is None
 
 
-@pytest.mark.parametrize('channel', ['vision', 'text', 'audio', 'video'])
+@pytest.mark.parametrize('channel', ['vision', 'text', 'audio'])
 def test_catalog_declares_the_row_metadata(channel):
     from brainscore_core import io_catalog
     keys = io_catalog.get(channel).meta_keys

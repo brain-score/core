@@ -270,6 +270,10 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
                 f"the registry marks family '{family}' as {entry.direction}."
             )
 
+        problem = io_catalog.form_problem(channel)
+        if problem:
+            raise CompatibilityError(f"{owner} declares {problem}.")
+
         if address is not None and entry.addressing is None:
             raise CompatibilityError(
                 f"{owner} declares addressed channel '{channel}', but family "

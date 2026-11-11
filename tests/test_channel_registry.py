@@ -57,8 +57,22 @@ def test_validate_accepts_valid_payload_and_direction():
     image = np.zeros((224, 224, 3), dtype=np.uint8)
     neural = np.zeros((10, 5), dtype=np.float32)
 
-    assert io_catalog.validate("vision", image, direction=INPUT) == []
+    assert io_catalog.validate("vision:image", image, direction=INPUT) == []
     assert io_catalog.validate("neural:IT", neural, direction=OUTPUT) == []
+
+
+def test_form_problem_accepts_named_forms_and_rejects_bare_vision():
+    for channel in ("vision:image", "vision:video", "text", "neural:IT"):
+        assert io_catalog.form_problem(channel) is None
+    for channel in ("vision", "vision:still"):
+        assert "names its form" in io_catalog.form_problem(channel)
+
+
+def test_validate_reports_a_visual_channel_without_a_form():
+    image = np.zeros((224, 224, 3), dtype=np.uint8)
+
+    assert any("names its form" in failure
+               for failure in io_catalog.validate("vision", image, direction=INPUT))
 
 
 def test_validate_reports_unknown_channel():
@@ -71,7 +85,7 @@ def test_validate_reports_unknown_channel():
 def test_validate_reports_wrong_direction():
     image = np.zeros((224, 224, 3), dtype=np.uint8)
 
-    failures = io_catalog.validate("vision", image, direction=OUTPUT)
+    failures = io_catalog.validate("vision:image", image, direction=OUTPUT)
 
     assert any("not requested 'output'" in failure for failure in failures)
 
@@ -79,7 +93,7 @@ def test_validate_reports_wrong_direction():
 def test_validate_reports_declared_shape_mismatch():
     image = np.zeros((224, 224), dtype=np.uint8)
 
-    failures = io_catalog.validate("vision", image, direction=INPUT)
+    failures = io_catalog.validate("vision:image", image, direction=INPUT)
 
     assert any("ndim" in failure for failure in failures)
 
