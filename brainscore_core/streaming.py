@@ -258,7 +258,7 @@ class Session(Source):
         self.task_context = task_context
         self.stimulus_set = stimulus_set
         self.time_bins = time_bins
-        self.streaming = streaming
+        self._streaming = streaming
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.
         self.settings = settings
@@ -276,6 +276,16 @@ class Session(Source):
         self.one_answer_per_trial = False
         self._observers: list[tuple] = []
         self._rewriters: list[Any] = []
+
+    @property
+    def streaming(self) -> bool:
+        """Answer one event at a time. Always so without a stimulus table: the inputs
+        then exist only as events, so there is nothing to answer in one call."""
+        return self._streaming or self.stimulus_set is None
+
+    @streaming.setter
+    def streaming(self, value: bool) -> None:
+        self._streaming = value
 
     def declare_inputs(self, channels: Iterable[str]) -> 'Session':
         """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
