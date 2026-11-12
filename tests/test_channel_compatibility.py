@@ -268,3 +268,84 @@ def test_image_subject_and_video_benchmark_do_not_match():
                            requested_output_channels={"neural:IT"})
     with pytest.raises(CompatibilityError):
         check_channel_compatibility(subject, benchmark)
+
+
+# ── output_inputs: the inputs an output can be answered from ──────────
+
+
+class _Listing(_Subject):
+    """A vision-language subject: its vision region needs a visual input."""
+
+    def __init__(self, output_inputs, **kwargs):
+        super().__init__(**kwargs)
+        self._output_inputs = output_inputs
+
+    @property
+    def output_inputs(self):
+        return self._output_inputs
+
+
+def test_output_inputs_is_empty_by_default_and_changes_nothing():
+    subject = _Subject({"text"}, {"neural:IT"})
+    assert subject.output_inputs == {}
+    match = check_channel_compatibility(subject, _Benchmark(
+        required_input_channels={"text"}, requested_output_channels={"neural:IT"}))
+    assert match.kind == "full"
+
+
+def _vision_language(**kwargs):
+    return _Listing({"neural:IT": frozenset({"vision:image", "vision:video"}),
+                     "neural:language": frozenset({"text"})},
+                    in_channels={"vision:image", "vision:video", "text"},
+                    out_channels={"neural:IT", "neural:language"}, **kwargs)
+
+
+def test_a_listed_output_runs_when_the_benchmark_sends_one_of_its_inputs():
+    match = check_channel_compatibility(_vision_language(), _Benchmark(
+        required_input_channels={"vision:video", "audio"},
+        requested_output_channels={"neural:IT"}))
+    assert match.consumed_inputs == {"vision:video"}
+
+
+def test_a_listed_output_is_na_when_the_benchmark_sends_none_of_its_inputs():
+    with pytest.raises(CompatibilityError,
+                       match=r"answers 'neural:IT' only from the inputs .*'vision:image'.*"
+                             r"takes in only \{'text'\}"):
+        check_channel_compatibility(_vision_language(), _Benchmark(
+            required_input_channels={"text"}, requested_output_channels={"neural:IT"}))
+    # The unlisted output, and the listed output whose input is sent, still run.
+    check_channel_compatibility(_vision_language(), _Benchmark(
+        required_input_channels={"text"}, requested_output_channels={"neural:language"}))
+
+
+def test_the_existing_rules_still_hold_with_a_listing():
+    with pytest.raises(CompatibilityError, match="cannot produce output channels"):
+        check_channel_compatibility(_vision_language(), _Benchmark(
+            required_input_channels={"text"}, requested_output_channels={"neural:V4"}))
+    with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
+        check_channel_compatibility(_vision_language(), _Benchmark(
+            required_input_channels={"audio"}, requested_output_channels={"neural:language"}))
+    with pytest.raises(CompatibilityError, match="hard-requires"):
+        check_channel_compatibility(_vision_language(required_channels={"text"}), _Benchmark(
+            required_input_channels={"vision:image"}, requested_output_channels={"neural:IT"}))
+
+
+def test_listed_inputs_are_compared_with_the_inputs_the_subject_takes_in():
+    """A listed input the benchmark sends but the subject does not take in does not count."""
+    subject = _Listing({"neural:IT": frozenset({"vision:image"})},
+                       in_channels={"vision:image", "text"}, out_channels={"neural:IT"})
+    match = check_channel_compatibility(subject, _Benchmark(
+        required_input_channels={"vision:image", "audio"},
+        requested_output_channels={"neural:IT"}))
+    assert match.consumed_inputs == {"vision:image"}
+
+
+@pytest.mark.parametrize("listing, message", [
+    ({"neural:V4": frozenset({"vision:image"})}, "not in out_channels"),
+    ({"neural:IT": frozenset({"audio"})}, "not in in_channels"),
+])
+def test_an_inconsistent_listing_is_an_error(listing, message):
+    subject = _Listing(listing, in_channels={"vision:image", "text"}, out_channels={"neural:IT"})
+    with pytest.raises(CompatibilityError, match=message):
+        check_channel_compatibility(subject, _Benchmark(
+            required_input_channels={"vision:image"}, requested_output_channels={"neural:IT"}))

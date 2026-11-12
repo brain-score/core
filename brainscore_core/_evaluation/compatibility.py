@@ -3,12 +3,14 @@ Pre-flight compatibility checker for Brain-Score (Contract Rules v3, rule 5).
 
 Compatibility is decided from declarations alone: what the benchmark sends
 and asks for, and what the subject says it takes in, produces and requires.
-A subject is compatible with a benchmark when all three hold:
+A subject is compatible with a benchmark when all four hold:
 
 1. every requested output is in ``subject.out_channels``;
 2. at least one benchmark input is in ``subject.in_channels``;
 3. every channel in ``subject.required_channels`` is among the benchmark's
-   inputs.
+   inputs;
+4. every requested output that ``subject.output_inputs`` lists can be answered:
+   the subject takes in at least one of its listed inputs from the benchmark.
 
 The benchmark declares the inputs its human participants received. A subject
 that takes in only some of them still runs: the streams it cannot take in
@@ -91,7 +93,7 @@ def _looks_like_channels(value) -> bool:
 
 
 def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMatch:
-    """Check the three compatibility conditions and return the match.
+    """Check the four compatibility conditions and return the match.
 
     Raises :class:`CompatibilityError` before compute when a condition fails.
     Every declared channel must be registered in the catalog with the right
@@ -169,6 +171,17 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"'{benchmark_id}' sends {_format_channels(bench_inputs)}."
         )
 
+    output_inputs = subject.output_inputs
+    _validate_output_inputs(output_inputs, subject_in, subject_out, subject_id)
+    for output in sorted(bench_requested):
+        needed = set(output_inputs.get(output, ()))
+        if needed and not needed & consumed:
+            raise CompatibilityError(
+                f"Subject '{subject_id}' answers {output!r} only from the inputs "
+                f"{_format_channels(needed)}, but it takes in only "
+                f"{_format_channels(consumed)} of what benchmark '{benchmark_id}' sends."
+            )
+
     required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
                                            getattr(benchmark, 'trial_memory', 'none'))
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
@@ -199,6 +212,21 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         dropped_inputs=frozenset(bench_inputs - consumed),
         requested_outputs=frozenset(bench_requested),
     )
+
+
+def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id) -> None:
+    """Every listed output is declared, and every input listed for it is declared."""
+    for output, inputs in output_inputs.items():
+        if output not in out_channels:
+            raise CompatibilityError(
+                f"Subject '{subject_id}' lists {output!r} in output_inputs, but not in "
+                f"out_channels {_format_channels(set(out_channels))}.")
+        undeclared = set(inputs) - set(in_channels)
+        if undeclared:
+            raise CompatibilityError(
+                f"Subject '{subject_id}' lists the inputs {_format_channels(undeclared)} for "
+                f"{output!r} in output_inputs, but not in in_channels "
+                f"{_format_channels(set(in_channels))}.")
 
 
 def benchmark_input_channels(benchmark) -> Set[str]:

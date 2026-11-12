@@ -102,7 +102,7 @@ def test_control_is_not_a_benchmark_input():
                             requested_output_channels={'behavior'})
     match = check_channel_compatibility(SimpleNamespace(
         identifier='s', in_channels={'text'}, out_channels={'behavior'},
-        required_channels=set()), bench)
+        required_channels=set(), output_inputs={}), bench)
     assert match.consumed_inputs == {'text'} and not match.dropped_inputs
 
 

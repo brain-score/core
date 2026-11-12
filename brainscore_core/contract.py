@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
 from .io_catalog import modalities_to_input_channels
@@ -163,6 +163,17 @@ class Subject(ABC):
     def required_channels(self) -> Set[str]:
         """Inputs the subject cannot run without; none by default."""
         return set()
+
+    @property
+    def output_inputs(self) -> Mapping[str, FrozenSet[str]]:
+        """For an output channel, the input channels it can be answered from.
+
+        The subject answers a listed output when it takes in at least one of its
+        inputs. An output that is not listed can be answered from any input the
+        subject takes. A listed output must be in ``out_channels`` and its inputs
+        in ``in_channels``. None is listed by default.
+        """
+        return {}
 
     @property
     def traits(self) -> Set[str]:
