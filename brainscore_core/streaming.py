@@ -243,21 +243,21 @@ class Session(Source):
     Fixed inputs are always complete; a closed-loop source stays False until a
     terminal step. Runners must not accept an incomplete session as a measurement.
     """
-    context_fields = ('requested_output_channels', 'stimulus_set', 'task_context',
+    context_fields = ('outputs', 'stimulus_set', 'task',
                       'time_bins', 'streaming', 'settings')
 
-    def __init__(self, source: Any, requested_output_channels: Optional[Iterable[str]] = None,
-                 task_context: Any = None, *, stimulus_set: Any = None, time_bins: Any = None,
+    def __init__(self, source: Any, outputs: Optional[Iterable[str]] = None,
+                 task: Any = None, *, stimulus_set: Any = None, time_bins: Any = None,
                  streaming: bool = False, settings: Any = None) -> None:
         self.source = source if isinstance(source, Source) else FixedSource(source)
-        self.requested_output_channels: Optional[tuple[str, ...]] = None
-        if requested_output_channels is not None:
-            if isinstance(requested_output_channels, str):
-                raise TypeError('requested_output_channels must be a sequence of channel names.')
-            self.requested_output_channels = tuple(requested_output_channels)
-            for channel in self.requested_output_channels:
+        self.outputs: Optional[tuple[str, ...]] = None
+        if outputs is not None:
+            if isinstance(outputs, str):
+                raise TypeError('outputs must be a sequence of channel names.')
+            self.outputs = tuple(outputs)
+            for channel in self.outputs:
                 parse_channel(channel)
-        self.task_context = task_context
+        self.task = task
         self.stimulus_set = stimulus_set
         self.time_bins = time_bins
         self._streaming = streaming
@@ -432,10 +432,10 @@ class Session(Source):
             raise TypeError("event must be a StreamEvent")
         for rewrite in tuple(self._rewriters):
             event = rewrite(event)
-        if self.requested_output_channels is not None:
-            if event.channel not in self.requested_output_channels:
+        if self.outputs is not None:
+            if event.channel not in self.outputs:
                 raise ValueError(f"response on {event.channel!r} was not requested; "
-                                 f"requested: {list(self.requested_output_channels)}")
+                                 f"requested: {list(self.outputs)}")
             from . import io_catalog
             check_event(event, io_catalog.OUTPUT)
         self._check_answered_once(event)
@@ -497,7 +497,7 @@ class Session(Source):
         else a dict keyed by requested channel.
         """
         if channel is None:
-            channels = self.requested_output_channels
+            channels = self.outputs
             if not channels:
                 return list(self.emitted)
             if len(channels) == 1:

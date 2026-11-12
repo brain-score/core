@@ -33,7 +33,7 @@ subject = EchoSubject()
 session = Session(
     [StreamEvent(channel="text", payload="hello", t_ms=0.0,
                  meta={"stimulus_id": "s1"})],
-    requested_output_channels=["behavior"])
+    outputs=["behavior"])
 subject.participate(session=session)
 response = session.emitted[0].payload
 assert response["stimulus_id"].values.tolist() == ["s1"]

@@ -99,7 +99,7 @@ class AnswerSubject(Subject):
 
     def participate(self, session):
         drain_session_inputs(session)
-        ids = list(session.task_context.fitting_stimuli['stimulus_id'])
+        ids = list(session.task.fitting_stimuli['stimulus_id'])
         output = BehavioralAssembly(['yes'] * len(ids), coords={'stimulus_id': ('presentation', ids)},
                                     dims=['presentation'])
         session.respond(StreamEvent('behavior', output, 0.0))

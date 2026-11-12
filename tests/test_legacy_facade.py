@@ -57,7 +57,7 @@ class _Recorder(Subject):
         while session.next_input() is not None:
             pass
         n = len(session.stimulus_set)
-        for channel in session.requested_output_channels:
+        for channel in session.outputs:
             neural = channel.startswith('neural:')
             cls = NeuroidAssembly if neural else BehavioralAssembly
             payload = cls(np.arange(n)[:, None],
@@ -75,7 +75,7 @@ def test_facade_runs_an_participate_only_subject_on_vision_calls():
     out = facade.look_at(_images(), number_of_trials=7)
     np.testing.assert_array_equal(out.values, [[0], [1]])
     session, = subject.sessions
-    assert session.requested_output_channels == ('neural:IT',)
+    assert session.outputs == ('neural:IT',)
     assert session.time_bins == [(70, 170), (170, 270)]
     assert session.settings['number_of_trials'] == 7
     assert facade.visual_degrees() == 12
@@ -91,8 +91,8 @@ def test_facade_runs_language_neural_and_behavior_in_one_session():
     out = facade.digest_text(text)
     assert set(out) == {'neural', 'behavior'}
     session, = subject.sessions
-    assert set(session.requested_output_channels) == {'neural:IT', 'behavior'}
-    assert session.task_context.task_type == 'reading_times'
+    assert set(session.outputs) == {'neural:IT', 'behavior'}
+    assert session.task.task_type == 'reading_times'
     assert session.settings['recording_type'] == 'spikes'
     assert session.settings['legacy_text'] is text
 
@@ -106,7 +106,7 @@ def test_facade_passes_a_text_stimulus_set_unchanged():
     facade.digest_text(text)
     session, = subject.sessions
     assert session.stimulus_set is text
-    assert 'legacy_text' not in session.task_context.metadata
+    assert 'legacy_text' not in session.task.metadata
 
 
 def test_behavioral_task_needs_a_declared_behavior_output():
@@ -187,10 +187,10 @@ def test_fitting_settings_stay_apart_from_measurement_settings():
     facade.look_at(_images(), number_of_trials=1)
     facade.look_at(_images(), number_of_trials=3)
     first, second = subject.sessions
-    assert first.task_context is second.task_context  # one task object, sent each time
-    assert first.task_context.metadata['task_settings'] == {
+    assert first.task is second.task  # one task object, sent each time
+    assert first.task.metadata['task_settings'] == {
         'number_of_trials': 2, 'require_variance': True}
-    assert first.task_context.fitting_stimuli is fitting
+    assert first.task.fitting_stimuli is fitting
     assert first.settings == {'number_of_trials': 1, 'require_variance': False}
     assert second.settings == {'number_of_trials': 3, 'require_variance': False}
 

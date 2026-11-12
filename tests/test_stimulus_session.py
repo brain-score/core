@@ -70,8 +70,8 @@ def _inputs(session):
 def test_neural_outputs_keep_the_table_and_answer_in_one_call():
     stimuli = _table()
     session = stimulus_session(stimuli, ['neural:IT'], time_bins=[(70, 170)])
-    assert session.requested_output_channels == ('neural:IT',)
-    assert session.stimulus_set is stimuli and session.task_context is None
+    assert session.outputs == ('neural:IT',)
+    assert session.stimulus_set is stimuli and session.task is None
     assert session.streaming is False
     subject = _Typed()
     drive_neural_session(subject, session)
@@ -83,8 +83,8 @@ def test_behavior_with_a_task_carries_the_task_and_presents_only_the_table():
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'],
                        fitting_stimuli=_table(2), instruction='Pick one')
     session = stimulus_session(stimuli, ['behavior'], task)
-    assert session.requested_output_channels == ('behavior',)
-    assert session.task_context is task and session.stimulus_set is stimuli
+    assert session.outputs == ('behavior',)
+    assert session.task is task and session.stimulus_set is stimuli
     events = _inputs(session.declare_inputs({'text', 'instruction'}))
     # The instruction and the fitting rows stay on the task context.
     assert [event.payload for event in events] == ['word 0', 'word 1', 'word 2']
@@ -96,7 +96,7 @@ def test_behavior_with_a_task_carries_the_task_and_presents_only_the_table():
 def test_behavior_and_neural_together_mark_each_row_as_one_trial():
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'])
     session = stimulus_session(_table(2), ['behavior', 'neural:IT'], task)
-    assert session.requested_output_channels == ('behavior', 'neural:IT')
+    assert session.outputs == ('behavior', 'neural:IT')
     assert session.one_answer_per_trial is True
     events = _inputs(session.declare_inputs({'text', 'control'}))
     assert [e.payload for e in events] == ['begin', 'word 0', 'end', 'begin', 'word 1', 'end']
@@ -117,8 +117,8 @@ def test_streaming_makes_one_row_at_a_time_for_any_outputs(outputs):
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'])
     session = stimulus_session(stimuli, outputs, task, streaming=True)
     assert pulled == [], 'building the session read the table'
-    assert session.streaming is True and session.task_context is task
-    assert session.requested_output_channels == (None if outputs is None else tuple(outputs))
+    assert session.streaming is True and session.task is task
+    assert session.outputs == (None if outputs is None else tuple(outputs))
     first = session.next_input()
     assert first.payload == 'word 0' and len(pulled) == 1
     rest = _inputs(session)
@@ -242,7 +242,7 @@ def test_behavioral_response_sends_the_rows_and_keeps_the_instruction_on_the_tas
         def participate(self, session):
             session.declare_inputs(self.in_channels)
             self.seen = [(e.channel, e.payload) for e in iter(session.next_input, None)]
-            self.instruction = session.task_context.instruction
+            self.instruction = session.task.instruction
             ids = list(session.stimulus_set['stimulus_id'])
             session.respond(StreamEvent('behavior', _behavior(ids), 0.0))
 

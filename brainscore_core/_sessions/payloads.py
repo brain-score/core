@@ -163,21 +163,21 @@ def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
 
 
-def requested_output_channels(session) -> list[str]:
-    requested = getattr(session, "requested_output_channels", None)
+def session_outputs(session) -> list[str]:
+    requested = getattr(session, "outputs", None)
     if requested is not None:
         return list(requested)
     raise ValueError(
-        "participate requires the session to declare requested_output_channels."
+        "participate requires the session to declare outputs."
     )
 
 
-def behavior_stimuli_from_session(session, task_context):
+def behavior_stimuli_from_session(session, task):
     events = [event for event in drain_session_inputs(session)
               if event.channel != 'instruction']
     if events or getattr(session, 'stimulus_set', None) is not None:
         return session_stimuli(session, events)
-    return _behavior_stimuli_to_score(task_context)
+    return _behavior_stimuli_to_score(task)
 
 
 _drain_stream_events = drain_session_inputs
@@ -286,11 +286,11 @@ def _table_row_stimuli(session, position: int):
     return preserve_stimulus_set_type(table, table.iloc[[position]])
 
 
-def _behavior_stimuli_to_score(task_context):
+def _behavior_stimuli_to_score(task):
     for key in ("stimulus_set", "stimuli", "scoring_stimuli", "test_stimuli"):
-        if key in task_context.metadata:
-            return task_context.metadata[key]
-    return task_context.fitting_stimuli
+        if key in task.metadata:
+            return task.metadata[key]
+    return task.fitting_stimuli
 
 
 def _state_change_event(state_change: StateChange) -> StreamEvent:

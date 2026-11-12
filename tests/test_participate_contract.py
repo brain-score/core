@@ -51,7 +51,7 @@ class _ParticipateOnly(Subject):
         self.payloads = []
 
     def participate(self, session):
-        if 'motor' in session.requested_output_channels:
+        if 'motor' in session.outputs:
             # Closed loop: answer each respond request until the episode ends.
             session.declare_inputs(self.in_channels)
             while (event := session.next_input()) is not None:
@@ -63,7 +63,7 @@ class _ParticipateOnly(Subject):
         while (event := session.next_input()) is not None:
             self.inputs.append(event)
         n = len(session.stimulus_set)
-        for channel in session.requested_output_channels:
+        for channel in session.outputs:
             payload = (_neural(n) if channel.startswith('neural:') else
                        BehavioralAssembly(np.zeros((n, 1)), dims=['presentation', 'choice']))
             self.payloads.append(payload)

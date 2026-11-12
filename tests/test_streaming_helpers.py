@@ -232,7 +232,7 @@ def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
     else:
         session = stimulus_session(_stimulus_set(), channels, streaming=kind == 'streaming')
     expected = {}
-    for channel in session.requested_output_channels:
+    for channel in session.outputs:
         expected[channel] = _assembly()
         session.respond(StreamEvent(channel=channel, payload=expected[channel], t_ms=0))
     collected = session.collect()
@@ -295,9 +295,9 @@ def test_a_behavior_session_sends_only_the_stimulus_rows():
     session = stimulus_session(scoring, ["behavior"], context).declare_inputs(
         {'control', 'instruction', 'vision:image'})
 
-    assert session.requested_output_channels == ("behavior",)
-    assert session.task_context.instruction == "Choose the animal"
-    assert session.task_context.fitting_stimuli is fitting
+    assert session.outputs == ("behavior",)
+    assert session.task.instruction == "Choose the animal"
+    assert session.task.fitting_stimuli is fitting
     assert session.stimulus_set is scoring
 
     events = list(iter(session.next_input, None))
@@ -412,7 +412,7 @@ def test_environment_session_advances_after_motor_emit():
     session = environment_session(_SyntheticEnvironment(2)).declare_inputs(
         {'control', 'vision:image', 'proprioception', 'instruction', 'reward', 'observation'})
 
-    assert session.requested_output_channels == ("motor",)
+    assert session.outputs == ("motor",)
 
     events = []
     while (event := session.next_input()).channel != 'control' or event.payload != 'respond':
@@ -463,7 +463,7 @@ def test_state_change_session_emits_lesion_event_on_the_plain_channel_with_the_t
     session = _state_change_session(change)
     event = session.next_input()
 
-    assert session.requested_output_channels == ("perturbation",)
+    assert session.outputs == ("perturbation",)
     assert event.channel == "lesion"
     assert event.payload is change
     assert event.payload.target == Selection(layer="blocks.10", indices=[1, 2, 3])
@@ -548,20 +548,20 @@ class TestRequestedNeuralChannels:
 
     def test_several_channels_stay_one_channel_per_region(self):
         from brainscore_core.streaming_helpers import (
-            stimulus_session, requested_output_channels)
+            stimulus_session, session_outputs)
         session = stimulus_session(self._stimuli(), ['neural:V4', 'neural:IT'])
-        assert requested_output_channels(session) == ['neural:V4', 'neural:IT']
+        assert session_outputs(session) == ['neural:V4', 'neural:IT']
 
     def test_single_channel_unchanged(self):
         from brainscore_core.streaming_helpers import (
-            stimulus_session, requested_output_channels)
+            stimulus_session, session_outputs)
         session = stimulus_session(self._stimuli(), ['neural:IT'])
-        assert requested_output_channels(session) == ['neural:IT']
+        assert session_outputs(session) == ['neural:IT']
 
     def test_streaming_session_keeps_the_channels(self):
         from brainscore_core.streaming_helpers import stimulus_session
         session = stimulus_session(self._stimuli(), ['neural:V4', 'neural:IT'], streaming=True)
-        assert list(session.requested_output_channels) == ['neural:V4', 'neural:IT']
+        assert list(session.outputs) == ['neural:V4', 'neural:IT']
 
     def test_a_bare_channel_string_raises(self):
         import pytest

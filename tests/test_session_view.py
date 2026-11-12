@@ -15,7 +15,7 @@ def test_declared_session_keeps_completion_responses_and_collection():
     assert session.declare_inputs({'vision:image'}) is session
     assert session.complete is True
     assert session.time_bins == [(0, 10)]
-    assert session.requested_output_channels == ('neural:IT',)
+    assert session.outputs == ('neural:IT',)
     assert session.next_input().channel == 'vision:image'
     assert session.next_input() is None
     session.respond(StreamEvent('neural:IT', np.array([1.0, 2.0]), 0.0))

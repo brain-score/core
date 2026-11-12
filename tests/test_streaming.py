@@ -123,7 +123,7 @@ def test_measurement_settings_are_a_saved_session_context_field():
     from brainscore_core.streaming import Session, StreamEvent
     assert 'settings' in Session.context_fields
     assert Session(()).settings is None
-    session = Session([StreamEvent('text', 'hello', None)], requested_output_channels=['behavior'])
+    session = Session([StreamEvent('text', 'hello', None)], outputs=['behavior'])
     session.settings = {'number_of_trials': 7, 'require_variance': True}
     saved = {name: getattr(session, name) for name in Session.context_fields
              if getattr(session, name, None) is not None}

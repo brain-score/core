@@ -87,7 +87,7 @@ class _MultiRegionSubject:
 
 
 def _request_two_regions(session):
-    session.requested_output_channels = ('neural:early', 'neural:late')
+    session.outputs = ('neural:early', 'neural:late')
     return session
 
 

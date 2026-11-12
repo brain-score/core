@@ -81,7 +81,7 @@ from brainscore_core._sessions.payloads import (
     _one_row_stimuli,
     preserve_stimulus_set_type,
     reconstruct_stimulus_set_from_events,
-    requested_output_channels,
+    session_outputs,
     _row_value,
     _single_row_stimuli,
     _spans_several_inputs,

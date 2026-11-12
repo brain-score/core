@@ -860,7 +860,7 @@ class TestProbeSafeRegions:
                 self.sessions = []
 
             def participate(self, session):
-                channel, = session.requested_output_channels
+                channel, = session.outputs
                 self.sessions.append(channel)
                 if channel in failing:
                     raise RuntimeError(f'{channel} unavailable')

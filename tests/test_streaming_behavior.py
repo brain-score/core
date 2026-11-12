@@ -33,10 +33,10 @@ def _stimuli(n=5):
 class _Session:
     """Minimal behavioral session; `streaming` decides which driver participate picks."""
 
-    def __init__(self, task_context, streaming=False):
-        self.task_context = task_context
+    def __init__(self, task, streaming=False):
+        self.task = task
         self.streaming = streaming
-        self.requested_output_channels = ('behavior',)
+        self.outputs = ('behavior',)
         self.emitted = []
 
     def next_input(self):
@@ -120,9 +120,9 @@ def test_missing_task_context_fails_fast():
     class _NoContext(_Session):
         def __init__(self):
             self.streaming = True
-            self.requested_output_channels = ('behavior',)
+            self.outputs = ('behavior',)
             self.emitted = []
-            self.task_context = None
+            self.task = None
 
-    with pytest.raises(ValueError, match="task_context"):
+    with pytest.raises(ValueError, match="session.task"):
         drive_behavior_session_streaming(_Subject(), _NoContext())

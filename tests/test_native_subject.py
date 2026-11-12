@@ -30,7 +30,7 @@ class TextSubject(Subject):
             answers = {"neural:language_network": np.array([len(event.payload), 1.0]),
                        "behavior": event.payload.upper()}
             for channel, payload in answers.items():
-                requested = session.requested_output_channels
+                requested = session.outputs
                 if requested is None or channel in requested:
                     session.respond(StreamEvent(channel, payload, event.t_ms, dict(event.meta)))
 

@@ -117,14 +117,14 @@ class _Answerer(Subject):
         while session.next_input() is not None:
             pass
         stimuli = (session.stimulus_set if getattr(session, 'stimulus_set', None) is not None
-                   else session.task_context.metadata['stimulus_set'])
+                   else session.task.metadata['stimulus_set'])
         n = len(stimuli)
         payload = BehavioralAssembly(
             np.tile([1.0, 0.0], (n, 1)),
             coords={'stimulus_id': ('presentation', list(stimuli['stimulus_id'])),
                     'choice': ['cat', 'dog']},
             dims=['presentation', 'choice'], attrs={'measure': self.measure})
-        for channel in session.requested_output_channels:
+        for channel in session.outputs:
             session.respond(StreamEvent(channel, payload, None))
 
     def reset(self):
@@ -249,7 +249,7 @@ def test_mixed_measures_in_one_collection_are_all_recorded():
             dims=['presentation', 'choice'], attrs={'measure': measure}), None)
 
     with record_measures() as measures:
-        session = Session((), requested_output_channels=['behavior'])
+        session = Session((), outputs=['behavior'])
         session.respond(event({'kind': 'implied', 'source': 'readout'}, 's0'))
         session.respond(event({'kind': 'reported', 'source': 'reply'}, 's1'))
         session.collect('behavior')
@@ -307,7 +307,7 @@ def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
 
     subject = _Replayer(measure=None)
     with record_measures() as measures:
-        session = Session((), requested_output_channels=['behavior'])
+        session = Session((), outputs=['behavior'])
         subject.participate(session)
         session.collect('behavior')
 

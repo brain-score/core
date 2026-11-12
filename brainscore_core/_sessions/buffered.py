@@ -19,17 +19,17 @@ from .payloads import (
 )
 
 
-def _memory(task_context) -> str:
-    return 'none' if task_context is None else task_context.trial_memory
+def _memory(task) -> str:
+    return 'none' if task is None else task.trial_memory
 
 
-def stimulus_session(stimulus_set, requested_output_channels=None, task_context=None, *,
+def stimulus_session(stimulus_set, outputs=None, task=None, *,
                      time_bins=None, settings=None, streaming: bool = False) -> Session:
     """One session that presents every row of ``stimulus_set``.
 
     The table stays on the session, so the batch drivers answer it with one
-    ``process`` call; ``task_context``, ``time_bins`` and ``settings`` ride along.
-    The events mark the trials with ``begin`` / ``end`` as ``task_context.trial_memory``
+    ``process`` call; ``task``, ``time_bins`` and ``settings`` ride along.
+    The events mark the trials with ``begin`` / ``end`` as ``task.trial_memory``
     says (``none`` without a task context).
 
     With ``streaming=True`` the events are made one row at a time from the
@@ -37,12 +37,12 @@ def stimulus_session(stimulus_set, requested_output_channels=None, task_context=
     and then gets the next. The requested outputs and the task are the same
     as for a batch session.
     """
-    memory = _memory(task_context)
+    memory = _memory(task)
     if streaming:
         events = _with_trial_memory(_lazy_stimulus_events(stimulus_set), memory)
     else:
         events = list(_with_trial_memory(_stimulus_events(stimulus_set), memory))
-    session = Session(events, requested_output_channels, task_context,
+    session = Session(events, outputs, task,
                       stimulus_set=stimulus_set, time_bins=time_bins, settings=settings,
                       streaming=streaming)
     session.one_answer_per_trial = memory == 'none'
@@ -86,11 +86,11 @@ def neural_response(subject, stimulus_set, record: Union[str, Sequence[str]] = "
     return session.collect(f"neural:{record}")
 
 
-def behavioral_response(subject, task_context) -> BehavioralAssembly:
+def behavioral_response(subject, task) -> BehavioralAssembly:
     """Run ``subject`` on the task and return its behavior as a
     ``BehavioralAssembly`` -- the model's output, not a Score.
 
-    The stimuli to answer go in ``task_context.metadata['stimulus_set']``;
+    The stimuli to answer go in ``task.metadata['stimulus_set']``;
     ``fitting_stimuli`` is only the training set for a readout. Without that
     key the fitting stimuli are answered instead, so pass it for any held-out
     test set::
@@ -100,14 +100,14 @@ def behavioral_response(subject, task_context) -> BehavioralAssembly:
         behavior = behavioral_response(subject, task)
 
     The session presents only the stimuli to answer. The instruction and the
-    fitting stimuli are not sent as events; they stay on ``session.task_context``.
+    fitting stimuli are not sent as events; they stay on ``session.task``.
     """
-    stimuli = _behavior_stimuli_to_score(task_context)
+    stimuli = _behavior_stimuli_to_score(task)
     if stimuli is None:
         raise ValueError(
             "behavioral_response requires stimuli to elicit a response. Provide "
-            "task_context.metadata['stimulus_set'] or fitting_stimuli.")
-    session = stimulus_session(stimuli, ['behavior'], task_context)
+            "task.metadata['stimulus_set'] or fitting_stimuli.")
+    session = stimulus_session(stimuli, ['behavior'], task)
     subject.participate(session)
     return session.collect("behavior")
 

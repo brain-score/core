@@ -9,26 +9,26 @@ from brainscore_core.streaming import (
 
 
 def test_response_on_a_channel_that_was_not_requested_raises():
-    session = Session([], requested_output_channels=['neural:IT'])
+    session = Session([], outputs=['neural:IT'])
     with pytest.raises(ValueError, match='not requested'):
         session.respond(StreamEvent('neural:V4', np.zeros(3), 0.0))
     assert session.emitted == []
 
 
 def test_a_bare_family_does_not_stand_for_a_requested_address():
-    session = Session([], requested_output_channels=['neural:IT'])
+    session = Session([], outputs=['neural:IT'])
     with pytest.raises(ValueError, match='not requested'):
         session.respond(StreamEvent('neural', np.zeros(3), 0.0))
 
 
 def test_response_with_a_wrong_payload_type_raises():
-    session = Session([], requested_output_channels=['neural:IT'])
+    session = Session([], outputs=['neural:IT'])
     with pytest.raises(ValueError, match='payload is str'):
         session.respond(StreamEvent('neural:IT', 'not an array', 0.0))
 
 
 def test_response_with_a_valid_payload_is_kept():
-    session = Session([], requested_output_channels=['neural:IT'])
+    session = Session([], outputs=['neural:IT'])
     session.respond(StreamEvent('neural:IT', np.zeros(3), 0.0))
     assert len(session.emitted) == 1
 
@@ -55,7 +55,7 @@ def test_an_unknown_input_channel_raises():
 
 
 def test_an_unknown_output_channel_raises():
-    session = Session([], requested_output_channels=['not_a_family'])
+    session = Session([], outputs=['not_a_family'])
     with pytest.raises(ValueError, match='No Input/Output Catalog entry'):
         session.respond(StreamEvent('not_a_family', 1, 0.0))
 

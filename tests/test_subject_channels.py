@@ -63,7 +63,7 @@ def test_typed_participate_default_runs_sessions_and_rejects_unknown_outputs():
 
     subject = _ChannelSubject()
     with pytest.raises(NotImplementedError, match="runs sessions requesting"):
-        subject.participate(Session((), requested_output_channels=["pupil"]))
+        subject.participate(Session((), outputs=["pupil"]))
 
 
 def test_legacy_subclass_still_instantiates_without_participate():
