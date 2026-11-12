@@ -11,6 +11,7 @@ model's internals by a stated link: a readout's or a language model's
 probabilities over the labels (``behavior:probabilities``). Every result says
 which it is.
 """
+import math
 import re
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence, Tuple
@@ -107,8 +108,36 @@ class Choice:
 @dataclass(frozen=True)
 class Text:
     """A written answer, kept as written. Brain-Score never scores text itself:
-    the benchmark brings its own parser, judge or comparison."""
+    the benchmark brings its own parser, judge or comparison.
+
+    The generation settings are part of the task, so the benchmark sets them
+    and a replying model obeys them: ``max_tokens`` (the longest reply, in
+    tokens), ``temperature`` (0 or ``None`` means greedy decoding), ``top_p``
+    (needs a temperature above 0) and ``seed``. ``None`` leaves the model's
+    own default. A ``reply`` part reads them from ``prompt.response``.
+    """
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    seed: Optional[int] = None
+
     channels = ('behavior:text',)
+
+    def __post_init__(self):
+        if self.max_tokens is not None and (type(self.max_tokens) is not int or self.max_tokens < 1):
+            raise ValueError(f'max_tokens is a positive integer, not {self.max_tokens!r}')
+        if self.temperature is not None and (
+                isinstance(self.temperature, bool) or not isinstance(self.temperature, (int, float))
+                or not math.isfinite(self.temperature) or self.temperature < 0):
+            raise ValueError(f'temperature is a finite number of 0 or more, not {self.temperature!r}')
+        if self.top_p is not None:
+            if (isinstance(self.top_p, bool) or not isinstance(self.top_p, (int, float))
+                    or not 0 < self.top_p <= 1):
+                raise ValueError(f'top_p is a number above 0 and at most 1, not {self.top_p!r}')
+            if not self.temperature:
+                raise ValueError('top_p applies only to sampling; give a temperature above 0')
+        if self.seed is not None and type(self.seed) is not int:
+            raise ValueError(f'seed is an integer, not {self.seed!r}')
 
     def directive(self) -> str:
         return ''
@@ -134,11 +163,14 @@ class Prompt:
     'video' | 'audio', path)``. The order is the trial's: the instruction, the
     stimulus parts in ``TaskContext.present`` order, then the response's
     directive. A ``reply`` or ``likelihood`` part shows them in this order.
+    ``response`` is the task's response; a ``Text`` response carries the
+    generation settings the reply obeys.
     """
     parts: Tuple[Tuple[str, Any], ...]
     stimulus_id: Optional[str] = None
     names: Tuple[str, ...] = ()   # one per part: 'instruction', a column name, or 'directive'
     history: Tuple[Tuple['Prompt', str], ...] = ()   # earlier trials of the session: (prompt, reply)
+    response: Any = None   # the task's Choice, Scale or Text
 
     def text(self) -> str:
         """The text parts joined, for a model that reads text only."""
@@ -179,7 +211,8 @@ def trial_prompt(task, stimulus_row) -> Prompt:
     directive = task.response.directive() if task.response is not None else ''
     if directive:
         parts.append(('text', directive)); names.append('directive')
-    return Prompt(tuple(parts), stimulus_id=_cell(stimulus_row, 'stimulus_id'), names=tuple(names))
+    return Prompt(tuple(parts), stimulus_id=_cell(stimulus_row, 'stimulus_id'), names=tuple(names),
+                  response=task.response)
 
 
 def _cell(row, column):
