@@ -218,11 +218,13 @@ class FixedSource(Source):
     never materialized; the session checks each event when it delivers it.
     """
     checked = False
+    listed = False      # True for a list or tuple: a finite batch known up front
 
     def __init__(self, events: Iterable[Any] = ()) -> None:
         if isinstance(events, (list, tuple)):
             _validate_inputs(events)
             self.checked = True
+            self.listed = True
         self._events: Iterator[Any] = iter(events)
 
     def next_input(self) -> Optional[StreamEvent]:
@@ -262,9 +264,9 @@ class Session(Source):
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.
         self.settings = settings
-        # The last state change the subject received; a perturbation response
-        # without a handle or kind of its own is read against it.
-        self._state_change: Any = None
+        # The state changes the subject received and has not answered yet; each
+        # perturbation response is read against its own request.
+        self._pending_changes: list = []
         self.dropped = 0
         self.emitted: list[StreamEvent] = []
         self._declared: Optional[frozenset] = None
@@ -279,9 +281,11 @@ class Session(Source):
 
     @property
     def streaming(self) -> bool:
-        """Answer one event at a time. Always so without a stimulus table: the inputs
-        then exist only as events, so there is nothing to answer in one call."""
-        return self._streaming or self.stimulus_set is None
+        """Answer one event at a time: when asked, or when the inputs cannot be listed
+        up front (a generator, a closed-loop source). A list of events with no table
+        is a batch: its rows are rebuilt from the events and answered in one call."""
+        listed = isinstance(self.source, FixedSource) and self.source.listed
+        return self._streaming or (self.stimulus_set is None and not listed)
 
     @streaming.setter
     def streaming(self, value: bool) -> None:
@@ -367,7 +371,34 @@ class Session(Source):
     def _note_state_change(self, event: StreamEvent) -> None:
         from .events import StateChange
         if isinstance(event.payload, StateChange):
-            self._state_change = event.payload
+            self._pending_changes.append(event.payload)
+
+    def _request_for(self, event: StreamEvent) -> Any:
+        """The state change a perturbation response answers, or None.
+
+        A response that names a handle answers the reset of that handle, else the
+        oldest apply request. A response with no handle answers the only pending
+        request; with several pending it is ambiguous and is refused.
+        """
+        if event.channel != 'perturbation':
+            return None
+        from .events import PerturbationApplied
+        pending = self._pending_changes
+        handle = event.payload.handle_id if isinstance(event.payload, PerturbationApplied) else None
+        handle = handle or event.meta.get('handle_id')
+        if handle is not None:
+            request = next((r for r in pending if r.kind == 'reset' and r.handle_id == handle), None)
+            if request is None and event.meta.get('kind') != 'reset':
+                request = next((r for r in pending if r.kind != 'reset'), None)
+        elif len(pending) > 1:
+            raise ValueError("A perturbation response without a handle cannot tell which of "
+                             f"{len(pending)} pending state changes it answers; put the handle "
+                             "in the PerturbationApplied payload or in meta['handle_id'].")
+        else:
+            request = pending[0] if pending else None
+        if request is not None:
+            pending.remove(request)
+        return request
 
     def _note_row(self, event: StreamEvent) -> None:
         # The row identity of the open trial: its first stimulus event names it.
@@ -408,6 +439,7 @@ class Session(Source):
             from . import io_catalog
             check_event(event, io_catalog.OUTPUT)
         self._check_answered_once(event)
+        request = self._request_for(event)
         try:
             kept = self.source.respond(event)
         except BaseException as error:
@@ -415,7 +447,7 @@ class Session(Source):
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
-        note_response(kept, self._state_change)
+        note_response(kept, request)
         self.emitted.append(kept)
         limit = self.source.history_limit
         if limit is not None and len(self.emitted) > limit:

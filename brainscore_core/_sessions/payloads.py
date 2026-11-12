@@ -319,7 +319,8 @@ def _state_change_family(state_change: StateChange) -> str:
         )
         if family:
             return str(family)
-        # Handle-id-only resets do not retain the original perturbation channel.
+        # A handle-only reset of a change applied outside ``apply_state_change``:
+        # its family is not known, so it goes on the generic one.
         return "lesion"
 
     family = _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY.get(state_change.kind)

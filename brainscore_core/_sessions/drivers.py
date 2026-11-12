@@ -248,6 +248,22 @@ def drive_neural_session_streaming(
             ))
         stream_index += 1
 
+    for stimuli, t_ms in _stream_rows(session, on_begin):
+        present(stimuli, t_ms)
+
+
+def _stream_rows(session, on_begin: Optional[Callable[[], None]] = None,
+                 skip_channels: Sequence[str] = ()):
+    """Read the session's inputs one event at a time; yield ``(stimuli, t_ms)`` per presentation.
+
+    A row is yielded as soon as its last input column has arrived, before the next
+    event is read, so a caller answers it first. A table row with several input
+    columns arrives as one event per column (``meta['table_row']``); they are one
+    presentation (rule 4.5). Every other event is presented alone. ``begin``
+    control events call ``on_begin()`` after the row before them was answered;
+    other control events carry no stimulus. Events on ``skip_channels`` are read
+    and dropped.
+    """
     # The input columns a row delivers through this session. A view that
     # drops an undeclared stream drops its table column too.
     table = getattr(session, "stimulus_set", None)
@@ -255,41 +271,60 @@ def drive_neural_session_streaming(
                    if table is not None else set())
     row_events: list[StreamEvent] = []   # arrived input columns of one row
     row_position = None
-
-    def present_row() -> None:
-        nonlocal row_events
-        if row_events:
-            present(_table_row_stimuli(session, row_position), row_events[0].t_ms)
-            row_events = []
-
+    stream_index = 0
     event = session.next_input()
-    while event is not None:
+    while True:
+        # Flush the open row when the next event cannot belong to it.
+        end_of_row = event is None or not isinstance(event, StreamEvent) or event.channel == CONTROL_CHANNEL
+        position = None if end_of_row else _table_row_position(session, event)
+        if row_events and (
+                end_of_row or position != row_position
+                or event.t_ms != row_events[0].t_ms
+                or event.meta["column"] in {e.meta["column"] for e in row_events}):
+            yield _table_row_stimuli(session, row_position), row_events[0].t_ms
+            row_events = []
+        if event is None:
+            return
         if not isinstance(event, StreamEvent):
             raise TypeError(
-                "streaming neural participate expects StreamEvent inputs; got "
+                "streaming participate expects StreamEvent inputs; got "
                 f"{type(event).__name__}."
             )
         if event.channel == CONTROL_CHANNEL:
-            present_row()                    # an episode mark ends the row before it
             if on_begin is not None and event.payload == BEGIN:
                 on_begin()
-            event = session.next_input()     # episode marks carry no stimulus
-            continue
-        position = _table_row_position(session, event)
-        if row_events and (
-                position != row_position
-                or event.t_ms != row_events[0].t_ms
-                or event.meta["column"] in {e.meta["column"] for e in row_events}):
-            present_row()            # the next event starts another presentation
-        if position is None:
-            present(_one_row_stimuli(session, event, stream_index), event.t_ms)
+        elif event.channel in skip_channels:
+            pass
+        elif position is None:
+            yield _one_row_stimuli(session, event, stream_index), event.t_ms
+            stream_index += 1
         else:
             row_events.append(event)
             row_position = position
             if row_columns <= {e.meta["column"] for e in row_events}:
-                present_row()        # the row's last input column has arrived
+                yield _table_row_stimuli(session, row_position), row_events[0].t_ms
+                row_events = []
         event = session.next_input()
-    present_row()                    # a row cut short by the end of input
+
+
+def stream_trials(session, task_context):
+    """One single-row stimulus set per trial, read from the session one at a time.
+
+    The next trial is read only after the caller has answered this one. A session
+    that sends no input events presents its table, or the task's own stimuli.
+    """
+    count = 0
+    for stimuli, _t_ms in _stream_rows(session, skip_channels=("instruction",)):
+        count += 1
+        yield stimuli
+    if not count:
+        stimuli = behavior_stimuli_from_session(session, task_context)
+        if stimuli is None:
+            raise ValueError(
+                "behavioral_response requires stimuli to elicit a response. Provide "
+                "task_context.metadata['stimulus_set'] or fitting_stimuli.")
+        for index in range(len(stimuli)):
+            yield preserve_stimulus_set_type(stimuli, stimuli.iloc[[index]])
 
 
 def drive_typed_session(subject, session) -> None:
@@ -361,8 +396,9 @@ def drive_state_change_session(
     if state_change is None:
         raise ValueError(
             "perturbation participate requires a StateChange input event. A subject "
-            "receives one only on a channel it declares: add 'lesion', 'stimulation' "
-            "or 'pharmacological' to its in_channels."
+            "receives one only on the family channel of the change: add 'lesion', "
+            "'stimulation' or 'pharmacological' to its in_channels. A reset goes on "
+            "the family its change was applied on."
         )
     result = subject.process(state_change)
     handle_id = _state_change_handle_id(state_change, result)
@@ -480,18 +516,12 @@ def drive_behavior_session_streaming(
         raise ValueError(
             "behavior participate requires a session.task_context to drive."
         )
+    refuse_variance(subject, session)
     subject.start_task(task_context)              # once, before any trial
-    stimuli = behavior_stimuli_from_session(session, task_context)
-    if stimuli is None:
-        raise ValueError(
-            "behavioral_response requires stimuli to elicit a response. Provide "
-            "task_context.metadata['stimulus_set'] or fitting_stimuli."
-        )
-    for trial_index, (row_index, _row) in enumerate(stimuli.iterrows()):
+    for trial_index, trial in enumerate(stream_trials(session, task_context)):
         if on_begin is not None and (trial_index == 0
                                      or task_context.trial_memory == 'none'):
             on_begin()
-        trial = preserve_stimulus_set_type(stimuli, stimuli.loc[[row_index]])
         output = subject.process(trial)
         session.respond(StreamEvent(
             channel="behavior",
