@@ -108,9 +108,10 @@ class TaskContext:
                 self.task_type = kind
             elif self.task_type != kind:
                 raise ValueError(f'task_type {self.task_type!r} contradicts a {type(self.response).__name__} response')
-            if kind == 'choice' and self.label_set is None and self.response.labels is not None:
+            if (kind == 'choice' and self.label_set is None
+                    and not isinstance(self.response.labels, str)):
                 self.label_set = list(self.response.labels)
-            if getattr(self.response, 'raw_text', False) and (self.instruction or '').strip():
+            if kind == 'choice' and self.response.raw_text and (self.instruction or '').strip():
                 raise ValueError('A raw_text response shows the stimulus text exactly as given; '
                                  'remove the instruction or put it in the text.')
         elif self.task_type is None:

@@ -41,14 +41,14 @@ def test_trial_prompt_carries_the_task_response(response):
 
 def test_a_plain_choice_is_unchanged():
     choice = Choice(['a', 'b'])
-    assert (choice.labels_column, choice.raw_scores, choice.raw_text) == (None, False, False)
+    assert (choice.labels, choice.raw_scores, choice.raw_text) == (('a', 'b'), False, False)
     assert choice.channels == ('behavior:choice',)
     assert choice.directive() == 'Answer with exactly one of: a, b.'
     assert TaskContext(response=choice).label_set == ['a', 'b']
 
 
 def test_options_from_a_column_become_the_rows_labels():
-    choice = Choice(labels_column='options', raw_scores=True, raw_text=True)
+    choice = Choice('options', raw_scores=True, raw_text=True)
     assert choice.channels == ('behavior:choice', 'behavior:probabilities')
     task = TaskContext(response=choice)
     assert task.label_set is None
@@ -56,19 +56,19 @@ def test_options_from_a_column_become_the_rows_labels():
     # Raw text: the text exactly as given, no directive.
     assert prompt.parts == (('text', 'the cat'),)
     assert prompt.response.labels == ('sat', 'ran')
-    assert prompt.response.labels_column is None and prompt.response.raw_scores
+    assert prompt.response.raw_scores
 
 
 def test_a_column_choice_without_raw_text_phrases_the_rows_options():
-    task = TaskContext(response=Choice(labels_column='options'))
+    task = TaskContext(response=Choice('options'))
     prompt = trial_prompt(task, {'stimulus_id': 'a', 'sentence': 'x', 'options': ['p', 'q']})
     assert prompt.parts[-1] == ('text', 'Answer with exactly one of: p, q.')
 
 
 @pytest.mark.parametrize('fields, message', [
-    ({'labels': ['a', 'b'], 'labels_column': 'options'}, 'not both'),
-    ({'labels_column': ''}, 'name of a stimulus column'),
+    ({'labels': ''}, 'column name in labels must not be empty'),
     ({}, 'at least two labels'),
+    ({'labels': ['a']}, 'at least two labels'),
     ({'labels': ['a', 'b'], 'raw_scores': 1}, 'True or False'),
     ({'labels': ['a', 'b'], 'raw_text': 'yes'}, 'True or False'),
     ({'labels': ['a', 'b'], 'raw_scores': True, 'reaction_time': 'surprisal'}, 'normalized'),
@@ -89,6 +89,6 @@ def test_raw_text_refuses_an_instruction():
     (('a', 'a'), 'distinct'), (('a', 2), 'sequence of option strings'),
 ])
 def test_bad_row_options_fail_before_any_compute(options, message):
-    task = TaskContext(response=Choice(labels_column='options', raw_text=True))
+    task = TaskContext(response=Choice('options', raw_text=True))
     with pytest.raises(ValueError, match=message):
         trial_prompt(task, {'stimulus_id': 'a', 'text': 'x', 'options': options})
