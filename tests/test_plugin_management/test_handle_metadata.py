@@ -1,4 +1,6 @@
 import os
+import json
+from pathlib import Path
 import tempfile
 import pytest
 import subprocess
@@ -140,34 +142,155 @@ def test_v2_metadata_is_validated_but_rejected_by_legacy_endpoint(tmp_path):
         writer.assert_not_called()
 
 
-def test_scoring_opens_pr_only_when_v2_metadata_gains_values(tmp_path, monkeypatch):
+@pytest.mark.parametrize("filename", ["metadata.yml", "metadata.yaml"])
+@pytest.mark.parametrize("legacy", [None, {}, {"runnable": True}])
+def test_existing_v2_metadata_only_validates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    legacy: dict | None,
+) -> None:
     from brainscore_core.metadata import dump
     from brainscore_core.plugin_management import handle_metadata
-    path = tmp_path / 'metadata.yaml'
-    path.write_text(dump({'schema_version': '2.0', 'domain': 'vision',
-                          'models': {'test_model': {'model': {'parameter_count': 123}}}}))
+
+    entry = {"model": {"architecture": {"family": "vision_transformer"}}}
+    if legacy is not None:
+        entry["legacy"] = legacy
+    document = {
+        "schema_version": "2.0",
+        "domain": "vision",
+        "models": {"test_model": entry},
+    }
+    path = tmp_path / filename
+    original = dump(document)
+    path.write_text(original)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr('sys.argv', ['handle_metadata', '--plugin-dir', str(tmp_path), '--plugin-type', 'models'])
-    opened = []
-    monkeypatch.setattr(handle_metadata, 'create_metadata_pr', lambda plugin_dir: opened.append(plugin_dir) or '7')
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "handle_metadata",
+            "--plugin-dir",
+            str(tmp_path),
+            "--plugin-type",
+            "models",
+            "--db-connection",
+        ],
+    )
+    with (
+        patch.object(handle_metadata, "generate_metadata") as generate,
+        patch.object(handle_metadata, "create_metadata_pr") as create_pr,
+        patch.object(handle_metadata, "load_domain_plugin") as load_plugin,
+        patch.object(handle_metadata, "MetadataEndpoint") as endpoint,
+    ):
+        handle_metadata.main()
+    generate.assert_not_called()
+    create_pr.assert_not_called()
+    load_plugin.assert_not_called()
+    endpoint.assert_not_called()
+    assert path.read_text() == original
+    assert json.loads((tmp_path / "validated_metadata.json").read_text()) == document
 
-    monkeypatch.setattr(handle_metadata, 'generate_metadata', lambda *args, **kwargs: None)
-    handle_metadata.main()
-    assert opened == []
 
-    monkeypatch.setattr(handle_metadata, 'generate_metadata',
-                        lambda *args, **kwargs: path.write_text(path.read_text() + '\n'))
-    handle_metadata.main()
-    assert opened == [str(tmp_path)]
-
-
-def test_scored_v2_metadata_does_not_reload_models(tmp_path, monkeypatch):
-    from brainscore_core.metadata import dump
+def test_invalid_existing_v2_metadata_stops_without_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from brainscore_core.plugin_management import handle_metadata
-    path = tmp_path / 'metadata.yaml'
-    path.write_text(dump({'schema_version': '2.0', 'domain': 'vision',
-                          'models': {'test_model': {'legacy': {'runnable': True}}}}))
+
+    (tmp_path / "metadata.yaml").write_text(
+        'schema_version: "2.0"\ndomain: vision\n'
+        "models: {test_model: {unexpected: true}}\n"
+    )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr('sys.argv', ['handle_metadata', '--plugin-dir', str(tmp_path), '--plugin-type', 'models'])
-    monkeypatch.setattr(handle_metadata, 'generate_metadata', lambda *args, **kwargs: pytest.fail('models reloaded'))
-    handle_metadata.main()
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "handle_metadata",
+            "--plugin-dir",
+            str(tmp_path),
+            "--plugin-type",
+            "models",
+        ],
+    )
+    with (
+        patch.object(handle_metadata, "generate_metadata") as generate,
+        patch.object(handle_metadata, "create_metadata_pr") as create_pr,
+        pytest.raises(SystemExit) as error,
+    ):
+        handle_metadata.main()
+    assert error.value.code == 1
+    generate.assert_not_called()
+    create_pr.assert_not_called()
+    assert not (tmp_path / "validated_metadata.json").exists()
+
+
+def test_missing_metadata_still_generates_and_opens_pr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from brainscore_core.plugin_management import handle_metadata
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "handle_metadata",
+            "--plugin-dir",
+            str(tmp_path),
+            "--plugin-type",
+            "models",
+        ],
+    )
+    path = tmp_path / "metadata.yml"
+
+    def generate_metadata(*args: object, **kwargs: object) -> str:
+        path.write_text("models: {test_model: {architecture: Transformer}}\n")
+        return str(path)
+
+    with (
+        patch.object(
+            handle_metadata, "generate_metadata", side_effect=generate_metadata
+        ) as generate,
+        patch.object(
+            handle_metadata, "create_metadata_pr", return_value="7"
+        ) as create_pr,
+    ):
+        handle_metadata.main()
+    generate.assert_called_once_with(str(tmp_path), "models", domain="vision")
+    create_pr.assert_called_once_with(str(tmp_path))
+    assert json.loads((tmp_path / "validated_metadata.json").read_text()) == {
+        "models": {"test_model": {"architecture": "Transformer"}}
+    }
+
+
+def test_existing_legacy_metadata_still_uses_legacy_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from brainscore_core.plugin_management import handle_metadata
+
+    (tmp_path / "metadata.yml").write_text(
+        "models: {test_model: {architecture: Transformer}}\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "handle_metadata",
+            "--plugin-dir",
+            str(tmp_path),
+            "--plugin-type",
+            "models",
+            "--db-connection",
+        ],
+    )
+    plugin = Mock()
+    with (
+        patch.object(handle_metadata, "generate_metadata") as generate,
+        patch.object(handle_metadata, "create_metadata_pr") as create_pr,
+        patch.object(handle_metadata, "load_domain_plugin", return_value=plugin),
+        patch.object(handle_metadata, "MetadataEndpoint") as endpoint,
+    ):
+        handle_metadata.main()
+    generate.assert_not_called()
+    create_pr.assert_not_called()
+    endpoint.return_value.assert_called_once_with(
+        plugin_dir=str(tmp_path), plugin_type="models", domain="vision"
+    )
