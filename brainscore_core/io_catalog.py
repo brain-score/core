@@ -311,9 +311,10 @@ def validate(
 # pinning a device schema in core.
 # ----------------------------------------------------------------------------
 
-# A policy that answers in words keeps what it said and whether it was understood,
-# with the same names as a response trace. fallback_action is the action applied
-# when the answer could not be parsed.
+# A policy that answers in words keeps, in the extra data of its motor event, what
+# it said (answer), whether it was understood (valid, parse_error) and where it
+# came from (provenance). fallback_action is the action applied when the answer
+# could not be parsed.
 RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "provenance")
 
 # A stimulus table sends one event per input column of each row. Every such

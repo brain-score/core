@@ -13,7 +13,7 @@ which it is.
 """
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional, Sequence, Tuple
 
 
@@ -57,29 +57,68 @@ class Choice:
     surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
     probable labels; close calls are slow) or ``'surprisal'`` (-log2 of the
     chosen label's probability).
+
+    ``labels_column`` names a stimulus column whose cell holds the options of
+    that row, when the options differ from row to row; give it instead of
+    ``labels``. Every row must give the same number of distinct options. The
+    ``choice`` axis of the answers is then the position of each option in the
+    row's cell, and ``Prompt.response`` holds that row's options as ``labels``.
+
+    ``raw_scores=True`` returns on ``behavior:probabilities`` the score of each
+    option exactly as the model's ``likelihood`` part gave it (the summed log
+    probability of the option's tokens), not normalized; the measure attributes
+    say ``'scale': 'log'``. Only a ``likelihood`` part gives raw scores.
+
+    ``raw_text=True`` shows the stimulus text exactly as given: no directive is
+    added, and an instruction is refused. A part that scores options scores
+    ``f"{text} {option}"`` as plain text, with no chat template and no
+    beginning-of-sequence token, as EWoK's ``score`` does. A ``reply`` part
+    still answers through its own chat template, because a chat model cannot
+    answer without one; it gets no added sentence.
     """
-    labels: Tuple[str, ...]
+    labels: Optional[Tuple[str, ...]] = None
     probabilities: bool = False
     confidence: Optional[Scale] = None
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
+    labels_column: Optional[str] = None
+    raw_scores: bool = False
+    raw_text: bool = False
 
     REACTION_TIMES = ('evidence_margin', 'surprisal')
 
     def __post_init__(self):
-        if isinstance(self.labels, str) or len(self.labels) < 2:
+        if self.labels_column is not None:
+            if not isinstance(self.labels_column, str) or not self.labels_column:
+                raise ValueError(f'labels_column is the name of a stimulus column, not {self.labels_column!r}')
+            if self.labels is not None:
+                raise ValueError('Give labels or labels_column, not both')
+        elif self.labels is None or isinstance(self.labels, str) or len(self.labels) < 2:
             raise ValueError('Choice needs at least two labels')
         if self.reaction_time not in (None, *self.REACTION_TIMES):
             raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
-        object.__setattr__(self, 'labels', tuple(self.labels))
+        for name in ('probabilities', 'raw_scores', 'raw_text'):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f'{name} is True or False, not {getattr(self, name)!r}')
+        if self.raw_scores and self.reaction_time is not None:
+            raise ValueError('reaction_time reads normalized probabilities; it cannot use raw_scores')
+        if self.confidence is not None and (self.raw_scores or self.raw_text):
+            raise ValueError('A reported confidence needs a reply with a directive; '
+                             'it cannot be used with raw_scores or raw_text')
+        if self.labels is not None:
+            object.__setattr__(self, 'labels', tuple(self.labels))
 
     @property
     def channels(self) -> Tuple[str, ...]:
         return (('behavior:choice',)
-                + (('behavior:probabilities',) if self.probabilities else ())
+                + (('behavior:probabilities',) if self.probabilities or self.raw_scores else ())
                 + (('behavior:confidence',) if self.confidence is not None else ())
                 + (('behavior:rt',) if self.reaction_time is not None else ()))
 
     def directive(self) -> str:
+        if self.raw_text:
+            return ''
+        if self.labels is None:
+            raise ValueError("The directive needs the row's options; trial_prompt gives them")
         text = f'Answer with exactly one of: {", ".join(self.labels)}.'
         if self.confidence is not None:
             text += (f' Then, on a new line, rate your confidence from '
@@ -164,7 +203,8 @@ class Prompt:
     stimulus parts in ``TaskContext.present`` order, then the response's
     directive. A ``reply`` or ``likelihood`` part shows them in this order.
     ``response`` is the task's response; a ``Text`` response carries the
-    generation settings the reply obeys.
+    generation settings the reply obeys. For a ``Choice`` with
+    ``labels_column`` it holds this row's options as ``labels``.
     """
     parts: Tuple[Tuple[str, Any], ...]
     stimulus_id: Optional[str] = None
@@ -208,11 +248,30 @@ def trial_prompt(task, stimulus_row) -> Prompt:
         parts.append(('text', task.instruction.strip())); names.append('instruction')
     for kind, value, name in shown:
         parts.append((kind, value)); names.append(name)
-    directive = task.response.directive() if task.response is not None else ''
+    response = task.response
+    if isinstance(response, Choice):
+        response = _row_choice(response, stimulus_row)
+    directive = response.directive() if response is not None else ''
     if directive:
         parts.append(('text', directive)); names.append('directive')
     return Prompt(tuple(parts), stimulus_id=_cell(stimulus_row, 'stimulus_id'), names=tuple(names),
-                  response=task.response)
+                  response=response)
+
+
+def _row_choice(response: 'Choice', stimulus_row) -> 'Choice':
+    """``response`` with the row's own options as ``labels`` (for ``labels_column``)."""
+    if response.labels_column is None:
+        return response
+    options = _cell(stimulus_row, response.labels_column)
+    if (options is None or isinstance(options, str)
+            or not all(isinstance(option, str) for option in options)):
+        raise ValueError(f'Column {response.labels_column!r} must hold a sequence of option '
+                         f'strings in every row; got {options!r}')
+    options = tuple(options)
+    if len(set(options)) != len(options):
+        raise ValueError(f'The options in column {response.labels_column!r} must be distinct; '
+                         f'got {options!r}')
+    return replace(response, labels=options, labels_column=None)
 
 
 def _cell(row, column):
