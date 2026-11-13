@@ -328,11 +328,6 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
         return [event.payload for event in session.collect(action_channel)]
 
 
-def _drive_environment_via_process(subject, session: Session) -> None:
-    """Drive an environment for a subject that exposes process()."""
-    drive_environment_session(subject, session, driver="process")
-
-
 def drive_environment_session(subject, session: Session, driver: str = "interact",
                               on_begin=None) -> None:
     """Drive a live session through ``subject.process(row) -> outputs``.

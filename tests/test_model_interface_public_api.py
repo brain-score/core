@@ -30,9 +30,7 @@ EXPECTED_PUBLIC_NAMES = {
     'Union',
     'abstractmethod',
     'dataclass',
-    'dispatch_metric',
     'field',
-    'output_event_kind',
     'replace',
     'warnings',
 }
@@ -157,10 +155,6 @@ def test_removed_session_builders_are_not_public():
     for name in ('table_session', 'streaming_stimulus_session', 'state_change_session',
                  'behavior_session'):
         assert not hasattr(public, name), name
-    assert public._drain_stream_events is public.drain_session_inputs
-    assert public._stimuli_from_stream_session is public.session_stimuli
-    assert public._drive_neural_session_via_process is public.drive_neural_session
-    assert public._drive_behavior_session_via_process is public.drive_behavior_session
 
 
 def test_layout_keeps_recorded_contract_type_names():

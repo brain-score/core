@@ -180,12 +180,6 @@ def behavior_stimuli_from_session(session, task):
     return _behavior_stimuli_to_score(task)
 
 
-_drain_stream_events = drain_session_inputs
-
-
-_stimuli_from_stream_session = session_stimuli
-
-
 def _stimulus_input_columns(stimulus_set) -> list[tuple[str, str]]:
     """``(column, channel)`` for each input column of a stimulus table."""
     return [

@@ -10,11 +10,9 @@ from .model_interface import (
     PerturbationApplied,
     InputEvent,
     OutputEvent,
-    output_event_kind,
-    dispatch_metric,
 )
 from ._evaluation.compatibility import (
-    CompatibilityError, CompatibilityWarning, check_compatibility, check_io_catalog,
+    CompatibilityError, CompatibilityWarning, check_compatibility,
 )
 from ._evaluation.score_status import STATUS_NA, na_score, score_or_na
 from ._evaluation.memory import MemoryError, check_memory, get_available_memory

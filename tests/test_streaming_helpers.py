@@ -607,12 +607,12 @@ class _TypedSubject:
 class TestPublicSessionHelpers:
     """The promoted session helpers keep their behavior under the public names."""
 
-    def test_private_names_are_the_same_functions(self):
+    def test_removed_aliases_are_gone(self):
         from brainscore_core import streaming_helpers as helpers
-        assert helpers._drain_stream_events is helpers.drain_session_inputs
-        assert helpers._stimuli_from_stream_session is helpers.session_stimuli
-        assert helpers._drive_neural_session_via_process is helpers.drive_neural_session
-        assert helpers._drive_behavior_session_via_process is helpers.drive_behavior_session
+        for name in ('_drain_stream_events', '_stimuli_from_stream_session',
+                     '_drive_neural_session_via_process',
+                     '_drive_behavior_session_via_process'):
+            assert not hasattr(helpers, name), name
 
     def test_drain_returns_every_input_in_order_then_none(self):
         from brainscore_core.streaming import Session

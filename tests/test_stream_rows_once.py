@@ -143,7 +143,6 @@ def test_catalog_declares_the_row_metadata(channel):
     from brainscore_core import io_catalog
     keys = io_catalog.get(channel).meta_keys
     assert {'stimulus_id', 'stimulus_index', 'column', 'table_row'} <= set(keys)
-    assert 'table_row' in io_catalog.describe(channel)
 
 
 @pytest.mark.parametrize('marked', [False, True])

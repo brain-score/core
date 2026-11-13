@@ -4,9 +4,7 @@ from brainscore_core import io_catalog
 from brainscore_core.io_catalog import INPUT, OUTPUT, CatalogEntry
 
 
-def test_registry_version_and_seed_entry_fields_are_queryable():
-    assert io_catalog.REGISTRY_VERSION == "2.0"
-
+def test_seed_entry_fields_are_queryable():
     vision = io_catalog.get("vision")
     assert vision.kind == INPUT
     assert vision.direction == INPUT
@@ -42,15 +40,14 @@ def test_catalog_entry_keeps_v1_constructor_defaults():
     assert entry.materializers == ()
 
 
-def test_channels_can_be_listed_and_filtered_by_direction():
-    assert "vision" in io_catalog.channels()
-    assert "vision" in io_catalog.channels(INPUT)
-    assert "neural" not in io_catalog.channels(INPUT)
-    assert "neural" in io_catalog.channels(OUTPUT)
-    assert "vision" not in io_catalog.channels(OUTPUT)
-
-    assert all(entry.direction == INPUT for entry in io_catalog.by_direction(INPUT))
-    assert all(entry.direction == OUTPUT for entry in io_catalog.by_direction(OUTPUT))
+def test_entries_split_by_direction():
+    by_direction = {INPUT: set(), OUTPUT: set()}
+    for entry in io_catalog.all_entries():
+        by_direction[entry.direction].add(entry.name)
+    assert "vision" in by_direction[INPUT]
+    assert "neural" in by_direction[OUTPUT]
+    assert "neural" not in by_direction[INPUT]
+    assert "vision" not in by_direction[OUTPUT]
 
 
 def test_validate_accepts_valid_payload_and_direction():

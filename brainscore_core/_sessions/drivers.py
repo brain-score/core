@@ -25,19 +25,6 @@ from .payloads import (
 # Keep them unchanged when moving the session implementation.
 
 
-def _drive_via_process(subject, session: Session, stimulus_set,
-                       record: Union[str, Sequence[str]] = "IT", time_bins=None) -> None:
-    """Interim Phase 2 bridge; Phase 3 swaps this for native participate()."""
-    _start_recording(subject, record, time_bins=time_bins)
-    output = subject.process(stimulus_set)
-    session.respond(StreamEvent(
-        channel=f"neural:{record}",
-        payload=output,
-        t_ms=0.0,
-        meta={"driver": "process", "record": record},
-    ))
-
-
 def drive_neural_session(
     subject: Any, session: Any, driver: str = "interact",
     allow_multi_modality: bool = False,
@@ -364,14 +351,6 @@ def drive_typed_session(subject, session) -> None:
     )
 
 
-def _drive_state_change_via_process(subject, session: Session,
-                                    state_change: StateChange) -> None:
-    """Interim Phase 2 bridge; Phase 3 swaps this for native participate()."""
-    drive_state_change_session(
-        subject, session, state_change=state_change, driver="process"
-    )
-
-
 def drive_state_change_session(
     subject, session: Session, state_change: StateChange = None,
     driver: str = "interact"
@@ -412,14 +391,6 @@ def drive_state_change_session(
             "handle_id": handle_id,
         },
     ))
-
-
-def _drive_behavior_via_process(subject, session: Session,
-                                task) -> None:
-    """Interim Phase 2 bridge; Phase 3 swaps this for native participate()."""
-    drive_behavior_session(
-        subject, session, task=task, driver="process"
-    )
 
 
 def measurement_settings(session) -> dict:
@@ -487,10 +458,6 @@ def drive_behavior_session(
     ))
 
 
-_drive_neural_session_via_process = drive_neural_session
-
-
-_drive_behavior_session_via_process = drive_behavior_session
 
 
 def drive_behavior_session_streaming(

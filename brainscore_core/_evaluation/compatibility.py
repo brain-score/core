@@ -355,40 +355,7 @@ def check_compatibility(model: Subject, benchmark) -> CompatibilityMatch:
             )
 
     match = check_channel_compatibility(model, benchmark)
-    # Warn-only documentation conformance; never changes the result.
-    check_io_catalog(model, benchmark)
     return match
-
-
-def check_io_catalog(model: Subject, benchmark) -> None:
-    """Optional documentation-conformance check against the Input/Output Catalog.
-
-    Warn-only: emits a :class:`CompatibilityWarning` for any input the benchmark
-    declares, or any neural output the benchmark targets, that is not documented
-    in the catalog. It never raises and does not change the pass/fail result of
-    :func:`check_compatibility`; it only makes undocumented channels visible at
-    pre-flight rather than discovered later.
-    """
-    bench_required: Set[str] = set(getattr(benchmark, 'required_modalities', set()))
-    for modality in bench_required:
-        if not io_catalog.has(modality):
-            warnings.warn(
-                f"Benchmark '{getattr(benchmark, 'identifier', '?')}' declares input "
-                f"modality '{modality}' which is not in the Input/Output Catalog. "
-                f"Documented inputs: {sorted(e.name for e in io_catalog.inputs())}.",
-                CompatibilityWarning,
-                stacklevel=2,
-            )
-
-    region: Optional[str] = getattr(benchmark, 'region', None)
-    if region is not None and not io_catalog.has(f'neural:{region}'):
-        warnings.warn(
-            f"Benchmark '{getattr(benchmark, 'identifier', '?')}' targets neural "
-            f"region '{region}' but 'neural' is not documented in the Input/Output "
-            f"Catalog.",
-            CompatibilityWarning,
-            stacklevel=2,
-        )
 
 
 # Keep existing pickle references and public type names stable.
@@ -406,7 +373,6 @@ for _definition in (
     _format_channels,
     _benchmark_identifier,
     check_compatibility,
-    check_io_catalog,
 ):
     _definition.__module__ = 'brainscore_core.compatibility'
 del _definition

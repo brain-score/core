@@ -139,44 +139,6 @@ class PerturbationApplied:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def output_event_kind(output: 'OutputEvent') -> str:
-    """Classify an ``OutputEvent`` member so metrics can dispatch on output type
-    instead of the benchmark hard-selecting one.
-
-    Returns one of ``'neural'`` (NeuroidAssembly), ``'behavioral'``
-    (BehavioralAssembly), ``'perturbation'`` (PerturbationApplied), the channel
-    family of a ``StreamEvent`` (``'motor'``, ``'text'``, ...), or ``'unknown'``. Uses
-    duck typing for the two forward-ref assembly types (whose concrete classes
-    aren't imported in core) so it never requires a hard BrainIO import.
-    """
-    if isinstance(output, StreamEvent):
-        return output.channel.split(':', 1)[0]
-    if isinstance(output, PerturbationApplied):
-        return 'perturbation'
-    cls_names = {c.__name__ for c in type(output).__mro__}
-    if 'NeuroidAssembly' in cls_names:
-        return 'neural'
-    if 'BehavioralAssembly' in cls_names:
-        return 'behavioral'
-    return 'unknown'
-
-
-def dispatch_metric(output: 'OutputEvent', metric_map: Dict[str, Any]):
-    """Pick a metric for an output by its :func:`output_event_kind`.
-
-    ``metric_map`` maps a kind (``'neural'`` / ``'behavioral'`` / ``'motor'`` /
-    …) to a metric callable. Raises ``KeyError`` with the available kinds when an
-    output's kind isn't registered — so a benchmark declares the metrics it
-    supports by output type and the dispatch is data-driven, not hard-coded.
-    """
-    kind = output_event_kind(output)
-    if kind not in metric_map:
-        raise KeyError(
-            f"no metric registered for output kind {kind!r}; "
-            f"metric_map has {sorted(metric_map)}")
-    return metric_map[kind]
-
-
 # Input event type for process().
 #
 # The union spans two orthogonal axes, flattened here for single-dispatch:

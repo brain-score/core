@@ -16,7 +16,5 @@ from .events import (
     PerturbationApplied,
     Selection,
     StateChange,
-    dispatch_metric,
-    output_event_kind,
 )
 from .contract import Subject, TaskContext, UnifiedModel

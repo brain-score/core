@@ -273,6 +273,7 @@ class Session(Source):
         self._control = False
         self._trial = 0
         self._rows: list = []
+        self._row_trials: dict = {}  # row label -> trial numbers, ascending
         self._read_all = False
         self._answered: set = set()
         self.one_answer_per_trial = False
@@ -362,6 +363,7 @@ class Session(Source):
                 if event.payload == BEGIN:
                     self._trial += 1
                     self._rows.append(None)
+                    self._row_trials.setdefault(None, []).append(self._trial)
                 if self._control:
                     return event
             elif self._declared is None or channel_declared(event.channel, self._declared):
@@ -407,7 +409,13 @@ class Session(Source):
         # The row identity of the open trial: its first stimulus event names it.
         meta = event.meta
         if self._rows and self._rows[-1] is None and 'stimulus_index' in meta:
-            self._rows[-1] = meta['stimulus_index']
+            label = meta['stimulus_index']
+            self._rows[-1] = label
+            self._row_trials[None].pop()
+            try:
+                self._row_trials.setdefault(label, []).append(len(self._rows))
+            except TypeError:  # unhashable label: found by a scan in _trials_named
+                pass
 
     @property
     def complete(self) -> bool:
@@ -477,7 +485,7 @@ class Session(Source):
         if event.meta and 'stimulus_index' in event.meta:
             # The label can repeat across rows: prefer the open trial, then
             # the first trial with this label not yet answered on the channel.
-            known = [i + 1 for i, row in enumerate(self._rows) if row == event.meta['stimulus_index']]
+            known = self._trials_named(event.meta['stimulus_index'])
             free = [t for t in known if (t, event.channel) not in self._answered]
             if known:
                 trial = (self._trial if self._trial in free else
@@ -489,6 +497,15 @@ class Session(Source):
             raise ValueError(f"Channel {event.channel!r} was answered twice for trial {trial}. "
                              "Answer each requested channel once per trial.")
         self._answered.add((trial, event.channel))
+
+    def _trials_named(self, label: Any) -> list:
+        """The trial numbers whose row has this label, in order."""
+        try:
+            if label != label:  # a null label that is not equal to itself matches no row
+                return []
+            return self._row_trials.get(label, [])
+        except TypeError:  # unhashable label
+            return [i + 1 for i, row in enumerate(self._rows) if row == label]
 
     def collect(self, channel: Optional[str] = None) -> Any:
         """Return the responses, shaped by the channel family.

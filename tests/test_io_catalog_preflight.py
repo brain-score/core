@@ -1,8 +1,7 @@
 """Tests for the v1.5 Input/Output Catalog wiring into pre-flight.
 
-``check_compatibility`` calls ``check_io_catalog`` as a warn-only documentation
-conformance check: it surfaces inputs or neural outputs not documented in the
-catalog, without changing the pass/fail result.
+``check_compatibility`` rejects an input that is not in the catalog, and accepts
+a documented input or neural region without a warning.
 """
 import warnings
 
@@ -63,12 +62,6 @@ class TestIOCatalogPreflight:
         b = _Bench({"telepathy"})
         with pytest.raises(CompatibilityError, match="unknown channel 'telepathy'"):
             check_compatibility(m, b)
-
-    def test_catalog_documentation_check_is_warn_only(self):
-        # check_io_catalog itself only warns; it never raises.
-        from brainscore_core.compatibility import check_io_catalog
-        with pytest.warns(CompatibilityWarning, match="not in the Input/Output Catalog"):
-            check_io_catalog(_Model({"telepathy"}), _Bench({"telepathy"}))
 
     def test_neural_region_is_documented(self):
         m = _Model({"vision"}, region_map={"IT": "layer.10"})

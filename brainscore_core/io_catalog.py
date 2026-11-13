@@ -1,22 +1,22 @@
-"""The Input/Output Catalog: documented, queryable contracts for the allowable
-inputs and outputs of a Brain-Score subject.
+"""The channel catalog: the one list of channel families a session accepts.
 
-v1.5 keeps the typed events (``StimulusSet``, ``StateChange``) and the lightweight methods (``process``,
-``start_recording``, ``start_task``). The catalog is documentation layered over
-them, not a dispatch mechanism. It records, for every allowable input and
-output: what carries it, what its payload contains, which harness interprets it,
-and what metadata it recognizes.
+A channel is a name for one kind of input or output of a subject. The name has
+a family and an optional address (``family:address``), for example
+``'neural:IT'`` or ``'vision:image'``. Every family has one entry here with its
+direction, its payload contract and, when it has one, a payload type and a
+validator (Contract Rules 3.2 and 5).
 
-The channel-style names (e.g. ``'neural:IT'``, ``'motor'``) are labels for
-readability and alignment with how the field talks. They are NOT a dispatch
-contract: dispatch is still by typed event and measurement method. A name with a
-colon has a family and an address (``family:address``); the family carries the
-payload contract and the address is interpreted by the relevant harness.
+The catalog is part of the contract. Pre-flight refuses a channel that is not
+registered. A session checks every event against the entry of its family and
+raises an error for a payload that does not match. A family with a ``CHANNEL_FORMS``
+entry (``vision``) has no bare channel: each channel names a form.
 
-The catalog also offers an optional, best-effort ``check_payload`` for a
-documentation-backed pre-flight check. It is deliberately loose (duck-typed on
-``.ndim`` / ``.dtype``) so ``core`` stays free of heavy dependencies; it never
-replaces the type system, it only flags obvious payload mismatches early.
+``check_payload`` is a loose check on ``.ndim`` and ``.dtype``, so that core needs
+no heavy dependency. ``validate`` runs every check for one event.
+
+To add a family from outside core, call ``brainscore_core.extensions.register_channel``.
+It registers the entry here and can also bind stimulus-table columns to the
+family. ``register`` in this module only adds the entry.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -37,7 +37,6 @@ BUILTIN_STIMULUS_COLUMNS: Mapping[str, str] = MappingProxyType({
 INPUT = "input"
 OUTPUT = "output"
 BOTH = "both"
-REGISTRY_VERSION = "2.0"
 # ``video`` is a modality name that folds into ``vision`` for lookups
 # (``canonical_modality``). A visual input channel names its form instead:
 # ``vision:image`` or ``vision:video`` (see ``MODALITY_TO_INPUT_CHANNEL``).
@@ -65,20 +64,27 @@ ShapeValidator = Callable[[Any], object]
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    """One allowable input or output and its payload contract."""
-    name: str                          # channel-style label, e.g. 'text', 'neural:IT'
+    """One channel family and its payload contract.
+
+    ``name``, ``kind``, ``payload_contract``, ``meta_keys``, ``addressing``,
+    ``expected_ndim``, ``expected_dtype``, ``shape_validator`` and ``payload_type``
+    are read by pre-flight and by sessions. ``direction`` repeats ``kind``.
+    ``carried_by``, ``handled_by``, ``owner`` and ``materializers`` are notes for
+    readers; no code reads them.
+    """
+    name: str                          # channel family, e.g. 'text', 'neural'
     kind: str                          # INPUT, OUTPUT, or BOTH
-    carried_by: str                    # the typed envelope or method that carries it
+    carried_by: str                    # note: what carries it (a table column, a task, a policy)
     payload_contract: str              # human-readable dtype / shape / units
-    handled_by: str                    # which harness or wrapper interprets the payload
+    handled_by: str                    # note: which harness or wrapper interprets the payload
     meta_keys: Tuple[str, ...] = ()     # recognized metadata keys
     addressing: Optional[str] = None    # how the ':address' suffix is interpreted, if any
     expected_ndim: Tuple[int, ...] = ()  # allowed array ndims; empty means unchecked
     expected_dtype: Optional[str] = None  # e.g. 'uint8'; None means unchecked
-    direction: Optional[str] = None     # v2 registry alias for kind
+    direction: Optional[str] = None     # same value as kind; given or filled from kind
     shape_validator: Optional[ShapeValidator] = None
-    owner: str = "core"
-    materializers: Tuple[str, ...] = ()
+    owner: str = "core"                # note: who defines the family
+    materializers: Tuple[str, ...] = ()  # note: the objects that produce it
     payload_type: Any = None            # type or tuple of types a payload must be; None means unchecked
 
     def __post_init__(self):
@@ -100,6 +106,9 @@ _CATALOG: Dict[str, CatalogEntry] = {}
 
 def register(entry: CatalogEntry, *, replace: bool = False) -> None:
     """Add a catalog entry, keyed by its family name.
+
+    Core uses this for the seed entries. Code outside core calls
+    ``brainscore_core.extensions.register_channel``, which also binds columns.
 
     Registering a family that already exists is an error unless
     ``replace=True`` (Contract Rules v3, rule 3.5). Re-registering the same
@@ -174,44 +183,6 @@ def has(label: str) -> bool:
 def all_entries() -> List[CatalogEntry]:
     """Every catalog entry, sorted by name."""
     return [_CATALOG[k] for k in sorted(_CATALOG)]
-
-
-def by_direction(direction: str) -> List[CatalogEntry]:
-    """Every registry entry usable in the requested direction."""
-    _check_direction(direction)
-    return [e for e in all_entries() if _matches_direction(e, direction)]
-
-
-def channels(direction: Optional[str] = None) -> List[str]:
-    """Registered channel family names, optionally filtered by direction."""
-    entries = all_entries() if direction is None else by_direction(direction)
-    return [e.name for e in entries]
-
-
-def inputs() -> List[CatalogEntry]:
-    """Every input entry."""
-    return by_direction(INPUT)
-
-
-def outputs() -> List[CatalogEntry]:
-    """Every output entry."""
-    return by_direction(OUTPUT)
-
-
-def describe(label: str) -> str:
-    """A human-readable one-block description of a catalog entry."""
-    e = get(label)
-    lines = [
-        f"{e.name} ({e.kind})",
-        f"  carried by:  {e.carried_by}",
-        f"  payload:     {e.payload_contract}",
-        f"  handled by:  {e.handled_by}",
-    ]
-    if e.addressing:
-        lines.append(f"  addressing:  {e.addressing}")
-    if e.meta_keys:
-        lines.append(f"  meta keys:   {', '.join(e.meta_keys)}")
-    return "\n".join(lines)
 
 
 def check_payload(label: str, payload) -> List[str]:
@@ -403,21 +374,21 @@ _SEED = [
                  meta_keys=("discount",), payload_type=(int, float),
                  owner="environment harness",
                  materializers=("EnvironmentSource",)),
-    # --- outputs: neural measurement (carried by start_recording + process) ---
-    CatalogEntry("neural", OUTPUT, "start_recording(target) + process(stimuli)",
+    # --- outputs: neural measurement (a subject answer on neural:<region>) ---
+    CatalogEntry("neural", OUTPUT, "a subject answer on neural:<region>",
                  "(units,) or (units, time) activations packaged into a NeuroidAssembly",
                  "the wrapper at region_layer_map[region]",
                  meta_keys=("signal_type", "layer"), expected_ndim=(1, 2),
                  addressing="address is a brain region present in region_layer_map",
-                 materializers=("start_recording", "NeuroidAssembly")),
-    # --- outputs: behavior (carried by start_task + process) ---
-    CatalogEntry("behavior", OUTPUT, "start_task(task_context) + process(stimuli)",
+                 materializers=("NeuroidAssembly",)),
+    # --- outputs: behavior (a subject answer on behavior:<kind>) ---
+    CatalogEntry("behavior", OUTPUT, "a subject answer on behavior:<kind>, as the task asks",
                  "a label, a probability vector, or generated text",
                  "a fitted readout or the model's generation path",
                  meta_keys=("label_set",),
                  addressing=("address is the kind of answer a TaskContext response asks for: "
                              "choice, probabilities, confidence, rating, rt or text"),
-                 materializers=("start_task", "BehavioralAssembly")),
+                 materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
                  "harness-defined continuous action / control vector",

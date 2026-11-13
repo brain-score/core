@@ -93,12 +93,12 @@ def _request_two_regions(session):
 
 @pytest.mark.unit
 def test_batch_multi_region_records_once_and_demultiplexes_channels():
-    from brainscore_core.streaming_helpers import _drive_neural_session_via_process
+    from brainscore_core.streaming_helpers import drive_neural_session
 
     subject = _MultiRegionSubject()
     session = _request_two_regions(stimulus_session(_stimulus_set(3), ['neural:early']))
 
-    _drive_neural_session_via_process(subject, session)
+    drive_neural_session(subject, session)
 
     assert subject.recording_calls == [['early', 'late']]
     assert subject.process_calls == 1
@@ -147,9 +147,9 @@ def test_streaming_multi_region_rejects_missing_layer_provenance():
     subject = _MissingLayerSubject()
     session = _request_two_regions(stimulus_session(_stimulus_set(1), ['neural:early']))
 
-    from brainscore_core.streaming_helpers import _drive_neural_session_via_process
+    from brainscore_core.streaming_helpers import drive_neural_session
     with pytest.raises(ValueError, match="per-neuroid 'layer' coordinate"):
-        _drive_neural_session_via_process(subject, session)
+        drive_neural_session(subject, session)
 
 
 @pytest.mark.unit
@@ -211,13 +211,13 @@ def test_streaming_and_batch_agree():
     interface change, not a scientific one.
     """
     from brainscore_core.streaming_helpers import (
-        drive_neural_session_streaming, _drive_neural_session_via_process)
+        drive_neural_session_streaming, drive_neural_session)
 
     stim = _stimulus_set(5)
 
     batch_subject = _CountingSubject()
     batch_session = stimulus_session(stim, ['neural:IT'])
-    _drive_neural_session_via_process(batch_subject, batch_session)
+    drive_neural_session(batch_subject, batch_session)
     batch_out = [e.payload for e in batch_session.emitted if e.channel == 'neural:IT'][0]
 
     stream_subject = _CountingSubject()

@@ -15,7 +15,7 @@ from brainscore_core.contract import TaskContext
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     drive_behavior_session_streaming,
-    _drive_behavior_session_via_process,
+    drive_behavior_session,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
@@ -93,7 +93,7 @@ def test_streaming_and_batch_behavior_agree():
     stimuli = _stimuli(6)
 
     batch_subject, batch_session = _Subject(), _Session(_context(stimuli))
-    _drive_behavior_session_via_process(batch_subject, batch_session)
+    drive_behavior_session(batch_subject, batch_session)
     batch_out = batch_session.emitted[0].payload
 
     stream_subject, stream_session = _Subject(), _Session(_context(stimuli), streaming=True)

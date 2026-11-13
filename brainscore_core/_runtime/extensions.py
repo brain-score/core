@@ -6,9 +6,12 @@ from brainscore_core.streaming import StreamEvent
 
 
 def register_channel(entry: CatalogEntry, *, columns=(), replace=False):
-    """Register a schema and optional stimulus columns without editing core.
+    """Register a channel family and optional stimulus columns without editing core.
 
-    Existing registrations require explicit replacement.
+    This is the registration function for code outside core. It adds the entry to
+    the channel catalog and binds each column to the family, so that a stimulus
+    table sends that column on the channel. A family or column that already
+    exists needs ``replace=True``.
     """
     from brainscore_core.streaming import parse_channel
     _, address = parse_channel(entry.name)

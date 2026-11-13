@@ -22,8 +22,8 @@ class TestSeedCatalog:
         assert expected <= names
 
     def test_inputs_and_outputs_partition(self):
-        inputs = {e.name for e in io_catalog.inputs()}
-        outputs = {e.name for e in io_catalog.outputs()}
+        inputs = {e.name for e in io_catalog.all_entries() if e.kind == INPUT}
+        outputs = {e.name for e in io_catalog.all_entries() if e.kind == OUTPUT}
         assert "vision" in inputs and "lesion" in inputs
         assert {"neural", "behavior", "motor"} <= outputs
         assert inputs.isdisjoint(outputs)
@@ -65,10 +65,6 @@ class TestLookup:
     def test_unknown_label_raises(self):
         with pytest.raises(KeyError):
             io_catalog.get("telepathy")
-
-    def test_describe_returns_text(self):
-        text = io_catalog.describe("neural:IT")
-        assert "neural" in text and "carried by" in text
 
 
 class TestCheckPayload:
