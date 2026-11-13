@@ -295,15 +295,18 @@ class Session(Source):
         """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
 
         Events on other channels are skipped (exact match, see ``channel_declared``),
-        and the stimulus table loses the columns of undeclared modalities. Control
-        events pass only when ``control`` is declared; a session that was never
-        given a declaration delivers no control events. A second call narrows
-        further. Returns ``self``.
+        and the stimulus table loses the columns of undeclared modalities. The
+        task the subject sees loses the ``present`` entries of those inputs, so a
+        trial shows only the parts the subject takes in; the caller's task is not
+        changed. Control events pass only when ``control`` is declared; a session
+        that was never given a declaration delivers no control events. A second
+        call narrows further. Returns ``self``.
         """
-        from brainscore_core._sessions.view import declared_only
+        from brainscore_core._sessions.view import _declared_task, declared_only
         declared = frozenset(channels)
         self._declared = declared if self._declared is None else self._declared & declared
         self._control = CONTROL_CHANNEL in self._declared
+        self.task = _declared_task(self.task, self.stimulus_set, self._declared)
         self.stimulus_set = declared_only(self.stimulus_set, self._declared)
         return self
 

@@ -75,3 +75,48 @@ def test_table_loses_undeclared_columns_and_keeps_identity_otherwise():
     assert sorted(projected.stimulus_set.columns) == ['image_path', 'stimulus_id']
     assert projected.stimulus_set.identifier == 'two-streams'
     assert 'sentence' in table.columns        # the caller's table is never changed
+
+
+def _trial_table():
+    return StimulusSet(pd.DataFrame({'stimulus_id': ['a'], 'sentence': ['hi'],
+                                     'image_path': ['/x.png'], 'video_path': ['/x.mp4']}))
+
+
+def test_task_loses_the_parts_of_undeclared_inputs_and_the_callers_task_is_unchanged():
+    from brainscore_core.contract import TaskContext
+    from brainscore_core.responses import Text, trial_prompt
+    task = TaskContext(response=Text(), instruction='Rate it.',
+                       present=('text', 'image:image_path', 'video'))
+    session = Session((), ['behavior:text'], task, stimulus_set=_trial_table())
+    session.declare_inputs({'text', 'instruction'})
+    assert session.task.present == ('text',)
+    assert task.present == ('text', 'image:image_path', 'video')
+    assert (session.task.instruction, session.task.response) == (task.instruction, task.response)
+    row = session.stimulus_set.iloc[0]
+    assert trial_prompt(session.task, row).names == ('instruction', 'text')
+
+
+def test_task_of_a_full_match_is_the_same_object():
+    from brainscore_core.contract import TaskContext
+    from brainscore_core.responses import Text
+    task = TaskContext(response=Text(), present=('text', 'image:image_path', 'video'))
+    session = Session((), ['behavior:text'], task, stimulus_set=_trial_table())
+    session.declare_inputs({'text', 'vision:image', 'vision:video'})
+    assert session.task is task
+
+
+def test_a_present_entry_no_input_provides_is_still_an_error():
+    import pytest
+    from brainscore_core.contract import TaskContext
+    from brainscore_core.responses import Text, trial_prompt
+    # Dropped for this subject, but the column exists nowhere: refused, not skipped.
+    task = TaskContext(response=Text(), present=('text', 'image:image_pth'))
+    session = Session((), ['behavior:text'], task, stimulus_set=_trial_table())
+    with pytest.raises(ValueError, match='image_pth'):
+        session.declare_inputs({'text'})
+    # Kept for this subject: the trial still refuses the missing column.
+    task = TaskContext(response=Text(), present=('text:sentense',))
+    session = Session((), ['behavior:text'], task, stimulus_set=_trial_table())
+    session.declare_inputs({'text'})
+    with pytest.raises(ValueError, match='sentense'):
+        trial_prompt(session.task, session.stimulus_set.iloc[0])

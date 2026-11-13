@@ -34,5 +34,35 @@ def declared_only(stimulus_set, channels):
     return preserve_stimulus_set_type(stimulus_set, stimulus_set.drop(columns=omitted))
 
 
+def _declared_task(task, stimulus_set, channels):
+    """``task`` without the ``present`` entries of input streams not in ``channels``.
+
+    An entry's stream is the stream of its column when the column is a known
+    stimulus column (the one ``declared_only`` drops), else the stream of its
+    kind. Returns the same object when nothing is dropped, so a full match is
+    unchanged; never mutates ``task``. An entry that is dropped must still name
+    a part the stimulus table has: a ``present`` entry no input provides is an
+    error, never skipped.
+    """
+    if task is None or task.present is None:
+        return task
+    from dataclasses import replace
+    from brainscore_core._sessions.helpers import _channel_for_stimulus_column
+    from brainscore_core.responses import PART_COLUMNS
+    declared = frozenset(channels)
+    columns = set(getattr(stimulus_set, 'columns', ()))
+    kept = []
+    for entry in task.present:
+        kind, _, column = entry.partition(':')
+        channel = _channel_for_stimulus_column(column) or _channel_for_stimulus_column(kind)
+        if channel_declared(channel, declared):
+            kept.append(entry)
+        elif stimulus_set is not None and not columns & ({column} if column else set(PART_COLUMNS[kind])):
+            raise ValueError(f'TaskContext.present names {entry!r}, which no stimulus column provides.')
+    if len(kept) == len(task.present):
+        return task
+    return replace(task, present=tuple(kept))
+
+
 # Keep the existing public module name stable.
 declared_only.__module__ = 'brainscore_core.session_view'

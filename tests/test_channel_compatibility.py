@@ -349,3 +349,12 @@ def test_an_inconsistent_listing_is_an_error(listing, message):
     with pytest.raises(CompatibilityError, match=message):
         check_channel_compatibility(subject, _Benchmark(
             required_input_channels={"vision:image"}, requested_output_channels={"neural:IT"}))
+
+
+def test_an_empty_listed_set_is_an_error_and_an_absent_entry_is_unrestricted():
+    bench = _Benchmark(required_input_channels={"text"}, requested_output_channels={"neural:IT"})
+    empty = _Listing({"neural:IT": frozenset()}, in_channels={"text"}, out_channels={"neural:IT"})
+    with pytest.raises(CompatibilityError, match="must name at least one input"):
+        check_channel_compatibility(empty, bench)
+    absent = _Listing({}, in_channels={"text"}, out_channels={"neural:IT"})
+    assert check_channel_compatibility(absent, bench).kind == "full"

@@ -174,8 +174,10 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     output_inputs = subject.output_inputs
     _validate_output_inputs(output_inputs, subject_in, subject_out, subject_id)
     for output in sorted(bench_requested):
-        needed = set(output_inputs.get(output, ()))
-        if needed and not needed & consumed:
+        if output not in output_inputs:
+            continue
+        needed = set(output_inputs[output])
+        if not needed & consumed:
             raise CompatibilityError(
                 f"Subject '{subject_id}' answers {output!r} only from the inputs "
                 f"{_format_channels(needed)}, but it takes in only "
@@ -221,6 +223,10 @@ def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id
             raise CompatibilityError(
                 f"Subject '{subject_id}' lists {output!r} in output_inputs, but not in "
                 f"out_channels {_format_channels(set(out_channels))}.")
+        if not inputs:
+            raise CompatibilityError(
+                f"Subject '{subject_id}' lists {output!r} in output_inputs with no input. "
+                "A listed output must name at least one input.")
         undeclared = set(inputs) - set(in_channels)
         if undeclared:
             raise CompatibilityError(
