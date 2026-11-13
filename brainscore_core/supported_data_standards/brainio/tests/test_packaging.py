@@ -5,20 +5,18 @@ import pytest
 from unittest.mock import patch, MagicMock
 from moto import mock_aws
 import boto3
+import numpy as np
+from PIL import Image
 
 from brainscore_core.supported_data_standards import brainio
 from pandas import DataFrame
 
-from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, get_levels
+from brainscore_core.supported_data_standards.brainio import fetch
+from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly, NeuroidAssembly, get_levels
+from brainscore_core.supported_data_standards.brainio.s3 import load_assembly_from_s3, load_stimulus_set_from_s3
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 from brainscore_core.supported_data_standards.brainio.packaging import write_netcdf, check_stimulus_numbers, check_stimulus_naming_convention, \
     package_stimulus_set, package_data_assembly, get_user_info, upload_to_s3
-import numpy as np
-from PIL import Image
-
-from brainscore_core.supported_data_standards.brainio import fetch
-from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
-from brainscore_core.supported_data_standards.brainio.s3 import load_assembly_from_s3, load_stimulus_set_from_s3
 # Note: lookup module functionality is not available in brainio-lite (catalog system removed)
 from brainscore_core.supported_data_standards.brainio.tests.conftest import make_stimulus_set_df, make_spk_assembly, make_meta_assembly, BUCKET_NAME
 
