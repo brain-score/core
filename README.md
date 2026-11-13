@@ -29,7 +29,7 @@ please [send in a pull request](https://github.com/brain-score/core/pulls).
 | `model_interface.py` | Public names of the subject contract and events |
 | `_sessions/` | Session helpers, environment source, perception windows, session drivers |
 | `_evaluation/` | Compatibility, preflight, memory checks, legacy facade |
-| `_data/` | Assembly builders, multimodal stimuli, text and time helpers |
+| `_data/` | Assembly builders, text and time helpers |
 | `_runtime/` | Extraction cache, environment checks, extensions |
 
 `BrainScoreModel` and the temporal analysis functions are in the unified

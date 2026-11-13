@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union
 if TYPE_CHECKING:  # annotation-only; resolved against the vendored brainio
     from brainscore_core.supported_data_standards.brainio.assemblies import (
         NeuroidAssembly, BehavioralAssembly)
-    from brainscore_core._data.multimodal import MultimodalStimulusSet
 
 
 @dataclass
@@ -142,7 +141,7 @@ class PerturbationApplied:
 # Input event type for process().
 #
 # The union spans two orthogonal axes, flattened here for single-dispatch:
-#   - PAYLOAD axis (what is presented): StimulusSet / MultimodalStimulusSet.
+#   - PAYLOAD axis (what is presented): a StimulusSet (a table, one row per moment).
 #   - PROTOCOL axis (mode of engagement): perceive (open-loop batch readout),
 #     interact (closed-loop: a row, a mapping of channel -> payload), perturb
 #     (intervention, StateChange).

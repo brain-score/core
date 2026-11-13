@@ -74,10 +74,7 @@ _COMPONENT_MODULES = {
     'score_metadata': '_evaluation.score_metadata',
     'score_status': '_evaluation.score_status',
     'legacy_facade': '_evaluation.legacy_facade',
-    'nulls': '_evaluation.nulls',
     'assembly_builder': '_data.assembly_builder',
-    'clock': '_data.clock',
-    'multimodal': '_data.multimodal',
     'text': '_data.text',
     'time_axis': '_data.time_axis',
     'environment_check': '_runtime.environment_check',
@@ -173,7 +170,6 @@ def test_layout_keeps_recorded_contract_type_names():
     ('extraction_cache', 'FileContent'),
     ('legacy_facade', 'LegacyBenchmarkFacade'),
     ('memory', 'MemoryError'),
-    ('multimodal', 'MultimodalStimulusSet'),
 ])
 def test_moved_types_keep_public_pickle_references(module_name, type_name):
     import pickle

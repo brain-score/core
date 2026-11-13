@@ -30,10 +30,7 @@ from ._evaluation import preflight
 from ._evaluation import score_metadata
 from ._evaluation import score_status
 from ._evaluation import legacy_facade
-from ._evaluation import nulls
 from ._data import assembly_builder
-from ._data import clock
-from ._data import multimodal
 from ._data import text
 from ._data import time_axis
 from ._runtime import environment_check
@@ -51,10 +48,7 @@ for _name, _module in (
     ('score_metadata', score_metadata),
     ('score_status', score_status),
     ('legacy_facade', legacy_facade),
-    ('nulls', nulls),
     ('assembly_builder', assembly_builder),
-    ('clock', clock),
-    ('multimodal', multimodal),
     ('text', text),
     ('time_axis', time_axis),
     ('environment_check', environment_check),
