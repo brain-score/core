@@ -31,7 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "imageio",
-    "moto",
+    "moto>=5",  # mock_aws
     "pytest",
     "pytest-check",
     "pytest-mock",

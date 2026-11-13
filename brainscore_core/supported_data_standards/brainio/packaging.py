@@ -79,7 +79,15 @@ def create_stimulus_zip(proto_stimulus_set, target_zip_path):
 
 
 def upload_to_s3(source_file_path: Union[Path, str], bucket_name: str, target_s3_key: str) -> dict:
+    """
+    :param bucket_name: the bucket name, optionally followed by a folder (e.g. `"brainscore-storage/brainio-brainscore"`),
+        the same form that `load_stimulus_set_from_s3` and `load_assembly_from_s3` accept.
+    """
     _logger.debug(f"Uploading {source_file_path} to {bucket_name}/{target_s3_key}")
+    if '/' in bucket_name:  # split off the folder exactly like the s3 loaders and `get_path` do
+        bucket_name, folder_name = bucket_name.split('/', 1)
+        if folder_name:
+            target_s3_key = f"{folder_name}/{target_s3_key}"
 
     file_size = os.path.getsize(source_file_path)
     with tqdm(total=file_size, unit='B', unit_scale=True, desc="upload to s3") as progress_bar:
@@ -200,7 +208,7 @@ def package_stimulus_set(catalog_name, proto_stimulus_set, stimulus_set_identifi
         and columns for all stimulus-set-specific metadata but not the column 'filename'.
     :param stimulus_set_identifier: A unique name identifying the stimulus set
         <lab identifier>.<first author e.g. 'Rajalingham' or 'MajajHong' for shared first-author><YYYY year of publication>.
-    :param bucket_name: The name of the bucket to upload to.
+    :param bucket_name: The name of the bucket to upload to, optionally followed by a folder (`"<bucket>/<folder>"`).
     """
     _logger.debug(f"Packaging {stimulus_set_identifier}")
 
@@ -208,7 +216,7 @@ def package_stimulus_set(catalog_name, proto_stimulus_set, stimulus_set_identifi
     id_col_present = 'stimulus_id' in proto_stimulus_set.columns or 'image_id' in proto_stimulus_set.columns
     assert id_col_present, "StimulusSet needs to have a `stimulus_id` column"
 
-    if bucket_name == 'brainio.requested':
+    if bucket_name.split('/', 1)[0] == 'brainio.requested':
         check_experiment_stimulus_set(proto_stimulus_set)
 
     # naming
@@ -293,7 +301,7 @@ def package_data_assembly(catalog_identifier, proto_data_assembly, assembly_iden
         * For requests: <lab identifier>.<b for behavioral|n for neuroidal>.<m for monkey|h for human>.<proposer e.g. 'Margalit'>.<pull request number>
     :param stimulus_set_identifier: The unique name of an existing StimulusSet in the BrainIO system.
     :param assembly_class_name: The name of a DataAssembly subclass.
-    :param bucket_name: The name of the bucket to upload to.
+    :param bucket_name: The name of the bucket to upload to, optionally followed by a folder (`"<bucket>/<folder>"`).
     """
     _logger.debug(f"Packaging {assembly_identifier}")
 
