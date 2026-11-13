@@ -11,9 +11,8 @@ of subject is wrapped: a ``BrainScoreModel``, a domain adapter and an
 participate-only ``Subject`` all take part the same way.
 
 ``subject_for_benchmark`` applies the facade at the scoring boundary to
-benchmarks a domain loader marked as legacy. ``BrainScoreModel`` forwards its
-own legacy methods to a facade seeded with its current recording and task
-state, so direct calls keep working too.
+benchmarks a domain loader marked as legacy. A subject has no legacy methods
+of its own: every legacy call goes through this facade.
 """
 
 import hashlib
