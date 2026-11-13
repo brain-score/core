@@ -187,9 +187,12 @@ class Source:
     the response (a receipt). ``complete`` says whether the input ran to the end of
     its episode; ``history_limit`` bounds how many responses the session keeps.
     ``checked`` says the source already checked its events against the catalog;
-    otherwise the session checks each event as it delivers it.
+    otherwise the session checks each event as it delivers it. ``listed`` says
+    the events are a finite list known up front: a subject may answer them in one
+    call. Any other source is answered one event at a time.
     """
     checked: bool = False
+    listed: bool = False
     complete: bool = True
     history_limit: Optional[int] = None
 
@@ -217,8 +220,6 @@ class FixedSource(Source):
     catalog now (rule 3.4). A lazy iterator is read one event at a time and is
     never materialized; the session checks each event when it delivers it.
     """
-    checked = False
-    listed = False      # True for a list or tuple: a finite batch known up front
 
     def __init__(self, events: Iterable[Any] = ()) -> None:
         if isinstance(events, (list, tuple)):
@@ -235,9 +236,11 @@ class Session(Source):
     """Input delivery, requested outputs, task settings, and result collection.
 
     ``source`` is a ``Source`` or any iterable of events (made a ``FixedSource``).
-    The other arguments are the common configuration consumed by
-    ``BrainScoreModel`` and experiment replay; a stimulus table or task is kept
-    on the session so the batch drivers can answer it in one ``process`` call.
+    The source decides the delivery: a listed source is one batch, any other is
+    answered one event at a time. The other arguments are the common
+    configuration consumed by ``BrainScoreModel`` and experiment replay; a
+    stimulus table or task is kept on the session so the batch drivers can
+    answer it in one ``process`` call.
 
     ``complete`` asks the source whether the inputs ran to the end of the episode.
     Fixed inputs are always complete; a closed-loop source stays False until a
@@ -248,7 +251,7 @@ class Session(Source):
 
     def __init__(self, source: Any, outputs: Optional[Iterable[str]] = None,
                  task: Any = None, *, stimuli: Any = None, time_bins: Any = None,
-                 streaming: bool = False, settings: Any = None) -> None:
+                 settings: Any = None) -> None:
         self.source = source if isinstance(source, Source) else FixedSource(source)
         self.outputs: Optional[tuple[str, ...]] = None
         if outputs is not None:
@@ -260,7 +263,6 @@ class Session(Source):
         self.task = task
         self.stimuli = stimuli
         self.time_bins = time_bins
-        self._streaming = streaming
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.
         self.settings = settings
@@ -282,15 +284,8 @@ class Session(Source):
 
     @property
     def streaming(self) -> bool:
-        """Answer one event at a time: when asked, or when the inputs cannot be listed
-        up front (a generator, a closed-loop source). A list of events with no table
-        is a batch: its rows are rebuilt from the events and answered in one call."""
-        listed = isinstance(self.source, FixedSource) and self.source.listed
-        return self._streaming or (self.stimuli is None and not listed)
-
-    @streaming.setter
-    def streaming(self, value: bool) -> None:
-        self._streaming = value
+        """Answer one event at a time: the source is not a list known up front."""
+        return not self.source.listed
 
     def declare_inputs(self, channels: Iterable[str]) -> 'Session':
         """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.

@@ -220,8 +220,7 @@ def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
     channels = ([f'neural:{regions}'] if isinstance(regions, str)
                 else [f'neural:{region}' for region in regions])
     if kind == 'windowed':
-        session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels,
-                          streaming=True)
+        session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels)
     else:
         session = stimulus_session(_stimulus_set(), channels, streaming=kind == 'streaming')
     expected = {}

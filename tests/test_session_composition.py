@@ -164,7 +164,7 @@ def test_windowing_composes_with_the_one_session():
     stats = {}
     frames = (f'f{i}.png' for i in range(90))
     windows = windowed_stream(frames, fps=30, window_ms=1000, stats=stats)
-    session = Session(windows, ['neural:IT'], streaming=True)
+    session = Session(windows, ['neural:IT'])
 
     class Recorder:
         def start_recording(self, region, time_bins=None, recording_type=None):

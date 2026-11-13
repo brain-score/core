@@ -31,9 +31,8 @@ def stimulus_session(stimuli, outputs=None, task=None, *,
     The events mark the trials with ``begin`` / ``end`` as ``task.trial_memory``
     says (``none`` without a task).
 
-    With ``streaming=True`` the events are made one row at a time from the
-    table, and the session is marked ``streaming``: a subject answers one row
-    and then gets the next. The requested outputs and the task are the same
+    With ``streaming=True`` the source makes the events one row at a time
+    from the table: a subject answers one row and then gets the next. The requested outputs and the task are the same
     as for a batch session.
     """
     memory = _memory(task)
@@ -42,8 +41,7 @@ def stimulus_session(stimuli, outputs=None, task=None, *,
     else:
         events = list(_with_trial_memory(_stimulus_events(stimuli), memory))
     session = Session(events, outputs, task,
-                      stimuli=stimuli, time_bins=time_bins, settings=settings,
-                      streaming=streaming)
+                      stimuli=stimuli, time_bins=time_bins, settings=settings)
     session.one_answer_per_trial = memory == 'none'
     return session
 

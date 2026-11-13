@@ -39,8 +39,7 @@ class _RecordingSubject:
 
 
 def _session(frames, stats=None, **kwargs):
-    return Session(windowed_stream(frames, stats=stats, **kwargs), ('neural:IT',),
-                   streaming=True)
+    return Session(windowed_stream(frames, stats=stats, **kwargs), ('neural:IT',))
 
 
 def _counting_feed(n, counter):
