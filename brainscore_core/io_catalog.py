@@ -11,12 +11,16 @@ registered. A session checks every event against the entry of its family and
 raises an error for a payload that does not match. A family with a ``CHANNEL_FORMS``
 entry (``vision``) has no bare channel: each channel names a form.
 
+The catalog also holds the one table that says which channel a stimulus-table
+column feeds (``stimulus_columns``, ``column_channel``). A table session sends
+each such column on its channel; pre-flight, the subject's projection of a table
+and ``BrainScoreModel`` read the same table.
+
 ``check_payload`` is a loose check on ``.ndim`` and ``.dtype``, so that core needs
 no heavy dependency. ``validate`` runs every check for one event.
 
-To add a family from outside core, call ``brainscore_core.extensions.register_channel``.
-It registers the entry here and can also bind stimulus-table columns to the
-family. ``register`` in this module only adds the entry.
+``register_channel`` adds a family and, for an input family, the columns that
+feed it. Code outside core imports it from ``brainscore_core.extensions``.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -26,13 +30,6 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 import numpy as np
 
 from .streaming import parse_channel
-
-# Preserve the column ownership used by model construction and registration.
-BUILTIN_STIMULUS_COLUMNS: Mapping[str, str] = MappingProxyType({
-    'image_file_name': 'vision', 'image_path': 'vision', 'filename': 'vision',
-    'sentence': 'text', 'text': 'text', 'video_path': 'vision',
-    'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio',
-})
 
 INPUT = "input"
 OUTPUT = "output"
@@ -103,23 +100,67 @@ class CatalogEntry:
 
 _CATALOG: Dict[str, CatalogEntry] = {}
 
+# Which channel each stimulus-table column feeds: the one answer for sessions,
+# pre-flight, subjects and documents. ``register_channel`` adds columns. Within
+# one channel the order is the order a prompt looks for a part's column.
+_STIMULUS_COLUMNS: Dict[str, str] = {
+    'image_file_name': 'vision:image', 'image_path': 'vision:image',
+    'filename': 'vision:image', 'image': 'vision:image', 'vision': 'vision:image',
+    'video_path': 'vision:video', 'video_file_name': 'vision:video', 'video': 'vision:video',
+    'sentence': 'text', 'text': 'text',
+    'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio', 'audio': 'audio',
+}
 
-def register(entry: CatalogEntry, *, replace: bool = False) -> None:
-    """Add a catalog entry, keyed by its family name.
 
-    Core uses this for the seed entries. Code outside core calls
-    ``brainscore_core.extensions.register_channel``, which also binds columns.
+def stimulus_columns() -> Dict[str, str]:
+    """Every stimulus column and the channel it feeds, as a copy."""
+    return dict(_STIMULUS_COLUMNS)
 
-    Registering a family that already exists is an error unless
-    ``replace=True`` (Contract Rules v3, rule 3.5). Re-registering the same
-    entry object is a no-op.
+
+def column_channel(column: str) -> Optional[str]:
+    """The channel a stimulus-table column feeds, or None for a metadata column."""
+    return _STIMULUS_COLUMNS.get(column)
+
+
+def register_channel(entry: CatalogEntry, *, columns: Iterable[str] = (),
+                     replace: bool = False) -> CatalogEntry:
+    """Add a channel family to the catalog and bind stimulus columns to it.
+
+    Each column in ``columns`` then feeds the channel ``entry.name``: a table
+    session sends it on that channel, pre-flight and the subject's projection
+    of a table see it. Only an input family takes columns, and a family that
+    names its form (``vision``) does not: give a new family.
+
+    Registering a family or a column that already exists is an error unless
+    ``replace=True`` (Contract Rules 3.5). Re-registering the same entry
+    object is a no-op.
     """
+    _, address = parse_channel(entry.name)
+    if address is not None:
+        raise ValueError("Register a channel family, not an addressed instance")
+    if isinstance(columns, str):
+        raise TypeError(f"columns is a sequence of column names, not the string {columns!r}")
+    columns = tuple(columns)
     existing = _CATALOG.get(entry.name)
     if existing is not None and existing is not entry and not replace:
         raise ValueError(
             f"Channel family {entry.name!r} is already registered "
             f"(owner {existing.owner!r}); pass replace=True to replace it.")
+    if columns:
+        if entry.kind not in (INPUT, BOTH):
+            raise ValueError('Only input channels can own stimulus columns')
+        problem = form_problem(entry.name)
+        if problem:
+            raise ValueError(f"Columns cannot feed {problem}")
+    for column in columns:
+        if not isinstance(column, str) or not column:
+            raise ValueError('Stimulus columns must be nonempty strings')
+        owner = _STIMULUS_COLUMNS.get(column)
+        if owner is not None and owner != entry.name and not replace:
+            raise ValueError(f'Column {column!r} already belongs to {owner!r}')
     _CATALOG[entry.name] = entry
+    _STIMULUS_COLUMNS.update({column: entry.name for column in columns})
+    return entry
 
 
 def _family(label: str) -> str:
@@ -416,7 +457,7 @@ _SEED = [
 ]
 
 for _entry in _SEED:
-    register(_entry)
+    register_channel(_entry)
 
 
 def payload_type_notes(label: str, payload) -> List[str]:
@@ -456,15 +497,7 @@ def _declare_payload_types() -> None:
         'perturbation': (PerturbationApplied, type(None)),
     }
     for family, payload_type in payload_types.items():
-        register(_replace(get(family), payload_type=payload_type), replace=True)
+        register_channel(_replace(get(family), payload_type=payload_type), replace=True)
 
 
 _declare_payload_types()
-
-
-_STIMULUS_COLUMNS: Dict[str, str] = {}
-
-
-def stimulus_columns() -> Dict[str, str]:
-    """External stimulus-column bindings, returned as a copy."""
-    return dict(_STIMULUS_COLUMNS)

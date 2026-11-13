@@ -59,13 +59,10 @@ from brainscore_core._sessions.drivers import (
 )
 
 from brainscore_core._sessions.payloads import (
-    STIMULUS_COLUMN_TO_MODALITY,
     _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY,
-    _STIMULUS_INPUT_CHANNEL_FAMILIES,
     _behavior_label_set,
     behavior_stimuli_from_session,
     _behavior_stimuli_to_score,
-    _channel_for_stimulus_column,
     _collect_behavior_events,
     _collect_neural_events,
     _is_label_payload,

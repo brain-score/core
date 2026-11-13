@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Any, Optional
 import numpy as np
-from ..io_catalog import modalities_to_input_channels
+from ..io_catalog import column_channel, stimulus_columns
 from ..streaming import CONTROL_CHANNEL, StreamEvent, parse_channel
 from ..events import PerturbationApplied, StateChange
 from ..supported_data_standards.brainio.assemblies import (
@@ -12,35 +12,12 @@ from ..supported_data_standards.brainio.assemblies import (
 )
 
 
-STIMULUS_COLUMN_TO_MODALITY = {
-    "vision": "vision",
-    "image": "vision",
-    "image_file_name": "vision",
-    "image_path": "vision",
-    "filename": "vision",
-    "text": "text",
-    "sentence": "text",
-    "audio": "audio",
-    "audio_file": "audio",
-    "audio_file_name": "audio",
-    "audio_path": "audio",
-    "video": "video",
-    "video_path": "video",
-}
-
-
 _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY = {
     "ablation": "lesion",
     "lesion": "lesion",
     "stimulation": "stimulation",
     "pharmacological": "pharmacological",
 }
-
-
-_STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
-    parse_channel(channel)[0]
-    for channel in modalities_to_input_channels(STIMULUS_COLUMN_TO_MODALITY.values())
-)
 
 
 def _one_row_stimuli(session, event: StreamEvent, stream_index: int):
@@ -119,10 +96,12 @@ def session_stimuli(session: Any, events: list[StreamEvent]) -> Any:
 
 
 def _spans_several_inputs(events: list[StreamEvent]) -> bool:
+    """Whether ``events`` carry stimulus columns of more than one channel family."""
+    stimulus_families = {parse_channel(channel)[0] for channel in stimulus_columns().values()}
     families = set()
     for event in events:
         family, _ = parse_channel(event.channel)
-        if family in _STIMULUS_INPUT_CHANNEL_FAMILIES:
+        if family in stimulus_families:
             families.add(family)
     return len(families) > 1
 
@@ -183,9 +162,9 @@ def behavior_stimuli_from_session(session, task):
 def _stimulus_input_columns(stimuli) -> list[tuple[str, str]]:
     """``(column, channel)`` for each input column of a stimulus table."""
     return [
-        (column, _channel_for_stimulus_column(column))
+        (column, column_channel(column))
         for column in list(getattr(stimuli, "columns", []))
-        if _channel_for_stimulus_column(column) is not None
+        if column_channel(column) is not None
     ]
 
 
@@ -263,7 +242,7 @@ def _table_row_position(session, event: StreamEvent) -> Optional[int]:
         return None
     column = meta.get("column")
     if (not isinstance(column, str) or column not in table.columns
-            or _channel_for_stimulus_column(column) != event.channel):
+            or column_channel(column) != event.channel):
         return None
     position = int(position)
     label = table.index[position]
@@ -329,13 +308,6 @@ def _state_change_handle_id(state_change: StateChange, result) -> Optional[str]:
     if isinstance(result, PerturbationApplied):
         return result.handle_id
     return state_change.handle_id
-
-
-def _channel_for_stimulus_column(column: str) -> Optional[str]:
-    modality = STIMULUS_COLUMN_TO_MODALITY.get(column)
-    if modality is None:
-        return None
-    return next(iter(modalities_to_input_channels({modality})))
 
 
 def _row_value(row, column: str, default: Any = None) -> Any:

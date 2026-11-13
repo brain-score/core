@@ -99,7 +99,7 @@ class TestRegister:
             payload_contract="(time,) float diameter in mm",
             handled_by="an eye-tracker harness",
         )
-        io_catalog.register(entry, replace=True)  # 'pupil' is a seeded family
+        io_catalog.register_channel(entry, replace=True)  # 'pupil' is a seeded family
         assert io_catalog.get("pupil") is entry
         assert io_catalog.get("pupil:left").name == "pupil"
 
@@ -111,9 +111,9 @@ class TestRegister:
             handled_by="another harness",
         )
         with pytest.raises(ValueError, match="already registered"):
-            io_catalog.register(clash)
+            io_catalog.register_channel(clash)
         assert io_catalog.get("pupil") is original
-        io_catalog.register(original)  # same object: allowed, no change
+        io_catalog.register_channel(original)  # same object: allowed, no change
 
 
 class TestPayloadTypes:

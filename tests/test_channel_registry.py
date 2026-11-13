@@ -109,25 +109,16 @@ def test_validate_reports_unaddressable_channel_family():
 
 
 def test_registration_keeps_builtin_column_ownership(monkeypatch):
+    """A column core already maps cannot be claimed by a new family without replace=True."""
     import pytest
     from brainscore_core.extensions import register_channel
 
     monkeypatch.setattr(io_catalog, '_CATALOG', dict(io_catalog._CATALOG))
-    monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', {})
-    expected = {
-        'image_file_name': 'vision', 'image_path': 'vision', 'filename': 'vision',
-        'sentence': 'text', 'text': 'text', 'video_path': 'vision',
-        'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio',
-        'vision': None, 'image': None, 'audio': None, 'video': None,
-    }
-    for index, (column, owner) in enumerate(expected.items()):
+    monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', dict(io_catalog._STIMULUS_COLUMNS))
+    for index, (column, owner) in enumerate(io_catalog.stimulus_columns().items()):
         entry = CatalogEntry(f'column_probe_{index}', INPUT, 'StimulusSet', 'test', 'test')
-        if owner is None:
+        with pytest.raises(ValueError, match=f"already belongs to '{owner}'"):
             register_channel(entry, columns=[column])
-            assert io_catalog.stimulus_columns()[column] == entry.name
-        else:
-            with pytest.raises(ValueError, match=f"already belongs to '{owner}'"):
-                register_channel(entry, columns=[column])
-            assert not io_catalog.has(entry.name)
-            register_channel(entry, columns=[column], replace=True)
-            assert io_catalog.stimulus_columns()[column] == entry.name
+        assert not io_catalog.has(entry.name)
+        register_channel(entry, columns=[column], replace=True)
+        assert io_catalog.column_channel(column) == entry.name

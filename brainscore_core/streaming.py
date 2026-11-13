@@ -296,7 +296,7 @@ class Session(Source):
         """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
 
         Events on other channels are skipped (exact match, see ``channel_declared``),
-        and the stimulus table loses the columns of undeclared modalities. The
+        and the stimulus table loses the columns that feed undeclared channels. The
         task the subject sees loses the ``present`` entries of those inputs, so a
         trial shows only the parts the subject takes in; the caller's task is not
         changed. Control events pass only when ``control`` is declared; a session

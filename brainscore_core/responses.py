@@ -183,13 +183,19 @@ class Text:
         return (reply, None) if isinstance(reply, str) else (None, 'the reply is not text')
 
 
-# The stimulus columns that carry each kind of trial part.
-PART_COLUMNS = {
-    'text': ('sentence', 'text'),
-    'image': ('image_file_name', 'image_path', 'filename'),
-    'video': ('video_path', 'video_file_name'),
-    'audio': ('audio_path', 'audio_file_name', 'audio_file'),
-}
+# The channel that carries each kind of trial part.
+PART_CHANNELS = {'text': 'text', 'image': 'vision:image', 'video': 'vision:video', 'audio': 'audio'}
+
+
+def part_columns(kind: str) -> Tuple[str, ...]:
+    """The stimulus columns that carry a part of ``kind``, in the order a prompt looks.
+
+    They are the columns that feed the part's channel in the catalog's column
+    table (``io_catalog.stimulus_columns``).
+    """
+    from .io_catalog import stimulus_columns
+    channel = PART_CHANNELS[kind]
+    return tuple(column for column, fed in stimulus_columns().items() if fed == channel)
 
 
 @dataclass(frozen=True)
@@ -218,8 +224,8 @@ class Prompt:
 def trial_prompt(task, stimulus_row) -> Prompt:
     """Build one trial's Prompt from the task and a stimulus row (fails before any compute)."""
     present = {}
-    for kind, columns in PART_COLUMNS.items():
-        for column in columns:
+    for kind in PART_CHANNELS:
+        for column in part_columns(kind):
             value = _cell(stimulus_row, column)
             if value is not None:
                 present[kind] = value
