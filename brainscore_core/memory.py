@@ -479,8 +479,8 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
     logger.warning(
         "Memory pre-flight could NOT run: no region yielded a readable feature "
         "width (last error: %s), so no estimate was made and the OOM guard is OFF "
-        "for this run. Pass feature_dim=... to estimate anyway, or check_mem=False "
-        "to silence.",
+        "for this run. To estimate anyway, call check_memory(model, benchmark, "
+        "feature_dim=...); to silence this, pass check_mem=False to score().",
         last_error,
         exc_info=last_error if isinstance(last_error, BaseException) else None,
     )

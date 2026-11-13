@@ -95,10 +95,11 @@ def warn_on_drift() -> None:
             "bounds (these are the versions scoring is verified against; the exact "
             "install pin is the environment file's job):\n  - "
             + "\n  - ".join(drift)
-            + "\nScoring may be SILENTLY WRONG (scikit-learn>=1.8 drops "
+            + "\nScoring may be SILENTLY WRONG: for example, scikit-learn 1.8 drops "
             "LogisticRegression(multi_class=...), so binary behavioral-readout "
-            "scores move without erroring). Install the pinned environment "
-            "(environment-unified.yml) to fix.",
+            "scores move without erroring. To fix, install with the pinned "
+            "versions: run unified/install/setup.sh, or pip install with "
+            "-c unified/install/v2-constraints.txt (see the unified README).",
             RuntimeWarning,
             stacklevel=2,
         )
