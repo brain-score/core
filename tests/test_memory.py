@@ -29,11 +29,11 @@ def FakeResult(nbytes=8000, n_features=1000):
 
 class FakeModel(UnifiedModel):
 
-    def __init__(self, identifier='test-model', modalities=None,
+    def __init__(self, identifier='test-model', in_channels=None,
                  region_layer_map=None, process_result=None,
                  activation_nbytes=8000, n_features=1000):
         self._id = identifier
-        self._modalities = modalities or {'vision'}
+        self._in_channels = in_channels or {'vision:image'}
         # A model that records somewhere; the probe reads it from the declared output.
         self._rlm = region_layer_map if region_layer_map is not None else {'IT': 'layer'}
         self._process_result = (process_result if process_result is not None
@@ -48,8 +48,8 @@ class FakeModel(UnifiedModel):
         return self._rlm
 
     @property
-    def supported_modalities(self) -> Set[str]:
-        return self._modalities
+    def in_channels(self) -> Set[str]:
+        return self._in_channels
 
     def process(self, stimuli):
         return self._process_result

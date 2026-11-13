@@ -55,7 +55,7 @@ def benchmark(**overrides):
 def test_minimal_subject_consumes_and_emits_timestamped_events():
     subject = TextSubject()
     for name in ("process", "start_task", "start_recording", "region_layer_map",
-                 "supported_modalities", "check_session_support"):
+                 "check_session_support"):
         assert not hasattr(subject, name)
     session = Session([StreamEvent("text", "cat", 12.0, {"stimulus_id": "a"})])
     subject.participate(session)

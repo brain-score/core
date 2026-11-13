@@ -16,18 +16,18 @@ class _ChannelSubject(UnifiedModel):
         return {"V1": "layer1", "IT": "layer4"}
 
     @property
-    def supported_modalities(self):
-        return {"vision", "text"}
+    def in_channels(self):
+        return {"vision:image", "text"}
 
     @property
-    def required_modalities(self):
+    def required_channels(self):
         return {"text"}
 
     def process(self, input_event):
         return None
 
 
-def test_subject_derives_channel_identity_from_v1_contract():
+def test_subject_declares_its_channels():
     subject = _ChannelSubject()
 
     assert subject.in_channels == {"vision:image", "text"}
@@ -77,8 +77,8 @@ def test_legacy_subclass_still_instantiates_without_participate():
             return {}
 
         @property
-        def supported_modalities(self):
-            return {"vision"}
+        def in_channels(self):
+            return {"vision:image"}
 
         def process(self, input_event):
             return "ok"

@@ -96,7 +96,6 @@ def test_subject_participate_and_reset_contract_are_pinned():
     assert subject.participate(session=None) is None
     assert not hasattr(subject, "process")
     assert not hasattr(subject, "region_layer_map")
-    assert not hasattr(subject, "supported_modalities")
     assert subject.reset() is None
 
 

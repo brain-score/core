@@ -29,7 +29,7 @@ class _Model(UnifiedModel):
         return self._rm
 
     @property
-    def supported_modalities(self):
+    def in_channels(self):
         return self._av
 
     def process(self, stimuli):
@@ -45,7 +45,7 @@ class _Bench:
 
 class TestIOCatalogPreflight:
     def test_documented_input_no_warning(self):
-        m = _Model({"vision"})
+        m = _Model({"vision:image"})
         b = _Bench({"vision"})
         with warnings.catch_warnings():
             warnings.simplefilter("error", CompatibilityWarning)
@@ -54,13 +54,13 @@ class TestIOCatalogPreflight:
     def test_undocumented_input_is_rejected(self):
         # Contract v3 rule 3.2: every channel family is registered. An
         # undocumented input is a compatibility error, not a warning.
-        m = _Model({"vision", "telepathy"})
+        m = _Model({"vision:image", "telepathy"})
         b = _Bench({"telepathy"})
         with pytest.raises(CompatibilityError, match="unknown channel 'telepathy'"):
             check_compatibility(m, b)
 
     def test_neural_region_is_documented(self):
-        m = _Model({"vision"}, region_map={"IT": "layer.10"})
+        m = _Model({"vision:image"}, region_map={"IT": "layer.10"})
         b = _Bench({"vision"}, region="IT")
         with warnings.catch_warnings():
             warnings.simplefilter("error", CompatibilityWarning)

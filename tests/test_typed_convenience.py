@@ -17,8 +17,8 @@ class NoProcess(UnifiedModel):
         return {'IT': 'layer'}
 
     @property
-    def supported_modalities(self):
-        return {'vision'}
+    def in_channels(self):
+        return {'vision:image'}
 
 
 def test_typed_subclass_instantiates_without_process_and_fails_clearly():

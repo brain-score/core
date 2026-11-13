@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
-from .io_catalog import modalities_to_input_channels
 
 if TYPE_CHECKING:
     from .streaming import Session
@@ -201,10 +200,11 @@ class UnifiedModel(Subject):
     """Subject base for models evaluated through typed paths.
 
     Implementations provide ``process``, ``start_task``, ``start_recording``,
-    a layer map and modality declarations. ``participate`` (the evaluation
-    method of the contract) runs a session through those typed paths, so a
-    typed model needs no session code of its own. ``process`` is a typed
-    convenience of this base, not part of the subject contract.
+    a layer map and ``in_channels`` (and ``required_channels`` when an input
+    is required). ``participate`` (the evaluation method of the contract) runs
+    a session through those typed paths, so a typed model needs no session
+    code of its own. ``process`` is a typed convenience of this base, not part
+    of the subject contract.
 
     New session-native implementations should inherit ``Subject`` directly.
     """
@@ -220,27 +220,6 @@ class UnifiedModel(Subject):
         ...
 
     @property
-    @abstractmethod
-    def supported_modalities(self) -> Set[str]:
-        """All modalities the model can consume; :py:attr:`in_channels` comes from them."""
-        ...
-
-    @property
-    def required_modalities(self) -> Set[str]:
-        """Modalities the model HARD-requires in stimuli. Empty by default —
-        most models can run on whichever modality the benchmark provides, as
-        long as the intersection with :py:attr:`supported_modalities` is
-        non-empty. Override for models that must receive a specific modality
-        (single-modality text/video backbones, multimodal-fusion models that
-        cannot degrade, etc.)."""
-        return set()
-
-    @property
-    def in_channels(self) -> Set[str]:
-        """Input channels: the declared modalities as channel families."""
-        return modalities_to_input_channels(self.supported_modalities)
-
-    @property
     def out_channels(self) -> Set[str]:
         """Output channels: ``neural:<region>`` for every mapped region.
 
@@ -248,11 +227,6 @@ class UnifiedModel(Subject):
         ``behavior`` or ``motor``; nothing is discovered from attribute names.
         """
         return {f"neural:{region}" for region in self.region_layer_map}
-
-    @property
-    def required_channels(self) -> Set[str]:
-        """Input stream channels this subject hard-requires."""
-        return modalities_to_input_channels(self.required_modalities)
 
     def process(self, input_event: InputEvent) -> OutputEvent:
         """Typed convenience used by the default ``participate``; not part of the contract."""

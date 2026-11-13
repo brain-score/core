@@ -90,8 +90,8 @@ class _SyntheticSubject(UnifiedModel):
         return {"IT": "layer4"}
 
     @property
-    def supported_modalities(self):
-        return {"vision"}
+    def in_channels(self):
+        return {"vision:image"}
 
     def start_recording(self, recording_target, **kwargs):
         self.recording_target = recording_target
@@ -115,8 +115,8 @@ class _NonNativeEnvironmentSubject(UnifiedModel):
         return {}
 
     @property
-    def supported_modalities(self):
-        return {"vision", "proprioception"}
+    def in_channels(self):
+        return {"vision:image", "proprioception"}
 
     def process(self, input_event):
         self.processed_rows.append(input_event)
