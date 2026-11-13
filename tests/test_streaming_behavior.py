@@ -51,7 +51,7 @@ class _Subject:
         self.start_task_calls = 0
         self.process_sizes = []
 
-    def start_task(self, task_context):
+    def start_task(self, task):
         self.start_task_calls += 1
 
     def process(self, stimuli, multi_modality=False):
@@ -116,7 +116,7 @@ def test_each_trial_is_tagged_with_its_index():
 
 
 @pytest.mark.unit
-def test_missing_task_context_fails_fast():
+def test_missing_task_fails_fast():
     class _NoContext(_Session):
         def __init__(self):
             self.streaming = True

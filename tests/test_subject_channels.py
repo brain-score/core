@@ -121,5 +121,5 @@ def test_typed_model_without_multi_modality_runs_multimodal_session():
                                         'sentence': ['a sentence']}))
     stimuli.identifier = 'two-inputs'
     model = TwoInputModel()
-    neural_response(model, stimuli, record='IT')
+    neural_response(model, stimuli, ['neural:IT'])
     assert model.calls == [1]

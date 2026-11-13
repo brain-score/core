@@ -125,11 +125,11 @@ class PolicySubject(Subject):
 stimuli = StimulusSet({'stimulus_id': ['s0', 's1'], 'sentence': ['one', 'two']})
 stimuli.identifier = 'layout-control'
 neural = NeuralSubject()
-neural_values = neural_response(neural, stimuli, record='language_system')
+neural_values = neural_response(neural, stimuli, ['neural:language_system'])
 answer = AnswerSubject()
 task = TaskContext(task_type='label', label_set=['yes', 'no'], fitting_stimuli=stimuli,
                    instruction='Respond yes or no')
-behavior_values = behavioral_response(answer, task)
+behavior_values = behavioral_response(answer, stimuli, task)
 
 
 class Environment:

@@ -81,7 +81,7 @@ def test_two_column_events_mark_their_row_position(producer):
 
 def test_table_row_position_reads_only_the_event_and_the_table():
     session = Session(())
-    session.stimulus_set = table()
+    session.stimuli = table()
     event = _stimulus_events(table())[0]
     assert _table_row_position(session, event) == 0
     session.settings = {'_table_rows': 'anything'}
@@ -104,7 +104,7 @@ def test_table_row_position_reads_only_the_event_and_the_table():
 def test_v7_external_hint_requires_complete_matching_identity(hint):
     session = Session(())
     if hint != 'no_table':
-        session.stimulus_set = table()
+        session.stimuli = table()
     meta = {'table_row': 0, 'stimulus_id': 'a', 'stimulus_index': 0, 'column': 'sentence'}
     if hint == 'foreign':
         meta['table_row'] = ('other', 0)
@@ -126,14 +126,14 @@ def test_v7_external_hint_requires_complete_matching_identity(hint):
 @pytest.mark.parametrize('label', [np.nan, pd.NA], ids=['NaN', 'pdNA'])
 def test_null_index_label_is_matched_only_when_present(label):
     session = Session(())
-    session.stimulus_set = table(index=[label, 2])
-    event = _stimulus_events(session.stimulus_set)[0]
+    session.stimuli = table(index=[label, 2])
+    event = _stimulus_events(session.stimuli)[0]
     assert _table_row_position(session, event) == 0
     event.meta['stimulus_index'] = 2                 # a value never equals a null label
     assert _table_row_position(session, event) is None
     del event.meta['stimulus_index']                 # an absent label stays invalid
     assert _table_row_position(session, event) is None
-    other = _stimulus_events(session.stimulus_set)[2]
+    other = _stimulus_events(session.stimuli)[2]
     other.meta['stimulus_index'] = label             # a null never equals a value label
     assert _table_row_position(session, other) is None
 

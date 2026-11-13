@@ -54,8 +54,8 @@ class _Typed:
     def start_recording(self, target, time_bins=None):
         self.calls.append(('start_recording', target, time_bins))
 
-    def start_task(self, task_context):
-        self.calls.append(('start_task', task_context))
+    def start_task(self, task):
+        self.calls.append(('start_task', task))
 
     def process(self, stimuli, **kwargs):
         self.calls.append(('process', len(stimuli)))
@@ -71,7 +71,7 @@ def test_neural_outputs_keep_the_table_and_answer_in_one_call():
     stimuli = _table()
     session = stimulus_session(stimuli, ['neural:IT'], time_bins=[(70, 170)])
     assert session.outputs == ('neural:IT',)
-    assert session.stimulus_set is stimuli and session.task is None
+    assert session.stimuli is stimuli and session.task is None
     assert session.streaming is False
     subject = _Typed()
     drive_neural_session(subject, session)
@@ -84,7 +84,7 @@ def test_behavior_with_a_task_carries_the_task_and_presents_only_the_table():
                        fitting_stimuli=_table(2), instruction='Pick one')
     session = stimulus_session(stimuli, ['behavior'], task)
     assert session.outputs == ('behavior',)
-    assert session.task is task and session.stimulus_set is stimuli
+    assert session.task is task and session.stimuli is stimuli
     events = _inputs(session.declare_inputs({'text', 'instruction'}))
     # The instruction and the fitting rows stay on the task context.
     assert [event.payload for event in events] == ['word 0', 'word 1', 'word 2']
@@ -232,7 +232,7 @@ def test_behavioral_response_sends_the_rows_and_keeps_the_instruction_on_the_tas
     from brainscore_core.contract import Subject
     from brainscore_core.streaming_helpers import behavioral_response
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'], instruction='Pick one',
-                       fitting_stimuli=_table(2), metadata={'stimulus_set': _table(3)})
+                       fitting_stimuli=_table(2))
 
     class _Reader(Subject):
         identifier = 'reader'
@@ -243,11 +243,11 @@ def test_behavioral_response_sends_the_rows_and_keeps_the_instruction_on_the_tas
             session.declare_inputs(self.in_channels)
             self.seen = [(e.channel, e.payload) for e in iter(session.next_input, None)]
             self.instruction = session.task.instruction
-            ids = list(session.stimulus_set['stimulus_id'])
+            ids = list(session.stimuli['stimulus_id'])
             session.respond(StreamEvent('behavior', _behavior(ids), 0.0))
 
     subject = _Reader()
-    result = behavioral_response(subject, task)
+    result = behavioral_response(subject, _table(3), task)
     assert subject.seen == [('text', 'word 0'), ('text', 'word 1'), ('text', 'word 2')]
     assert subject.instruction == 'Pick one'
     assert result.sizes['presentation'] == 3
@@ -259,8 +259,8 @@ def test_behavioral_response_without_stimuli_raises_before_participate():
     class _Never:
         def participate(self, session):
             raise AssertionError('participate reached')
-    with pytest.raises(ValueError, match='requires stimuli'):
-        behavioral_response(_Never(), TaskContext(task_type='probabilities'))
+    with pytest.raises(ValueError, match='needs the stimuli'):
+        behavioral_response(_Never(), None, TaskContext(task_type='probabilities'))
 
 
 def test_a_subject_that_does_not_declare_the_family_never_receives_the_change():

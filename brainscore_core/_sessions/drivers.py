@@ -253,7 +253,7 @@ def _stream_rows(session, on_begin: Optional[Callable[[], None]] = None,
     """
     # The input columns a row delivers through this session. A view that
     # drops an undeclared stream drops its table column too.
-    table = getattr(session, "stimulus_set", None)
+    table = getattr(session, "stimuli", None)
     row_columns = ({column for column, _ in _stimulus_input_columns(table)}
                    if table is not None else set())
     row_events: list[StreamEvent] = []   # arrived input columns of one row
@@ -308,8 +308,8 @@ def stream_trials(session, task):
         stimuli = behavior_stimuli_from_session(session, task)
         if stimuli is None:
             raise ValueError(
-                "behavioral_response requires stimuli to elicit a response. Provide "
-                "task.metadata['stimulus_set'] or fitting_stimuli.")
+                "A behavior session requires stimuli to elicit a response. Build it with "
+                "stimulus_session(stimuli, ['behavior'], task), or set task.fitting_stimuli.")
         for index in range(len(stimuli)):
             yield preserve_stimulus_set_type(stimuli, stimuli.iloc[[index]])
 
@@ -427,7 +427,7 @@ def drive_behavior_session(
     implements ``participate`` and never needs this.
 
     Uses ``task`` when given, otherwise the session's. The scored
-    trials are the session's ``stimulus_set``, or the task's own stimuli when
+    trials are the session's ``stimuli``, or the task's own stimuli when
     the session sends none. An ``instruction`` event is not scored.
     A request for trial-to-trial variance is refused before any compute. The
     single response is sent on the ``behavior`` channel. ``on_begin()`` runs once
@@ -446,8 +446,8 @@ def drive_behavior_session(
     stimuli = behavior_stimuli_from_session(session, task)
     if stimuli is None:
         raise ValueError(
-            "behavioral_response requires stimuli to elicit a response. Provide "
-            "task.metadata['stimulus_set'] or fitting_stimuli."
+            "A behavior session requires stimuli to elicit a response. Build it with "
+            "stimulus_session(stimuli, ['behavior'], task), or set task.fitting_stimuli."
         )
     output = subject.process(stimuli)
     session.respond(StreamEvent(

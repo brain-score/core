@@ -115,12 +115,11 @@ def test_optional_requirements_and_stateless_reset_have_safe_defaults():
 
 def test_native_subject_runs_through_neural_and_behavioral_helpers():
     subject = TextSubject()
-    neural = neural_response(subject, stimuli(), record="language_network")
+    neural = neural_response(subject, stimuli(), ['neural:language_network'])
     np.testing.assert_array_equal(neural.values, [[3, 1], [5, 1]])
     assert list(neural["stimulus_id"].values) == ["a", "b"]
-    behavior = behavioral_response(subject, TaskContext(
+    behavior = behavioral_response(subject, stimuli(), TaskContext(
         task_type="generation", instruction="Uppercase the text",
-        metadata={"stimulus_set": stimuli()},
     ))
     np.testing.assert_array_equal(behavior.values, [[1, 0], [0, 1]])
     assert list(behavior["choice"].values) == ["CAT", "HORSE"]

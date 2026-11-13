@@ -187,12 +187,13 @@ def resolve(name: str) -> Callable:
     if name in MODEL_LEVEL_NULLS:
         raise ValueError(
             f"{name!r} is a MODEL-level null: realize it by loading a registered "
-            f"null model (e.g. 'random-vit-b-32' or 'chance-baseline'), not by "
+            f"null subject (e.g. 'random-vit-b-32' or 'chance-baseline'), not by "
             f"calling a function here.")
     if name in PERTURBATION_NULLS:
         raise ValueError(
             f"{name!r} is a PERTURBATION-level null: realize it by constructing a "
-            f"Perturbation variant and dispatching process(StateChange(...)).")
+            f"Perturbation variant and applying it with "
+            f"apply_state_change(subject, StateChange(...)).")
     raise ValueError(f"unknown null {name!r}; callable nulls: {sorted(CALLABLE_NULLS)}.")
 
 

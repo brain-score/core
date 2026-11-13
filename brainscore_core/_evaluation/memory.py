@@ -374,7 +374,7 @@ def _probe_regions(model, benchmark):
     would sum several layers and inflate the feature width, and would request a
     modality a single-tower wrapper can't serve). A model's ``region_layer_map``
     order is kept when it has one. ``[None]`` means no neural output is declared
-    (e.g. a behavioral candidate) — nothing to probe.
+    (e.g. a behavioral subject) — nothing to probe.
 
     A subject that declares ``probe_safe_regions`` (the regions it can record
     without first running work the benchmark may never ask for, e.g. a legacy
@@ -467,7 +467,7 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
                                  'channel (neural:<region>); for a benchmark that names '
                                  'none, only the subject\'s probe_safe_regions are '
                                  'probed when it declares them')
-            result = neural_response(model, one, record=region, time_bins=time_bins)
+            result = neural_response(model, one, [f'neural:{region}'], time_bins=time_bins)
         except Exception as e:
             last_error = e
             continue
@@ -553,7 +553,7 @@ def check_memory(
     ``n_features`` to a probe / ``expected_feature_dim`` / ``model.feature_dim``.
     Every result on this path is flagged APPROXIMATE.
 
-    Skips (loudly) when no feature width can be resolved — e.g. a candidate that
+    Skips (loudly) when no feature width can be resolved — e.g. a subject that
     only configures recording inside the benchmark's ``__call__`` and the plan
     supplies no ``probe_stimuli`` (the guard is OFF for that run, not "safe").
 

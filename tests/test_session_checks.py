@@ -67,7 +67,7 @@ def test_a_bad_control_payload_raises_on_a_lazy_source():
         session.next_input()
 
 
-def test_a_session_with_no_requested_outputs_accepts_any_catalog_channel():
+def test_a_session_with_no_outputs_accepts_any_catalog_channel():
     session = Session([])
     session.respond(StreamEvent('neural:V4', np.zeros(3), 0.0))
     session.respond(StreamEvent('behavior', 'cat', 0.0))

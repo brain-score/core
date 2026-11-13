@@ -250,7 +250,7 @@ def test_neural_response_matches_process_assembly_exactly():
     stimuli = _stimulus_set()
 
     assert type(subject).participate is UnifiedModel.participate
-    scored = neural_response(subject, stimuli, record="IT")
+    scored = neural_response(subject, stimuli, ['neural:IT'])
 
     assert subject.recording_target == "IT"
     assert subject.process_input is stimuli
@@ -298,7 +298,7 @@ def test_a_behavior_session_sends_only_the_stimulus_rows():
     assert session.outputs == ("behavior",)
     assert session.task.instruction == "Choose the animal"
     assert session.task.fitting_stimuli is fitting
-    assert session.stimulus_set is scoring
+    assert session.stimuli is scoring
 
     events = list(iter(session.next_input, None))
 
@@ -329,10 +329,9 @@ def test_behavioral_response_falls_back_for_non_native_subject():
     context = TaskContext(
         task_type="probabilities",
         label_set=["cat", "dog"],
-        metadata={"stimulus_set": scoring},
     )
 
-    scored = behavioral_response(subject, context)
+    scored = behavioral_response(subject, scoring, context)
 
     assert type(subject).participate is UnifiedModel.participate
     assert subject.process_input is scoring
@@ -579,8 +578,8 @@ class TestRequestedNeuralChannels:
         """It returns one assembly, so it must not silently pick a region."""
         import pytest
         from brainscore_core.streaming_helpers import neural_response
-        with pytest.raises(TypeError, match='single region'):
-            neural_response(object(), self._stimuli(), record=['V4', 'IT'])
+        with pytest.raises(TypeError, match='one channel'):
+            neural_response(object(), self._stimuli(), ['neural:V4', 'neural:IT'])
 
 
 class _TypedSubject:
@@ -596,8 +595,8 @@ class _TypedSubject:
     def start_recording(self, target, time_bins=None):
         self.calls.append(('start_recording', target, time_bins))
 
-    def start_task(self, task_context):
-        self.calls.append(('start_task', task_context))
+    def start_task(self, task):
+        self.calls.append(('start_task', task))
 
     def process(self, stimuli, **kwargs):
         self.calls.append(('process', stimuli, kwargs))
@@ -697,10 +696,9 @@ class TestPublicSessionHelpers:
 
     def test_drive_behavior_session_refuses_variance_before_compute(self):
         from brainscore_core.streaming_helpers import drive_behavior_session
-        context = TaskContext(task_type='probabilities',
-                              metadata={'stimulus_set': _stimulus_set()})
+        context = TaskContext(task_type='probabilities')
         subject = _TypedSubject()
-        session = stimulus_session(context.metadata['stimulus_set'], ['behavior'], context)
+        session = stimulus_session(_stimulus_set(), ['behavior'], context)
         session.settings = {'require_variance': True}
         with pytest.raises(NotImplementedError, match='trial-to-trial variance'):
             drive_behavior_session(subject, session)

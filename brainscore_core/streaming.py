@@ -243,11 +243,11 @@ class Session(Source):
     Fixed inputs are always complete; a closed-loop source stays False until a
     terminal step. Runners must not accept an incomplete session as a measurement.
     """
-    context_fields = ('outputs', 'stimulus_set', 'task',
+    context_fields = ('outputs', 'stimuli', 'task',
                       'time_bins', 'streaming', 'settings')
 
     def __init__(self, source: Any, outputs: Optional[Iterable[str]] = None,
-                 task: Any = None, *, stimulus_set: Any = None, time_bins: Any = None,
+                 task: Any = None, *, stimuli: Any = None, time_bins: Any = None,
                  streaming: bool = False, settings: Any = None) -> None:
         self.source = source if isinstance(source, Source) else FixedSource(source)
         self.outputs: Optional[tuple[str, ...]] = None
@@ -258,7 +258,7 @@ class Session(Source):
             for channel in self.outputs:
                 parse_channel(channel)
         self.task = task
-        self.stimulus_set = stimulus_set
+        self.stimuli = stimuli
         self.time_bins = time_bins
         self._streaming = streaming
         # Per-measurement settings a legacy facade attaches (trial count, variance
@@ -286,7 +286,7 @@ class Session(Source):
         up front (a generator, a closed-loop source). A list of events with no table
         is a batch: its rows are rebuilt from the events and answered in one call."""
         listed = isinstance(self.source, FixedSource) and self.source.listed
-        return self._streaming or (self.stimulus_set is None and not listed)
+        return self._streaming or (self.stimuli is None and not listed)
 
     @streaming.setter
     def streaming(self, value: bool) -> None:
@@ -307,8 +307,8 @@ class Session(Source):
         declared = frozenset(channels)
         self._declared = declared if self._declared is None else self._declared & declared
         self._control = CONTROL_CHANNEL in self._declared
-        self.task = _declared_task(self.task, self.stimulus_set, self._declared)
-        self.stimulus_set = declared_only(self.stimulus_set, self._declared)
+        self.task = _declared_task(self.task, self.stimuli, self._declared)
+        self.stimuli = declared_only(self.stimuli, self._declared)
         return self
 
     def _request_control(self, driver: str) -> None:

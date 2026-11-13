@@ -56,7 +56,7 @@ class _Recorder(Subject):
         self.sessions.append(session)
         while session.next_input() is not None:
             pass
-        n = len(session.stimulus_set)
+        n = len(session.stimuli)
         for channel in session.outputs:
             neural = channel.startswith('neural:')
             cls = NeuroidAssembly if neural else BehavioralAssembly
@@ -105,7 +105,7 @@ def test_facade_passes_a_text_stimulus_set_unchanged():
                         'context_id': ['p', 'p']})
     facade.digest_text(text)
     session, = subject.sessions
-    assert session.stimulus_set is text
+    assert session.stimuli is text
     assert 'legacy_text' not in session.task.metadata
 
 

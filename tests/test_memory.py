@@ -76,7 +76,7 @@ class CountingFailingModel(FakeModel):
 
 
 class MultiRegionProbeModel(FakeModel):
-    """A layer-aware candidate that only accepts process() AFTER start_recording
+    """A layer-aware subject that only accepts process() AFTER start_recording
     (configured inside the benchmark's __call__, no .region attr). Records ONE
     region at a time; the width scales with how many regions were recorded (so a
     naive record-all fallback would inflate it), and an audio region 'A1' raises

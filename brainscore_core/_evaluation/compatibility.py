@@ -70,7 +70,7 @@ class CompatibilityMatch:
     benchmark: str
     consumed_inputs: FrozenSet[str]
     dropped_inputs: FrozenSet[str]
-    requested_outputs: FrozenSet[str]
+    requested_output_channels: FrozenSet[str]
 
     @property
     def kind(self) -> str:
@@ -82,7 +82,7 @@ class CompatibilityMatch:
             'match': self.kind,
             'consumed_inputs': sorted(self.consumed_inputs),
             'dropped_inputs': sorted(self.dropped_inputs),
-            'requested_outputs': sorted(self.requested_outputs),
+            'requested_output_channels': sorted(self.requested_output_channels),
         }
 
 
@@ -212,7 +212,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         benchmark=benchmark_id,
         consumed_inputs=frozenset(consumed),
         dropped_inputs=frozenset(bench_inputs - consumed),
-        requested_outputs=frozenset(bench_requested),
+        requested_output_channels=frozenset(bench_requested),
     )
 
 

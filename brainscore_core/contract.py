@@ -54,8 +54,8 @@ class TaskContext:
 
     ``BrainScoreModel`` accepts ``task_type`` ``'passive'`` or one of
     ``'probabilities'``, ``'classification'``, ``'label'``. Put the stimuli to
-    answer (for example a held-out test set) in ``metadata['stimulus_set']``
-    when using ``behavioral_response``.
+    answer (for example a held-out test set) to ``behavioral_response`` or
+    ``stimulus_session`` as ``stimuli``.
 
     ``response`` is the form of the answer (``brainscore_core.responses``):
     ``Choice``, ``Scale`` or ``Text``; ``task_type='passive'`` means no answer.
@@ -275,8 +275,8 @@ class UnifiedModel(Subject):
         from brainscore_core._sessions.helpers import drive_typed_session
         drive_typed_session(self, session)
 
-    def start_task(self, task_context: TaskContext) -> None:
-        self._task_context: Optional[TaskContext] = task_context
+    def start_task(self, task: TaskContext) -> None:
+        self._task: Optional[TaskContext] = task
 
     def start_recording(self,
                         recording_target: Union[str, List[str]],

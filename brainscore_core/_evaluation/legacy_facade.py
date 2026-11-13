@@ -25,7 +25,7 @@ from brainscore_core._sessions.buffered import stimulus_session
 PASSIVE = 'passive'
 
 LEGACY_API = 'legacy'     # calls look_at / digest_text and friends
-TYPED_API = 'typed'       # calls start_recording + process on the candidate
+TYPED_API = 'typed'       # calls start_recording + process on the subject
 SESSION_API = 'session'   # declares channels and drives participate itself
 
 
@@ -155,8 +155,8 @@ class LegacyBenchmarkFacade:
     def _behavior_requested(self) -> bool:
         return self._task is not None and self._task.task_type != PASSIVE
 
-    def _task_context(self) -> TaskContext:
-        """The task sent with each measurement: the recorded one, else one passive context."""
+    def _session_task(self) -> TaskContext:
+        """The task sent with each measurement: the recorded one, else one passive task."""
         if self._task is not None:
             return self._task
         if self._passive is None:
@@ -170,15 +170,14 @@ class LegacyBenchmarkFacade:
             raise ValueError(
                 f'{method} returns one region; several were requested '
                 f'({list(self._record)}). Use a session with one neural channel per region, '
-                "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']), "
-                'or process() for several regions.')
+                "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']).")
         return f'neural:{self._record}'
 
     def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
         """One session: the recorded task object, the time bins and the measurement settings."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        session = stimulus_session(stimuli, channels, self._task_context(),
+        session = stimulus_session(stimuli, channels, self._session_task(),
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
@@ -199,14 +198,14 @@ def mark_legacy_benchmark(benchmark):
 
 
 def subject_for_benchmark(subject, benchmark, *, visual_degrees: Optional[float] = None):
-    """The candidate a benchmark receives: the facade for legacy benchmarks, else the subject."""
+    """What a benchmark receives: the facade for legacy benchmarks, else the subject."""
     if getattr(benchmark, 'subject_api', None) != LEGACY_API:
         return subject
     return LegacyBenchmarkFacade(subject, visual_degrees=visual_degrees)
 
 
 def declared_visual_degrees(subject) -> Optional[float]:
-    """The field of view a vision candidate reports, or ``None`` when it has none.
+    """The field of view a vision subject reports, or ``None`` when it has none.
 
     ``visual_degrees()`` is part of the legacy vision ``BrainModel`` surface, a
     measurement setting of the vision harness rather than an ability; a
