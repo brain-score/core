@@ -40,16 +40,9 @@ class TaskContext:
       (``BrainScoreModel(behavioral_readout_layer=...)``)
     - Instruction-following models use instruction + label_set with their
       ``answer`` function (``BrainScoreModel(answer=...)``)
-    - Models that support both can choose their preferred approach
-
-    ``prefer_path`` lets a benchmark (or an experimenting user) pin which
-    behavioral dispatch path is selected when a model supports more than
-    one. Accepts ``'auto'`` (default — generation if available, else
-    readout), ``'generation'`` (force generation through the model's
-    ``answer``; error if no answer is registered or instruction/label_set
-    is empty), or ``'readout'`` (force readout, error if
-    behavioral_readout_layer is missing or fitting_stimuli is empty). Use
-    it instead of disabling a model's answer function to force readout.
+    - Which part answers is a property of the model, not of the task: a
+      model built with both answers through its answering part when the
+      task gives an instruction; a model built without it uses its readout
 
     ``BrainScoreModel`` accepts ``task_type`` ``'passive'`` or one of
     ``'probabilities'``, ``'classification'``, ``'label'``. Put the stimuli to
@@ -87,7 +80,6 @@ class TaskContext:
     label_set: Optional[List[str]] = None
     fitting_stimuli: Optional[Any] = None
     instruction: Optional[str] = None
-    prefer_path: Optional[str] = None  # 'auto' | 'generation' | 'readout'
     metadata: Dict[str, Any] = field(default_factory=dict)
     readout_fit: str = 'current'  # 'current' | 'intact'
     response: Any = None  # a brainscore_core.responses Choice, Scale or Text
