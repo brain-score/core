@@ -84,8 +84,10 @@ def upload_to_s3(source_file_path: Union[Path, str], bucket_name: str, target_s3
         the same form that `load_stimulus_set_from_s3` and `load_assembly_from_s3` accept.
     """
     _logger.debug(f"Uploading {source_file_path} to {bucket_name}/{target_s3_key}")
-    if '/' in bucket_name:  # split off the folder exactly like the s3 loaders and `get_path` do
+    if '/' in bucket_name:  # split off the folder like the s3 loaders do, and put it in front of the key
         bucket_name, folder_name = bucket_name.split('/', 1)
+        # the loaders' `BotoFetcher` drops empty path segments, so do the same here
+        folder_name = '/'.join(part for part in folder_name.split('/') if part)
         if folder_name:
             target_s3_key = f"{folder_name}/{target_s3_key}"
 
