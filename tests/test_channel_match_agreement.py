@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from brainscore_core._evaluation.compatibility import check_channel_compatibility
-from brainscore_core._evaluation.compatibility import CompatibilityError
+from brainscore_core.compatibility import check_channel_compatibility
+from brainscore_core.compatibility import CompatibilityError
 from brainscore_core.streaming import Session, StreamEvent
 
 POOL = ['vision:image', 'vision:video', 'text', 'audio']

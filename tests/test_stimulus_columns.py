@@ -14,7 +14,7 @@ from brainscore_core.compatibility import check_channel_compatibility
 from brainscore_core.contract import Subject
 from brainscore_core.extensions import CatalogEntry, register_channel
 from brainscore_core.responses import PART_CHANNELS, part_columns
-from brainscore_core.session_view import declared_only
+from brainscore_core.streaming_helpers import declared_only
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import stimulus_session
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet

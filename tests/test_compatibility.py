@@ -6,7 +6,7 @@ from brainscore_core.compatibility import (
     CompatibilityError,
     check_compatibility,
 )
-from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.contract import UnifiedModel
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ class TestModelRequiredModalities:
 
 # ── Available-modalities API on UnifiedModel ────────────────────────
 
-class TestAvailableModalitiesDefault:
+class TestSupportedModalitiesGiveTheInputs:
     """A model that states only supported_modalities takes its input channels
     from them and requires none."""
 
@@ -304,7 +304,6 @@ class TestAvailableModalitiesDefault:
             supported_modalities = {'vision', 'text'}
 
         model = _OnlySupported()
-        assert model.available_modalities == {'vision', 'text'}
         assert model.in_channels == {'vision:image', 'text'}
         assert model.required_modalities == set()
         assert not model.required_channels

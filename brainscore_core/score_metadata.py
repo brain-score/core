@@ -2,7 +2,7 @@
 
 from typing import Iterable, Optional, Set
 
-from brainscore_core._evaluation.compatibility import benchmark_requested_output_channels
+from brainscore_core.compatibility import benchmark_requested_output_channels
 from brainscore_core._evaluation.measures import (  # noqa: F401  (re-exported)
     MeasureRecord,
     note_measure,
@@ -134,19 +134,3 @@ def _behavior_protocol(measures: Optional[MeasureRecord]) -> str:
     if "likelihood" in measures.sources:
         return "behavior:likelihood"
     return "behavior:implied"
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    stamp_score_metadata,
-    requested_output_channels_for_score,
-    infer_score_protocol,
-    _sorted_tuple,
-    _channel_family,
-    _normalise_parent,
-    _optional_attr,
-    _is_behavior_parent,
-    _behavior_protocol,
-):
-    _definition.__module__ = 'brainscore_core.score_metadata'
-del _definition

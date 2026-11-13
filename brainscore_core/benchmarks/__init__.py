@@ -13,7 +13,20 @@ from brainscore_core.metrics import Score
 class Benchmark(ABC):
     """
     Standard Benchmark interface defining the method interfaces.
+
+    A benchmark that runs subjects through sessions declares what it sends and
+    what it requests (Contract Rules 5.1, 5.10, 5.12). The defaults below mean
+    "not declared"; pre-flight reads them, and a legacy benchmark keeps them.
     """
+
+    #: Every input channel the human participants received, e.g. ``{'vision:image'}``.
+    required_input_channels = None
+    #: Every output channel the benchmark's sessions request, e.g. ``{'neural:IT'}``.
+    requested_output_channels = None
+    #: ``'none'`` (independent trials) or ``'history'`` (needs ``memory:trial_history``).
+    trial_memory = 'none'
+    #: Subject traits the benchmark depends on, e.g. ``{'memory:trial_history'}``.
+    required_traits = None
 
     def __call__(self, candidate):
         """

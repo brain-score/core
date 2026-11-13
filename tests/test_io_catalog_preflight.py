@@ -7,7 +7,7 @@ import warnings
 
 import pytest
 
-from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.contract import UnifiedModel
 from brainscore_core.compatibility import (
     check_compatibility,
     CompatibilityError,
@@ -30,10 +30,6 @@ class _Model(UnifiedModel):
 
     @property
     def supported_modalities(self):
-        return self._av
-
-    @property
-    def available_modalities(self):
         return self._av
 
     def process(self, stimuli):

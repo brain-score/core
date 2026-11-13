@@ -282,18 +282,6 @@ def _time_bin_pairs(time_bins) -> List[Tuple[Any, Any]]:
     return pairs
 
 
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    LegacyBenchmarkFacade,
-    mark_legacy_benchmark,
-    subject_for_benchmark,
-    declared_visual_degrees,
-    text_stimulus_set,
-    repeat_over_time_bins,
-    _time_bin_pairs,
-):
-    _definition.__module__ = 'brainscore_core.legacy_facade'
-del _definition
 
 
 # Above this share of invalid answers the model is not doing the task; scoring

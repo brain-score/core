@@ -6,7 +6,7 @@ from brainscore_core.compatibility import (
     benchmark_required_input_channels,
     check_channel_compatibility,
 )
-from brainscore_core.model_interface import Subject
+from brainscore_core.contract import Subject
 
 
 class _Subject(Subject):

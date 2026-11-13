@@ -222,24 +222,14 @@ class UnifiedModel(Subject):
     @property
     @abstractmethod
     def supported_modalities(self) -> Set[str]:
-        """All modalities the model can consume. Concrete subclasses MUST
-        implement this. :py:attr:`available_modalities` defaults to this
-        value so code written for the two-tier contract works unchanged on
-        pre-two-tier subclasses."""
+        """All modalities the model can consume; :py:attr:`in_channels` comes from them."""
         ...
-
-    @property
-    def available_modalities(self) -> Set[str]:
-        """All modalities the model can consume. Defaults to
-        :py:attr:`supported_modalities`. Concrete subclasses may override
-        this directly (preferred new API) or rely on the default."""
-        return self.supported_modalities
 
     @property
     def required_modalities(self) -> Set[str]:
         """Modalities the model HARD-requires in stimuli. Empty by default —
         most models can run on whichever modality the benchmark provides, as
-        long as the intersection with :py:attr:`available_modalities` is
+        long as the intersection with :py:attr:`supported_modalities` is
         non-empty. Override for models that must receive a specific modality
         (single-modality text/video backbones, multimodal-fusion models that
         cannot degrade, etc.)."""
@@ -248,7 +238,7 @@ class UnifiedModel(Subject):
     @property
     def in_channels(self) -> Set[str]:
         """Input channels: the declared modalities as channel families."""
-        return modalities_to_input_channels(self.available_modalities)
+        return modalities_to_input_channels(self.supported_modalities)
 
     @property
     def out_channels(self) -> Set[str]:
@@ -272,7 +262,7 @@ class UnifiedModel(Subject):
 
     def participate(self, session: "Session") -> None:
         """Run ``session`` through this model's typed paths."""
-        from brainscore_core._sessions.helpers import drive_typed_session
+        from brainscore_core.streaming_helpers import drive_typed_session
         drive_typed_session(self, session)
 
     def start_task(self, task: TaskContext) -> None:

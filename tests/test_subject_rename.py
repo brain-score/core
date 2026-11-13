@@ -4,7 +4,7 @@ from abc import ABC
 import pytest
 
 import brainscore_core
-from brainscore_core.model_interface import Subject, UnifiedModel
+from brainscore_core.contract import Subject, UnifiedModel
 
 
 class TestSubjectRename:

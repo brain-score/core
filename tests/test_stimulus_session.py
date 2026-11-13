@@ -154,7 +154,7 @@ def test_trial_memory_history_needs_the_trial_history_trait():
 
 
 def test_history_benchmark_is_not_compatible_without_the_trait():
-    from brainscore_core._evaluation.compatibility import CompatibilityError, check_compatibility
+    from brainscore_core.compatibility import CompatibilityError, check_compatibility
     from brainscore_core.contract import Subject
 
     class _Subject(Subject):

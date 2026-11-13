@@ -1,9 +1,11 @@
 from .metrics import Metric, Score
 from .benchmarks import Benchmark
-from .model_interface import (
+from .contract import (
     TaskContext,
     Subject,
     UnifiedModel,  # compatibility base for the legacy typed interface
+)
+from .events import (
     Selection,
     Perturbation,
     StateChange,
@@ -11,54 +13,14 @@ from .model_interface import (
     InputEvent,
     OutputEvent,
 )
-from ._evaluation.compatibility import (
+from .compatibility import (
     CompatibilityError, CompatibilityWarning, check_compatibility,
 )
-from ._evaluation.score_status import STATUS_NA, na_score, score_or_na
-from ._evaluation.memory import MemoryError, check_memory, get_available_memory
+from .score_status import STATUS_NA, na_score, score_or_na
+from .memory import MemoryError, check_memory, get_available_memory
 from . import io_catalog
 from .io_catalog import CatalogEntry
-
-# Established imports share the actual implementation module and its state.
-import sys as _sys
-from ._sessions import helpers as streaming_helpers
-from ._sessions import view as session_view
-from ._evaluation import compatibility
-from ._evaluation import execution_plan
-from ._evaluation import memory
-from ._evaluation import preflight
-from ._evaluation import score_metadata
-from ._evaluation import score_status
-from ._evaluation import legacy_facade
-from ._data import assembly_builder
-from ._data import text
-from ._data import time_axis
-from ._runtime import environment_check
-from ._runtime import extraction_cache
-from ._runtime import hf_compat
-from ._runtime import extensions
-
-for _name, _module in (
-    ('streaming_helpers', streaming_helpers),
-    ('session_view', session_view),
-    ('compatibility', compatibility),
-    ('execution_plan', execution_plan),
-    ('memory', memory),
-    ('preflight', preflight),
-    ('score_metadata', score_metadata),
-    ('score_status', score_status),
-    ('legacy_facade', legacy_facade),
-    ('assembly_builder', assembly_builder),
-    ('text', text),
-    ('time_axis', time_axis),
-    ('environment_check', environment_check),
-    ('extraction_cache', extraction_cache),
-    ('hf_compat', hf_compat),
-    ('extensions', extensions),
-    ('_env_check', environment_check),
-):
-    _sys.modules[__name__ + '.' + _name] = _module
-del _sys, _name, _module
+from . import environment_check
 
 # Warn about dependency drift before scoring.
 environment_check.warn_on_drift()

@@ -35,8 +35,13 @@ def weight_fingerprint_scope():
 
     Normal tensor edits and storage replacement invalidate entries. Writes via
     .data aliases or NumPy bypass version counters and must occur between runs.
-    Outside this scope every lookup reads the full tensor contents.
+    Outside this scope every lookup reads the full tensor contents. A scope
+    opened inside an active one reuses it, so a session in a scored run shares
+    the run's hashes.
     """
+    if _weight_hashes.get() is not None:
+        yield
+        return
     token = _weight_hashes.set({})
     try:
         yield
@@ -320,26 +325,3 @@ class store_xarray(_store_xarray):
                 logger.info('Activation cache miss: %s; unversioned entries are retained but cannot be reused',
                             identifier)
         return identifier
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    weight_fingerprint_scope,
-    UncacheableConfiguration,
-    FileContent,
-    file_inputs,
-    _tensor_chunks,
-    _hash_tensor,
-    _tensor_content,
-    _name,
-    _version,
-    _canonical,
-    fingerprint,
-    extraction_fingerprint,
-    model_config,
-    wrapper_config,
-    implementation_config,
-    store_xarray,
-):
-    _definition.__module__ = 'brainscore_core.extraction_cache'
-del _definition

@@ -5,15 +5,8 @@ import pytest
 import xarray as xr
 
 from brainscore_core import io_catalog
-from brainscore_core.model_interface import (
-    Perturbation,
-    PerturbationApplied,
-    Selection,
-    StateChange,
-    Subject,
-    UnifiedModel,
-    TaskContext,
-)
+from brainscore_core.contract import Subject, UnifiedModel, TaskContext
+from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
 from brainscore_core.streaming import NamedStreams
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (

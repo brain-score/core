@@ -17,7 +17,7 @@ from typing import Callable, TypeVar
 
 import numpy as np
 
-from brainscore_core._evaluation.compatibility import CompatibilityError
+from brainscore_core.compatibility import CompatibilityError
 from brainscore_core.metrics import Score
 
 
@@ -45,12 +45,3 @@ def score_or_na(score_function: Callable[..., _T], *args, **kwargs) -> _T | Scor
         return score_function(*args, **kwargs)
     except CompatibilityError as error:
         return na_score(str(error), error_type=type(error).__name__)
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    na_score,
-    score_or_na,
-):
-    _definition.__module__ = 'brainscore_core.score_status'
-del _definition

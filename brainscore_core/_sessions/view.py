@@ -25,7 +25,7 @@ def declared_only(stimulus_set, channels):
     if stimulus_set is None:
         return None
     from brainscore_core.io_catalog import column_channel
-    from brainscore_core._sessions.helpers import preserve_stimulus_set_type
+    from .payloads import preserve_stimulus_set_type
     declared = frozenset(channels)
 
     omitted = []
@@ -66,7 +66,3 @@ def _declared_task(task, stimulus_set, channels):
     if len(kept) == len(task.present):
         return task
     return replace(task, present=tuple(kept))
-
-
-# Keep the existing public module name stable.
-declared_only.__module__ = 'brainscore_core.session_view'

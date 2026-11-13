@@ -26,18 +26,18 @@ please [send in a pull request](https://github.com/brain-score/core/pulls).
 | --- | --- |
 | `contract.py`, `events.py`, `streaming.py` | `Subject`, `TaskContext`, event types, `StreamEvent`, `Session` |
 | `io_catalog.py`, `responses.py`, `environment.py` | Channel catalog, answer forms, environment specifications |
-| `model_interface.py` | Public names of the subject contract and events |
-| `_sessions/` | Session helpers, environment source, perception windows, session drivers |
-| `_evaluation/` | Compatibility, preflight, memory checks, legacy facade |
-| `_data/` | Assembly builders, text and time helpers |
-| `_runtime/` | Extraction cache, environment checks, extensions |
+| `model_interface.py` | The subject contract and its events, under one older name |
+| `compatibility.py`, `memory.py`, `preflight.py`, `score_metadata.py`, `score_status.py`, `legacy_facade.py`, `execution_plan.py` | Pre-flight, memory checks, score stamps, the legacy-benchmark facade |
+| `streaming_helpers.py` | Session helpers: build a session, run a subject on it, read its outputs |
+| `assembly_builder.py`, `text.py`, `time_axis.py` | Assembly builders, text and time helpers |
+| `extraction_cache.py`, `environment_check.py`, `hf_compat.py`, `extensions.py` | Extraction cache, environment checks, extensions |
+| `_sessions/`, `_evaluation/` | Internal: the session implementation and the measure record |
 
 `BrainScoreModel` and the temporal analysis functions are in the unified
 `brainscore` package, not in this repository.
 
-Imports such as `brainscore_core.memory` and `brainscore_core.streaming_helpers`
-still work. They point to the modules in the underscored folders. Those
-folders are internal, so import from the public names.
+Each module has one import path. Import from the names above, not from the
+underscored folders.
 
 ## License
 

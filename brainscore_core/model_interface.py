@@ -1,13 +1,8 @@
-"""Public names of the Brain-Score subject contract and its events.
+"""The subject contract and its events under an older name.
 
-The concrete ``BrainScoreModel``, its unit selectors and its capability
-registry live in the unified ``brainscore`` package.
+A legacy vision plugin test imports from here, so the name stays. New code
+imports from ``brainscore_core.contract`` and ``brainscore_core.events``.
 """
-
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
-import warnings
 
 from .events import (
     InputEvent,

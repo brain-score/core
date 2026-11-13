@@ -35,7 +35,7 @@ def test_text_stimulus_set_keys_cache_by_content():
 
 # --- the facade runs any subject through participate ------------------------
 
-from brainscore_core.model_interface import Subject
+from brainscore_core.contract import Subject
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 

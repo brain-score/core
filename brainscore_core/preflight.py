@@ -25,11 +25,3 @@ def check_cache_directory():
             'starting Python. Set RESULTCACHING_DISABLE=1 to run without caching.'
         ) from error
     return path
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    check_cache_directory,
-):
-    _definition.__module__ = 'brainscore_core.preflight'
-del _definition

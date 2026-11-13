@@ -35,7 +35,7 @@ from typing import Dict, FrozenSet, Optional, Set
 from brainscore_core import io_catalog
 from brainscore_core.contract import required_traits_for
 from brainscore_core.io_catalog import canonical_modality, modalities_to_input_channels
-from brainscore_core.model_interface import Subject
+from brainscore_core.contract import Subject
 from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_channel
 
 
@@ -356,23 +356,3 @@ def check_compatibility(model: Subject, benchmark) -> CompatibilityMatch:
 
     match = check_channel_compatibility(model, benchmark)
     return match
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    CompatibilityError,
-    CompatibilityWarning,
-    ensure_legacy_benchmark_modalities,
-    CompatibilityMatch,
-    check_channel_compatibility,
-    benchmark_input_channels,
-    benchmark_required_input_channels,
-    benchmark_accepted_input_channels,
-    benchmark_requested_output_channels,
-    validate_channels,
-    _format_channels,
-    _benchmark_identifier,
-    check_compatibility,
-):
-    _definition.__module__ = 'brainscore_core.compatibility'
-del _definition

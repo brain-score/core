@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from brainscore_core.contract import Subject
-from brainscore_core._evaluation.compatibility import CompatibilityError, check_channel_compatibility
+from brainscore_core.compatibility import CompatibilityError, check_channel_compatibility
 from brainscore_core.streaming import (
     Session, StreamEvent, begin_event, end_event, respond_event,
 )

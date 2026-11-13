@@ -10,7 +10,7 @@ from brainscore_core.memory import (
     estimate_metric_memory,
     check_memory,
 )
-from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.contract import UnifiedModel
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
@@ -794,7 +794,7 @@ class TestProbeCacheIsolation:
         """Identifiers of the stimuli each probe session shows the subject."""
         import numpy as np
         from types import SimpleNamespace
-        from brainscore_core.model_interface import Subject
+        from brainscore_core.contract import Subject
         from brainscore_core.streaming import StreamEvent
 
         class Watching(Subject):
@@ -854,7 +854,7 @@ class TestProbeSafeRegions:
     def _subject(self, region_layer_map=None, probe_safe_regions=None, failing=()):
         """A subject declaring neural:V4, neural:EXTRA, neural:IT that counts its sessions."""
         import numpy as np
-        from brainscore_core.model_interface import Subject
+        from brainscore_core.contract import Subject
         from brainscore_core.streaming import StreamEvent
         from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 

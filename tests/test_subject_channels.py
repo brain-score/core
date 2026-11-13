@@ -1,6 +1,6 @@
 import pytest
 
-from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.contract import UnifiedModel
 
 
 class _ChannelSubject(UnifiedModel):
