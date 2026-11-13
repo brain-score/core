@@ -63,14 +63,14 @@ ShapeValidator = Callable[[Any], object]
 class CatalogEntry:
     """One channel family and its payload contract.
 
-    ``name``, ``kind``, ``payload_contract``, ``meta_keys``, ``addressing``,
+    ``name``, ``direction``, ``payload_contract``, ``meta_keys``, ``addressing``,
     ``expected_ndim``, ``expected_dtype``, ``shape_validator`` and ``payload_type``
-    are read by pre-flight and by sessions. ``direction`` repeats ``kind``.
+    are read by pre-flight and by sessions.
     ``carried_by``, ``handled_by``, ``owner`` and ``materializers`` are notes for
     readers; no code reads them.
     """
     name: str                          # channel family, e.g. 'text', 'neural'
-    kind: str                          # INPUT, OUTPUT, or BOTH
+    direction: str                     # INPUT, OUTPUT, or BOTH
     carried_by: str                    # note: what carries it (a table column, a task, a policy)
     payload_contract: str              # human-readable dtype / shape / units
     handled_by: str                    # note: which harness or wrapper interprets the payload
@@ -78,21 +78,14 @@ class CatalogEntry:
     addressing: Optional[str] = None    # how the ':address' suffix is interpreted, if any
     expected_ndim: Tuple[int, ...] = ()  # allowed array ndims; empty means unchecked
     expected_dtype: Optional[str] = None  # e.g. 'uint8'; None means unchecked
-    direction: Optional[str] = None     # same value as kind; given or filled from kind
     shape_validator: Optional[ShapeValidator] = None
     owner: str = "core"                # note: who defines the family
     materializers: Tuple[str, ...] = ()  # note: the objects that produce it
     payload_type: Any = None            # type or tuple of types a payload must be; None means unchecked
 
     def __post_init__(self):
-        if self.kind not in _DIRECTIONS:
-            raise ValueError(f"CatalogEntry.kind must be one of {_DIRECTIONS}")
-        direction = self.kind if self.direction is None else self.direction
-        if direction not in _DIRECTIONS:
+        if self.direction not in _DIRECTIONS:
             raise ValueError(f"CatalogEntry.direction must be one of {_DIRECTIONS}")
-        if direction != self.kind:
-            raise ValueError("CatalogEntry.direction must match kind")
-        object.__setattr__(self, "direction", direction)
         object.__setattr__(self, "meta_keys", tuple(self.meta_keys))
         object.__setattr__(self, "expected_ndim", tuple(self.expected_ndim))
         object.__setattr__(self, "materializers", tuple(self.materializers))
@@ -147,7 +140,7 @@ def register_channel(entry: CatalogEntry, *, columns: Iterable[str] = (),
             f"Channel family {entry.name!r} is already registered "
             f"(owner {existing.owner!r}); pass replace=True to replace it.")
     if columns:
-        if entry.kind not in (INPUT, BOTH):
+        if entry.direction not in (INPUT, BOTH):
             raise ValueError('Only input channels can own stimulus columns')
         problem = form_problem(entry.name)
         if problem:

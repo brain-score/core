@@ -22,15 +22,15 @@ class TestSeedCatalog:
         assert expected <= names
 
     def test_inputs_and_outputs_partition(self):
-        inputs = {e.name for e in io_catalog.all_entries() if e.kind == INPUT}
-        outputs = {e.name for e in io_catalog.all_entries() if e.kind == OUTPUT}
+        inputs = {e.name for e in io_catalog.all_entries() if e.direction == INPUT}
+        outputs = {e.name for e in io_catalog.all_entries() if e.direction == OUTPUT}
         assert "vision" in inputs and "lesion" in inputs
         assert {"neural", "behavior", "motor"} <= outputs
         assert inputs.isdisjoint(outputs)
 
     def test_every_entry_is_documented(self):
         for e in io_catalog.all_entries():
-            assert e.kind in (INPUT, OUTPUT)
+            assert e.direction in (INPUT, OUTPUT)
             assert e.payload_contract, f"{e.name} has no payload contract"
             assert e.handled_by, f"{e.name} has no handler"
 
@@ -95,7 +95,7 @@ class TestRegister:
     def test_register_and_get_roundtrip(self, monkeypatch):
         monkeypatch.setattr(io_catalog, "_CATALOG", dict(io_catalog._CATALOG))
         entry = CatalogEntry(
-            name="pupil", kind=OUTPUT, carried_by="start_recording('pupil')",
+            name="pupil", direction=OUTPUT, carried_by="start_recording('pupil')",
             payload_contract="(time,) float diameter in mm",
             handled_by="an eye-tracker harness",
         )
@@ -107,7 +107,7 @@ class TestRegister:
         monkeypatch.setattr(io_catalog, "_CATALOG", dict(io_catalog._CATALOG))
         original = io_catalog.get("pupil")
         clash = CatalogEntry(
-            name="pupil", kind=OUTPUT, carried_by="x", payload_contract="x",
+            name="pupil", direction=OUTPUT, carried_by="x", payload_contract="x",
             handled_by="another harness",
         )
         with pytest.raises(ValueError, match="already registered"):

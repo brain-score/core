@@ -205,6 +205,13 @@ class TestDeprecatedBenchmarkAvailableModalities:
             warnings.simplefilter('error')
             check_compatibility(model, bench)  # no warning
 
+    def test_warning_fires_before_the_compatibility_error(self):
+        """An incompatible pair still shows the maintainer the deprecation."""
+        bench = FakeBenchmark(required_modalities={'vision'}, available_modalities={'audio'})
+        with pytest.warns(DeprecationWarning, match="deprecated as of the April 30"):
+            with pytest.raises(CompatibilityError):
+                check_compatibility(FakeModel(in_channels={'text'}), bench)
+
 # ── Region mapping ──────────────────────────────────────────────────
 
 class TestRegionMapping:

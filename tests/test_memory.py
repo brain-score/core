@@ -227,10 +227,13 @@ class TestMetricInputsFromTheBenchmark:
 
     def test_stimulus_count_comes_from_the_stimulus_set_or_the_assembly(self):
         from types import SimpleNamespace
-        from_set = FakeBenchmark(identifier='x-rdm', n_stimuli=300)
+        from_set = FakeBenchmark(identifier='x-rdm', n_stimuli=500)
         from_assembly = SimpleNamespace(identifier='x-rdm', stimulus_set=None,
                                         _assembly=FakeAssembly(n_stimuli=300))
-        assert estimate_metric_memory(from_assembly) == estimate_metric_memory(from_set) > 0
+        for bench, count in ((from_set, 500), (from_assembly, 300)):
+            inferred = estimate_metric_memory(bench)
+            assert inferred == estimate_metric_memory(bench, n_stimuli=count) > 0
+            assert inferred != estimate_metric_memory(bench, n_stimuli=count + 1)
 
 
 # ── estimate_metric_memory ───────────────────────────────────────────

@@ -6,13 +6,11 @@ from brainscore_core.io_catalog import INPUT, OUTPUT, CatalogEntry
 
 def test_seed_entry_fields_are_queryable():
     vision = io_catalog.get("vision")
-    assert vision.kind == INPUT
     assert vision.direction == INPUT
     assert vision.owner == "core"
     assert vision.materializers == ("StimulusSet",)
 
     neural = io_catalog.get("neural:IT")
-    assert neural.kind == OUTPUT
     assert neural.direction == OUTPUT
     assert neural.owner == "core"
     assert "NeuroidAssembly" in neural.materializers
@@ -28,7 +26,7 @@ def test_seed_entry_fields_are_queryable():
 def test_catalog_entry_keeps_v1_constructor_defaults():
     entry = CatalogEntry(
         name="pupil",
-        kind=OUTPUT,
+        direction=OUTPUT,
         carried_by="start_recording('pupil')",
         payload_contract="(time,) float diameter in mm",
         handled_by="an eye-tracker harness",
