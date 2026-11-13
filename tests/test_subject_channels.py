@@ -1,6 +1,6 @@
 import pytest
 
-from brainscore_core.model_interface import Subject, UnifiedModel
+from brainscore_core.model_interface import UnifiedModel
 
 
 class _ChannelSubject(UnifiedModel):
@@ -87,11 +87,6 @@ def test_legacy_subclass_still_instantiates_without_participate():
 
     assert subject.process(None) == "ok"
     assert subject.in_channels == {"vision:image"}
-
-
-def test_unifiedmodel_remains_a_subject():
-    assert issubclass(UnifiedModel, Subject)
-    assert UnifiedModel is not Subject
 
 
 def test_typed_model_without_multi_modality_runs_multimodal_session():

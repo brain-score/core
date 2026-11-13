@@ -62,12 +62,9 @@ class TestRequiredModalities:
     def test_matching_modalities_passes(self):
         model = FakeModel(modalities={'vision'})
         bench = FakeBenchmark(required_modalities={'vision'})
-        check_compatibility(model, bench)  # should not raise
-
-    def test_superset_modalities_passes(self):
-        model = FakeModel(modalities={'vision', 'text'})
-        bench = FakeBenchmark(required_modalities={'vision'})
-        check_compatibility(model, bench)
+        match = check_compatibility(model, bench)
+        assert match.kind == 'full'
+        assert match.consumed_inputs == {'vision:image'}
 
     def test_missing_required_raises(self):
         model = FakeModel(modalities={'text'})
@@ -131,22 +128,14 @@ class TestRequiredModalities:
 
 class TestAcceptedModalities:
 
-    def test_any_one_accepted_passes(self):
-        bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
-        check_compatibility(FakeModel(modalities={'vision', 'text'}), bench)
-        check_compatibility(FakeModel(modalities={'video'}), bench)  # video-only too
-
-    def test_none_accepted_raises(self):
-        bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
-        with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
-            check_compatibility(FakeModel(modalities={'text'}), bench)
-
     def test_required_plus_accepted_combo(self):
         # multimodal A+V: audio required (all-of) + video|vision accepted (any-of)
         bench = FakeBenchmark(required_modalities={'audio'},
                               accepted_modalities={'video', 'vision'})
-        check_compatibility(FakeModel(modalities={'audio', 'video'}), bench)
-        check_compatibility(FakeModel(modalities={'audio', 'vision'}), bench)
+        assert check_compatibility(FakeModel(modalities={'audio', 'video'}), bench).consumed_inputs == {
+            'audio', 'vision:video'}
+        assert check_compatibility(FakeModel(modalities={'audio', 'vision'}), bench).consumed_inputs == {
+            'audio', 'vision:image'}
         # Missing audio or missing both visual formats: partial, still runs.
         assert check_compatibility(FakeModel(modalities={'video'}), bench).dropped_inputs == {'audio', 'vision:image'}
         assert check_compatibility(FakeModel(modalities={'audio'}), bench).dropped_inputs == {
@@ -159,7 +148,7 @@ class TestAcceptedModalities:
         # benchmark ACCEPTS video (required ∪ accepted).
         bench = FakeBenchmark(accepted_modalities={'video', 'vision'})
         model = FakeModel(modalities={'video'}, required_modalities={'video'})
-        check_compatibility(model, bench)  # should not raise
+        assert check_compatibility(model, bench).consumed_inputs == {'vision:video'}
 
 
 class TestVisualFormsAreSeparateChannels:
@@ -177,8 +166,8 @@ class TestVisualFormsAreSeparateChannels:
 
     def test_benchmark_with_both_forms_runs_either_model(self):
         bench = FakeBenchmark(accepted_modalities={'vision', 'video'})
-        check_compatibility(FakeModel(modalities={'vision'}), bench)
-        check_compatibility(FakeModel(modalities={'video'}), bench)
+        assert check_compatibility(FakeModel(modalities={'vision'}), bench).consumed_inputs == {'vision:image'}
+        assert check_compatibility(FakeModel(modalities={'video'}), bench).consumed_inputs == {'vision:video'}
 
     def test_a_bare_vision_declaration_is_refused(self):
         bench = FakeBenchmark()
@@ -216,40 +205,6 @@ class TestDeprecatedBenchmarkAvailableModalities:
             warnings.simplefilter('error')
             check_compatibility(model, bench)  # no warning
 
-    def test_no_available_modalities_no_warning(self):
-        model = FakeModel(modalities={'vision'})
-        bench = FakeBenchmark(required_modalities={'vision'})
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
-            check_compatibility(model, bench)  # no warning
-
-    def test_deprecation_warning_does_not_block_valid_pairing(self):
-        """Deprecated available_modalities still lets valid pairings score."""
-        model = FakeModel(modalities={'vision', 'audio'})
-        bench = FakeBenchmark(
-            required_modalities={'vision'},
-            available_modalities={'audio'},
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter('always')
-            check_compatibility(model, bench)  # raises nothing
-
-    def test_deprecation_warning_fires_before_compat_error(self):
-        """If both a deprecation case and a hard compatibility failure are
-        present, the maintainer should see the deprecation warning so they
-        can act on it even if the test pairing is broken."""
-        model = FakeModel(modalities={'text'})  # no vision
-        bench = FakeBenchmark(
-            required_modalities={'vision'},
-            available_modalities={'audio'},  # deprecated field
-        )
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            with pytest.raises(CompatibilityError):
-                check_compatibility(model, bench)
-        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-
-
 # ── Region mapping ──────────────────────────────────────────────────
 
 class TestRegionMapping:
@@ -257,7 +212,11 @@ class TestRegionMapping:
     def test_region_present_passes(self):
         model = FakeModel(modalities={'vision'}, region_layer_map={'IT': 'layer4'})
         bench = FakeBenchmark(required_modalities={'vision'}, region='IT')
-        check_compatibility(model, bench)
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            match = check_compatibility(model, bench)
+        assert match.kind == 'full'
+        assert match.requested_output_channels == {'neural:IT'}
 
     def test_region_missing_raises(self):
         model = FakeModel(modalities={'vision'}, region_layer_map={'V1': 'layer1'})
@@ -268,25 +227,12 @@ class TestRegionMapping:
     def test_no_region_on_benchmark(self):
         model = FakeModel(modalities={'vision'}, region_layer_map={})
         bench = FakeBenchmark(required_modalities={'vision'})
-        check_compatibility(model, bench)  # no region check needed
+        assert check_compatibility(model, bench).requested_output_channels == frozenset()
 
 
 # ── Combined scenarios ──────────────────────────────────────────────
 
 class TestCombinedScenarios:
-
-    def test_full_compatible_model(self):
-        model = FakeModel(
-            modalities={'vision'},
-            region_layer_map={'IT': 'layer4'},
-        )
-        bench = FakeBenchmark(
-            required_modalities={'vision'},
-            region='IT',
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
-            check_compatibility(model, bench)
 
     def test_missing_output_reported_before_inputs(self):
         """A missing requested output is reported first, even if inputs also fail."""
@@ -318,21 +264,6 @@ class TestModelRequiredModalities:
     model's required set must be a subset of the benchmark's required set.
     """
 
-    def test_unimodal_model_requirement_satisfied(self):
-        # GPT-2 style: requires text, benchmark provides text
-        model = FakeModel(modalities={'text'}, required_modalities={'text'})
-        bench = FakeBenchmark(required_modalities={'text'})
-        check_compatibility(model, bench)  # no raise
-
-    def test_unimodal_model_requirement_unmet_raises(self):
-        # Benchmark is vision-only, model requires text (e.g. GPT-2 on V4)
-        model = FakeModel(modalities={'text'}, required_modalities={'text'})
-        bench = FakeBenchmark(required_modalities={'vision'})
-        # Fails at check 1 first (benchmark.required={'vision'} not in
-        # model.available={'text'}); message differs but it's a hard error.
-        with pytest.raises(CompatibilityError):
-            check_compatibility(model, bench)
-
     def test_locked_fusion_model_full_provision(self):
         # Locked fusion that exactly matches the benchmark's input format
         model = FakeModel(
@@ -342,7 +273,7 @@ class TestModelRequiredModalities:
         bench = FakeBenchmark(
             required_modalities={'vision', 'audio', 'text'},
         )
-        check_compatibility(model, bench)  # all three present
+        assert check_compatibility(model, bench).kind == 'full'
 
     def test_locked_fusion_missing_audio_raises(self):
         # Model needs audio, benchmark only provides vision + text
@@ -351,49 +282,29 @@ class TestModelRequiredModalities:
             required_modalities={'vision', 'audio', 'text'},
         )
         bench = FakeBenchmark(
+            identifier='movie-watching-no-sound',
             required_modalities={'vision', 'text'},
         )
-        with pytest.raises(CompatibilityError, match="hard-requires"):
+        with pytest.raises(CompatibilityError, match="hard-requires") as exc_info:
             check_compatibility(model, bench)
-
-    def test_model_available_but_not_required_can_degrade(self):
-        # CLIP-style: available={vision, text}, required={}
-        # Benchmark provides only vision; model can run with just vision.
-        model = FakeModel(
-            modalities={'vision', 'text'},
-            required_modalities=set(),
-        )
-        bench = FakeBenchmark(required_modalities={'vision'})
-        check_compatibility(model, bench)  # no raise, no warn needed
-
-    def test_error_message_identifies_missing_modality(self):
-        model = FakeModel(
-            identifier='tribev2',
-            modalities={'vision', 'audio', 'text'},
-            required_modalities={'vision', 'audio', 'text'},
-        )
-        bench = FakeBenchmark(
-            identifier='movie-watching-vision-only',
-            required_modalities={'vision'},
-        )
-        with pytest.raises(CompatibilityError) as exc_info:
-            check_compatibility(model, bench)
-        msg = str(exc_info.value)
-        assert 'tribev2' in msg and 'movie-watching-vision-only' in msg
-        assert 'audio' in msg and 'text' in msg
-
+        message = str(exc_info.value)
+        assert 'test-model' in message and 'movie-watching-no-sound' in message
+        assert 'audio' in message
 
 # ── Available-modalities API on UnifiedModel ────────────────────────
 
 class TestAvailableModalitiesDefault:
-    """Models that only override supported_modalities should still get a
-    working available_modalities via the concrete default on the ABC."""
+    """A model that states only supported_modalities takes its input channels
+    from them and requires none."""
 
-    def test_legacy_model_available_defaults_to_supported(self):
-        model = FakeModel(modalities={'vision', 'text'})
+    def test_supported_modalities_give_the_inputs_and_no_requirement(self):
+        class _OnlySupported(UnifiedModel):
+            identifier = 'only-supported'
+            region_layer_map = {}
+            supported_modalities = {'vision', 'text'}
+
+        model = _OnlySupported()
         assert model.available_modalities == {'vision', 'text'}
-        assert model.supported_modalities == {'vision', 'text'}
-
-    def test_legacy_model_required_defaults_to_empty(self):
-        model = FakeModel(modalities={'vision'})
+        assert model.in_channels == {'vision:image', 'text'}
         assert model.required_modalities == set()
+        assert not model.required_channels

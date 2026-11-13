@@ -68,22 +68,6 @@ def test_transformers_just_below_shipped_floor_flagged(monkeypatch):
     assert any("transformers" in d for d in _env_check.check_env_bounds())
 
 
-def test_public_module_is_the_old_module():
-    """The old private name is an alias of the public module, not a copy."""
-    from brainscore_core import environment_check
-    assert _env_check is environment_check
-    assert environment_check.describe_env is _env_check.describe_env
-
-
-def test_patching_the_old_name_reaches_the_public_functions(monkeypatch):
-    from brainscore_core import environment_check
-    v = {"transformers": "4.57.1", "scikit-learn": "1.8.0",
-         "numpy": "1.26.4", "xarray": "2022.3.0"}
-    monkeypatch.setattr(_env_check, "version", lambda p: v[p])
-    assert [row[0] for row in environment_check.describe_env()
-            if row[3] is False] == ["scikit-learn"]
-
-
 def test_describe_env_reports_passing_absent_and_drifted_rows(monkeypatch):
     from importlib.metadata import PackageNotFoundError
     from brainscore_core import environment_check

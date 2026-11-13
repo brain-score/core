@@ -9,9 +9,6 @@ from brainscore_core.memory import (
     reset_peak_memory,
     estimate_metric_memory,
     check_memory,
-    _detect_metric_category,
-    _get_n_targets,
-    _get_n_stimuli,
 )
 from brainscore_core.model_interface import UnifiedModel
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
@@ -179,76 +176,61 @@ class TestResetPeakMemory:
         reset_peak_memory()  # should not raise
 
 
-# ── _detect_metric_category ──────────────────────────────────────────
+# ── what estimate_metric_memory reads from a benchmark ──────────────
 
-class TestDetectMetricCategory:
+class TestMetricInputsFromTheBenchmark:
+    """The metric kind, the target count and the stimulus count come from the benchmark.
 
-    def test_pls_from_identifier(self):
-        bench = FakeBenchmark(identifier='MajajHong2015.IT-pls')
-        assert _detect_metric_category(bench) == 'pls'
+    Each case compares the estimate with the estimate for an explicit value
+    (``category=``, ``n_targets``), so the test goes through the public function.
+    """
 
-    def test_ridge_from_identifier(self):
-        bench = FakeBenchmark(identifier='Allen2022_fmri_surface.IT-ridge')
-        assert _detect_metric_category(bench) == 'ridge'
+    def test_each_category_gives_its_own_estimate(self):
+        bench = FakeBenchmark(identifier='plain', n_stimuli=100,
+                              assembly=FakeAssembly(n_neuroids=600))
+        estimates = {category: estimate_metric_memory(bench, category=category)
+                     for category in ('pls', 'ridge', 'ridgecv', 'rsa', 'behavioral')}
+        assert len(set(estimates.values())) == 5
+        assert estimates['behavioral'] == 0
 
-    def test_ridgecv_from_identifier(self):
-        bench = FakeBenchmark(identifier='Papale2025.IT-ridgecv')
-        assert _detect_metric_category(bench) == 'ridgecv'
+    @pytest.mark.parametrize('identifier, has_assembly, category', [
+        ('MajajHong2015.IT-pls', True, 'pls'),
+        ('Allen2022_fmri_surface.IT-ridge', True, 'ridge'),
+        ('Papale2025.IT-ridgecv', True, 'ridgecv'),
+        ('something-ridgecv-split', True, 'ridgecv'),   # ridgecv wins over ridge
+        ('Allen2022_fmri_surface.IT-rdm', True, 'rsa'),
+        ('Rajalingham2018-i2n', False, 'behavioral'),   # no assembly: behavioral
+        ('SomeBench', True, 'pls'),                     # neural default
+    ])
+    def test_category_comes_from_the_identifier_or_the_assembly(self, identifier, has_assembly,
+                                                                 category):
+        bench = FakeBenchmark(identifier=identifier, n_stimuli=100,
+                              assembly=FakeAssembly(n_neuroids=600) if has_assembly else None)
+        assert estimate_metric_memory(bench) == estimate_metric_memory(bench, category=category)
 
-    def test_ridgecv_preferred_over_ridge(self):
-        bench = FakeBenchmark(identifier='something-ridgecv-split')
-        assert _detect_metric_category(bench) == 'ridgecv'
+    def test_a_benchmark_without_identifier_is_behavioral(self):
+        assert estimate_metric_memory(MagicMock(spec=[])) == 0
 
-    def test_rsa_from_rdm(self):
-        bench = FakeBenchmark(identifier='Allen2022_fmri_surface.IT-rdm')
-        assert _detect_metric_category(bench) == 'rsa'
+    @pytest.mark.parametrize('attribute', ['_assembly', 'train_assembly'])
+    def test_target_count_is_read_from_the_assembly(self, attribute):
+        bench = FakeBenchmark(identifier='x-pls', n_stimuli=100)
+        setattr(bench, attribute, FakeAssembly(n_neuroids=3000))
+        declared = FakeBenchmark(identifier='x-pls', n_stimuli=100, n_targets=3000)
+        assert estimate_metric_memory(bench) == estimate_metric_memory(declared)
 
-    def test_behavioral_no_assembly(self):
-        bench = FakeBenchmark(identifier='Rajalingham2018-i2n')
-        assert _detect_metric_category(bench) == 'behavioral'
+    def test_target_count_defaults_to_100(self):
+        default = FakeBenchmark(identifier='x-pls', n_stimuli=100)
+        assert estimate_metric_memory(default) == estimate_metric_memory(
+            FakeBenchmark(identifier='x-pls', n_stimuli=100, n_targets=100))
+        assert estimate_metric_memory(default) != estimate_metric_memory(
+            FakeBenchmark(identifier='x-pls', n_stimuli=100, n_targets=3000))
 
-    def test_neural_with_assembly_defaults_to_pls(self):
-        bench = FakeBenchmark(identifier='SomeBench',
-                              assembly=FakeAssembly())
-        assert _detect_metric_category(bench) == 'pls'
-
-    def test_no_identifier(self):
-        bench = MagicMock(spec=[])
-        assert _detect_metric_category(bench) == 'behavioral'
-
-
-class TestGetNTargets:
-
-    def test_reads_from_assembly(self):
-        bench = FakeBenchmark(assembly=FakeAssembly(n_neuroids=3000))
-        assert _get_n_targets(bench) == 3000
-
-    def test_reads_from_train_assembly(self):
-        bench = FakeBenchmark()
-        bench.train_assembly = FakeAssembly(n_neuroids=5000)
-        assert _get_n_targets(bench) == 5000
-
-    def test_falls_back_to_n_targets_attr(self):
-        bench = FakeBenchmark(n_targets=200)
-        assert _get_n_targets(bench) == 200
-
-    def test_falls_back_to_default(self):
-        bench = FakeBenchmark()
-        assert _get_n_targets(bench) == 100
-
-
-class TestGetNStimuli:
-
-    def test_from_stimulus_set(self):
-        bench = FakeBenchmark(n_stimuli=500)
-        assert _get_n_stimuli(bench) == 500
-
-    def test_from_assembly(self):
-        bench = MagicMock(spec=['identifier', '_assembly'])
-        bench.identifier = 'test'
-        bench.stimulus_set = None
-        bench._assembly = FakeAssembly(n_stimuli=300)
-        assert _get_n_stimuli(bench) == 300
+    def test_stimulus_count_comes_from_the_stimulus_set_or_the_assembly(self):
+        from types import SimpleNamespace
+        from_set = FakeBenchmark(identifier='x-rdm', n_stimuli=300)
+        from_assembly = SimpleNamespace(identifier='x-rdm', stimulus_set=None,
+                                        _assembly=FakeAssembly(n_stimuli=300))
+        assert estimate_metric_memory(from_assembly) == estimate_metric_memory(from_set) > 0
 
 
 # ── estimate_metric_memory ───────────────────────────────────────────
@@ -807,19 +789,45 @@ class TestProbeCacheIsolation:
         s.stimulus_paths = {f'i{i}': f'/tmp/i{i}.png' for i in range(n)}
         return s
 
+    @staticmethod
+    def _probe_identifiers(stimulus_set, runs=1):
+        """Identifiers of the stimuli each probe session shows the subject."""
+        import numpy as np
+        from types import SimpleNamespace
+        from brainscore_core.model_interface import Subject
+        from brainscore_core.streaming import StreamEvent
+
+        class Watching(Subject):
+            identifier = 'watching'
+            in_channels = {'vision:image'}
+            out_channels = {'neural:IT'}
+            seen = []
+
+            def participate(self, session):
+                self.seen.append(getattr(session.stimuli, 'identifier', None))
+                n = len(list(iter(session.next_input, None)))
+                session.respond(StreamEvent('neural:IT', NeuroidAssembly(
+                    np.zeros((n, 4)), dims=['presentation', 'neuroid'],
+                    coords={'stimulus_id': ('presentation', list(range(n))),
+                            'neuroid_id': ('neuroid', list(range(4)))}), None))
+
+        subject = Watching()
+        bench = SimpleNamespace(identifier='bench', stimulus_set=stimulus_set, region='IT')
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
+             _mock_memory(100):
+            for _ in range(runs):
+                check_memory(subject, bench)
+        return subject.seen
+
     def test_probe_identifier_differs_from_the_parent(self):
-        from brainscore_core.memory import _isolate_probe_identifier
         parent = self._stimulus_set()
-        probe = _isolate_probe_identifier(parent.iloc[:1], parent)
-        assert probe.identifier != parent.identifier
+        seen, = self._probe_identifiers(parent)
+        assert seen != parent.identifier
         assert parent.identifier == 'hvm-public'      # parent untouched
 
     def test_probe_identifier_is_derived_and_stable(self):
-        from brainscore_core.memory import _isolate_probe_identifier
-        parent = self._stimulus_set()
-        first = _isolate_probe_identifier(parent.iloc[:1], parent).identifier
-        second = _isolate_probe_identifier(parent.iloc[:1], parent).identifier
-        assert first == second == 'hvm-public-memory-probe'
+        assert self._probe_identifiers(self._stimulus_set(), runs=2) == [
+            'hvm-public-memory-probe', 'hvm-public-memory-probe']
 
     def test_identifierless_stimulus_set_passes_through(self):
         import pandas as pd
@@ -881,20 +889,28 @@ class TestProbeSafeRegions:
 
     def _bench(self, **declarations):
         from types import SimpleNamespace
-        return SimpleNamespace(identifier='bench', **declarations)
+        return SimpleNamespace(identifier='bench', stimulus_set=FakeStimulusSet(n=3), **declarations)
 
-    def _probe(self, subject, benchmark):
-        from brainscore_core.memory import _probe_feature_dim
-        return _probe_feature_dim(subject, benchmark, FakeStimulusSet(n=3))
+    def _check(self, subject, benchmark):
+        """Run the memory check; return the output channel of each probe session, in order."""
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
+             _mock_memory(100):
+            check_memory(subject, benchmark)
+        return subject.sessions
+
+    def _probe_order(self, region_layer_map=None, probe_safe_regions=None, **declarations):
+        """Every region the probe would try, in order: each one fails, so each is tried."""
+        subject = self._subject(region_layer_map, probe_safe_regions,
+                                failing=('neural:V4', 'neural:EXTRA', 'neural:IT'))
+        return self._check(subject, self._bench(**declarations))
 
     def test_all_committed_regions_safe_probes_as_before(self):
-        from brainscore_core.memory import _probe_regions
         full = {'V4': 'a', 'EXTRA': 'b', 'IT': 'c'}
+        assert (self._probe_order(full, probe_safe_regions=list(full)) == self._probe_order(full)
+                == ['neural:V4', 'neural:EXTRA', 'neural:IT'])
         plain = self._subject(full)
         declared = self._subject(full, probe_safe_regions=list(full))
-        assert _probe_regions(declared, self._bench()) == _probe_regions(plain, self._bench()) == ['V4', 'EXTRA', 'IT']
-        assert self._probe(declared, self._bench()) == self._probe(plain, self._bench()) == (9, 'V4')
-        assert declared.sessions == plain.sessions == ['neural:V4']
+        assert self._check(declared, self._bench()) == self._check(plain, self._bench()) == ['neural:V4']
 
     def test_no_safe_region_means_no_probe_on_an_undeclared_benchmark(self, caplog):
         import logging
@@ -905,34 +921,28 @@ class TestProbeSafeRegions:
         assert any('probe_safe_regions' in r.getMessage() for r in caplog.records)
 
     def test_only_safe_regions_are_probed_on_an_undeclared_benchmark(self):
-        from brainscore_core.memory import _probe_regions
-        subject = self._subject({'IT': 'c'}, probe_safe_regions=['IT'])
-        assert _probe_regions(subject, self._bench()) == ['IT']
+        assert self._probe_order({'IT': 'c'}, probe_safe_regions=['IT']) == ['neural:IT']
 
     def test_subject_without_the_declaration_keeps_the_fallback(self):
         # No map: every declared neural region, sorted.
-        from brainscore_core.memory import _probe_regions
-        assert _probe_regions(self._subject(), self._bench()) == ['EXTRA', 'IT', 'V4']
+        assert self._probe_order() == ['neural:EXTRA', 'neural:IT', 'neural:V4']
         # Partial map: map order first, then the remaining declared regions.
+        assert self._probe_order({'V4': 'a'}) == ['neural:V4', 'neural:EXTRA', 'neural:IT']
         subject = self._subject({'V4': 'a'}, failing=('neural:V4',))
-        assert _probe_regions(subject, self._bench()) == ['V4', 'EXTRA', 'IT']
-        assert self._probe(subject, self._bench()) == (9, 'EXTRA')
-        assert subject.sessions == ['neural:V4', 'neural:EXTRA']
+        assert self._check(subject, self._bench()) == ['neural:V4', 'neural:EXTRA']
 
     def test_declared_benchmark_ignores_probe_safe_regions(self):
-        from brainscore_core.memory import _probe_regions
-        subject = self._subject({}, probe_safe_regions=[])
-        assert _probe_regions(subject, self._bench(region='IT')) == ['IT']
-        assert _probe_regions(subject, self._bench(requested_output_channels={'neural:IT', 'behavior'})) == ['IT']
+        assert self._probe_order({}, probe_safe_regions=[], region='IT') == ['neural:IT']
+        assert self._probe_order({}, probe_safe_regions=[],
+                                 requested_output_channels={'neural:IT', 'behavior'}) == ['neural:IT']
 
     @pytest.mark.parametrize('requested', [frozenset({'behavior'}), frozenset()])
     def test_declared_outputs_without_a_neural_channel_mean_no_probe(self, requested):
         subject = self._subject({'V4': 'a', 'IT': 'c'}, probe_safe_regions=['V4', 'IT'])
-        assert self._probe(subject, self._bench(requested_output_channels=requested)) == (None, None)
-        assert subject.sessions == []
+        assert self._check(subject, self._bench(requested_output_channels=requested)) == []
 
     def test_region_keeps_precedence_over_requested_channels(self):
-        from brainscore_core.memory import _probe_regions
-        subject = self._subject({'V4': 'a', 'IT': 'c'})
-        assert _probe_regions(subject, self._bench(region='IT', requested_output_channels={'neural:V4'})) == ['IT']
-        assert _probe_regions(subject, self._bench(region='IT', requested_output_channels={'behavior'})) == ['IT']
+        assert self._probe_order({'V4': 'a', 'IT': 'c'}, region='IT',
+                                 requested_output_channels={'neural:V4'}) == ['neural:IT']
+        assert self._probe_order({'V4': 'a', 'IT': 'c'}, region='IT',
+                                 requested_output_channels={'behavior'}) == ['neural:IT']

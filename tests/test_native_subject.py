@@ -8,7 +8,7 @@ import pytest
 
 from brainscore_core import Subject, TaskContext
 from brainscore_core.compatibility import CompatibilityError, check_compatibility
-from brainscore_core.memory import _probe_feature_dim
+from brainscore_core.memory import check_memory
 from brainscore_core.streaming import Session, Source, StreamEvent
 from brainscore_core.streaming_helpers import behavioral_response, neural_response
 
@@ -153,7 +153,16 @@ def test_optional_model_specific_probe_is_still_honored():
         check_compatibility(Restricted(), benchmark())
 
 
-def test_memory_feature_probe_uses_native_session_without_layer_map():
+def test_memory_feature_probe_uses_native_session_without_layer_map(caplog):
+    import logging
+    from unittest.mock import patch
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
     subject = TextSubject()
-    assert _probe_feature_dim(subject, benchmark(), stimuli()) == (2, "language_network")
-    assert len([e for e in subject.seen if e.channel != 'control']) == 1
+    table = StimulusSet(stimuli())
+    table.identifier = "native-stimuli"
+    with patch("brainscore_core.memory.get_host_available_memory", return_value=16_000_000_000), \
+            caplog.at_level(logging.WARNING, logger="brainscore_core.memory"):
+        check_memory(subject, benchmark(stimulus_set=table))
+    # The probe ran one session with one stimulus and read a width: no skip warning.
+    assert [e.payload for e in subject.seen if e.channel != 'control'] == ["cat"]
+    assert not [r for r in caplog.records if "could NOT run" in r.getMessage()]

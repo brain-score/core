@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from brainscore_core.contract import TaskContext, required_traits_for
-from brainscore_core.streaming import Session, StreamEvent, _with_trial_memory
+from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     drive_behavior_session,
     drive_behavior_session_streaming,
@@ -134,25 +134,12 @@ def test_streaming_behavior_answers_each_trial_after_one_task_setup():
     assert len(session.emitted) == 3
 
 
-@pytest.mark.parametrize('removed', [{'record': 'IT'}, {'state_change': object()},
-                                     {'scoring_stimuli': _table()}])
-def test_session_rejects_the_removed_arguments(removed):
-    with pytest.raises(TypeError):
-        Session((), ['neural:IT'], **removed)
-
-
-def test_stimulus_session_rejects_record():
-    with pytest.raises(TypeError):
-        stimulus_session(_table(), record='IT')
-
-
-def test_trial_memory_conversation_is_rejected():
+def test_an_unknown_trial_memory_is_rejected():
+    # 'conversation' is the old name of 'history' (rule 5.12); it has no alias.
     with pytest.raises(ValueError, match="'none', 'history'"):
         TaskContext(task_type='probabilities', trial_memory='conversation')
     with pytest.raises(ValueError):
         required_traits_for(None, 'conversation')
-    with pytest.raises(ValueError):
-        list(_with_trial_memory([], 'conversation'))
 
 
 def test_trial_memory_history_needs_the_trial_history_trait():

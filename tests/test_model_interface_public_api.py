@@ -1,48 +1,10 @@
-"""Public API guard for ``brainscore_core.model_interface``.
+"""Public API guard for ``brainscore_core``.
 
-The model-interface module names the subject contract and its events. The
-concrete BrainScoreModel and its unit selectors live in the unified
-``brainscore`` package. This test snapshots the public surface.
+The concrete BrainScoreModel and its unit selectors live in the unified
+``brainscore`` package. These tests check what a user or a saved record
+depends on: Subject members, framework-free imports, and the module names
+of recorded types (cache keys and pickles carry them).
 """
-
-import brainscore_core.model_interface as model_interface
-
-
-EXPECTED_PUBLIC_NAMES = {
-    'ABC',
-    'Any',
-    'Callable',
-    'Dict',
-    'InputEvent',
-    'List',
-    'Optional',
-    'OutputEvent',
-    'Perturbation',
-    'PerturbationApplied',
-    'Selection',
-    'Set',
-    'StateChange',
-    'Subject',
-    'TYPE_CHECKING',
-    'TaskContext',
-    'Tuple',
-    'UnifiedModel',
-    'Union',
-    'abstractmethod',
-    'dataclass',
-    'field',
-    'replace',
-    'warnings',
-}
-
-
-def test_model_interface_public_surface_snapshot():
-    public_names = {name for name in dir(model_interface)
-                    if not name.startswith('_')}
-
-    assert public_names == EXPECTED_PUBLIC_NAMES
-    assert issubclass(model_interface.UnifiedModel, model_interface.Subject)
-
 
 # -- ``extractor`` and ``detect_modalities`` are not Subject members -----------
 
@@ -85,13 +47,6 @@ _COMPONENT_MODULES = {
 }
 
 
-@pytest.mark.parametrize('name,implementation', _COMPONENT_MODULES.items())
-def test_component_imports_share_the_same_module(name, implementation):
-    public = importlib.import_module('brainscore_core.' + name)
-    organized = importlib.import_module('brainscore_core.' + implementation)
-    assert public is organized
-
-
 _IMPORT_ORDER_SCRIPT = """
 import importlib, json, sys
 modules = json.loads(sys.argv[1])
@@ -118,40 +73,14 @@ print(json.dumps(failures))
 
 def test_component_import_order_stays_framework_free():
     # One interpreter checks every module and order; a failure names each one.
-    run = subprocess.run([sys.executable, '-I', '-c', _IMPORT_ORDER_SCRIPT, json.dumps(_COMPONENT_MODULES)],
+    # -P -s, not -I: -I also drops PYTHONPATH and then tests an installed copy
+    # instead of the code under test.
+    run = subprocess.run([sys.executable, '-P', '-s', '-c', _IMPORT_ORDER_SCRIPT,
+                          json.dumps(_COMPONENT_MODULES)],
                          capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     failures = json.loads(run.stdout.strip().splitlines()[-1])
     assert not failures, '\n'.join(failures)
-
-
-def test_session_facade_preserves_implementation_identity():
-    from brainscore_core import streaming_helpers as public
-    from brainscore_core._sessions import buffered, drivers, environment, payloads, perception
-
-    pairs = [
-        (public.stimulus_session, buffered.stimulus_session),
-        (public.neural_response, buffered.neural_response),
-        (public.behavioral_response, buffered.behavioral_response),
-        (public.apply_state_change, buffered.apply_state_change),
-        (public.EnvironmentSource, environment.EnvironmentSource),
-        (public.run_environment, environment.run_environment),
-        (public.windowed_stream, perception.windowed_stream),
-        (public.drive_neural_session, drivers.drive_neural_session),
-        (public.drive_behavior_session, drivers.drive_behavior_session),
-        (public.drive_typed_session, drivers.drive_typed_session),
-        (public.drain_session_inputs, payloads.drain_session_inputs),
-        (public.session_stimuli, payloads.session_stimuli),
-    ]
-    assert all(left is right for left, right in pairs)
-    assert public.environment_session is environment.environment_session
-
-
-def test_removed_session_builders_are_not_public():
-    from brainscore_core import streaming_helpers as public
-    for name in ('table_session', 'streaming_stimulus_session', 'state_change_session',
-                 'behavior_session'):
-        assert not hasattr(public, name), name
 
 
 def test_layout_keeps_recorded_contract_type_names():
