@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: KartikP/brainscore-unified
-          ref: 1facf540314014854dccce57847ea67432dff912
+          ref: ee683a519301c500d213ef53f1ce90ee76f92550
           path: unified
           persist-credentials: false
       - uses: actions/setup-python@v5
