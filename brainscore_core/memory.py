@@ -664,7 +664,10 @@ def check_memory(
             f"{' [declared]' if cardinality_declared else ' [approx]'}). "
             f"Available host RAM: {total_system / 1e9:.1f} GB. This {grounding} "
             f"estimate uses heuristic workspace factors and may over-count — if it "
-            f"is a false rejection, set check_mem=False."
+            f"is a false rejection, set check_mem=False. To lower the extraction peak "
+            f"of a session that records several regions, set the environment variable "
+            f"BRAINSCORE_REGIONS_PER_PASS=one: each region then gets its own model pass "
+            f"(more passes, same scores); the default, all, records every region in one pass."
         )
 
     utilization = total_estimated / total_system if total_system > 0 else 0

@@ -305,8 +305,10 @@ class TestCheckMemory:
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=1000)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=300_000_000), \
              _mock_memory(500_000_000, 700_000_000):
-            with pytest.raises(MemoryError, match="Estimated peak"):
+            with pytest.raises(MemoryError, match="Estimated peak") as raised:
                 check_memory(model, bench)
+        # The message names the variable that lowers the extraction peak.
+        assert 'BRAINSCORE_REGIONS_PER_PASS=one' in str(raised.value)
 
     def test_warns_at_high_utilization(self):
         # Ridge plan, baseline=200MB, F=100K, S=1000:
