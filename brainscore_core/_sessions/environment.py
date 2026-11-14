@@ -295,7 +295,9 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
 
     The subject must implement ``participate(session)``; there is no ``process()``
     fallback for closed-loop sessions. The returned list holds the payloads sent on
-    ``action_channel``.
+    ``action_channel``, as the environment accepted them (an ``action_validator``
+    can change them); a choice stays its option string. The session keeps an
+    addressed behavior answer in the stored form.
 
     Reset rule: the caller owns ``subject.reset()`` between episodes (or uses
     Experiment with SessionProtocol, which resets before and after each trial).
@@ -320,15 +322,16 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
                 "sessions require a Subject. Wrap a bare policy function as "
                 "BrainScoreModel(..., policy=fn)."
             )
-        participate(session)
+        accepted = []   # the actions the environment received, as the receipts say
+        with session.observe(on_output=lambda event: accepted.append(event)
+                             if event.channel == action_channel
+                             and not event.meta.get('missing') else None):
+            participate(session)
         if not session.complete:
             raise RuntimeError("Environment session ended before episode completion")
-        if not session.emitted:  # episode ended at reset, no action was sent
-            return []
-        collected = session.collect(action_channel)
-        if hasattr(collected, 'dims'):   # an addressed behavior channel: one stored answer
-            return list(collected.values)
-        return [event.payload for event in collected]
+        # The session keeps addressed behavior answers in the stored form; the caller
+        # gets the actions themselves (a choice stays its option string).
+        return [event.payload for event in accepted]
 
 
 def drive_environment_session(subject, session: Session, driver: str = "interact",

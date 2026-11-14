@@ -290,3 +290,37 @@ def test_a_table_session_whose_source_sends_respond_signals_is_refused():
     session = Session(events, ['behavior:text'], TEXT, stimuli=_table(['a']))
     with pytest.raises(ValueError, match='a table or respond signals, not both'):
         _drain(session)
+
+
+# --- run_environment returns the actions (P04) ----------------------------------
+
+class _Picker:
+    """An environment that takes one choice and ends."""
+
+    def __init__(self):
+        self.heard = []
+
+    def reset(self, *, seed=None, options=None):
+        return {'text': 'cat or dog?'}
+
+    def step(self, outputs):
+        self.heard.append(outputs['behavior:choice'])
+        return {'text': 'done'}, 'terminal'
+
+
+class _Chooser(_Replier):
+    out_channels = {'behavior:choice'}
+
+    def participate(self, session):
+        session.declare_inputs(self.in_channels)
+        while (event := session.next_input()) is not None:
+            if event.channel == 'control' and event.payload == 'respond':
+                session.respond(StreamEvent('behavior:choice', 'cat', None))
+
+
+def test_run_environment_returns_the_choice_as_sent():
+    from brainscore_core.streaming_helpers import run_environment
+    environment = _Picker()
+    actions = run_environment(_Chooser(), environment, action_channel='behavior:choice',
+                              task=CHOICE)
+    assert actions == ['cat'] and environment.heard == ['cat']
