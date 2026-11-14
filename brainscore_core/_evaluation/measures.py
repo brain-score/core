@@ -43,7 +43,7 @@ class MeasureRecord:
         """Handles applied during the run more often than the run undid them."""
         return set(self.applied - self.undone)
 
-    def check_released(self, benchmark_identifier, subject_identifier) -> None:
+    def check_released(self, benchmark_identifier: str, subject_identifier: str) -> None:
         """Raise when the run left an intervention it applied active.
 
         The one release check of every score entry point: the run must leave
