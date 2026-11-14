@@ -6,6 +6,7 @@ from brainscore_core.compatibility import benchmark_requested_output_channels
 from brainscore_core._evaluation.measures import (  # noqa: F401  (re-exported)
     MeasureRecord,
     note_measure,
+    note_session,
     record_measures,
 )
 from brainscore_core._evaluation import measures as _measures
