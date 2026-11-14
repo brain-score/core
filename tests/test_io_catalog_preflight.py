@@ -1,14 +1,13 @@
 """Tests for the v1.5 Input/Output Catalog wiring into pre-flight.
 
-``check_compatibility`` calls ``check_io_catalog`` as a warn-only documentation
-conformance check: it surfaces inputs or neural outputs not documented in the
-catalog, without changing the pass/fail result.
+``check_compatibility`` rejects an input that is not in the catalog, and accepts
+a documented input or neural region without a warning.
 """
 import warnings
 
 import pytest
 
-from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.contract import UnifiedModel
 from brainscore_core.compatibility import (
     check_compatibility,
     CompatibilityError,
@@ -30,11 +29,7 @@ class _Model(UnifiedModel):
         return self._rm
 
     @property
-    def supported_modalities(self):
-        return self._av
-
-    @property
-    def available_modalities(self):
+    def in_channels(self):
         return self._av
 
     def process(self, stimuli):
@@ -50,7 +45,7 @@ class _Bench:
 
 class TestIOCatalogPreflight:
     def test_documented_input_no_warning(self):
-        m = _Model({"vision"})
+        m = _Model({"vision:image"})
         b = _Bench({"vision"})
         with warnings.catch_warnings():
             warnings.simplefilter("error", CompatibilityWarning)
@@ -59,19 +54,13 @@ class TestIOCatalogPreflight:
     def test_undocumented_input_is_rejected(self):
         # Contract v3 rule 3.2: every channel family is registered. An
         # undocumented input is a compatibility error, not a warning.
-        m = _Model({"vision", "telepathy"})
+        m = _Model({"vision:image", "telepathy"})
         b = _Bench({"telepathy"})
         with pytest.raises(CompatibilityError, match="unknown channel 'telepathy'"):
             check_compatibility(m, b)
 
-    def test_catalog_documentation_check_is_warn_only(self):
-        # check_io_catalog itself only warns; it never raises.
-        from brainscore_core.compatibility import check_io_catalog
-        with pytest.warns(CompatibilityWarning, match="not in the Input/Output Catalog"):
-            check_io_catalog(_Model({"telepathy"}), _Bench({"telepathy"}))
-
     def test_neural_region_is_documented(self):
-        m = _Model({"vision"}, region_map={"IT": "layer.10"})
+        m = _Model({"vision:image"}, region_map={"IT": "layer.10"})
         b = _Bench({"vision"}, region="IT")
         with warnings.catch_warnings():
             warnings.simplefilter("error", CompatibilityWarning)

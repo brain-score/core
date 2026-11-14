@@ -11,21 +11,21 @@ of subject is wrapped: a ``BrainScoreModel``, a domain adapter and an
 participate-only ``Subject`` all take part the same way.
 
 ``subject_for_benchmark`` applies the facade at the scoring boundary to
-benchmarks a domain loader marked as legacy. ``BrainScoreModel`` forwards its
-own legacy methods to a facade seeded with its current recording and task
-state, so direct calls keep working too.
+benchmarks a domain loader marked as legacy. A subject has no legacy methods
+of its own: every legacy call goes through this facade.
 """
 
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from brainscore_core.compatibility import CompatibilityError
 from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
 PASSIVE = 'passive'
 
 LEGACY_API = 'legacy'     # calls look_at / digest_text and friends
-TYPED_API = 'typed'       # calls start_recording + process on the candidate
+TYPED_API = 'typed'       # calls start_recording + process on the subject
 SESSION_API = 'session'   # declares channels and drives participate itself
 
 
@@ -114,12 +114,14 @@ class LegacyBenchmarkFacade:
 
     def start_behavioral_task(self, task) -> None:
         if 'behavior' not in set(self._subject.out_channels):
-            raise NotImplementedError(
-                f"Subject {self.identifier!r} has no path for the legacy language "
-                f"behavioral task {getattr(task, 'value', task)!r} (reading times / "
-                f"next-word prediction): it declares no 'behavior' output. Legacy "
-                f"language behavioral benchmarks need a subject that implements "
-                f"that task.")
+            # A refusal during the run: an error of score(), not N/A.
+            raise CompatibilityError(
+                f"Subject {self.identifier!r} refused the legacy language behavioral task "
+                f"{getattr(task, 'value', task)!r} (reading times / next-word prediction): "
+                f"it declares no 'behavior' output. The pair passed the declared "
+                f"compatibility check because this legacy benchmark declares no requested "
+                f"output, so there is no result; the benchmark's declarations do not yet "
+                f"express that it needs 'behavior'.", channels={'behavior'})
         self.start_task(task)
 
     def digest_text(self, text) -> Dict[str, Any]:
@@ -144,9 +146,11 @@ class LegacyBenchmarkFacade:
         return {name: measured[channel] for name, channel in channels.items()}
 
     def reset(self) -> None:
-        self._subject.reset()
-        self._record = self._time_bins = self._recording_type = self._task = None
-        self._passive = None
+        try:
+            self._subject.reset()
+        finally:
+            self._record = self._time_bins = self._recording_type = self._task = None
+            self._passive = None
 
     # --- internals --------------------------------------------------------
 
@@ -155,8 +159,8 @@ class LegacyBenchmarkFacade:
     def _behavior_requested(self) -> bool:
         return self._task is not None and self._task.task_type != PASSIVE
 
-    def _task_context(self) -> TaskContext:
-        """The task sent with each measurement: the recorded one, else one passive context."""
+    def _session_task(self) -> TaskContext:
+        """The task sent with each measurement: the recorded one, else one passive task."""
         if self._task is not None:
             return self._task
         if self._passive is None:
@@ -170,15 +174,14 @@ class LegacyBenchmarkFacade:
             raise ValueError(
                 f'{method} returns one region; several were requested '
                 f'({list(self._record)}). Use a session with one neural channel per region, '
-                "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']), "
-                'or process() for several regions.')
+                "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']).")
         return f'neural:{self._record}'
 
     def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
         """One session: the recorded task object, the time bins and the measurement settings."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        session = stimulus_session(stimuli, channels, self._task_context(),
+        session = stimulus_session(stimuli, channels, self._session_task(),
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
@@ -199,14 +202,14 @@ def mark_legacy_benchmark(benchmark):
 
 
 def subject_for_benchmark(subject, benchmark, *, visual_degrees: Optional[float] = None):
-    """The candidate a benchmark receives: the facade for legacy benchmarks, else the subject."""
+    """What a benchmark receives: the facade for legacy benchmarks, else the subject."""
     if getattr(benchmark, 'subject_api', None) != LEGACY_API:
         return subject
     return LegacyBenchmarkFacade(subject, visual_degrees=visual_degrees)
 
 
 def declared_visual_degrees(subject) -> Optional[float]:
-    """The field of view a vision candidate reports, or ``None`` when it has none.
+    """The field of view a vision subject reports, or ``None`` when it has none.
 
     ``visual_degrees()`` is part of the legacy vision ``BrainModel`` surface, a
     measurement setting of the vision harness rather than an ability; a
@@ -284,18 +287,6 @@ def _time_bin_pairs(time_bins) -> List[Tuple[Any, Any]]:
     return pairs
 
 
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    LegacyBenchmarkFacade,
-    mark_legacy_benchmark,
-    subject_for_benchmark,
-    declared_visual_degrees,
-    text_stimulus_set,
-    repeat_over_time_bins,
-    _time_bin_pairs,
-):
-    _definition.__module__ = 'brainscore_core.legacy_facade'
-del _definition
 
 
 # Above this share of invalid answers the model is not doing the task; scoring

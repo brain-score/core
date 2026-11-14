@@ -1,6 +1,6 @@
 import pytest
 
-from brainscore_core.model_interface import Subject, UnifiedModel
+from brainscore_core.contract import UnifiedModel
 
 
 class _ChannelSubject(UnifiedModel):
@@ -16,18 +16,18 @@ class _ChannelSubject(UnifiedModel):
         return {"V1": "layer1", "IT": "layer4"}
 
     @property
-    def supported_modalities(self):
-        return {"vision", "text"}
+    def in_channels(self):
+        return {"vision:image", "text"}
 
     @property
-    def required_modalities(self):
+    def required_channels(self):
         return {"text"}
 
     def process(self, input_event):
         return None
 
 
-def test_subject_derives_channel_identity_from_v1_contract():
+def test_subject_declares_its_channels():
     subject = _ChannelSubject()
 
     assert subject.in_channels == {"vision:image", "text"}
@@ -63,7 +63,7 @@ def test_typed_participate_default_runs_sessions_and_rejects_unknown_outputs():
 
     subject = _ChannelSubject()
     with pytest.raises(NotImplementedError, match="runs sessions requesting"):
-        subject.participate(Session((), requested_output_channels=["pupil"]))
+        subject.participate(Session((), outputs=["pupil"]))
 
 
 def test_legacy_subclass_still_instantiates_without_participate():
@@ -77,8 +77,8 @@ def test_legacy_subclass_still_instantiates_without_participate():
             return {}
 
         @property
-        def supported_modalities(self):
-            return {"vision"}
+        def in_channels(self):
+            return {"vision:image"}
 
         def process(self, input_event):
             return "ok"
@@ -87,11 +87,6 @@ def test_legacy_subclass_still_instantiates_without_participate():
 
     assert subject.process(None) == "ok"
     assert subject.in_channels == {"vision:image"}
-
-
-def test_unifiedmodel_remains_a_subject():
-    assert issubclass(UnifiedModel, Subject)
-    assert UnifiedModel is not Subject
 
 
 def test_typed_model_without_multi_modality_runs_multimodal_session():
@@ -121,5 +116,5 @@ def test_typed_model_without_multi_modality_runs_multimodal_session():
                                         'sentence': ['a sentence']}))
     stimuli.identifier = 'two-inputs'
     model = TwoInputModel()
-    neural_response(model, stimuli, record='IT')
+    neural_response(model, stimuli, ['neural:IT'])
     assert model.calls == [1]

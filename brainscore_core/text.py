@@ -47,14 +47,3 @@ def contextualized_texts(stimuli):
             prefix.append(parts[position])
             result[position] = prepare_context(prefix)
     return result
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    text_parts,
-    text_groups,
-    prepare_context,
-    contextualized_texts,
-):
-    _definition.__module__ = 'brainscore_core.text'
-del _definition

@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Any, Optional
 import numpy as np
-from ..io_catalog import modalities_to_input_channels
+from ..io_catalog import column_channel, stimulus_columns
 from ..streaming import CONTROL_CHANNEL, StreamEvent, parse_channel
 from ..events import PerturbationApplied, StateChange
 from ..supported_data_standards.brainio.assemblies import (
@@ -12,35 +12,12 @@ from ..supported_data_standards.brainio.assemblies import (
 )
 
 
-STIMULUS_COLUMN_TO_MODALITY = {
-    "vision": "vision",
-    "image": "vision",
-    "image_file_name": "vision",
-    "image_path": "vision",
-    "filename": "vision",
-    "text": "text",
-    "sentence": "text",
-    "audio": "audio",
-    "audio_file": "audio",
-    "audio_file_name": "audio",
-    "audio_path": "audio",
-    "video": "video",
-    "video_path": "video",
-}
-
-
 _STATE_CHANGE_KIND_TO_CHANNEL_FAMILY = {
     "ablation": "lesion",
     "lesion": "lesion",
     "stimulation": "stimulation",
     "pharmacological": "pharmacological",
 }
-
-
-_STIMULUS_INPUT_CHANNEL_FAMILIES = frozenset(
-    parse_channel(channel)[0]
-    for channel in modalities_to_input_channels(STIMULUS_COLUMN_TO_MODALITY.values())
-)
 
 
 def _one_row_stimuli(session, event: StreamEvent, stream_index: int):
@@ -55,21 +32,21 @@ def _one_row_stimuli(session, event: StreamEvent, stream_index: int):
 def _single_row_stimuli(session, event: StreamEvent, stream_index: int):
     """A one-row StimulusSet for a single streamed input event.
 
-    Prefers slicing the session's own stimulus_set so presentation metadata that
+    Prefers slicing the session's own stimuli so presentation metadata that
     metrics depend on (object_name and friends) survives; falls back to
     reconstructing from the event when the session has no table -- which is the
     case that matters for a genuinely generated stream.
     """
-    stimulus_set = getattr(session, "stimulus_set", None)
-    if stimulus_set is not None:
+    stimuli = getattr(session, "stimuli", None)
+    if stimuli is not None:
         index = event.meta.get("stimulus_index")
         if index is not None:
             try:
-                row = stimulus_set.loc[[index]]
+                row = stimuli.loc[[index]]
             except KeyError:
                 row = None
             if row is not None and len(row) == 1:
-                return preserve_stimulus_set_type(stimulus_set, row)
+                return preserve_stimulus_set_type(stimuli, row)
     return reconstruct_stimulus_set_from_events([event])
 
 
@@ -108,21 +85,23 @@ def drain_session_inputs(session: Any) -> list[StreamEvent]:
 def session_stimuli(session: Any, events: list[StreamEvent]) -> Any:
     """The stimulus table a session presented.
 
-    Returns the session's own ``stimulus_set`` object unchanged when it has
+    Returns the session's own ``stimuli`` object unchanged when it has
     one, so presentation metadata (``object_name`` and friends) survives. When
     it has none, rebuilds a minimal ``StimulusSet`` from ``events`` that keeps
     only the input columns and ``stimulus_id``.
     """
-    if getattr(session, "stimulus_set", None) is not None:
-        return session.stimulus_set
+    if getattr(session, "stimuli", None) is not None:
+        return session.stimuli
     return reconstruct_stimulus_set_from_events(events)
 
 
 def _spans_several_inputs(events: list[StreamEvent]) -> bool:
+    """Whether ``events`` carry stimulus columns of more than one channel family."""
+    stimulus_families = {parse_channel(channel)[0] for channel in stimulus_columns().values()}
     families = set()
     for event in events:
         family, _ = parse_channel(event.channel)
-        if family in _STIMULUS_INPUT_CHANNEL_FAMILIES:
+        if family in stimulus_families:
             families.add(family)
     return len(families) > 1
 
@@ -133,11 +112,11 @@ def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     This fallback preserves only input-channel payload columns plus
     ``stimulus_id``. It is not metadata-faithful: metric-critical
     presentation metadata such as ``object_name`` must come from
-    session.stimulus_set, or from a future event-carried metadata path.
+    session.stimuli, or from a future event-carried metadata path.
     """
     if not events:
         raise ValueError(
-            "neural participate received no input events and no session.stimulus_set "
+            "neural participate received no input events and no session.stimuli "
             "context to reconstruct."
         )
 
@@ -163,35 +142,29 @@ def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
 
 
-def requested_output_channels(session) -> list[str]:
-    requested = getattr(session, "requested_output_channels", None)
+def session_outputs(session) -> list[str]:
+    requested = getattr(session, "outputs", None)
     if requested is not None:
         return list(requested)
     raise ValueError(
-        "participate requires the session to declare requested_output_channels."
+        "participate requires the session to declare outputs."
     )
 
 
-def behavior_stimuli_from_session(session, task_context):
+def behavior_stimuli_from_session(session, task):
     events = [event for event in drain_session_inputs(session)
               if event.channel != 'instruction']
-    if events or getattr(session, 'stimulus_set', None) is not None:
+    if events or getattr(session, 'stimuli', None) is not None:
         return session_stimuli(session, events)
-    return _behavior_stimuli_to_score(task_context)
+    return _behavior_stimuli_to_score(task)
 
 
-_drain_stream_events = drain_session_inputs
-
-
-_stimuli_from_stream_session = session_stimuli
-
-
-def _stimulus_input_columns(stimulus_set) -> list[tuple[str, str]]:
+def _stimulus_input_columns(stimuli) -> list[tuple[str, str]]:
     """``(column, channel)`` for each input column of a stimulus table."""
     return [
-        (column, _channel_for_stimulus_column(column))
-        for column in list(getattr(stimulus_set, "columns", []))
-        if _channel_for_stimulus_column(column) is not None
+        (column, column_channel(column))
+        for column in list(getattr(stimuli, "columns", []))
+        if column_channel(column) is not None
     ]
 
 
@@ -218,10 +191,10 @@ def _table_row_events(input_columns, position: int, row_index,
     return events
 
 
-def _stimulus_events(stimulus_set) -> list[StreamEvent]:
+def _stimulus_events(stimuli) -> list[StreamEvent]:
     events: list[StreamEvent] = []
-    input_columns = _stimulus_input_columns(stimulus_set)
-    for position, (row_index, row) in enumerate(stimulus_set.iterrows()):
+    input_columns = _stimulus_input_columns(stimuli)
+    for position, (row_index, row) in enumerate(stimuli.iterrows()):
         events.extend(_table_row_events(input_columns, position, row_index, row))
     return events
 
@@ -262,14 +235,14 @@ def _table_row_position(session, event: StreamEvent) -> Optional[int]:
     position = meta.get("table_row")
     if isinstance(position, (bool, np.bool_)) or not isinstance(position, (int, np.integer)):
         return None
-    table = getattr(session, "stimulus_set", None)
+    table = getattr(session, "stimuli", None)
     if table is None or not 0 <= int(position) < len(table):
         return None
     if "stimulus_index" not in meta or "stimulus_id" not in meta:
         return None
     column = meta.get("column")
     if (not isinstance(column, str) or column not in table.columns
-            or _channel_for_stimulus_column(column) != event.channel):
+            or column_channel(column) != event.channel):
         return None
     position = int(position)
     label = table.index[position]
@@ -282,15 +255,15 @@ def _table_row_position(session, event: StreamEvent) -> Optional[int]:
 
 def _table_row_stimuli(session, position: int):
     """A one-row slice of the session's table, selected by position."""
-    table = session.stimulus_set
+    table = session.stimuli
     return preserve_stimulus_set_type(table, table.iloc[[position]])
 
 
-def _behavior_stimuli_to_score(task_context):
+def _behavior_stimuli_to_score(task):
     for key in ("stimulus_set", "stimuli", "scoring_stimuli", "test_stimuli"):
-        if key in task_context.metadata:
-            return task_context.metadata[key]
-    return task_context.fitting_stimuli
+        if key in task.metadata:
+            return task.metadata[key]
+    return task.fitting_stimuli
 
 
 def _state_change_event(state_change: StateChange) -> StreamEvent:
@@ -335,13 +308,6 @@ def _state_change_handle_id(state_change: StateChange, result) -> Optional[str]:
     if isinstance(result, PerturbationApplied):
         return result.handle_id
     return state_change.handle_id
-
-
-def _channel_for_stimulus_column(column: str) -> Optional[str]:
-    modality = STIMULUS_COLUMN_TO_MODALITY.get(column)
-    if modality is None:
-        return None
-    return next(iter(modalities_to_input_channels({modality})))
 
 
 def _row_value(row, column: str, default: Any = None) -> Any:

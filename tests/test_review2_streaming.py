@@ -19,7 +19,7 @@ class _Subject:
     def start_recording(self, region, time_bins=None, recording_type=None):
         self.calls.append(('start_recording', region, time_bins))
 
-    def start_task(self, task_context):
+    def start_task(self, task):
         self.calls.append(('start_task',))
 
     def process(self, stimuli, multi_modality=False):

@@ -2,10 +2,9 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple, Union
 
 from .events import InputEvent, OutputEvent
-from .io_catalog import modalities_to_input_channels
 
 if TYPE_CHECKING:
     from .streaming import Session
@@ -41,21 +40,14 @@ class TaskContext:
       (``BrainScoreModel(behavioral_readout_layer=...)``)
     - Instruction-following models use instruction + label_set with their
       ``answer`` function (``BrainScoreModel(answer=...)``)
-    - Models that support both can choose their preferred approach
-
-    ``prefer_path`` lets a benchmark (or an experimenting user) pin which
-    behavioral dispatch path is selected when a model supports more than
-    one. Accepts ``'auto'`` (default — generation if available, else
-    readout), ``'generation'`` (force generation through the model's
-    ``answer``; error if no answer is registered or instruction/label_set
-    is empty), or ``'readout'`` (force readout, error if
-    behavioral_readout_layer is missing or fitting_stimuli is empty). Use
-    it instead of disabling a model's answer function to force readout.
+    - Which part answers is a property of the model, not of the task: a
+      model built with both answers through its answering part when the
+      task gives an instruction; a model built without it uses its readout
 
     ``BrainScoreModel`` accepts ``task_type`` ``'passive'`` or one of
     ``'probabilities'``, ``'classification'``, ``'label'``. Put the stimuli to
-    answer (for example a held-out test set) in ``metadata['stimulus_set']``
-    when using ``behavioral_response``.
+    answer (for example a held-out test set) to ``behavioral_response`` or
+    ``stimulus_session`` as ``stimuli``.
 
     ``response`` is the form of the answer (``brainscore_core.responses``):
     ``Choice``, ``Scale`` or ``Text``; ``task_type='passive'`` means no answer.
@@ -88,7 +80,6 @@ class TaskContext:
     label_set: Optional[List[str]] = None
     fitting_stimuli: Optional[Any] = None
     instruction: Optional[str] = None
-    prefer_path: Optional[str] = None  # 'auto' | 'generation' | 'readout'
     metadata: Dict[str, Any] = field(default_factory=dict)
     readout_fit: str = 'current'  # 'current' | 'intact'
     response: Any = None  # a brainscore_core.responses Choice, Scale or Text
@@ -108,8 +99,12 @@ class TaskContext:
                 self.task_type = kind
             elif self.task_type != kind:
                 raise ValueError(f'task_type {self.task_type!r} contradicts a {type(self.response).__name__} response')
-            if kind == 'choice' and self.label_set is None:
+            if (kind == 'choice' and self.label_set is None
+                    and not isinstance(self.response.labels, str)):
                 self.label_set = list(self.response.labels)
+            if kind == 'choice' and self.response.raw_text and (self.instruction or '').strip():
+                raise ValueError('A raw_text response shows the stimulus text exactly as given; '
+                                 'remove the instruction or put it in the text.')
         elif self.task_type is None:
             raise ValueError("Give a response (Choice, Scale, Text) or task_type='passive'.")
         if self.present is not None:
@@ -161,6 +156,17 @@ class Subject(ABC):
         return set()
 
     @property
+    def output_inputs(self) -> Mapping[str, FrozenSet[str]]:
+        """For an output channel, the input channels it can be answered from.
+
+        The subject answers a listed output when it takes in at least one of its
+        inputs. An output that is not listed can be answered from any input the
+        subject takes. A listed output must be in ``out_channels`` and its inputs
+        in ``in_channels``. None is listed by default.
+        """
+        return {}
+
+    @property
     def traits(self) -> Set[str]:
         """Properties of the subject a benchmark may require; none by default.
 
@@ -186,10 +192,11 @@ class UnifiedModel(Subject):
     """Subject base for models evaluated through typed paths.
 
     Implementations provide ``process``, ``start_task``, ``start_recording``,
-    a layer map and modality declarations. ``participate`` (the evaluation
-    method of the contract) runs a session through those typed paths, so a
-    typed model needs no session code of its own. ``process`` is a typed
-    convenience of this base, not part of the subject contract.
+    a layer map and ``in_channels`` (and ``required_channels`` when an input
+    is required). ``participate`` (the evaluation method of the contract) runs
+    a session through those typed paths, so a typed model needs no session
+    code of its own. ``process`` is a typed convenience of this base, not part
+    of the subject contract.
 
     New session-native implementations should inherit ``Subject`` directly.
     """
@@ -205,37 +212,6 @@ class UnifiedModel(Subject):
         ...
 
     @property
-    @abstractmethod
-    def supported_modalities(self) -> Set[str]:
-        """All modalities the model can consume. Concrete subclasses MUST
-        implement this. :py:attr:`available_modalities` defaults to this
-        value so code written for the two-tier contract works unchanged on
-        pre-two-tier subclasses."""
-        ...
-
-    @property
-    def available_modalities(self) -> Set[str]:
-        """All modalities the model can consume. Defaults to
-        :py:attr:`supported_modalities`. Concrete subclasses may override
-        this directly (preferred new API) or rely on the default."""
-        return self.supported_modalities
-
-    @property
-    def required_modalities(self) -> Set[str]:
-        """Modalities the model HARD-requires in stimuli. Empty by default —
-        most models can run on whichever modality the benchmark provides, as
-        long as the intersection with :py:attr:`available_modalities` is
-        non-empty. Override for models that must receive a specific modality
-        (single-modality text/video backbones, multimodal-fusion models that
-        cannot degrade, etc.)."""
-        return set()
-
-    @property
-    def in_channels(self) -> Set[str]:
-        """Input channels: the declared modalities as channel families."""
-        return modalities_to_input_channels(self.available_modalities)
-
-    @property
     def out_channels(self) -> Set[str]:
         """Output channels: ``neural:<region>`` for every mapped region.
 
@@ -243,11 +219,6 @@ class UnifiedModel(Subject):
         ``behavior`` or ``motor``; nothing is discovered from attribute names.
         """
         return {f"neural:{region}" for region in self.region_layer_map}
-
-    @property
-    def required_channels(self) -> Set[str]:
-        """Input stream channels this subject hard-requires."""
-        return modalities_to_input_channels(self.required_modalities)
 
     def process(self, input_event: InputEvent) -> OutputEvent:
         """Typed convenience used by the default ``participate``; not part of the contract."""
@@ -257,11 +228,11 @@ class UnifiedModel(Subject):
 
     def participate(self, session: "Session") -> None:
         """Run ``session`` through this model's typed paths."""
-        from brainscore_core._sessions.helpers import drive_typed_session
+        from brainscore_core.streaming_helpers import drive_typed_session
         drive_typed_session(self, session)
 
-    def start_task(self, task_context: TaskContext) -> None:
-        self._task_context: Optional[TaskContext] = task_context
+    def start_task(self, task: TaskContext) -> None:
+        self._task: Optional[TaskContext] = task
 
     def start_recording(self,
                         recording_target: Union[str, List[str]],

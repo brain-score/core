@@ -33,7 +33,7 @@ subject = EchoSubject()
 session = Session(
     [StreamEvent(channel="text", payload="hello", t_ms=0.0,
                  meta={"stimulus_id": "s1"})],
-    requested_output_channels=["behavior"])
+    outputs=["behavior"])
 subject.participate(session=session)
 response = session.emitted[0].payload
 assert response["stimulus_id"].values.tolist() == ["s1"]
@@ -80,8 +80,8 @@ subject needs the trait `memory:trial_history`).
 ## Choose helpers for your subject
 
 `UnifiedModel` is a `Subject` base with task, recording, and `process()` methods.
-It requires `identifier`, `region_layer_map`, and `supported_modalities`, and
-derives channel declarations from the modalities. Use `BrainScoreModel` from the
+It requires `identifier`, `region_layer_map` and `in_channels`; it may declare
+`required_channels`. Use `BrainScoreModel` from the
 unified `brainscore` package (`from brainscore import BrainScoreModel`) for a
 configurable implementation with extraction helpers. Core no longer contains
 it: `brainscore_core.BrainScoreModel`, the unit selectors and

@@ -117,6 +117,23 @@ def test_scoped_hash_reuse_and_tracked_mutations(monkeypatch):
     assert len(reads) == 4
 
 
+def test_a_scope_inside_an_active_scope_reuses_its_hashes(monkeypatch):
+    import torch
+    from brainscore_core import extraction_cache as cache
+    model = torch.nn.Linear(2, 2, bias=False)
+    original = cache._hash_tensor
+    reads = []
+    monkeypatch.setattr(cache, '_hash_tensor', lambda tensor: reads.append(1) or original(tensor))
+    with cache.weight_fingerprint_scope():
+        outer = fingerprint(cache.model_config(model))
+        with cache.weight_fingerprint_scope():
+            assert fingerprint(cache.model_config(model)) == outer
+        assert cache._weight_hashes.get() is not None  # the inner scope left the run's memo open
+        assert fingerprint(cache.model_config(model)) == outer
+    assert len(reads) == 1
+    assert cache._weight_hashes.get() is None
+
+
 @pytest.mark.parametrize('edit', ['data_alias', 'numpy_alias'])
 def test_untracked_edits_between_runs_are_detected(edit):
     import torch

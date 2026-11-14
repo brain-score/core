@@ -58,8 +58,7 @@ def test_stamp_score_metadata_adds_provenance_and_preserves_existing_attrs():
         _Subject(),
         requested_channels={"neural:IT"},
         protocol="neural",
-        harness_id="test-harness",
-    )
+        harness_id="test-harness")
 
     assert returned is score
     assert score.attrs["runtime_sec"] == 0.01
@@ -116,15 +115,14 @@ class _Answerer(Subject):
     def participate(self, session):
         while session.next_input() is not None:
             pass
-        stimuli = (session.stimulus_set if getattr(session, 'stimulus_set', None) is not None
-                   else session.task_context.metadata['stimulus_set'])
+        stimuli = session.stimuli
         n = len(stimuli)
         payload = BehavioralAssembly(
             np.tile([1.0, 0.0], (n, 1)),
             coords={'stimulus_id': ('presentation', list(stimuli['stimulus_id'])),
                     'choice': ['cat', 'dog']},
             dims=['presentation', 'choice'], attrs={'measure': self.measure})
-        for channel in session.requested_output_channels:
+        for channel in session.outputs:
             session.respond(StreamEvent(channel, payload, None))
 
     def reset(self):
@@ -142,9 +140,9 @@ def _stimuli():
 def test_generation_subject_without_brainscore_model_is_stamped_generation():
     subject = _Answerer({'kind': 'reported', 'source': 'reply'})
     task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
-                       instruction='Which animal?', metadata={'stimulus_set': _stimuli()})
+                       instruction='Which animal?')
     with record_measures() as measures:
-        behavioral_response(subject, task)
+        behavioral_response(subject, _stimuli(), task)
 
     score = stamp_score_metadata(Score(0.5), subject, {'behavior'},
                                  protocol=_protocol(subject, measures),
@@ -156,20 +154,18 @@ def test_generation_subject_without_brainscore_model_is_stamped_generation():
 
 def test_likelihood_subject_is_not_stamped_readout():
     subject = _Answerer({'kind': 'implied', 'source': 'likelihood'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
-                       metadata={'stimulus_set': _stimuli()})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     with record_measures() as measures:
-        behavioral_response(subject, task)
+        behavioral_response(subject, _stimuli(), task)
 
     assert _protocol(subject, measures) == 'behavior:likelihood'
 
 
 def test_implied_measure_without_a_known_source_does_not_claim_readout():
     subject = _Answerer({'kind': 'implied'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
-                       metadata={'stimulus_set': _stimuli()})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     with record_measures() as measures:
-        behavioral_response(subject, task)
+        behavioral_response(subject, _stimuli(), task)
 
     assert _protocol(subject, measures) == 'behavior:implied'
 
@@ -198,9 +194,8 @@ def test_reported_and_implied_measures_stamp_a_sorted_tuple():
         for measure in ({'kind': 'reported', 'source': 'reply'},
                         {'kind': 'implied', 'source': 'likelihood'}):
             subject.measure = measure
-            behavioral_response(subject, TaskContext(
-                task_type='probabilities', label_set=['cat', 'dog'],
-                metadata={'stimulus_set': _stimuli()}))
+            behavioral_response(subject, _stimuli(), TaskContext(
+                task_type='probabilities', label_set=['cat', 'dog']))
     score = stamp_score_metadata(Score(0.5), subject, {'behavior'},
                                  protocol=_protocol(subject, measures),
                                  harness_id='test', measures=measures)
@@ -221,9 +216,8 @@ def test_nothing_recorded_keeps_the_old_default_stamp():
 
 def test_measures_outside_a_run_are_not_recorded():
     subject = _Answerer({'kind': 'reported', 'source': 'reply'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
-                       metadata={'stimulus_set': _stimuli()})
-    behavioral_response(subject, task)            # no run open: nothing kept
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
+    behavioral_response(subject, _stimuli(), task)            # no run open: nothing kept
     with record_measures() as measures:
         pass
 
@@ -249,7 +243,7 @@ def test_mixed_measures_in_one_collection_are_all_recorded():
             dims=['presentation', 'choice'], attrs={'measure': measure}), None)
 
     with record_measures() as measures:
-        session = Session((), requested_output_channels=['behavior'])
+        session = Session((), outputs=['behavior'])
         session.respond(event({'kind': 'implied', 'source': 'readout'}, 's0'))
         session.respond(event({'kind': 'reported', 'source': 'reply'}, 's1'))
         session.collect('behavior')
@@ -263,11 +257,10 @@ def test_mixed_measures_in_one_collection_are_all_recorded():
 
 def test_an_inner_score_passes_its_measures_to_the_outer_score():
     subject = _Answerer({'kind': 'reported', 'source': 'reply'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
-                       metadata={'stimulus_set': _stimuli()})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     with record_measures() as outer:
         with record_measures() as inner:      # an inner score() call
-            behavioral_response(subject, task)
+            behavioral_response(subject, _stimuli(), task)
         assert inner.measures == {('reported', 'reply')}
 
     assert _protocol(subject, outer) == 'behavior:generation'
@@ -277,15 +270,14 @@ def test_a_failed_inner_run_passes_nothing_to_the_outer_record():
     """Only a successful inner score reaches the outer result, so only its
     measures are passed on; the outer record is restored either way."""
     subject = _Answerer({'kind': 'reported', 'source': 'reply'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
-                       metadata={'stimulus_set': _stimuli()})
+    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     with record_measures() as outer:
         with pytest.raises(RuntimeError):
             with record_measures():
-                behavioral_response(subject, task)
+                behavioral_response(subject, _stimuli(), task)
                 raise RuntimeError('benchmark failed')
         subject.measure = {'kind': 'implied', 'source': 'likelihood'}
-        behavioral_response(subject, task)     # lands in the outer record
+        behavioral_response(subject, _stimuli(), task)     # lands in the outer record
 
     assert outer.measures == {('implied', 'likelihood')}
 
@@ -307,7 +299,7 @@ def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
 
     subject = _Replayer(measure=None)
     with record_measures() as measures:
-        session = Session((), requested_output_channels=['behavior'])
+        session = Session((), outputs=['behavior'])
         subject.participate(session)
         session.collect('behavior')
 

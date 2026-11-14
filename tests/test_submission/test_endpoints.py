@@ -88,6 +88,14 @@ class DummyDomainPlugins(DomainPlugins):
         return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
 
 
+class NotApplicableDomainPlugins(DummyDomainPlugins):
+    def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
+        from brainscore_core.compatibility import CompatibilityError
+        from brainscore_core.score_status import na_score
+        return na_score(CompatibilityError("does not produce ['neural:IT']",
+                                           channels={'neural:IT'}))
+
+
 class TestRunScoring:
     test_database = None
 
@@ -171,6 +179,70 @@ class TestRunScoring:
         assert len(score_entries) == 1
         score_entry = score_entries[0]
         assert score_entry.score_raw == 0.8
+
+    def test_not_applicable_pair_is_stored_as_a_result_and_not_run_again(self):
+        import math
+        plugins = NotApplicableDomainPlugins()
+        calls = []
+        score = plugins.score
+        plugins.score = lambda **kwargs: calls.append(kwargs) or score(**kwargs)
+        endpoint = RunScoringEndpoint(domain_plugins=plugins, db_secret=self.test_database)
+        for _ in range(2):
+            endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                     jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+
+        assert len(calls) == 1                        # the second submission runs nothing
+        score_entry, = list(database_models.Score.select())
+        # NaN in a database that keeps it; SQLite (this test) stores it as NULL.
+        assert score_entry.score_raw is None or math.isnan(score_entry.score_raw)
+        assert score_entry.comment.startswith("N/A: does not produce ['neural:IT']")
+
+    def test_a_failed_run_is_retried(self):
+        class Failing(DummyDomainPlugins):
+            def score(self, model_identifier, benchmark_identifier):
+                raise RuntimeError('model crashed')
+        endpoint = RunScoringEndpoint(domain_plugins=Failing(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        failed, = list(database_models.Score.select())
+        assert failed.score_raw is None and 'model crashed' in failed.comment
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        score_entry, = list(database_models.Score.select())
+        assert score_entry.score_raw == 0.8
+
+    def test_an_ordinary_nan_score_with_an_na_like_comment_is_retried(self):
+        import math
+        class NoCeiling(DummyDomainPlugins):
+            def __init__(self):
+                self.calls = 0
+
+            def score(self, model_identifier, benchmark_identifier):
+                self.calls += 1
+                score = Score([float('nan'), float('nan')], coords={'aggregation': ['center', 'error']},
+                              dims=['aggregation'])
+                score.attrs['comment'] = 'N/A: no ceiling estimate'
+                return score
+        plugins = NoCeiling()
+        endpoint = RunScoringEndpoint(domain_plugins=plugins, db_secret=self.test_database)
+        endpoint._upload_score_to_s3 = lambda *args, **kwargs: None
+        for _ in range(2):
+            endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                     jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        assert plugins.calls == 2                     # not a stored N/A result: run again
+        score_entry, = list(database_models.Score.select())
+        assert score_entry.score_raw is None or math.isnan(score_entry.score_raw)
+        assert score_entry.comment == 'Comment: N/A: no ceiling estimate'
+
+    def test_an_ordinary_comment_is_stored_unchanged(self):
+        from brainscore_core.submission.database import update_score
+        score = Score([0.5, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+        score.attrs['comment'] = 'layers: {"IT": "layer4"}'
+        entry, _ = database_models.Score.get_or_create(
+            benchmark=BenchmarkInstance.get(), model=Model.get(name='dummymodel1'))
+        update_score(score, entry)
+        assert database_models.Score.get().comment == 'layers: {"IT": "layer4"}'
 
     def test_full_scoring(self):
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from brainscore_core.compatibility import (
@@ -6,7 +8,7 @@ from brainscore_core.compatibility import (
     benchmark_required_input_channels,
     check_channel_compatibility,
 )
-from brainscore_core.model_interface import Subject
+from brainscore_core.contract import Subject
 
 
 class _Subject(Subject):
@@ -217,7 +219,7 @@ def test_wrong_direction_channel_declaration_raises():
         requested_output_channels={"neural:IT"},
     )
 
-    with pytest.raises(CompatibilityError, match="behavior"):
+    with pytest.raises(ValueError, match="behavior"):
         check_channel_compatibility(subject, benchmark)
 
 
@@ -231,7 +233,7 @@ def test_invalid_addressed_channel_declaration_raises():
         requested_output_channels={"neural:IT"},
     )
 
-    with pytest.raises(CompatibilityError, match="not addressable"):
+    with pytest.raises(ValueError, match="not addressable"):
         check_channel_compatibility(subject, benchmark)
 
 
@@ -245,17 +247,17 @@ def test_invalid_channel_grammar_raises():
         requested_output_channels={"neural:"},
     )
 
-    with pytest.raises(CompatibilityError, match="invalid channel"):
+    with pytest.raises(ValueError, match="invalid channel"):
         check_channel_compatibility(subject, benchmark)
 
 
 def test_bare_vision_declaration_raises_for_subject_and_benchmark():
-    with pytest.raises(CompatibilityError, match="names its form"):
+    with pytest.raises(ValueError, match="names its form"):
         check_channel_compatibility(
             _Subject(in_channels={"vision"}, out_channels={"neural:IT"}),
             _Benchmark(required_input_channels={"vision:image"},
                        requested_output_channels={"neural:IT"}))
-    with pytest.raises(CompatibilityError, match="names its form"):
+    with pytest.raises(ValueError, match="names its form"):
         check_channel_compatibility(
             _Subject(in_channels={"vision:image"}, out_channels={"neural:IT"}),
             _Benchmark(required_input_channels={"vision"},
@@ -268,3 +270,153 @@ def test_image_subject_and_video_benchmark_do_not_match():
                            requested_output_channels={"neural:IT"})
     with pytest.raises(CompatibilityError):
         check_channel_compatibility(subject, benchmark)
+
+
+# ── output_inputs: the inputs an output can be answered from ──────────
+
+
+class _Listing(_Subject):
+    """A vision-language subject: its vision region needs a visual input."""
+
+    def __init__(self, output_inputs, **kwargs):
+        super().__init__(**kwargs)
+        self._output_inputs = output_inputs
+
+    @property
+    def output_inputs(self):
+        return self._output_inputs
+
+
+def test_output_inputs_is_empty_by_default_and_changes_nothing():
+    subject = _Subject({"text"}, {"neural:IT"})
+    assert subject.output_inputs == {}
+    match = check_channel_compatibility(subject, _Benchmark(
+        required_input_channels={"text"}, requested_output_channels={"neural:IT"}))
+    assert match.kind == "full"
+
+
+def _vision_language(**kwargs):
+    return _Listing({"neural:IT": frozenset({"vision:image", "vision:video"}),
+                     "neural:language": frozenset({"text"})},
+                    in_channels={"vision:image", "vision:video", "text"},
+                    out_channels={"neural:IT", "neural:language"}, **kwargs)
+
+
+def test_a_listed_output_runs_when_the_benchmark_sends_one_of_its_inputs():
+    match = check_channel_compatibility(_vision_language(), _Benchmark(
+        required_input_channels={"vision:video", "audio"},
+        requested_output_channels={"neural:IT"}))
+    assert match.consumed_inputs == {"vision:video"}
+
+
+def test_a_listed_output_is_na_when_the_benchmark_sends_none_of_its_inputs():
+    with pytest.raises(CompatibilityError,
+                       match=r"answers 'neural:IT' only from the inputs .*'vision:image'.*"
+                             r"takes in only \{'text'\}"):
+        check_channel_compatibility(_vision_language(), _Benchmark(
+            required_input_channels={"text"}, requested_output_channels={"neural:IT"}))
+    # The unlisted output, and the listed output whose input is sent, still run.
+    check_channel_compatibility(_vision_language(), _Benchmark(
+        required_input_channels={"text"}, requested_output_channels={"neural:language"}))
+
+
+def test_the_existing_rules_still_hold_with_a_listing():
+    with pytest.raises(CompatibilityError, match="cannot produce output channels"):
+        check_channel_compatibility(_vision_language(), _Benchmark(
+            required_input_channels={"text"}, requested_output_channels={"neural:V4"}))
+    with pytest.raises(CompatibilityError, match="takes in none of the inputs"):
+        check_channel_compatibility(_vision_language(), _Benchmark(
+            required_input_channels={"audio"}, requested_output_channels={"neural:language"}))
+    with pytest.raises(CompatibilityError, match="hard-requires"):
+        check_channel_compatibility(_vision_language(required_channels={"text"}), _Benchmark(
+            required_input_channels={"vision:image"}, requested_output_channels={"neural:IT"}))
+
+
+def test_listed_inputs_are_compared_with_the_inputs_the_subject_takes_in():
+    """A listed input the benchmark sends but the subject does not take in does not count."""
+    subject = _Listing({"neural:IT": frozenset({"vision:image"})},
+                       in_channels={"vision:image", "text"}, out_channels={"neural:IT"})
+    match = check_channel_compatibility(subject, _Benchmark(
+        required_input_channels={"vision:image", "audio"},
+        requested_output_channels={"neural:IT"}))
+    assert match.consumed_inputs == {"vision:image"}
+
+
+@pytest.mark.parametrize("listing, message", [
+    ({"neural:V4": frozenset({"vision:image"})}, "not in out_channels"),
+    ({"neural:IT": frozenset({"audio"})}, "not in in_channels"),
+])
+def test_an_inconsistent_listing_is_an_error(listing, message):
+    subject = _Listing(listing, in_channels={"vision:image", "text"}, out_channels={"neural:IT"})
+    with pytest.raises(ValueError, match=message):
+        check_channel_compatibility(subject, _Benchmark(
+            required_input_channels={"vision:image"}, requested_output_channels={"neural:IT"}))
+
+
+def test_an_empty_listed_set_is_an_error_and_an_absent_entry_is_unrestricted():
+    bench = _Benchmark(required_input_channels={"text"}, requested_output_channels={"neural:IT"})
+    empty = _Listing({"neural:IT": frozenset()}, in_channels={"text"}, out_channels={"neural:IT"})
+    with pytest.raises(ValueError, match="must name at least one input"):
+        check_channel_compatibility(empty, bench)
+    absent = _Listing({}, in_channels={"text"}, out_channels={"neural:IT"})
+    assert check_channel_compatibility(absent, bench).kind == "full"
+
+
+# ── A defect is reported before any mismatch of the pair ──────────────────────
+
+class _DeclaredSubject:
+    identifier = 'declared'
+    in_channels = frozenset({'text'})
+    out_channels = frozenset({'behavior'})       # no neural:IT: a mismatch with the benchmark
+    required_channels = frozenset()
+    output_inputs = {}
+    traits = frozenset()
+
+
+def _mismatched_benchmark(**fields):
+    values = dict(identifier='mismatched', required_input_channels=frozenset({'text'}),
+                  requested_output_channels=frozenset({'neural:IT'}))
+    return SimpleNamespace(**(values | fields))
+
+
+@pytest.mark.parametrize('subject_fields, benchmark_fields, message', [
+    ({'output_inputs': {'behavior': frozenset({'audio'})}}, {}, 'output_inputs'),
+    ({'output_inputs': {'neural:V1': frozenset({'text'})}}, {}, 'output_inputs'),
+    ({'required_channels': frozenset({'audio'})}, {}, 'not in its in_channels'),
+    ({'traits': frozenset({'memory:trial_history'})}, {}, "'control'"),
+    ({}, {'trial_memory': 'forever'}, 'trial_memory'),
+    ({}, {'required_input_channels': frozenset({'vision'})}, 'vision'),
+    ({}, {'required_input_channels': frozenset({'neural:IT'})}, 'registry marks'),
+    ({'in_channels': frozenset({'text', 'neural:IT'})}, {}, 'registry marks'),
+], ids=['output-inputs-undeclared-input', 'output-inputs-undeclared-output', 'required-not-in-inputs',
+        'history-without-control', 'trial-memory', 'bare-vision', 'benchmark-direction',
+        'subject-direction'])
+def test_a_defect_is_reported_even_when_the_pair_also_mismatches(subject_fields, benchmark_fields,
+                                                                  message):
+    subject = type('Subject', (_DeclaredSubject,), subject_fields)()
+    with pytest.raises(ValueError, match=message):
+        check_channel_compatibility(subject, _mismatched_benchmark(**benchmark_fields))
+
+
+def test_the_mismatch_alone_is_not_applicable():
+    with pytest.raises(CompatibilityError, match='neural:IT'):
+        check_channel_compatibility(_DeclaredSubject(), _mismatched_benchmark())
+
+
+@pytest.mark.parametrize('subject_fields, benchmark_fields', [
+    ({'in_channels': frozenset({'text', 'aardvark', 'vision'})}, {}),
+    ({'out_channels': frozenset({'behavior', 'aardvark', 'text'})}, {}),
+    ({}, {'required_input_channels': frozenset({'text', 'aardvark', 'vision'})}),
+    ({}, {'requested_output_channels': frozenset({'aardvark', 'text'})}),
+], ids=['subject-inputs', 'subject-outputs', 'benchmark-inputs', 'benchmark-outputs'])
+def test_an_unknown_channel_does_not_hide_a_malformed_one_in_the_same_collection(
+        subject_fields, benchmark_fields):
+    subject = type('Subject', (_DeclaredSubject,), subject_fields)()
+    with pytest.raises(ValueError):
+        check_channel_compatibility(subject, _mismatched_benchmark(**benchmark_fields))
+
+
+def test_an_unknown_channel_alone_is_not_applicable():
+    subject = type('Subject', (_DeclaredSubject,), {'in_channels': frozenset({'text', 'aardvark'})})()
+    with pytest.raises(CompatibilityError, match='aardvark'):
+        check_channel_compatibility(subject, _mismatched_benchmark())

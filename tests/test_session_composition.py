@@ -164,7 +164,7 @@ def test_windowing_composes_with_the_one_session():
     stats = {}
     frames = (f'f{i}.png' for i in range(90))
     windows = windowed_stream(frames, fps=30, window_ms=1000, stats=stats)
-    session = Session(windows, ['neural:IT'], streaming=True)
+    session = Session(windows, ['neural:IT'])
 
     class Recorder:
         def start_recording(self, region, time_bins=None, recording_type=None):
@@ -231,8 +231,8 @@ def test_observers_see_filtered_inputs_and_rewritten_responses():
 
 def test_state_change_session_driver_ignores_control_events():
     from brainscore_core.events import StateChange
-    from brainscore_core._sessions.payloads import _state_change_event
-    session = Session([begin_event(0.0), _state_change_event(StateChange(kind='ablation'))],
+    change = StateChange(kind='ablation')
+    session = Session([begin_event(0.0), StreamEvent('lesion', change, 0.0, {'kind': 'ablation'})],
                       ['perturbation'])
 
     class Subject:

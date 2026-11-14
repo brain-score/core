@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 
-from brainscore_core.model_interface import UnifiedModel
+from brainscore_core.contract import UnifiedModel
 from brainscore_core.streaming_helpers import stimulus_session
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
@@ -17,8 +17,8 @@ class NoProcess(UnifiedModel):
         return {'IT': 'layer'}
 
     @property
-    def supported_modalities(self):
-        return {'vision'}
+    def in_channels(self):
+        return {'vision:image'}
 
 
 def test_typed_subclass_instantiates_without_process_and_fails_clearly():

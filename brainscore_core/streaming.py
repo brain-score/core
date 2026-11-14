@@ -187,9 +187,12 @@ class Source:
     the response (a receipt). ``complete`` says whether the input ran to the end of
     its episode; ``history_limit`` bounds how many responses the session keeps.
     ``checked`` says the source already checked its events against the catalog;
-    otherwise the session checks each event as it delivers it.
+    otherwise the session checks each event as it delivers it. ``listed`` says
+    the events are a finite list known up front: a subject may answer them in one
+    call. Any other source is answered one event at a time.
     """
     checked: bool = False
+    listed: bool = False
     complete: bool = True
     history_limit: Optional[int] = None
 
@@ -217,8 +220,6 @@ class FixedSource(Source):
     catalog now (rule 3.4). A lazy iterator is read one event at a time and is
     never materialized; the session checks each event when it delivers it.
     """
-    checked = False
-    listed = False      # True for a list or tuple: a finite batch known up front
 
     def __init__(self, events: Iterable[Any] = ()) -> None:
         if isinstance(events, (list, tuple)):
@@ -235,32 +236,33 @@ class Session(Source):
     """Input delivery, requested outputs, task settings, and result collection.
 
     ``source`` is a ``Source`` or any iterable of events (made a ``FixedSource``).
-    The other arguments are the common configuration consumed by
-    ``BrainScoreModel`` and experiment replay; a stimulus table or task is kept
-    on the session so the batch drivers can answer it in one ``process`` call.
+    The source decides the delivery: a listed source is one batch, any other is
+    answered one event at a time. The other arguments are the common
+    configuration consumed by ``BrainScoreModel`` and experiment replay; a
+    stimulus table or task is kept on the session so the batch drivers can
+    answer it in one ``process`` call.
 
     ``complete`` asks the source whether the inputs ran to the end of the episode.
     Fixed inputs are always complete; a closed-loop source stays False until a
     terminal step. Runners must not accept an incomplete session as a measurement.
     """
-    context_fields = ('requested_output_channels', 'stimulus_set', 'task_context',
+    context_fields = ('outputs', 'stimuli', 'task',
                       'time_bins', 'streaming', 'settings')
 
-    def __init__(self, source: Any, requested_output_channels: Optional[Iterable[str]] = None,
-                 task_context: Any = None, *, stimulus_set: Any = None, time_bins: Any = None,
-                 streaming: bool = False, settings: Any = None) -> None:
+    def __init__(self, source: Any, outputs: Optional[Iterable[str]] = None,
+                 task: Any = None, *, stimuli: Any = None, time_bins: Any = None,
+                 settings: Any = None) -> None:
         self.source = source if isinstance(source, Source) else FixedSource(source)
-        self.requested_output_channels: Optional[tuple[str, ...]] = None
-        if requested_output_channels is not None:
-            if isinstance(requested_output_channels, str):
-                raise TypeError('requested_output_channels must be a sequence of channel names.')
-            self.requested_output_channels = tuple(requested_output_channels)
-            for channel in self.requested_output_channels:
+        self.outputs: Optional[tuple[str, ...]] = None
+        if outputs is not None:
+            if isinstance(outputs, str):
+                raise TypeError('outputs must be a sequence of channel names.')
+            self.outputs = tuple(outputs)
+            for channel in self.outputs:
                 parse_channel(channel)
-        self.task_context = task_context
-        self.stimulus_set = stimulus_set
+        self.task = task
+        self.stimuli = stimuli
         self.time_bins = time_bins
-        self._streaming = streaming
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.
         self.settings = settings
@@ -273,6 +275,7 @@ class Session(Source):
         self._control = False
         self._trial = 0
         self._rows: list = []
+        self._row_trials: dict = {}  # row label -> trial numbers, ascending
         self._read_all = False
         self._answered: set = set()
         self.one_answer_per_trial = False
@@ -281,30 +284,26 @@ class Session(Source):
 
     @property
     def streaming(self) -> bool:
-        """Answer one event at a time: when asked, or when the inputs cannot be listed
-        up front (a generator, a closed-loop source). A list of events with no table
-        is a batch: its rows are rebuilt from the events and answered in one call."""
-        listed = isinstance(self.source, FixedSource) and self.source.listed
-        return self._streaming or (self.stimulus_set is None and not listed)
-
-    @streaming.setter
-    def streaming(self, value: bool) -> None:
-        self._streaming = value
+        """Answer one event at a time: the source is not a list known up front."""
+        return not self.source.listed
 
     def declare_inputs(self, channels: Iterable[str]) -> 'Session':
         """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
 
         Events on other channels are skipped (exact match, see ``channel_declared``),
-        and the stimulus table loses the columns of undeclared modalities. Control
-        events pass only when ``control`` is declared; a session that was never
-        given a declaration delivers no control events. A second call narrows
-        further. Returns ``self``.
+        and the stimulus table loses the columns that feed undeclared channels. The
+        task the subject sees loses the ``present`` entries of those inputs, so a
+        trial shows only the parts the subject takes in; the caller's task is not
+        changed. Control events pass only when ``control`` is declared; a session
+        that was never given a declaration delivers no control events. A second
+        call narrows further. Returns ``self``.
         """
-        from brainscore_core._sessions.view import declared_only
+        from brainscore_core._sessions.view import _declared_task, declared_only
         declared = frozenset(channels)
         self._declared = declared if self._declared is None else self._declared & declared
         self._control = CONTROL_CHANNEL in self._declared
-        self.stimulus_set = declared_only(self.stimulus_set, self._declared)
+        self.task = _declared_task(self.task, self.stimuli, self._declared)
+        self.stimuli = declared_only(self.stimuli, self._declared)
         return self
 
     def _request_control(self, driver: str) -> None:
@@ -359,6 +358,7 @@ class Session(Source):
                 if event.payload == BEGIN:
                     self._trial += 1
                     self._rows.append(None)
+                    self._row_trials.setdefault(None, []).append(self._trial)
                 if self._control:
                     return event
             elif self._declared is None or channel_declared(event.channel, self._declared):
@@ -404,7 +404,13 @@ class Session(Source):
         # The row identity of the open trial: its first stimulus event names it.
         meta = event.meta
         if self._rows and self._rows[-1] is None and 'stimulus_index' in meta:
-            self._rows[-1] = meta['stimulus_index']
+            label = meta['stimulus_index']
+            self._rows[-1] = label
+            self._row_trials[None].pop()
+            try:
+                self._row_trials.setdefault(label, []).append(len(self._rows))
+            except TypeError:  # unhashable label: found by a scan in _trials_named
+                pass
 
     @property
     def complete(self) -> bool:
@@ -432,10 +438,10 @@ class Session(Source):
             raise TypeError("event must be a StreamEvent")
         for rewrite in tuple(self._rewriters):
             event = rewrite(event)
-        if self.requested_output_channels is not None:
-            if event.channel not in self.requested_output_channels:
+        if self.outputs is not None:
+            if event.channel not in self.outputs:
                 raise ValueError(f"response on {event.channel!r} was not requested; "
-                                 f"requested: {list(self.requested_output_channels)}")
+                                 f"requested: {list(self.outputs)}")
             from . import io_catalog
             check_event(event, io_catalog.OUTPUT)
         self._check_answered_once(event)
@@ -474,7 +480,7 @@ class Session(Source):
         if event.meta and 'stimulus_index' in event.meta:
             # The label can repeat across rows: prefer the open trial, then
             # the first trial with this label not yet answered on the channel.
-            known = [i + 1 for i, row in enumerate(self._rows) if row == event.meta['stimulus_index']]
+            known = self._trials_named(event.meta['stimulus_index'])
             free = [t for t in known if (t, event.channel) not in self._answered]
             if known:
                 trial = (self._trial if self._trial in free else
@@ -487,6 +493,15 @@ class Session(Source):
                              "Answer each requested channel once per trial.")
         self._answered.add((trial, event.channel))
 
+    def _trials_named(self, label: Any) -> list:
+        """The trial numbers whose row has this label, in order."""
+        try:
+            if label != label:  # a null label that is not equal to itself matches no row
+                return []
+            return self._row_trials.get(label, [])
+        except TypeError:  # unhashable label
+            return [i + 1 for i, row in enumerate(self._rows) if row == label]
+
     def collect(self, channel: Optional[str] = None) -> Any:
         """Return the responses, shaped by the channel family.
 
@@ -497,7 +512,7 @@ class Session(Source):
         else a dict keyed by requested channel.
         """
         if channel is None:
-            channels = self.requested_output_channels
+            channels = self.outputs
             if not channels:
                 return list(self.emitted)
             if len(channels) == 1:

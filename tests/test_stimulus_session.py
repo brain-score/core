@@ -1,11 +1,13 @@
 """The one stimulus session builder: any requested outputs, a task, and a streaming mode."""
 
+from collections import Counter
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from brainscore_core.contract import TaskContext, required_traits_for
-from brainscore_core.streaming import Session, StreamEvent, _with_trial_memory
+from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     drive_behavior_session,
     drive_behavior_session_streaming,
@@ -54,8 +56,8 @@ class _Typed:
     def start_recording(self, target, time_bins=None):
         self.calls.append(('start_recording', target, time_bins))
 
-    def start_task(self, task_context):
-        self.calls.append(('start_task', task_context))
+    def start_task(self, task):
+        self.calls.append(('start_task', task))
 
     def process(self, stimuli, **kwargs):
         self.calls.append(('process', len(stimuli)))
@@ -70,8 +72,8 @@ def _inputs(session):
 def test_neural_outputs_keep_the_table_and_answer_in_one_call():
     stimuli = _table()
     session = stimulus_session(stimuli, ['neural:IT'], time_bins=[(70, 170)])
-    assert session.requested_output_channels == ('neural:IT',)
-    assert session.stimulus_set is stimuli and session.task_context is None
+    assert session.outputs == ('neural:IT',)
+    assert session.stimuli is stimuli and session.task is None
     assert session.streaming is False
     subject = _Typed()
     drive_neural_session(subject, session)
@@ -83,8 +85,8 @@ def test_behavior_with_a_task_carries_the_task_and_presents_only_the_table():
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'],
                        fitting_stimuli=_table(2), instruction='Pick one')
     session = stimulus_session(stimuli, ['behavior'], task)
-    assert session.requested_output_channels == ('behavior',)
-    assert session.task_context is task and session.stimulus_set is stimuli
+    assert session.outputs == ('behavior',)
+    assert session.task is task and session.stimuli is stimuli
     events = _inputs(session.declare_inputs({'text', 'instruction'}))
     # The instruction and the fitting rows stay on the task context.
     assert [event.payload for event in events] == ['word 0', 'word 1', 'word 2']
@@ -96,7 +98,7 @@ def test_behavior_with_a_task_carries_the_task_and_presents_only_the_table():
 def test_behavior_and_neural_together_mark_each_row_as_one_trial():
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'])
     session = stimulus_session(_table(2), ['behavior', 'neural:IT'], task)
-    assert session.requested_output_channels == ('behavior', 'neural:IT')
+    assert session.outputs == ('behavior', 'neural:IT')
     assert session.one_answer_per_trial is True
     events = _inputs(session.declare_inputs({'text', 'control'}))
     assert [e.payload for e in events] == ['begin', 'word 0', 'end', 'begin', 'word 1', 'end']
@@ -117,8 +119,8 @@ def test_streaming_makes_one_row_at_a_time_for_any_outputs(outputs):
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'])
     session = stimulus_session(stimuli, outputs, task, streaming=True)
     assert pulled == [], 'building the session read the table'
-    assert session.streaming is True and session.task_context is task
-    assert session.requested_output_channels == (None if outputs is None else tuple(outputs))
+    assert session.streaming is True and session.task is task
+    assert session.outputs == (None if outputs is None else tuple(outputs))
     first = session.next_input()
     assert first.payload == 'word 0' and len(pulled) == 1
     rest = _inputs(session)
@@ -134,25 +136,12 @@ def test_streaming_behavior_answers_each_trial_after_one_task_setup():
     assert len(session.emitted) == 3
 
 
-@pytest.mark.parametrize('removed', [{'record': 'IT'}, {'state_change': object()},
-                                     {'scoring_stimuli': _table()}])
-def test_session_rejects_the_removed_arguments(removed):
-    with pytest.raises(TypeError):
-        Session((), ['neural:IT'], **removed)
-
-
-def test_stimulus_session_rejects_record():
-    with pytest.raises(TypeError):
-        stimulus_session(_table(), record='IT')
-
-
-def test_trial_memory_conversation_is_rejected():
+def test_an_unknown_trial_memory_is_rejected():
+    # 'conversation' is the old name of 'history' (rule 5.12); it has no alias.
     with pytest.raises(ValueError, match="'none', 'history'"):
         TaskContext(task_type='probabilities', trial_memory='conversation')
     with pytest.raises(ValueError):
         required_traits_for(None, 'conversation')
-    with pytest.raises(ValueError):
-        list(_with_trial_memory([], 'conversation'))
 
 
 def test_trial_memory_history_needs_the_trial_history_trait():
@@ -167,7 +156,7 @@ def test_trial_memory_history_needs_the_trial_history_trait():
 
 
 def test_history_benchmark_is_not_compatible_without_the_trait():
-    from brainscore_core._evaluation.compatibility import CompatibilityError, check_compatibility
+    from brainscore_core.compatibility import CompatibilityError, check_compatibility
     from brainscore_core.contract import Subject
 
     class _Subject(Subject):
@@ -205,7 +194,7 @@ def test_a_perturbation_answer_without_meta_is_read_against_the_delivered_change
         session = _state_change_session(StateChange(kind='reset', handle_id='h'))
         session.next_input()
         session.respond(StreamEvent('perturbation', PerturbationApplied('h', None, None), 0.0))
-    assert record.undone == {'h'} and record.applied == set()
+    assert record.undone == {'h': 1} and record.applied == Counter()
 
 
 def test_a_subject_that_declares_the_family_receives_the_change():
@@ -232,7 +221,7 @@ def test_behavioral_response_sends_the_rows_and_keeps_the_instruction_on_the_tas
     from brainscore_core.contract import Subject
     from brainscore_core.streaming_helpers import behavioral_response
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'], instruction='Pick one',
-                       fitting_stimuli=_table(2), metadata={'stimulus_set': _table(3)})
+                       fitting_stimuli=_table(2))
 
     class _Reader(Subject):
         identifier = 'reader'
@@ -242,12 +231,12 @@ def test_behavioral_response_sends_the_rows_and_keeps_the_instruction_on_the_tas
         def participate(self, session):
             session.declare_inputs(self.in_channels)
             self.seen = [(e.channel, e.payload) for e in iter(session.next_input, None)]
-            self.instruction = session.task_context.instruction
-            ids = list(session.stimulus_set['stimulus_id'])
+            self.instruction = session.task.instruction
+            ids = list(session.stimuli['stimulus_id'])
             session.respond(StreamEvent('behavior', _behavior(ids), 0.0))
 
     subject = _Reader()
-    result = behavioral_response(subject, task)
+    result = behavioral_response(subject, _table(3), task)
     assert subject.seen == [('text', 'word 0'), ('text', 'word 1'), ('text', 'word 2')]
     assert subject.instruction == 'Pick one'
     assert result.sizes['presentation'] == 3
@@ -259,8 +248,8 @@ def test_behavioral_response_without_stimuli_raises_before_participate():
     class _Never:
         def participate(self, session):
             raise AssertionError('participate reached')
-    with pytest.raises(ValueError, match='requires stimuli'):
-        behavioral_response(_Never(), TaskContext(task_type='probabilities'))
+    with pytest.raises(ValueError, match='needs the stimuli'):
+        behavioral_response(_Never(), None, TaskContext(task_type='probabilities'))
 
 
 def test_a_subject_that_does_not_declare_the_family_never_receives_the_change():

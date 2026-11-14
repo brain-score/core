@@ -51,7 +51,7 @@ class _ParticipateOnly(Subject):
         self.payloads = []
 
     def participate(self, session):
-        if 'motor' in session.requested_output_channels:
+        if 'motor' in session.outputs:
             # Closed loop: answer each respond request until the episode ends.
             session.declare_inputs(self.in_channels)
             while (event := session.next_input()) is not None:
@@ -62,8 +62,8 @@ class _ParticipateOnly(Subject):
             return
         while (event := session.next_input()) is not None:
             self.inputs.append(event)
-        n = len(session.stimulus_set)
-        for channel in session.requested_output_channels:
+        n = len(session.stimuli)
+        for channel in session.outputs:
             payload = (_neural(n) if channel.startswith('neural:') else
                        BehavioralAssembly(np.zeros((n, 1)), dims=['presentation', 'choice']))
             self.payloads.append(payload)
@@ -82,16 +82,15 @@ def test_subject_has_exactly_one_abstract_evaluation_method():
 
 def test_static_neural_helper_runs_a_participate_only_subject():
     subject = _ParticipateOnly()
-    out = neural_response(subject, _images(3), record='IT')
+    out = neural_response(subject, _images(3), ['neural:IT'])
     assert out is subject.payloads[0]
     assert len([e for e in subject.inputs if e.channel != 'control']) == 3
 
 
 def test_static_behavior_helper_runs_a_participate_only_subject():
     subject = _ParticipateOnly()
-    context = TaskContext(task_type='probabilities', label_set=['a', 'b'],
-                          metadata={'stimulus_set': _images(2)})
-    out = behavioral_response(subject, context)
+    context = TaskContext(task_type='probabilities', label_set=['a', 'b'])
+    out = behavioral_response(subject, _images(2), context)
     assert out is subject.payloads[0]
 
 
@@ -133,7 +132,7 @@ class _Environment:
 
 def test_closed_loop_runs_a_participate_only_subject():
     subject, env = _ParticipateOnly(), _Environment()
-    closed_loop = SimpleNamespace(identifier='closed-loop', uses_session=True,
+    closed_loop = SimpleNamespace(identifier='closed-loop',
                                   required_input_channels={'observation'},
                                   requested_output_channels={'motor'})
     match = check_channel_compatibility(subject, closed_loop)

@@ -271,25 +271,25 @@ class EnvironmentSource(Source):
         return receipt
 
 
-def environment_session(environment, requested_output_channels=None, task_context=None, *,
+def environment_session(environment, outputs=None, task=None, *,
                         action_channel: str = 'motor', action_validator=None, seed=None,
                         options=None, require_specs=False,
                         history_limit: Optional[int] = None) -> Session:
     """A session driving ``environment``.
 
-    ``requested_output_channels`` defaults to the action channel alone.
+    ``outputs`` defaults to the action channel alone.
     """
     source = EnvironmentSource(
         environment, action_channel=action_channel, action_validator=action_validator,
         seed=seed, options=options, require_specs=require_specs, history_limit=history_limit,
     )
-    requested = ((action_channel,) if requested_output_channels is None
-                 else requested_output_channels)
-    return Session(source, requested, task_context)
+    requested = ((action_channel,) if outputs is None
+                 else outputs)
+    return Session(source, requested, task)
 
 
 def run_environment(subject, environment, *, outputs=None, action_channel: str = 'motor',
-                    task_context=None, seed=None, options=None, action_validator=None,
+                    task=None, seed=None, options=None, action_validator=None,
                     require_specs=False) -> list:
     """Run one closed-loop episode and close its environment, returning the applied actions.
 
@@ -303,7 +303,7 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
     """
     try:
         session = environment_session(
-            environment, outputs, task_context, action_channel=action_channel,
+            environment, outputs, task, action_channel=action_channel,
             seed=seed, options=options,
             action_validator=action_validator, require_specs=require_specs,
         )
@@ -326,11 +326,6 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
         if not session.emitted:  # episode ended at reset, no action was sent
             return []
         return [event.payload for event in session.collect(action_channel)]
-
-
-def _drive_environment_via_process(subject, session: Session) -> None:
-    """Drive an environment for a subject that exposes process()."""
-    drive_environment_session(subject, session, driver="process")
 
 
 def drive_environment_session(subject, session: Session, driver: str = "interact",

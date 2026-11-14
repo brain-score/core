@@ -5,14 +5,8 @@ import pytest
 import xarray as xr
 
 from brainscore_core import io_catalog
-from brainscore_core.model_interface import (
-    Perturbation,
-    PerturbationApplied,
-    Selection,
-    StateChange,
-    UnifiedModel,
-    TaskContext,
-)
+from brainscore_core.contract import Subject, UnifiedModel, TaskContext
+from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
 from brainscore_core.streaming import NamedStreams
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
@@ -23,7 +17,6 @@ from brainscore_core.streaming_helpers import (
     stimulus_session,
     run_environment,
 )
-from brainscore_core._sessions.buffered import _state_change_session
 from brainscore_core.supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
     NeuroidAssembly,
@@ -97,8 +90,8 @@ class _SyntheticSubject(UnifiedModel):
         return {"IT": "layer4"}
 
     @property
-    def supported_modalities(self):
-        return {"vision"}
+    def in_channels(self):
+        return {"vision:image"}
 
     def start_recording(self, recording_target, **kwargs):
         self.recording_target = recording_target
@@ -122,8 +115,8 @@ class _NonNativeEnvironmentSubject(UnifiedModel):
         return {}
 
     @property
-    def supported_modalities(self):
-        return {"vision", "proprioception"}
+    def in_channels(self):
+        return {"vision:image", "proprioception"}
 
     def process(self, input_event):
         self.processed_rows.append(input_event)
@@ -227,12 +220,11 @@ def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
     channels = ([f'neural:{regions}'] if isinstance(regions, str)
                 else [f'neural:{region}' for region in regions])
     if kind == 'windowed':
-        session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels,
-                          streaming=True)
+        session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels)
     else:
         session = stimulus_session(_stimulus_set(), channels, streaming=kind == 'streaming')
     expected = {}
-    for channel in session.requested_output_channels:
+    for channel in session.outputs:
         expected[channel] = _assembly()
         session.respond(StreamEvent(channel=channel, payload=expected[channel], t_ms=0))
     collected = session.collect()
@@ -250,7 +242,7 @@ def test_neural_response_matches_process_assembly_exactly():
     stimuli = _stimulus_set()
 
     assert type(subject).participate is UnifiedModel.participate
-    scored = neural_response(subject, stimuli, record="IT")
+    scored = neural_response(subject, stimuli, ['neural:IT'])
 
     assert subject.recording_target == "IT"
     assert subject.process_input is stimuli
@@ -295,10 +287,10 @@ def test_a_behavior_session_sends_only_the_stimulus_rows():
     session = stimulus_session(scoring, ["behavior"], context).declare_inputs(
         {'control', 'instruction', 'vision:image'})
 
-    assert session.requested_output_channels == ("behavior",)
-    assert session.task_context.instruction == "Choose the animal"
-    assert session.task_context.fitting_stimuli is fitting
-    assert session.stimulus_set is scoring
+    assert session.outputs == ("behavior",)
+    assert session.task.instruction == "Choose the animal"
+    assert session.task.fitting_stimuli is fitting
+    assert session.stimuli is scoring
 
     events = list(iter(session.next_input, None))
 
@@ -329,10 +321,9 @@ def test_behavioral_response_falls_back_for_non_native_subject():
     context = TaskContext(
         task_type="probabilities",
         label_set=["cat", "dog"],
-        metadata={"stimulus_set": scoring},
     )
 
-    scored = behavioral_response(subject, context)
+    scored = behavioral_response(subject, scoring, context)
 
     assert type(subject).participate is UnifiedModel.participate
     assert subject.process_input is scoring
@@ -412,7 +403,7 @@ def test_environment_session_advances_after_motor_emit():
     session = environment_session(_SyntheticEnvironment(2)).declare_inputs(
         {'control', 'vision:image', 'proprioception', 'instruction', 'reward', 'observation'})
 
-    assert session.requested_output_channels == ("motor",)
+    assert session.outputs == ("motor",)
 
     events = []
     while (event := session.next_input()).channel != 'control' or event.payload != 'respond':
@@ -458,17 +449,38 @@ def _ablation_state_change():
     )
 
 
+class _ChangeWatcher(Subject):
+    """A subject that keeps what an intervention session shows it, then answers."""
+    identifier = "change-watcher"
+    in_channels = {"lesion", "stimulation", "pharmacological"}
+    out_channels = {"perturbation"}
+
+    def participate(self, session):
+        session.declare_inputs(self.in_channels)
+        self.events = list(iter(session.next_input, None))
+        self.outputs = tuple(session.outputs)
+        change = self.events[0].payload
+        session.respond(StreamEvent("perturbation", PerturbationApplied(
+            handle_id=change.handle_id or "h", target=change.target,
+            perturbation=change.perturbation), None))
+
+
+def _delivered(state_change):
+    """The events and requested outputs of the session apply_state_change builds."""
+    subject = _ChangeWatcher()
+    apply_state_change(subject, state_change)
+    return subject.events, subject.outputs
+
+
 def test_state_change_session_emits_lesion_event_on_the_plain_channel_with_the_target_in_the_payload():
     change = _ablation_state_change()
-    session = _state_change_session(change)
-    event = session.next_input()
+    (event,), outputs = _delivered(change)
 
-    assert session.requested_output_channels == ("perturbation",)
+    assert outputs == ("perturbation",)
     assert event.channel == "lesion"
     assert event.payload is change
     assert event.payload.target == Selection(layer="blocks.10", indices=[1, 2, 3])
     assert event.meta == {"kind": "ablation"}
-    assert session.next_input() is None
 
 
 def test_state_change_session_routes_pharmacological_event_to_registry_channel():
@@ -477,8 +489,7 @@ def test_state_change_session_routes_pharmacological_event_to_registry_channel()
         metadata={"address": "ketamine"},
         perturbation=Perturbation(kind="dose", scale=0.1),
     )
-    session = _state_change_session(state_change)
-    event = session.next_input()
+    (event,), _ = _delivered(state_change)
 
     assert event.channel == "pharmacological"
     assert event.payload.metadata["address"] == "ketamine"
@@ -493,8 +504,7 @@ def test_state_change_session_routes_lesion_kind_to_lesion_channel():
         target=Selection(layer="blocks.10"),
         perturbation=Perturbation(kind="zero"),
     )
-    session = _state_change_session(state_change)
-    event = session.next_input()
+    (event,), _ = _delivered(state_change)
 
     assert event.channel == "lesion"
 
@@ -508,8 +518,7 @@ def test_state_change_reset_uses_the_metadata_family():
             "address": "blocks.10",
         },
     )
-    session = _state_change_session(reset)
-    event = session.next_input()
+    (event,), _ = _delivered(reset)
 
     assert event.channel == "stimulation"
     assert event.meta["reset"] == "stimulation-handle"
@@ -548,20 +557,20 @@ class TestRequestedNeuralChannels:
 
     def test_several_channels_stay_one_channel_per_region(self):
         from brainscore_core.streaming_helpers import (
-            stimulus_session, requested_output_channels)
+            stimulus_session, session_outputs)
         session = stimulus_session(self._stimuli(), ['neural:V4', 'neural:IT'])
-        assert requested_output_channels(session) == ['neural:V4', 'neural:IT']
+        assert session_outputs(session) == ['neural:V4', 'neural:IT']
 
     def test_single_channel_unchanged(self):
         from brainscore_core.streaming_helpers import (
-            stimulus_session, requested_output_channels)
+            stimulus_session, session_outputs)
         session = stimulus_session(self._stimuli(), ['neural:IT'])
-        assert requested_output_channels(session) == ['neural:IT']
+        assert session_outputs(session) == ['neural:IT']
 
     def test_streaming_session_keeps_the_channels(self):
         from brainscore_core.streaming_helpers import stimulus_session
         session = stimulus_session(self._stimuli(), ['neural:V4', 'neural:IT'], streaming=True)
-        assert list(session.requested_output_channels) == ['neural:V4', 'neural:IT']
+        assert list(session.outputs) == ['neural:V4', 'neural:IT']
 
     def test_a_bare_channel_string_raises(self):
         import pytest
@@ -579,8 +588,8 @@ class TestRequestedNeuralChannels:
         """It returns one assembly, so it must not silently pick a region."""
         import pytest
         from brainscore_core.streaming_helpers import neural_response
-        with pytest.raises(TypeError, match='single region'):
-            neural_response(object(), self._stimuli(), record=['V4', 'IT'])
+        with pytest.raises(TypeError, match='one channel'):
+            neural_response(object(), self._stimuli(), ['neural:V4', 'neural:IT'])
 
 
 class _TypedSubject:
@@ -596,8 +605,8 @@ class _TypedSubject:
     def start_recording(self, target, time_bins=None):
         self.calls.append(('start_recording', target, time_bins))
 
-    def start_task(self, task_context):
-        self.calls.append(('start_task', task_context))
+    def start_task(self, task):
+        self.calls.append(('start_task', task))
 
     def process(self, stimuli, **kwargs):
         self.calls.append(('process', stimuli, kwargs))
@@ -606,13 +615,6 @@ class _TypedSubject:
 
 class TestPublicSessionHelpers:
     """The promoted session helpers keep their behavior under the public names."""
-
-    def test_private_names_are_the_same_functions(self):
-        from brainscore_core import streaming_helpers as helpers
-        assert helpers._drain_stream_events is helpers.drain_session_inputs
-        assert helpers._stimuli_from_stream_session is helpers.session_stimuli
-        assert helpers._drive_neural_session_via_process is helpers.drive_neural_session
-        assert helpers._drive_behavior_session_via_process is helpers.drive_behavior_session
 
     def test_drain_returns_every_input_in_order_then_none(self):
         from brainscore_core.streaming import Session
@@ -697,10 +699,9 @@ class TestPublicSessionHelpers:
 
     def test_drive_behavior_session_refuses_variance_before_compute(self):
         from brainscore_core.streaming_helpers import drive_behavior_session
-        context = TaskContext(task_type='probabilities',
-                              metadata={'stimulus_set': _stimulus_set()})
+        context = TaskContext(task_type='probabilities')
         subject = _TypedSubject()
-        session = stimulus_session(context.metadata['stimulus_set'], ['behavior'], context)
+        session = stimulus_session(_stimulus_set(), ['behavior'], context)
         session.settings = {'require_variance': True}
         with pytest.raises(NotImplementedError, match='trial-to-trial variance'):
             drive_behavior_session(subject, session)

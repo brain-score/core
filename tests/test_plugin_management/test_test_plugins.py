@@ -3,7 +3,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-import ctypes
 
 from brainscore_core.plugin_management.test_plugins import PluginTestRunner
 
@@ -56,19 +55,5 @@ class TestPluginTestRunner:
     def test_run_tests(self):
         dummy_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
         plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
-        plugin_test_runner.run_tests()
-        assert plugin_test_runner.returncode == 0
-
-    #@pytest.mark.travis_slow
-    @pytest.mark.skip(reason="R test does not work.")
-    def test_run_tests_with_r(self):
-        # Check GLIBC version
-        libc = ctypes.CDLL('libc.so.6')
-        glibc_version = '.'.join(str(x) for x in (libc.gnu_get_libc_version().decode('ascii').split('.')))
-        if float(glibc_version) < 2.34:  # rpy2 3.6.0 requires GLIBC 2.34 or higher
-            pytest.skip(f"Test requires GLIBC 2.34 or higher, but found {glibc_version}")
-
-        r_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'r_plugin'
-        plugin_test_runner = PluginTestRunner(r_plugin_path, {})
         plugin_test_runner.run_tests()
         assert plugin_test_runner.returncode == 0

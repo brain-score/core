@@ -4,17 +4,13 @@ from brainscore_core import io_catalog
 from brainscore_core.io_catalog import INPUT, OUTPUT, CatalogEntry
 
 
-def test_registry_version_and_seed_entry_fields_are_queryable():
-    assert io_catalog.REGISTRY_VERSION == "2.0"
-
+def test_seed_entry_fields_are_queryable():
     vision = io_catalog.get("vision")
-    assert vision.kind == INPUT
     assert vision.direction == INPUT
     assert vision.owner == "core"
     assert vision.materializers == ("StimulusSet",)
 
     neural = io_catalog.get("neural:IT")
-    assert neural.kind == OUTPUT
     assert neural.direction == OUTPUT
     assert neural.owner == "core"
     assert "NeuroidAssembly" in neural.materializers
@@ -30,7 +26,7 @@ def test_registry_version_and_seed_entry_fields_are_queryable():
 def test_catalog_entry_keeps_v1_constructor_defaults():
     entry = CatalogEntry(
         name="pupil",
-        kind=OUTPUT,
+        direction=OUTPUT,
         carried_by="start_recording('pupil')",
         payload_contract="(time,) float diameter in mm",
         handled_by="an eye-tracker harness",
@@ -42,15 +38,14 @@ def test_catalog_entry_keeps_v1_constructor_defaults():
     assert entry.materializers == ()
 
 
-def test_channels_can_be_listed_and_filtered_by_direction():
-    assert "vision" in io_catalog.channels()
-    assert "vision" in io_catalog.channels(INPUT)
-    assert "neural" not in io_catalog.channels(INPUT)
-    assert "neural" in io_catalog.channels(OUTPUT)
-    assert "vision" not in io_catalog.channels(OUTPUT)
-
-    assert all(entry.direction == INPUT for entry in io_catalog.by_direction(INPUT))
-    assert all(entry.direction == OUTPUT for entry in io_catalog.by_direction(OUTPUT))
+def test_entries_split_by_direction():
+    by_direction = {INPUT: set(), OUTPUT: set()}
+    for entry in io_catalog.all_entries():
+        by_direction[entry.direction].add(entry.name)
+    assert "vision" in by_direction[INPUT]
+    assert "neural" in by_direction[OUTPUT]
+    assert "neural" not in by_direction[INPUT]
+    assert "vision" not in by_direction[OUTPUT]
 
 
 def test_validate_accepts_valid_payload_and_direction():
@@ -112,25 +107,16 @@ def test_validate_reports_unaddressable_channel_family():
 
 
 def test_registration_keeps_builtin_column_ownership(monkeypatch):
+    """A column core already maps cannot be claimed by a new family without replace=True."""
     import pytest
     from brainscore_core.extensions import register_channel
 
     monkeypatch.setattr(io_catalog, '_CATALOG', dict(io_catalog._CATALOG))
-    monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', {})
-    expected = {
-        'image_file_name': 'vision', 'image_path': 'vision', 'filename': 'vision',
-        'sentence': 'text', 'text': 'text', 'video_path': 'vision',
-        'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio',
-        'vision': None, 'image': None, 'audio': None, 'video': None,
-    }
-    for index, (column, owner) in enumerate(expected.items()):
+    monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', dict(io_catalog._STIMULUS_COLUMNS))
+    for index, (column, owner) in enumerate(io_catalog.stimulus_columns().items()):
         entry = CatalogEntry(f'column_probe_{index}', INPUT, 'StimulusSet', 'test', 'test')
-        if owner is None:
+        with pytest.raises(ValueError, match=f"already belongs to '{owner}'"):
             register_channel(entry, columns=[column])
-            assert io_catalog.stimulus_columns()[column] == entry.name
-        else:
-            with pytest.raises(ValueError, match=f"already belongs to '{owner}'"):
-                register_channel(entry, columns=[column])
-            assert not io_catalog.has(entry.name)
-            register_channel(entry, columns=[column], replace=True)
-            assert io_catalog.stimulus_columns()[column] == entry.name
+        assert not io_catalog.has(entry.name)
+        register_channel(entry, columns=[column], replace=True)
+        assert io_catalog.column_channel(column) == entry.name

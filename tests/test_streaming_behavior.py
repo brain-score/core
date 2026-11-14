@@ -15,7 +15,7 @@ from brainscore_core.contract import TaskContext
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.streaming_helpers import (
     drive_behavior_session_streaming,
-    _drive_behavior_session_via_process,
+    drive_behavior_session,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
@@ -33,10 +33,10 @@ def _stimuli(n=5):
 class _Session:
     """Minimal behavioral session; `streaming` decides which driver participate picks."""
 
-    def __init__(self, task_context, streaming=False):
-        self.task_context = task_context
+    def __init__(self, task, streaming=False):
+        self.task = task
         self.streaming = streaming
-        self.requested_output_channels = ('behavior',)
+        self.outputs = ('behavior',)
         self.emitted = []
 
     def next_input(self):
@@ -51,7 +51,7 @@ class _Subject:
         self.start_task_calls = 0
         self.process_sizes = []
 
-    def start_task(self, task_context):
+    def start_task(self, task):
         self.start_task_calls += 1
 
     def process(self, stimuli, multi_modality=False):
@@ -93,7 +93,7 @@ def test_streaming_and_batch_behavior_agree():
     stimuli = _stimuli(6)
 
     batch_subject, batch_session = _Subject(), _Session(_context(stimuli))
-    _drive_behavior_session_via_process(batch_subject, batch_session)
+    drive_behavior_session(batch_subject, batch_session)
     batch_out = batch_session.emitted[0].payload
 
     stream_subject, stream_session = _Subject(), _Session(_context(stimuli), streaming=True)
@@ -116,13 +116,13 @@ def test_each_trial_is_tagged_with_its_index():
 
 
 @pytest.mark.unit
-def test_missing_task_context_fails_fast():
+def test_missing_task_fails_fast():
     class _NoContext(_Session):
         def __init__(self):
             self.streaming = True
-            self.requested_output_channels = ('behavior',)
+            self.outputs = ('behavior',)
             self.emitted = []
-            self.task_context = None
+            self.task = None
 
-    with pytest.raises(ValueError, match="task_context"):
+    with pytest.raises(ValueError, match="session.task"):
         drive_behavior_session_streaming(_Subject(), _NoContext())

@@ -35,7 +35,7 @@ def test_text_stimulus_set_keys_cache_by_content():
 
 # --- the facade runs any subject through participate ------------------------
 
-from brainscore_core.model_interface import Subject
+from brainscore_core.contract import Subject
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 
@@ -56,8 +56,8 @@ class _Recorder(Subject):
         self.sessions.append(session)
         while session.next_input() is not None:
             pass
-        n = len(session.stimulus_set)
-        for channel in session.requested_output_channels:
+        n = len(session.stimuli)
+        for channel in session.outputs:
             neural = channel.startswith('neural:')
             cls = NeuroidAssembly if neural else BehavioralAssembly
             payload = cls(np.arange(n)[:, None],
@@ -75,7 +75,7 @@ def test_facade_runs_an_participate_only_subject_on_vision_calls():
     out = facade.look_at(_images(), number_of_trials=7)
     np.testing.assert_array_equal(out.values, [[0], [1]])
     session, = subject.sessions
-    assert session.requested_output_channels == ('neural:IT',)
+    assert session.outputs == ('neural:IT',)
     assert session.time_bins == [(70, 170), (170, 270)]
     assert session.settings['number_of_trials'] == 7
     assert facade.visual_degrees() == 12
@@ -91,8 +91,8 @@ def test_facade_runs_language_neural_and_behavior_in_one_session():
     out = facade.digest_text(text)
     assert set(out) == {'neural', 'behavior'}
     session, = subject.sessions
-    assert set(session.requested_output_channels) == {'neural:IT', 'behavior'}
-    assert session.task_context.task_type == 'reading_times'
+    assert set(session.outputs) == {'neural:IT', 'behavior'}
+    assert session.task.task_type == 'reading_times'
     assert session.settings['recording_type'] == 'spikes'
     assert session.settings['legacy_text'] is text
 
@@ -105,16 +105,20 @@ def test_facade_passes_a_text_stimulus_set_unchanged():
                         'context_id': ['p', 'p']})
     facade.digest_text(text)
     session, = subject.sessions
-    assert session.stimulus_set is text
-    assert 'legacy_text' not in session.task_context.metadata
+    assert session.stimuli is text
+    assert 'legacy_text' not in session.task.metadata
 
 
 def test_behavioral_task_needs_a_declared_behavior_output():
     class Neural(_Recorder):
         out_channels = {'neural:IT'}
 
-    with pytest.raises(NotImplementedError, match="declares no 'behavior' output"):
-        LegacyBenchmarkFacade(Neural()).start_behavioral_task('reading_times')
+    from brainscore_core.compatibility import CompatibilityError
+    subject = Neural()
+    with pytest.raises(CompatibilityError, match="declares no 'behavior' output") as caught:
+        LegacyBenchmarkFacade(subject).start_behavioral_task('reading_times')
+    assert caught.value.channels == {'behavior'}
+    assert subject.sessions == []
 
 
 def test_facade_without_visual_field_fails_instead_of_inventing_one():
@@ -139,6 +143,20 @@ def test_facade_reset_clears_settings_and_resets_subject():
     facade.start_recording('IT')
     facade.reset()
     assert subject.resets == 1
+    with pytest.raises(ValueError, match='start_recording'):
+        facade.look_at(_images())
+
+
+def test_facade_reset_clears_settings_even_when_the_subject_reset_raises():
+    subject = _Recorder()
+
+    def failing_reset():
+        raise RuntimeError('undo failed')
+    subject.reset = failing_reset
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_recording('IT')
+    with pytest.raises(RuntimeError, match='undo failed'):
+        facade.reset()
     with pytest.raises(ValueError, match='start_recording'):
         facade.look_at(_images())
 
@@ -187,10 +205,10 @@ def test_fitting_settings_stay_apart_from_measurement_settings():
     facade.look_at(_images(), number_of_trials=1)
     facade.look_at(_images(), number_of_trials=3)
     first, second = subject.sessions
-    assert first.task_context is second.task_context  # one task object, sent each time
-    assert first.task_context.metadata['task_settings'] == {
+    assert first.task is second.task  # one task object, sent each time
+    assert first.task.metadata['task_settings'] == {
         'number_of_trials': 2, 'require_variance': True}
-    assert first.task_context.fitting_stimuli is fitting
+    assert first.task.fitting_stimuli is fitting
     assert first.settings == {'number_of_trials': 1, 'require_variance': False}
     assert second.settings == {'number_of_trials': 3, 'require_variance': False}
 

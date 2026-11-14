@@ -8,7 +8,7 @@ import pytest
 
 from brainscore_core import Subject, TaskContext
 from brainscore_core.compatibility import CompatibilityError, check_compatibility
-from brainscore_core.memory import _probe_feature_dim
+from brainscore_core.memory import check_memory
 from brainscore_core.streaming import Session, Source, StreamEvent
 from brainscore_core.streaming_helpers import behavioral_response, neural_response
 
@@ -30,7 +30,7 @@ class TextSubject(Subject):
             answers = {"neural:language_network": np.array([len(event.payload), 1.0]),
                        "behavior": event.payload.upper()}
             for channel, payload in answers.items():
-                requested = session.requested_output_channels
+                requested = session.outputs
                 if requested is None or channel in requested:
                     session.respond(StreamEvent(channel, payload, event.t_ms, dict(event.meta)))
 
@@ -46,7 +46,7 @@ def stimuli():
 
 
 def benchmark(**overrides):
-    values = dict(identifier="native-benchmark", uses_session=True,
+    values = dict(identifier="native-benchmark",
                   required_input_channels={"text"},
                   requested_output_channels={"neural:language_network"})
     return SimpleNamespace(**(values | overrides))
@@ -55,7 +55,7 @@ def benchmark(**overrides):
 def test_minimal_subject_consumes_and_emits_timestamped_events():
     subject = TextSubject()
     for name in ("process", "start_task", "start_recording", "region_layer_map",
-                 "supported_modalities", "check_session_support"):
+                 "check_session_support"):
         assert not hasattr(subject, name)
     session = Session([StreamEvent("text", "cat", 12.0, {"stimulus_id": "a"})])
     subject.participate(session)
@@ -115,12 +115,11 @@ def test_optional_requirements_and_stateless_reset_have_safe_defaults():
 
 def test_native_subject_runs_through_neural_and_behavioral_helpers():
     subject = TextSubject()
-    neural = neural_response(subject, stimuli(), record="language_network")
+    neural = neural_response(subject, stimuli(), ['neural:language_network'])
     np.testing.assert_array_equal(neural.values, [[3, 1], [5, 1]])
     assert list(neural["stimulus_id"].values) == ["a", "b"]
-    behavior = behavioral_response(subject, TaskContext(
+    behavior = behavioral_response(subject, stimuli(), TaskContext(
         task_type="generation", instruction="Uppercase the text",
-        metadata={"stimulus_set": stimuli()},
     ))
     np.testing.assert_array_equal(behavior.values, [[1, 0], [0, 1]])
     assert list(behavior["choice"].values) == ["CAT", "HORSE"]
@@ -134,7 +133,7 @@ def test_scoring_preflight_accepts_native_contract_without_legacy_properties():
 
 
 @pytest.mark.parametrize("overrides, missing", [
-    ({"required_input_channels": {"vision"}}, "vision"),
+    ({"required_input_channels": {"vision:image"}}, "vision:image"),
     ({"requested_output_channels": {"motor"}}, "motor"),
     ({"required_input_channels": {"instruction"}}, "text"),
 ])
@@ -145,16 +144,27 @@ def test_native_preflight_rejects_incompatible_pair_before_interaction(overrides
     assert subject.seen == []
 
 
-def test_optional_model_specific_probe_is_still_honored():
+def test_preflight_reads_declarations_only_and_calls_no_subject_method():
+    # The support step belongs to the subject at the start of a session; pre-flight
+    # never finds a method by name (rule 2.2).
     class Restricted(TextSubject):
         def check_session_support(self, channels):
-            raise ValueError("unsupported combination")
+            raise AssertionError("pre-flight must not call a subject method")
 
-    with pytest.raises(CompatibilityError, match="unsupported combination"):
-        check_compatibility(Restricted(), benchmark())
+    match = check_compatibility(Restricted(), benchmark())
+    assert match.kind == "full"
 
 
-def test_memory_feature_probe_uses_native_session_without_layer_map():
+def test_memory_feature_probe_uses_native_session_without_layer_map(caplog):
+    import logging
+    from unittest.mock import patch
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
     subject = TextSubject()
-    assert _probe_feature_dim(subject, benchmark(), stimuli()) == (2, "language_network")
-    assert len([e for e in subject.seen if e.channel != 'control']) == 1
+    table = StimulusSet(stimuli())
+    table.identifier = "native-stimuli"
+    with patch("brainscore_core.memory.get_host_available_memory", return_value=16_000_000_000), \
+            caplog.at_level(logging.WARNING, logger="brainscore_core.memory"):
+        check_memory(subject, benchmark(stimulus_set=table))
+    # The probe ran one session with one stimulus and read a width: no skip warning.
+    assert [e.payload for e in subject.seen if e.channel != 'control'] == ["cat"]
+    assert not [r for r in caplog.records if "could NOT run" in r.getMessage()]
