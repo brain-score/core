@@ -63,6 +63,10 @@ class ExecutionNotFeasibleError(Exception):
     The pair passed the declaration check, and the refusal comes when a session
     or a benchmark run starts, before model computation. It is an error of the
     run, never N/A; ``channels`` and ``task_type`` name what was refused.
+
+    A refusal is raised before model computation where the fact is knowable at
+    session start. A reply part that can detect an unsupported setting or
+    stimulus part only when it is called raises it at that call.
     """
 
     def __init__(self, message: str = '', channels=(), task_type=None):
