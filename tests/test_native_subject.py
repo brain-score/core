@@ -46,7 +46,7 @@ def stimuli():
 
 
 def benchmark(**overrides):
-    values = dict(identifier="native-benchmark", uses_session=True,
+    values = dict(identifier="native-benchmark",
                   required_input_channels={"text"},
                   requested_output_channels={"neural:language_network"})
     return SimpleNamespace(**(values | overrides))
@@ -144,13 +144,15 @@ def test_native_preflight_rejects_incompatible_pair_before_interaction(overrides
     assert subject.seen == []
 
 
-def test_optional_model_specific_probe_is_still_honored():
+def test_preflight_reads_declarations_only_and_calls_no_subject_method():
+    # The support step belongs to the subject at the start of a session; pre-flight
+    # never finds a method by name (rule 2.2).
     class Restricted(TextSubject):
         def check_session_support(self, channels):
-            raise ValueError("unsupported combination")
+            raise AssertionError("pre-flight must not call a subject method")
 
-    with pytest.raises(CompatibilityError, match="unsupported combination"):
-        check_compatibility(Restricted(), benchmark())
+    match = check_compatibility(Restricted(), benchmark())
+    assert match.kind == "full"
 
 
 def test_memory_feature_probe_uses_native_session_without_layer_map(caplog):

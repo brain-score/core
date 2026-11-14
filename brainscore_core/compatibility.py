@@ -16,7 +16,8 @@ The benchmark declares the inputs its human participants received. A subject
 that takes in only some of them still runs: the streams it cannot take in
 never enter it. :func:`check_compatibility` returns the match as data
 (:class:`CompatibilityMatch`) so the score records which inputs were used.
-An incompatible pair raises :class:`CompatibilityError` and is scored N/A.
+An incompatible pair raises :class:`CompatibilityError`; ``score()`` returns
+the N/A result for it (``brainscore_core.score_status.na_score``).
 
 Benchmark inputs are ``required_input_channels`` when declared, otherwise the
 channels of ``required_modalities`` plus ``accepted_modalities``. A benchmark with no
@@ -40,8 +41,16 @@ from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_c
 
 
 class CompatibilityError(Exception):
-    """Raised when a model cannot be scored on a benchmark."""
-    pass
+    """Raised when a subject cannot be scored on a benchmark: the pair is N/A.
+
+    ``channels`` are the channels that make the pair N/A (for example the
+    requested outputs the subject does not produce); empty when the reason is
+    not a channel. ``score()`` turns this error into the N/A result.
+    """
+
+    def __init__(self, message: str = '', channels=()):
+        super().__init__(message)
+        self.channels = frozenset(channels)
 
 
 class CompatibilityWarning(UserWarning):
@@ -95,7 +104,10 @@ def _looks_like_channels(value) -> bool:
 def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMatch:
     """Check the four compatibility conditions and return the match.
 
-    Raises :class:`CompatibilityError` before compute when a condition fails.
+    Decides from declarations only (rule 5.3). Raises
+    :class:`CompatibilityError` before compute when a condition fails. Whether
+    one part of the subject answers all requested outputs together (the
+    support step) is decided by the subject when a session starts.
     Every declared channel must be registered in the catalog with the right
     direction.
     """
@@ -153,23 +165,23 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
                 f"layer-mapping explorer (brainscore_vision.tools.layer_mapping_explorer) "
                 f"to find and commit a region-to-layer mapping."
             )
-        raise CompatibilityError(message)
+        raise CompatibilityError(message, channels=missing_outputs)
 
     consumed = {channel for channel in bench_inputs if channel_declared(channel, subject_in)}
     if not consumed:
         raise CompatibilityError(
             f"Subject '{subject_id}' takes in none of the inputs benchmark "
             f"'{benchmark_id}' sends: {_format_channels(bench_inputs)}. "
-            f"Subject in_channels: {_format_channels(subject_in)}."
-        )
+            f"Subject in_channels: {_format_channels(subject_in)}.",
+            channels=bench_inputs)
 
     unmet_requirements = subject_required - bench_inputs
     if unmet_requirements:
         raise CompatibilityError(
             f"Subject '{subject_id}' hard-requires input channels "
             f"{_format_channels(unmet_requirements)} but benchmark "
-            f"'{benchmark_id}' sends {_format_channels(bench_inputs)}."
-        )
+            f"'{benchmark_id}' sends {_format_channels(bench_inputs)}.",
+            channels=unmet_requirements)
 
     output_inputs = subject.output_inputs
     _validate_output_inputs(output_inputs, subject_in, subject_out, subject_id)
@@ -181,8 +193,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             raise CompatibilityError(
                 f"Subject '{subject_id}' answers {output!r} only from the inputs "
                 f"{_format_channels(needed)}, but it takes in only "
-                f"{_format_channels(consumed)} of what benchmark '{benchmark_id}' sends."
-            )
+                f"{_format_channels(consumed)} of what benchmark '{benchmark_id}' sends.",
+                channels=needed)
 
     required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
                                            getattr(benchmark, 'trial_memory', 'none'))
@@ -197,15 +209,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         raise CompatibilityError(
             f"Subject '{subject_id}' declares memory:trial_history but not the "
             f"'{CONTROL_CHANNEL}' input, so it cannot know where a trial starts. "
-            f"Add '{CONTROL_CHANNEL}' to in_channels.")
-
-    if getattr(benchmark, "uses_session", False):
-        probe = getattr(subject, "check_session_support", None)
-        if callable(probe):
-            try:
-                probe(bench_requested)
-            except (ValueError, NotImplementedError) as error:
-                raise CompatibilityError(str(error)) from error
+            f"Add '{CONTROL_CHANNEL}' to in_channels.", channels={CONTROL_CHANNEL})
 
     return CompatibilityMatch(
         subject=subject_id,
@@ -295,7 +299,7 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
                     CompatibilityWarning, stacklevel=2)
                 continue
             raise CompatibilityError(
-                f"{owner} declares unknown channel '{channel}'."
+                f"{owner} declares unknown channel '{channel}'.", channels={channel}
             ) from error
 
         if entry.direction not in (direction, io_catalog.BOTH):

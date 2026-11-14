@@ -132,7 +132,7 @@ class _Environment:
 
 def test_closed_loop_runs_a_participate_only_subject():
     subject, env = _ParticipateOnly(), _Environment()
-    closed_loop = SimpleNamespace(identifier='closed-loop', uses_session=True,
+    closed_loop = SimpleNamespace(identifier='closed-loop',
                                   required_input_channels={'observation'},
                                   requested_output_channels={'motor'})
     match = check_channel_compatibility(subject, closed_loop)
