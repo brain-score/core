@@ -147,6 +147,20 @@ def test_facade_reset_clears_settings_and_resets_subject():
         facade.look_at(_images())
 
 
+def test_facade_reset_clears_settings_even_when_the_subject_reset_raises():
+    subject = _Recorder()
+
+    def failing_reset():
+        raise RuntimeError('undo failed')
+    subject.reset = failing_reset
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_recording('IT')
+    with pytest.raises(RuntimeError, match='undo failed'):
+        facade.reset()
+    with pytest.raises(ValueError, match='start_recording'):
+        facade.look_at(_images())
+
+
 # --- applying the facade at the scoring boundary --------------------------
 
 def test_domain_loaders_mark_legacy_benchmarks_and_scoring_wraps_them():

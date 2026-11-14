@@ -146,9 +146,11 @@ class LegacyBenchmarkFacade:
         return {name: measured[channel] for name, channel in channels.items()}
 
     def reset(self) -> None:
-        self._subject.reset()
-        self._record = self._time_bins = self._recording_type = self._task = None
-        self._passive = None
+        try:
+            self._subject.reset()
+        finally:
+            self._record = self._time_bins = self._recording_type = self._task = None
+            self._passive = None
 
     # --- internals --------------------------------------------------------
 
