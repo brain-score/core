@@ -281,3 +281,12 @@ def test_missing_rows_obey_the_history_limit():
         _drain(session)
     assert len(session.emitted) == 1 and session.dropped == 2
     assert len(seen) == 3 and all(event.meta.get('missing') for event in seen)
+
+
+# --- a table and respond signals (P03) ------------------------------------------
+
+def test_a_table_session_whose_source_sends_respond_signals_is_refused():
+    events = [begin_event(), respond_event(), respond_event(), end_event('terminal')]
+    session = Session(events, ['behavior:text'], TEXT, stimuli=_table(['a']))
+    with pytest.raises(ValueError, match='a table or respond signals, not both'):
+        _drain(session)

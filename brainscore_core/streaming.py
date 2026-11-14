@@ -368,7 +368,12 @@ class Session(Source):
                 # control still owes an answer to each respond signal.
                 if event.payload in (BEGIN, END):
                     self._close_episode()
-                elif event.payload == RESPOND and self.stimuli is None:
+                elif event.payload == RESPOND:
+                    if self.stimuli is not None:
+                        raise ValueError(
+                            "A session with a stimulus table defines its trials by the table's "
+                            "rows; its source cannot also send 'respond' signals. Use a table "
+                            "or respond signals, not both.")
                     self._signals += 1
                 if event.payload == BEGIN:
                     self._trial += 1
@@ -466,9 +471,13 @@ class Session(Source):
         When outputs were requested, the response must be on one of them (exact
         string match). Every response must pass the catalog check for its channel,
         also when no outputs were requested (``None``); otherwise it raises
-        ``ValueError`` and nothing is kept. An answer on an addressed ``behavior``
-        channel is kept in the stored schema of its format, with each trial's state
-        (``response_formats``); the source and the observers get it as sent.
+        ``ValueError`` and nothing is kept. The source gets the response as the
+        subject sent it. The observers get what the source accepted: its receipt
+        when it returns one, else the response as sent. ``emitted`` and ``collect``
+        hold the stored form: an answer on an addressed ``behavior`` channel is
+        packaged in the schema of its format, with each trial's state
+        (``response_formats``). A missing row the session adds also reaches the
+        observers and ``emitted`` (``meta['missing']``).
         """
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
@@ -561,7 +570,9 @@ class Session(Source):
         ``presentation``); an addressed ``behavior`` channel gives its stored answer, rows
         in the order they arrived, and, once a session built from a table has delivered
         every input, a missing row for each table row with no answer (stored once, as a
-        response); ``perturbation`` gives its single payload (or the
+        response). The missing table rows need a driver that reads the source to its
+        end (``next_input`` returns None); a driver that reads ``stimuli`` without
+        reading the inputs gets no missing rows. ``perturbation`` gives its single payload (or the
         ``handle_id``); any other channel gives its events. With no channel: the
         events when nothing was requested, one result for one requested channel,
         else a dict keyed by requested channel.
