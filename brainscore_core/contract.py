@@ -90,11 +90,14 @@ class TaskContext:
         if self.trial_memory not in _TRIAL_MEMORIES:
             raise ValueError(f'trial_memory must be one of {_TRIAL_MEMORIES}; got {self.trial_memory!r}')
         # The response, when given, decides the task type; label lists follow it.
-        kinds = {'Choice': 'choice', 'Scale': 'rating', 'Text': 'text'}
+        from .responses import Choice, Scale, Text
+        # By identity: the response classes are the core formats, never a subclass.
+        kinds = {Choice: 'choice', Scale: 'rating', Text: 'text'}
         if self.response is not None:
-            kind = kinds.get(type(self.response).__name__)
+            kind = kinds.get(type(self.response))
             if kind is None:
-                raise TypeError('response must be a Choice, Scale or Text from brainscore_core.responses')
+                raise TypeError('response must be a Choice, Scale or Text from '
+                                'brainscore_core.responses (not a subclass)')
             if self.task_type is None:
                 self.task_type = kind
             elif self.task_type != kind:

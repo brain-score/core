@@ -3,13 +3,12 @@
 A ``TaskContext`` says what the subject is asked to do; its ``response`` says
 what form the answer takes. A response knows how to phrase itself after the
 instruction (``directive``), how to read a reply (``parse``), and which output
-channels it produces. A benchmark may subclass a response to change either;
-prompt wording and parsing are the benchmark's science, not the model's.
+channels it produces. ``Choice``, ``Scale`` and ``Text`` are the core response
+classes; a task takes these classes only, not a subclass.
 
-Reported answers come from the model's reply. Implied measures come from the
-model's internals by a stated link: a readout's or a language model's
-probabilities over the labels (``behavior:probabilities``). Every result says
-which it is.
+An answer comes from the model's reply, a likelihood part, a readout or a
+stated link. Every answer says which in its response record
+(``brainscore_core.response_formats.response_record``).
 """
 import math
 import re

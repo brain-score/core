@@ -21,7 +21,8 @@ no heavy dependency. ``validate`` runs every check for one event, including the
 validator of a behavioral response format (``response_formats``).
 
 ``register_channel`` adds a family and, for an input family, the columns that
-feed it. Code outside core imports it from ``brainscore_core.extensions``.
+feed it. Code outside core imports it from ``brainscore_core.extensions``. The
+``behavior`` family is closed: only core defines it and its addresses.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -130,6 +131,14 @@ def register_channel(entry: CatalogEntry, *, columns: Iterable[str] = (),
     ``replace=True`` (Contract Rules 3.5). Re-registering the same entry
     object is a no-op.
     """
+    if _family(entry.name) in _CLOSED_FAMILIES:
+        raise ValueError(f"The {entry.name!r} family is defined by core and cannot be "
+                         "registered or replaced (Response Format Standard)")
+    return _register(entry, columns=columns, replace=replace)
+
+
+def _register(entry: CatalogEntry, *, columns: Iterable[str] = (),
+              replace: bool = False) -> CatalogEntry:
     _, address = parse_channel(entry.name)
     if address is not None:
         raise ValueError("Register a channel family, not an addressed instance")
@@ -171,17 +180,27 @@ def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
     return entry.direction in (direction, BOTH)
 
 
-# A family listed here has no bare channel: each channel names one of these forms.
-CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({"vision": ("image", "video")})
+# The closed address list of a family: each channel of the family is one of
+# these addresses. ``None`` admits the bare family name. ``vision`` has no bare
+# channel: each channel names its form. ``behavior`` lists the response formats
+# that exist; the bare ``behavior`` channel stays for legacy tasks.
+CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({
+    "vision": ("image", "video"),
+    "behavior": (None, "choice", "probabilities", "confidence", "rating", "rt", "text"),
+})
+# Families only core defines: ``register_channel`` refuses them outside the seed.
+_CLOSED_FAMILIES = ("behavior",)
 
 
 def form_problem(channel: str) -> Optional[str]:
-    """Why ``channel`` does not name a form its family needs, or None."""
+    """Why ``channel`` is not an address its family lists, or None."""
     family, address = parse_channel(channel)
     forms = CHANNEL_FORMS.get(family)
     if forms is None or address in forms:
         return None
-    names = " or ".join(f"'{family}:{form}'" for form in forms)
+    names = " or ".join(f"'{family}:{form}'" if form else f"'{family}'" for form in forms)
+    if None in forms:
+        return f"{channel}: not in the closed list of '{family}' channels; use {names}"
     return f"{channel}: a '{family}' channel names its form; use {names}"
 
 
@@ -425,8 +444,10 @@ _SEED = [
                  "a label, a probability vector, or generated text",
                  "a fitted readout or the model's generation path",
                  meta_keys=("label_set",),
-                 addressing=("address is the kind of answer a TaskContext response asks for: "
-                             "choice, probabilities, confidence, rating, rt or text"),
+                 addressing=("address is the response format a TaskContext response asks for, "
+                             "from the closed list CHANNEL_FORMS['behavior']: choice, "
+                             "probabilities, confidence, rating, rt or text; each format's payload "
+                             "is checked by its validator (response_formats.PAYLOAD_VALIDATORS)"),
                  materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
@@ -455,7 +476,7 @@ _SEED = [
 ]
 
 for _entry in _SEED:
-    register_channel(_entry)
+    _register(_entry)
 
 
 def payload_type_notes(label: str, payload) -> List[str]:
@@ -495,7 +516,7 @@ def _declare_payload_types() -> None:
         'perturbation': (PerturbationApplied, type(None)),
     }
     for family, payload_type in payload_types.items():
-        register_channel(_replace(get(family), payload_type=payload_type), replace=True)
+        _register(_replace(get(family), payload_type=payload_type), replace=True)
 
 
 _declare_payload_types()

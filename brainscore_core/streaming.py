@@ -258,8 +258,12 @@ class Session(Source):
             if isinstance(outputs, str):
                 raise TypeError('outputs must be a sequence of channel names.')
             self.outputs = tuple(outputs)
+            from .io_catalog import form_problem
             for channel in self.outputs:
                 parse_channel(channel)
+                problem = form_problem(channel)
+                if problem:
+                    raise ValueError(f'A session cannot request {problem}')
         self.task = task
         self._session_noted = False   # note_session runs once per session
         self.stimuli = stimuli
