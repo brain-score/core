@@ -261,6 +261,7 @@ class Session(Source):
             for channel in self.outputs:
                 parse_channel(channel)
         self.task = task
+        self._session_noted = False   # note_session runs once per session
         self.stimuli = stimuli
         self.time_bins = time_bins
         # Per-measurement settings a legacy facade attaches (trial count, variance
@@ -453,7 +454,9 @@ class Session(Source):
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
-        note_session(self)
+        if not self._session_noted:
+            self._session_noted = True
+            note_session(self)
         note_response(kept, request)
         self.emitted.append(kept)
         limit = self.source.history_limit
