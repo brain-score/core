@@ -394,11 +394,66 @@ def test_the_score_records_software_versions_and_commits(monkeypatch):
     assert commit is None or (len(commit) == 40 and all(c in '0123456789abcdef' for c in commit))
 
 
+def _fake_package(monkeypatch, folder):
+    """Make ``brainscore_core`` look imported from ``folder/brainscore_core``."""
+    import sys
+    import types
+    (folder / "brainscore_core").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='brainscore-core'\n")
+    module = types.ModuleType("brainscore_core")
+    module.__file__ = str(folder / "brainscore_core" / "__init__.py")
+    monkeypatch.setitem(sys.modules, "brainscore_core", module)
+
+
+def test_a_git_checkout_stamps_its_real_forty_digit_commit(monkeypatch, tmp_path):
+    import subprocess
+    from brainscore_core.environment_check import _score_environment
+    _fake_package(monkeypatch, tmp_path)
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.org"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    expected = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True,
+                              text=True).stdout.strip()
+    commit = _score_environment()["code_commits"]["brainscore_core"]
+    assert len(commit) == 40 and all(c in "0123456789abcdef" for c in commit)
+    assert commit == expected
+
+
+def test_no_checkout_stamps_none(monkeypatch, tmp_path):
+    from brainscore_core.environment_check import _score_environment
+    _fake_package(monkeypatch, tmp_path)
+    assert _score_environment()["code_commits"]["brainscore_core"] is None
+
+
+def test_software_keys_are_installed_distribution_names():
+    from brainscore_core.environment_check import _score_environment
+    assert set(_score_environment()["software"]) == {
+        "python", "numpy", "torch", "transformers", "scikit-learn", "xarray",
+        "brainscore-core", "brainscore", "brainscore_vision", "brainscore_language"}
+
+
+def test_nested_score_records_merge_their_deliveries():
+    from brainscore_core._evaluation.measures import execution_attrs, note_session
+    from brainscore_core.streaming import Session
+    with record_measures() as outer:
+        note_session(Session(_events(), ["neural:IT"]), "all")
+        with record_measures():                         # an inner score() call
+            note_session(Session(iter(_events()), ["neural:IT"]), "one")
+    assert execution_attrs(outer) == {"delivery": ("listed", "stream"),
+                                      "regions_per_pass": ("all", "one")}
+
+
 def test_reading_versions_does_not_import_torch():
     import subprocess
     import sys
     code = ('import sys; from brainscore_core.environment_check import _score_environment; '
-            '_score_environment(); print("torch" in sys.modules)')
+            '_score_environment(); '
+            'from brainscore_core.score_metadata import stamp_score_metadata; '
+            'from brainscore_core._evaluation.measures import MeasureRecord; '
+            'from brainscore_core.metrics import Score; '
+            'stamp_score_metadata(Score(1), object(), set(), protocol=None, harness_id="t", '
+            'measures=MeasureRecord()); '
+            'assert "torch" not in sys.modules; print("torch" in sys.modules)')
     out = subprocess.run([sys.executable, '-W', 'ignore', '-c', code], capture_output=True,
                          text=True, check=True).stdout.strip()
     assert out == 'False'

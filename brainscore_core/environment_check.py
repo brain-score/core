@@ -133,7 +133,9 @@ def describe_env() -> List[Tuple[str, Optional[str], str, Optional[bool]]]:
 
 
 # The libraries whose versions can change the numbers of a score, and the four
-# Brain-Score packages, by distribution name. Read from the installed metadata:
+# Brain-Score packages. Every key of ``software`` is the installed distribution
+# name, as the package metadata spells it ("scikit-learn", "brainscore-core",
+# "brainscore_vision"), never the import name. Read from the installed metadata:
 # nothing is imported, so torch is never loaded here.
 _SCORE_LIBRARIES = ("numpy", "torch", "transformers", "scikit-learn", "xarray")
 _BRAINSCORE_PACKAGES = (("brainscore_core", "brainscore-core"), ("brainscore", "brainscore"),
