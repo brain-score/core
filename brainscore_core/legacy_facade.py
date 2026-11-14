@@ -114,13 +114,14 @@ class LegacyBenchmarkFacade:
 
     def start_behavioral_task(self, task) -> None:
         if 'behavior' not in set(self._subject.out_channels):
-            # A support refusal before any session: the pair is N/A.
+            # A refusal during the run: an error of score(), not N/A.
             raise CompatibilityError(
-                f"Subject {self.identifier!r} has no path for the legacy language "
-                f"behavioral task {getattr(task, 'value', task)!r} (reading times / "
-                f"next-word prediction): it declares no 'behavior' output. Legacy "
-                f"language behavioral benchmarks need a subject that implements "
-                f"that task.", channels={'behavior'})
+                f"Subject {self.identifier!r} refused the legacy language behavioral task "
+                f"{getattr(task, 'value', task)!r} (reading times / next-word prediction): "
+                f"it declares no 'behavior' output. The pair passed the declared "
+                f"compatibility check because this legacy benchmark declares no requested "
+                f"output, so there is no result; the benchmark's declarations do not yet "
+                f"express that it needs 'behavior'.", channels={'behavior'})
         self.start_task(task)
 
     def digest_text(self, text) -> Dict[str, Any]:
