@@ -5,8 +5,8 @@ import pytest
 from brainscore_core.contract import Subject, TaskContext
 from brainscore_core.legacy_facade import LegacyBenchmarkFacade
 from brainscore_core.metrics import Score
+from brainscore_core.response_formats import response_record
 from brainscore_core.score_metadata import (
-    infer_score_protocol,
     record_measures,
     requested_output_channels_for_score,
     stamp_score_metadata,
@@ -57,14 +57,14 @@ def test_stamp_score_metadata_adds_provenance_and_preserves_existing_attrs():
         score,
         _Subject(),
         requested_channels={"neural:IT"},
-        protocol="neural",
         harness_id="test-harness")
 
     assert returned is score
     assert score.attrs["runtime_sec"] == 0.01
     assert score.attrs["in_channels"] == ("text", "vision")
     assert score.attrs["out_channels"] == ("neural:IT",)
-    assert score.attrs["protocol"] == "neural"
+    assert score.attrs["response"] == ()
+    assert "protocol" not in score.attrs and "measure" not in score.attrs
     assert score.attrs["subject_id"] == "subject"
     assert score.attrs["harness_id"] == "test-harness"
 
@@ -88,29 +88,25 @@ def test_parent_lookup_is_best_effort_for_legacy_benchmarks():
     benchmark = _AbstractParentBenchmark()
 
     assert requested_output_channels_for_score(benchmark) == set()
-    assert infer_score_protocol(_Subject(), benchmark, set()) is None
 
 
-def test_infer_score_protocol_from_requested_channels():
-    assert infer_score_protocol(_Subject(), _Benchmark(), {"neural:V4"}) == "neural"
-    assert infer_score_protocol(_Subject(), _Benchmark(), {"motor"}) == "motor"
-    assert infer_score_protocol(
-        _Subject(), _Benchmark(), {"perturbation"}
-    ) == "perturbation"
+# --- the response records of the run's answers ---------------------------
 
+REPLY = response_record('behavior', 'generation', parsed_by='model')
+LIKELIHOOD = response_record('behavior', 'likelihood', conversion='softmax',
+                             source_format='behavior:log_probabilities')
 
-# --- behavioral protocol from the measures the responses state ------------
 
 class _Answerer(Subject):
-    """A participate-only subject (not a BrainScoreModel) with a fixed measure."""
+    """A participate-only subject (not a BrainScoreModel) with a fixed record."""
 
     identifier = 'answerer'
     in_channels = {'vision'}
     out_channels = {'behavior'}
     required_channels = set()
 
-    def __init__(self, measure):
-        self.measure = measure
+    def __init__(self, record):
+        self.record = record
 
     def participate(self, session):
         while session.next_input() is not None:
@@ -121,7 +117,8 @@ class _Answerer(Subject):
             np.tile([1.0, 0.0], (n, 1)),
             coords={'stimulus_id': ('presentation', list(stimuli['stimulus_id'])),
                     'choice': ['cat', 'dog']},
-            dims=['presentation', 'choice'], attrs={'measure': self.measure})
+            dims=['presentation', 'choice'],
+            attrs={} if self.record is None else {'response': self.record})
         for channel in session.outputs:
             session.respond(StreamEvent(channel, payload, None))
 
@@ -129,49 +126,30 @@ class _Answerer(Subject):
         pass
 
 
-def _protocol(subject, measures):
-    return infer_score_protocol(subject, _Benchmark(), {'behavior'}, measures=measures)
-
-
 def _stimuli():
     return _make_image_stimulus_set(['cat'] * 3 + ['dog'] * 3, identifier='measure-test')
 
 
-def test_generation_subject_without_brainscore_model_is_stamped_generation():
-    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+def _stamp(subject, measures):
+    return stamp_score_metadata(Score(0.5), subject, {'behavior'}, harness_id='test',
+                                measures=measures)
+
+
+def test_a_subject_without_brainscore_model_gets_its_record_on_the_score():
+    subject = _Answerer(REPLY)
     task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'],
                        instruction='Which animal?')
     with record_measures() as measures:
         behavioral_response(subject, _stimuli(), task)
 
-    score = stamp_score_metadata(Score(0.5), subject, {'behavior'},
-                                 protocol=_protocol(subject, measures),
-                                 harness_id='test', measures=measures)
+    score = _stamp(subject, measures)
 
-    assert score.attrs['protocol'] == 'behavior:generation'
-    assert score.attrs['measure'] == 'reported'
+    assert score.attrs['response'] == (REPLY,)
+    assert 'protocol' not in score.attrs and 'measure' not in score.attrs
 
 
-def test_likelihood_subject_is_not_stamped_readout():
-    subject = _Answerer({'kind': 'implied', 'source': 'likelihood'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
-    with record_measures() as measures:
-        behavioral_response(subject, _stimuli(), task)
-
-    assert _protocol(subject, measures) == 'behavior:likelihood'
-
-
-def test_implied_measure_without_a_known_source_does_not_claim_readout():
-    subject = _Answerer({'kind': 'implied'})
-    task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
-    with record_measures() as measures:
-        behavioral_response(subject, _stimuli(), task)
-
-    assert _protocol(subject, measures) == 'behavior:implied'
-
-
-def test_legacy_facade_behavioral_benchmark_gets_measure_attr():
-    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+def test_legacy_facade_behavioral_benchmark_gets_the_record():
+    subject = _Answerer(REPLY)
 
     def benchmark(candidate):          # a legacy behavioral benchmark
         candidate.start_task('probabilities', fitting_stimuli=_stimuli())
@@ -180,106 +158,99 @@ def test_legacy_facade_behavioral_benchmark_gets_measure_attr():
 
     with record_measures() as measures:
         score = benchmark(LegacyBenchmarkFacade(subject, visual_degrees=8))
-    stamp_score_metadata(score, subject, {'behavior'},
-                         protocol=_protocol(subject, measures),
-                         harness_id='test', measures=measures)
+    stamp_score_metadata(score, subject, {'behavior'}, harness_id='test', measures=measures)
 
-    assert score.attrs['measure'] == 'reported'
-    assert score.attrs['protocol'] == 'behavior:generation'
+    assert score.attrs['response'] == (REPLY,)
 
 
-def test_reported_and_implied_measures_stamp_a_sorted_tuple():
-    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+def test_two_records_are_both_on_the_score_once_each():
+    subject = _Answerer(REPLY)
     with record_measures() as measures:
-        for measure in ({'kind': 'reported', 'source': 'reply'},
-                        {'kind': 'implied', 'source': 'likelihood'}):
-            subject.measure = measure
+        for record in (REPLY, LIKELIHOOD, REPLY):
+            subject.record = record
             behavioral_response(subject, _stimuli(), TaskContext(
                 task_type='probabilities', label_set=['cat', 'dog']))
-    score = stamp_score_metadata(Score(0.5), subject, {'behavior'},
-                                 protocol=_protocol(subject, measures),
-                                 harness_id='test', measures=measures)
+    score = _stamp(subject, measures)
 
-    assert score.attrs['measure'] == ('implied', 'reported')
-    assert score.attrs['protocol'] == 'behavior:generation'
+    assert sorted(score.attrs['response'], key=repr) == sorted([REPLY, LIKELIHOOD], key=repr)
 
 
-def test_nothing_recorded_keeps_the_old_default_stamp():
-    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'},
-                                 protocol=infer_score_protocol(_Subject(), _Benchmark(),
-                                                               {'behavior'}),
-                                 harness_id='test')
+def test_nothing_recorded_gives_an_empty_record():
+    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'}, harness_id='test')
 
-    assert score.attrs['protocol'] == 'behavior:readout'
-    assert 'measure' not in score.attrs
+    assert score.attrs['response'] == ()
+    assert 'protocol' not in score.attrs
 
 
-def test_measures_outside_a_run_are_not_recorded():
-    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+def test_an_answer_without_a_record_adds_nothing():
+    subject = _Answerer(None)
+    with record_measures() as measures:
+        behavioral_response(subject, _stimuli(), TaskContext(
+            task_type='probabilities', label_set=['cat', 'dog']))
+
+    assert measures.responses == ()
+
+
+def test_records_outside_a_run_are_not_recorded():
+    subject = _Answerer(REPLY)
     task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     behavioral_response(subject, _stimuli(), task)            # no run open: nothing kept
     with record_measures() as measures:
         pass
 
-    assert measures.measures == set()
-
-
-_GENERATION_TASK = dict(task_type='probabilities', label_set=['cat', 'dog'],
-                        instruction='What animal is this?')
+    assert measures.responses == ()
 
 
 # --- direct sessions, nesting, mixed collection --------------------------
 
 
-def test_mixed_measures_in_one_collection_are_all_recorded():
-    """An implied event then a reported event on one channel: concat keeps
-    only the first assembly's attrs, so each event is noted on its own."""
+def test_mixed_records_in_one_collection_are_all_recorded():
+    """Two events with different records on one channel: concat keeps only
+    the first assembly's attrs, so each event is noted on its own."""
     from brainscore_core.streaming import Session
+    readout = response_record('behavior', 'readout')
 
-    def event(measure, stimulus):
+    def event(record, stimulus):
         return StreamEvent('behavior', BehavioralAssembly(
             [[1.0, 0.0]], coords={'stimulus_id': ('presentation', [stimulus]),
                                   'choice': ['cat', 'dog']},
-            dims=['presentation', 'choice'], attrs={'measure': measure}), None)
+            dims=['presentation', 'choice'], attrs={'response': record}), None)
 
     with record_measures() as measures:
         session = Session((), outputs=['behavior'])
-        session.respond(event({'kind': 'implied', 'source': 'readout'}, 's0'))
-        session.respond(event({'kind': 'reported', 'source': 'reply'}, 's1'))
+        session.respond(event(readout, 's0'))
+        session.respond(event(REPLY, 's1'))
         session.collect('behavior')
-    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'},
-                                 protocol=_protocol(_Subject(), measures),
-                                 harness_id='test', measures=measures)
 
-    assert score.attrs['measure'] == ('implied', 'reported')
-    assert score.attrs['protocol'] == 'behavior:generation'
+    assert sorted(_stamp(_Subject(), measures).attrs['response'], key=repr) == sorted(
+        [readout, REPLY], key=repr)
 
 
-def test_an_inner_score_passes_its_measures_to_the_outer_score():
-    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+def test_an_inner_score_passes_its_records_to_the_outer_score():
+    subject = _Answerer(REPLY)
     task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     with record_measures() as outer:
         with record_measures() as inner:      # an inner score() call
             behavioral_response(subject, _stimuli(), task)
-        assert inner.measures == {('reported', 'reply')}
+        assert inner.responses == (REPLY,)
 
-    assert _protocol(subject, outer) == 'behavior:generation'
+    assert outer.responses == (REPLY,)
 
 
 def test_a_failed_inner_run_passes_nothing_to_the_outer_record():
     """Only a successful inner score reaches the outer result, so only its
-    measures are passed on; the outer record is restored either way."""
-    subject = _Answerer({'kind': 'reported', 'source': 'reply'})
+    records are passed on; the outer record is restored either way."""
+    subject = _Answerer(REPLY)
     task = TaskContext(task_type='probabilities', label_set=['cat', 'dog'])
     with record_measures() as outer:
         with pytest.raises(RuntimeError):
             with record_measures():
                 behavioral_response(subject, _stimuli(), task)
                 raise RuntimeError('benchmark failed')
-        subject.measure = {'kind': 'implied', 'source': 'likelihood'}
+        subject.record = LIKELIHOOD
         behavioral_response(subject, _stimuli(), task)     # lands in the outer record
 
-    assert outer.measures == {('implied', 'likelihood')}
+    assert outer.responses == (LIKELIHOOD,)
 
 
 def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
@@ -288,8 +259,7 @@ def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
     made_earlier = StreamEvent('behavior', BehavioralAssembly(
         [[1.0, 0.0]], coords={'stimulus_id': ('presentation', ['s0']),
                               'choice': ['cat', 'dog']},
-        dims=['presentation', 'choice'],
-        attrs={'measure': {'kind': 'reported', 'source': 'reply'}}), None)
+        dims=['presentation', 'choice'], attrs={'response': REPLY}), None)
 
     class _Replayer(_Answerer):
         def participate(self, session):
@@ -297,13 +267,24 @@ def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
                 pass
             session.respond(made_earlier)
 
-    subject = _Replayer(measure=None)
+    subject = _Replayer(record=None)
     with record_measures() as measures:
         session = Session((), outputs=['behavior'])
         subject.participate(session)
         session.collect('behavior')
 
-    assert _protocol(subject, measures) == 'behavior:generation'
+    assert measures.responses == (REPLY,)
+
+
+def test_a_score_with_records_survives_pickling():
+    import pickle
+    subject = _Answerer(LIKELIHOOD)
+    with record_measures() as measures:
+        behavioral_response(subject, _stimuli(), TaskContext(
+            task_type='probabilities', label_set=['cat', 'dog']))
+    score = pickle.loads(pickle.dumps(_stamp(subject, measures)))
+
+    assert score.attrs['response'] == (LIKELIHOOD,)
 
 
 # ── Execution configuration and software versions in the provenance ─────────
@@ -329,7 +310,7 @@ def _stamped(events, monkeypatch, plan=None):
             note_session(session, plan)
         _answer_session(session)
     return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                protocol='neural', harness_id='test', measures=measures)
+                                harness_id='test', measures=measures)
 
 
 def _events():
@@ -355,7 +336,7 @@ def test_a_run_with_both_deliveries_lists_both(monkeypatch):
         _answer_session(Session(_events(), ['neural:IT']))
         _answer_session(Session(iter(_events()), ['neural:IT']))
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                 protocol='neural', harness_id='test', measures=measures)
+                                 harness_id='test', measures=measures)
     assert score.attrs['delivery'] == ('listed', 'stream')
 
 
@@ -364,7 +345,7 @@ def test_a_run_without_sessions_records_no_delivery(monkeypatch):
     with record_measures() as measures:
         pass
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(),
-                                 protocol=None, harness_id='test', measures=measures)
+                                 harness_id='test', measures=measures)
     assert score.attrs['delivery'] is None
     assert score.attrs['regions_per_pass'] is None
 
@@ -459,7 +440,7 @@ def test_reading_versions_does_not_import_torch():
             'from brainscore_core.score_metadata import stamp_score_metadata; '
             'from brainscore_core._evaluation.measures import MeasureRecord; '
             'from brainscore_core.metrics import Score; '
-            'stamp_score_metadata(Score(1), object(), set(), protocol=None, harness_id="t", '
+            'stamp_score_metadata(Score(1), object(), set(), harness_id="t", '
             'measures=MeasureRecord()); '
             'assert "torch" not in sys.modules; print("torch" in sys.modules)')
     out = subprocess.run([sys.executable, '-W', 'ignore', '-c', code], capture_output=True,

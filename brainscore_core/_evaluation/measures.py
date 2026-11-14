@@ -1,15 +1,13 @@
-"""Record how the behavioral responses of one scoring run were measured.
+"""Record how the behavioral responses of one scoring run were given.
 
-A behavioral assembly states its measure in ``attrs['measure']``:
-``{'kind': 'reported' | 'implied', 'source': ...}`` (see
-``brainscore_core.responses``). ``score()`` opens ``record_measures()`` around
-the benchmark run. Core notes the measure where a session accepts a response
-from the subject (``note_response`` in each core session's ``respond`` /
-``emit``), event by event, before any session concatenates payloads. Events
-that no session accepts (saved records, fixtures, copies) are not noted.
-``BrainScoreModel.process`` notes the assembly it returns, because that typed
-path has no session. The score metadata then reads the record. Only returned
-data is read, never the subject's state.
+A behavioral answer carries its response record in ``attrs['response']``
+(``brainscore_core.response_formats.response_record``). ``score()`` opens
+``record_measures()`` around the benchmark run. Core notes the record where a
+session accepts a response from the subject (``note_response`` in each core
+session's ``respond`` / ``emit``), event by event, before any session
+concatenates payloads. Events that no session accepts (saved records,
+fixtures, copies) are not noted. The score metadata then copies the records
+to the score. Only returned data is read, never the subject's state.
 
 The same record keeps the execution configuration of the run's sessions, noted
 where a session accepts a response (``note_session``): the delivery form
@@ -25,23 +23,23 @@ makes its response events there today (worker pools only extract features or
 compute metrics); copy the context into the worker if one ever does.
 """
 
+import json
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator, Optional, Set, Tuple
+from typing import Dict, Iterator, Optional, Set, Tuple
 
-MEASURE_KINDS = ('reported', 'implied')
 _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', default=None)
 
 
 class MeasureRecord:
-    """The ``(kind, source)`` pairs seen during one scoring run, and how often its
+    """The response records seen during one scoring run, and how often its
     sessions applied and undid each perturbation handle (``perturbation``
     responses carry a ``handle_id``; ``meta['kind'] == 'reset'`` marks an undo).
     Counts, not sets: a handle name used again after its undo is counted again."""
 
     def __init__(self) -> None:
-        self.measures: Set[Tuple[str, Optional[str]]] = set()
+        self._records: Dict[str, dict] = {}   # one per distinct record, keyed by its JSON
         self.applied: Counter = Counter()
         self.undone: Counter = Counter()
         self._deliveries: Set[str] = set()
@@ -66,12 +64,10 @@ class MeasureRecord:
                 "subject, StateChange(kind='reset', handle_id=...)).")
 
     @property
-    def kinds(self) -> Set[str]:
-        return {kind for kind, _source in self.measures}
-
-    @property
-    def sources(self) -> Set[Optional[str]]:
-        return {source for _kind, source in self.measures}
+    def responses(self) -> Tuple[dict, ...]:
+        """The distinct response records of the run, sorted by format, then content."""
+        return tuple(self._records[key] for key in sorted(
+            self._records, key=lambda key: (self._records[key]['format'], key)))
 
 
 @contextmanager
@@ -93,23 +89,22 @@ def record_measures() -> Iterator[MeasureRecord]:
     finally:
         _active.reset(token)
         if succeeded and outer is not None:
-            outer.measures |= record.measures
+            outer._records.update(record._records)
             outer.applied += record.applied
             outer.undone += record.undone
             outer._deliveries |= record._deliveries
             outer._region_plans |= record._region_plans
 
 
-def note_measure(assembly) -> None:
-    """Add ``assembly.attrs['measure']`` to the open record, if any."""
+def _note_record(payload) -> None:
+    """Add ``payload.attrs['response']`` to the open record, if any."""
     record = _active.get()
     if record is None:
         return
-    attrs = getattr(assembly, 'attrs', None)
-    measure = attrs.get('measure') if isinstance(attrs, dict) else None
-    if isinstance(measure, dict) and measure.get('kind') in MEASURE_KINDS:
-        source = measure.get('source')
-        record.measures.add((measure['kind'], None if source is None else str(source)))
+    attrs = getattr(payload, 'attrs', None)
+    response = attrs.get('response') if isinstance(attrs, dict) else None
+    if isinstance(response, dict) and 'format' in response:
+        record._records[json.dumps(response, sort_keys=True, default=str)] = response
 
 
 def note_session(session, regions_per_pass: Optional[str] = None) -> None:
@@ -141,7 +136,7 @@ def execution_attrs(record: MeasureRecord) -> dict:
 
 
 def note_response(event, request=None) -> None:
-    """Note a response event a session accepts: a behavior measure, or a perturbation handle.
+    """Note a response event a session accepts: a response record, or a perturbation handle.
 
     ``request`` is the ``StateChange`` the session delivered, if any. The handle
     comes from a typed ``PerturbationApplied`` payload, else the response meta,
@@ -150,7 +145,7 @@ def note_response(event, request=None) -> None:
     """
     channel = getattr(event, 'channel', None)
     if is_behavior_channel(channel):
-        note_measure(event.payload)
+        _note_record(event.payload)
     elif channel == 'perturbation':
         from ..events import PerturbationApplied
         record, meta = _active.get(), event.meta
