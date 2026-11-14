@@ -298,8 +298,10 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
     Exploratory experiments may allow unregistered families with a warning.
     Benchmark scoring requires registration: an unknown channel raises
     CompatibilityError. Invalid syntax, direction, form or address is a
-    malformed declaration and raises ValueError.
+    malformed declaration and raises ValueError. Every channel is checked
+    first, so an unknown channel never hides a malformed one.
     """
+    unknown = None
     for channel in sorted(channels, key=repr):
         try:
             family, address = parse_channel(channel)
@@ -318,9 +320,11 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
                     'a catalog channel or register_channel() registration.',
                     CompatibilityWarning, stacklevel=2)
                 continue
-            raise CompatibilityError(
-                f"{owner} declares unknown channel '{channel}'.", channels={channel}
-            ) from error
+            if unknown is None:
+                unknown = CompatibilityError(
+                    f"{owner} declares unknown channel '{channel}'.", channels={channel})
+                unknown.__cause__ = error
+            continue
 
         if entry.direction not in (direction, io_catalog.BOTH):
             raise ValueError(
@@ -337,6 +341,8 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
                 f"{owner} declares addressed channel '{channel}', but family "
                 f"'{family}' is not addressable."
             )
+    if unknown is not None:
+        raise unknown
 
 
 def _format_channels(channels: Set[str]) -> str:

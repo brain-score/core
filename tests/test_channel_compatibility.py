@@ -401,3 +401,22 @@ def test_a_defect_is_reported_even_when_the_pair_also_mismatches(subject_fields,
 def test_the_mismatch_alone_is_not_applicable():
     with pytest.raises(CompatibilityError, match='neural:IT'):
         check_channel_compatibility(_DeclaredSubject(), _mismatched_benchmark())
+
+
+@pytest.mark.parametrize('subject_fields, benchmark_fields', [
+    ({'in_channels': frozenset({'text', 'aardvark', 'vision'})}, {}),
+    ({'out_channels': frozenset({'behavior', 'aardvark', 'text'})}, {}),
+    ({}, {'required_input_channels': frozenset({'text', 'aardvark', 'vision'})}),
+    ({}, {'requested_output_channels': frozenset({'aardvark', 'text'})}),
+], ids=['subject-inputs', 'subject-outputs', 'benchmark-inputs', 'benchmark-outputs'])
+def test_an_unknown_channel_does_not_hide_a_malformed_one_in_the_same_collection(
+        subject_fields, benchmark_fields):
+    subject = type('Subject', (_DeclaredSubject,), subject_fields)()
+    with pytest.raises(ValueError):
+        check_channel_compatibility(subject, _mismatched_benchmark(**benchmark_fields))
+
+
+def test_an_unknown_channel_alone_is_not_applicable():
+    subject = type('Subject', (_DeclaredSubject,), {'in_channels': frozenset({'text', 'aardvark'})})()
+    with pytest.raises(CompatibilityError, match='aardvark'):
+        check_channel_compatibility(subject, _mismatched_benchmark())
