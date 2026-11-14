@@ -180,15 +180,37 @@ class TestRunScoring:
         score_entry = score_entries[0]
         assert score_entry.score_raw == 0.8
 
-    def test_not_applicable_pair_stores_the_reason_and_no_score(self):
-        endpoint = RunScoringEndpoint(domain_plugins=NotApplicableDomainPlugins(),
-                                      db_secret=self.test_database)
+    def test_not_applicable_pair_is_stored_as_a_result_and_not_run_again(self):
+        import math
+        plugins = NotApplicableDomainPlugins()
+        calls = []
+        score = plugins.score
+        plugins.score = lambda **kwargs: calls.append(kwargs) or score(**kwargs)
+        endpoint = RunScoringEndpoint(domain_plugins=plugins, db_secret=self.test_database)
+        for _ in range(2):
+            endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                     jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+
+        assert len(calls) == 1                        # the second submission runs nothing
+        score_entry, = list(database_models.Score.select())
+        # NaN in a database that keeps it; SQLite (this test) stores it as NULL.
+        assert score_entry.score_raw is None or math.isnan(score_entry.score_raw)
+        assert score_entry.comment.startswith("N/A: does not produce ['neural:IT']")
+
+    def test_a_failed_run_is_retried(self):
+        class Failing(DummyDomainPlugins):
+            def score(self, model_identifier, benchmark_identifier):
+                raise RuntimeError('model crashed')
+        endpoint = RunScoringEndpoint(domain_plugins=Failing(), db_secret=self.test_database)
         endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
                  jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
-
+        failed, = list(database_models.Score.select())
+        assert failed.score_raw is None and 'model crashed' in failed.comment
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
         score_entry, = list(database_models.Score.select())
-        assert score_entry.score_raw is None
-        assert score_entry.comment.startswith("N/A: does not produce ['neural:IT']")
+        assert score_entry.score_raw == 0.8
 
     def test_full_scoring(self):
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC
