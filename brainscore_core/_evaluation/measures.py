@@ -17,6 +17,7 @@ makes its response events there today (worker pools only extract features or
 compute metrics); copy the context into the worker if one ever does.
 """
 
+from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Iterator, Optional, Set, Tuple
@@ -27,19 +28,33 @@ _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', de
 
 
 class MeasureRecord:
-    """The ``(kind, source)`` pairs seen during one scoring run, and the perturbation
-    handles its sessions applied and undid (``perturbation`` responses carry a
-    ``handle_id``; ``meta['kind'] == 'reset'`` marks an undo)."""
+    """The ``(kind, source)`` pairs seen during one scoring run, and how often its
+    sessions applied and undid each perturbation handle (``perturbation``
+    responses carry a ``handle_id``; ``meta['kind'] == 'reset'`` marks an undo).
+    Counts, not sets: a handle name used again after its undo is counted again."""
 
     def __init__(self) -> None:
         self.measures: Set[Tuple[str, Optional[str]]] = set()
-        self.applied: Set[str] = set()
-        self.undone: Set[str] = set()
+        self.applied: Counter = Counter()
+        self.undone: Counter = Counter()
 
     @property
     def unreleased(self) -> Set[str]:
-        """Handles applied during the run and not undone by it."""
-        return self.applied - self.undone
+        """Handles applied during the run more often than the run undid them."""
+        return set(self.applied - self.undone)
+
+    def check_released(self, benchmark_identifier, subject_identifier) -> None:
+        """Raise when the run left an intervention it applied active.
+
+        The one release check of every score entry point: the run must leave
+        the subject as it found it. Interventions the caller applied stay.
+        """
+        if self.unreleased:
+            raise RuntimeError(
+                f"Benchmark '{benchmark_identifier}' left intervention handle(s) "
+                f"{sorted(self.unreleased)} active on subject '{subject_identifier}'; a "
+                "benchmark must undo every intervention it applies: apply_state_change("
+                "subject, StateChange(kind='reset', handle_id=...)).")
 
     @property
     def kinds(self) -> Set[str]:
@@ -70,8 +85,8 @@ def record_measures() -> Iterator[MeasureRecord]:
         _active.reset(token)
         if succeeded and outer is not None:
             outer.measures |= record.measures
-            outer.applied |= record.applied
-            outer.undone |= record.undone
+            outer.applied += record.applied
+            outer.undone += record.undone
 
 
 def note_measure(assembly) -> None:
@@ -106,7 +121,7 @@ def note_response(event, request=None) -> None:
         handle = handle or meta.get('handle_id') or getattr(request, 'handle_id', None)
         if handle is not None:
             undo = meta.get('kind') == 'reset' or getattr(request, 'kind', None) == 'reset'
-            (record.undone if undo else record.applied).add(handle)
+            (record.undone if undo else record.applied)[handle] += 1
 
 
 def is_behavior_channel(channel) -> bool:

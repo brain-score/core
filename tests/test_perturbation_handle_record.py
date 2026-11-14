@@ -53,8 +53,8 @@ def test_delayed_typed_responses_are_tied_to_their_own_request():
             session.next_input()
         for handle in ('h1', 'h2', 'h1'):
             session.respond(_typed(handle))
-    assert record.applied == {'h1', 'h2'}
-    assert record.undone == {'h1'}
+    assert record.applied == {'h1': 1, 'h2': 1}
+    assert record.undone == {'h1': 1}
     assert record.unreleased == {'h2'}
 
 
@@ -101,3 +101,21 @@ def test_handle_only_reset_goes_on_the_family_the_change_was_applied_on():
             apply_state_change(subject, StateChange(kind='reset', handle_id=applied.handle_id))
         assert subject.active == set()
         assert record.unreleased == set()
+
+
+def test_a_handle_name_used_again_after_its_undo_is_counted_and_checked():
+    """Apply h1, undo h1, apply h1 again: one application is still active."""
+    import pytest
+    subject = _TypedSubject()
+    with record_measures() as record:
+        apply_state_change(subject, _lesion())
+        apply_state_change(subject, StateChange(kind='reset', handle_id='h1'))
+        apply_state_change(subject, _lesion())
+    assert record.unreleased == {'h1'}
+    with pytest.raises(RuntimeError, match=r"'bench' left intervention handle\(s\) \['h1'\] "
+                                           r"active on subject 'typed'"):
+        record.check_released('bench', 'typed')
+    with record_measures() as clean:
+        apply_state_change(subject, _lesion())
+        apply_state_change(subject, StateChange(kind='reset', handle_id='h1'))
+    clean.check_released('bench', 'typed')          # returns normally
