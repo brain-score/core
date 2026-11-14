@@ -212,6 +212,25 @@ class TestRunScoring:
         score_entry, = list(database_models.Score.select())
         assert score_entry.score_raw == 0.8
 
+    def test_a_refused_run_is_a_failure_and_is_retried(self):
+        from brainscore_core.compatibility import ExecutionNotFeasibleError
+
+        class Refusing(DummyDomainPlugins):
+            def score(self, model_identifier, benchmark_identifier):
+                raise ExecutionNotFeasibleError('session refused', channels={'behavior'})
+        endpoint = RunScoringEndpoint(domain_plugins=Refusing(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        failed, = list(database_models.Score.select())
+        assert failed.score_raw is None
+        assert not failed.comment.startswith('N/A')
+        assert 'ExecutionNotFeasibleError' in failed.comment
+        endpoint = RunScoringEndpoint(domain_plugins=DummyDomainPlugins(), db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        score_entry, = list(database_models.Score.select())
+        assert score_entry.score_raw == 0.8
+
     def test_an_ordinary_nan_score_with_an_na_like_comment_is_retried(self):
         import math
         class NoCeiling(DummyDomainPlugins):

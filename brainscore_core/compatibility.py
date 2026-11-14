@@ -18,7 +18,9 @@ never enter it. :func:`check_compatibility` returns the match as data
 (:class:`CompatibilityMatch`) so the score records which inputs were used.
 An incompatible pair raises :class:`CompatibilityError`; ``score()`` returns
 the N/A result for it (``brainscore_core.score_status.na_score``). A malformed
-declaration raises ``ValueError``: it is a defect, not an incompatible pair.
+declaration raises ``ValueError``: it is a defect, not an incompatible pair. A
+compatible pair whose run is refused when it starts (a task, outputs or settings
+the subject cannot run) raises :class:`ExecutionNotFeasibleError`, an error.
 
 Benchmark inputs are ``required_input_channels`` when declared, otherwise the
 channels of ``required_modalities`` plus ``accepted_modalities``. A benchmark with no
@@ -42,18 +44,31 @@ from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_c
 
 
 class CompatibilityError(Exception):
-    """Raised when a subject cannot be scored on a benchmark.
+    """Raised when the declarations of a subject and a benchmark do not fit.
 
-    ``channels`` are the channels that cause the refusal (for example the
-    requested outputs the subject does not produce); empty when the reason is
-    not a channel. ``score()`` turns this error into the N/A result only when
-    the declaration check before the run raises it. A refusal during the run
-    is an error and propagates.
+    Only the declaration check raises it, before any compute, and ``score()``
+    turns it into the N/A result. ``channels`` are the channels that cause the
+    mismatch (for example the requested outputs the subject does not produce);
+    empty when the reason is not a channel.
     """
 
     def __init__(self, message: str = '', channels=()):
         super().__init__(message)
         self.channels = frozenset(channels)
+
+
+class ExecutionNotFeasibleError(Exception):
+    """Raised when a subject or benchmark refuses one combination of task, outputs and settings.
+
+    The pair passed the declaration check, and the refusal comes when a session
+    or a benchmark run starts, before model computation. It is an error of the
+    run, never N/A; ``channels`` and ``task_type`` name what was refused.
+    """
+
+    def __init__(self, message: str = '', channels=(), task_type=None):
+        super().__init__(message)
+        self.channels = frozenset(channels)
+        self.task_type = task_type
 
 
 class CompatibilityWarning(UserWarning):
@@ -115,7 +130,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     ``trial_memory``): that is a defect, not an N/A pair. Both declarations are
     validated before they are compared. Whether one part of the subject answers
     all requested outputs together is decided by the subject when a session
-    starts; a refusal there is an error of the run, not N/A.
+    starts; a refusal there raises :class:`ExecutionNotFeasibleError`.
     Every declared channel must be registered in the catalog with the right
     direction.
     """

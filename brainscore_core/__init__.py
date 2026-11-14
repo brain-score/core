@@ -14,7 +14,7 @@ from .events import (
     OutputEvent,
 )
 from .compatibility import (
-    CompatibilityError, CompatibilityWarning, check_compatibility,
+    CompatibilityError, CompatibilityWarning, ExecutionNotFeasibleError, check_compatibility,
 )
 from .score_status import STATUS_NA, na_score
 from .memory import MemoryError, check_memory, get_available_memory

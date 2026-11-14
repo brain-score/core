@@ -12,9 +12,10 @@ A score has four states:
 
 Every ``score()`` entry point (``brainscore``, ``brainscore_vision``,
 ``brainscore_language``) wraps only the declaration check in
-``except CompatibilityError: return na_score(error)``. A refusal during the run
-(a subject that refuses a session, a benchmark's own check), a malformed
-declaration (``ValueError``) and a memory-check failure are errors.
+``except CompatibilityError: return na_score(error)``. A refusal when the run
+starts (a subject that refuses a session, a benchmark's own check) raises
+:class:`~brainscore_core.compatibility.ExecutionNotFeasibleError`; it, a
+malformed declaration (``ValueError``) and a memory-check failure are errors.
 """
 
 import numpy as np

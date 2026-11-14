@@ -113,11 +113,13 @@ def test_behavioral_task_needs_a_declared_behavior_output():
     class Neural(_Recorder):
         out_channels = {'neural:IT'}
 
-    from brainscore_core.compatibility import CompatibilityError
+    from brainscore_core.compatibility import CompatibilityError, ExecutionNotFeasibleError
     subject = Neural()
-    with pytest.raises(CompatibilityError, match="declares no 'behavior' output") as caught:
+    with pytest.raises(ExecutionNotFeasibleError, match="declares no 'behavior' output") as caught:
         LegacyBenchmarkFacade(subject).start_behavioral_task('reading_times')
     assert caught.value.channels == {'behavior'}
+    assert caught.value.task_type == 'reading_times'
+    assert not isinstance(caught.value, CompatibilityError)
     assert subject.sessions == []
 
 

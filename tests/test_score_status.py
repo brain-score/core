@@ -52,3 +52,12 @@ def test_there_is_no_separate_conversion_helper():
     # score() returns the N/A result itself; no wrapper converts the error.
     assert not hasattr(brainscore_core, "score_or_na")
 
+
+
+def test_execution_not_feasible_is_a_separate_error():
+    from brainscore_core import ExecutionNotFeasibleError
+    error = ExecutionNotFeasibleError("no part for the task", channels={"behavior"},
+                                      task_type="choice")
+    assert not isinstance(error, CompatibilityError)
+    assert not issubclass(CompatibilityError, ExecutionNotFeasibleError)
+    assert error.channels == {"behavior"} and error.task_type == "choice"
