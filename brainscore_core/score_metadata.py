@@ -8,6 +8,8 @@ from brainscore_core._evaluation.measures import (  # noqa: F401  (re-exported)
     note_measure,
     record_measures,
 )
+from brainscore_core._evaluation import measures as _measures
+from brainscore_core.environment_check import _score_environment
 from brainscore_core.streaming import parse_channel
 
 
@@ -24,6 +26,13 @@ def stamp_score_metadata(
     ``measures`` is the record ``record_measures()`` kept during the run. When
     it holds behavioral measures, ``attrs['measure']`` says how they were
     measured: ``'reported'``, ``'implied'`` or both as a sorted tuple.
+    ``measures`` also gives the execution configuration of the run's sessions:
+    ``attrs['delivery']`` (``'listed'``, ``'stream'``, both as a sorted tuple,
+    or None when no session answered) and ``attrs['regions_per_pass']``
+    (the ``BRAINSCORE_REGIONS_PER_PASS`` setting the sessions ran under).
+    ``attrs['software']`` gives the versions of python, the libraries that can
+    change numbers and the four Brain-Score packages; ``attrs['code_commits']``
+    the commit of each imported Brain-Score package's checkout.
     """
     score.attrs["in_channels"] = _sorted_tuple(getattr(subject, "in_channels", ()))
     score.attrs["subject_traits"] = _sorted_tuple(getattr(subject, "traits", ()))
@@ -34,6 +43,9 @@ def stamp_score_metadata(
     kinds = sorted(measures.kinds) if measures is not None else []
     if kinds:
         score.attrs["measure"] = kinds[0] if len(kinds) == 1 else tuple(kinds)
+    if measures is not None:
+        score.attrs.update(_measures.execution_attrs(measures))
+    score.attrs.update(_score_environment())
     return score
 
 

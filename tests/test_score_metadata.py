@@ -304,3 +304,92 @@ def test_an_event_made_before_the_run_and_sent_during_it_is_recorded():
         session.collect('behavior')
 
     assert _protocol(subject, measures) == 'behavior:generation'
+
+
+# ── Execution configuration and software versions in the provenance ─────────
+
+def _answer_session(session):
+    """Answer every input of ``session`` on its one requested output."""
+    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+    while (event := session.next_input()) is not None:
+        session.respond(StreamEvent(session.outputs[0], NeuroidAssembly(
+            np.ones((1, 1)), dims=['presentation', 'neuroid'],
+            coords={'stimulus_id': ('presentation', ['s0']), 'neuroid_id': ('neuroid', ['n0'])}),
+            event.t_ms))
+
+
+def _stamped(events, monkeypatch, plan=None):
+    from brainscore_core.streaming import Session
+    if plan is None:
+        monkeypatch.delenv('BRAINSCORE_REGIONS_PER_PASS', raising=False)
+    else:
+        monkeypatch.setenv('BRAINSCORE_REGIONS_PER_PASS', plan)
+    with record_measures() as measures:
+        _answer_session(Session(events, ['neural:IT']))
+    return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                protocol='neural', harness_id='test', measures=measures)
+
+
+def _events():
+    return [StreamEvent('text', 'a cat', 0.0)]
+
+
+def test_a_listed_run_records_its_delivery_and_plan(monkeypatch):
+    score = _stamped(_events(), monkeypatch)
+    assert score.attrs['delivery'] == 'listed'
+    assert score.attrs['regions_per_pass'] == 'all'
+    assert float(score) == 0.5
+
+
+def test_a_streamed_run_records_its_delivery_and_plan(monkeypatch):
+    score = _stamped(iter(_events()), monkeypatch, plan='one')
+    assert score.attrs['delivery'] == 'stream'
+    assert score.attrs['regions_per_pass'] == 'one'
+
+
+def test_a_run_with_both_deliveries_lists_both(monkeypatch):
+    from brainscore_core.streaming import Session
+    monkeypatch.delenv('BRAINSCORE_REGIONS_PER_PASS', raising=False)
+    with record_measures() as measures:
+        _answer_session(Session(_events(), ['neural:IT']))
+        _answer_session(Session(iter(_events()), ['neural:IT']))
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                 protocol='neural', harness_id='test', measures=measures)
+    assert score.attrs['delivery'] == ('listed', 'stream')
+
+
+def test_a_run_without_sessions_records_no_delivery(monkeypatch):
+    monkeypatch.setenv('BRAINSCORE_REGIONS_PER_PASS', 'one')
+    with record_measures() as measures:
+        pass
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(),
+                                 protocol=None, harness_id='test', measures=measures)
+    assert score.attrs['delivery'] is None
+    assert score.attrs['regions_per_pass'] == 'one'
+
+
+def test_the_score_records_software_versions_and_commits(monkeypatch):
+    import platform
+    from importlib.metadata import version
+    score = _stamped(_events(), monkeypatch)
+    software = score.attrs['software']
+    assert software['python'] == platform.python_version()
+    assert software['numpy'] == version('numpy')
+    assert software['xarray'] == version('xarray')
+    assert set(software) >= {'torch', 'transformers', 'scikit-learn', 'brainscore-core',
+                             'brainscore', 'brainscore_vision', 'brainscore_language'}
+    commits = score.attrs['code_commits']
+    assert set(commits) == {'brainscore_core', 'brainscore', 'brainscore_vision',
+                            'brainscore_language'}
+    commit = commits['brainscore_core']
+    assert commit is None or (len(commit) == 40 and all(c in '0123456789abcdef' for c in commit))
+
+
+def test_reading_versions_does_not_import_torch():
+    import subprocess
+    import sys
+    code = ('import sys; from brainscore_core.environment_check import _score_environment; '
+            '_score_environment(); print("torch" in sys.modules)')
+    out = subprocess.run([sys.executable, '-W', 'ignore', '-c', code], capture_output=True,
+                         text=True, check=True).stdout.strip()
+    assert out == 'False'

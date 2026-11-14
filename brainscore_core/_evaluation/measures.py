@@ -11,18 +11,28 @@ that no session accepts (saved records, fixtures, copies) are not noted.
 path has no session. The score metadata then reads the record. Only returned
 data is read, never the subject's state.
 
+The same record keeps the execution configuration of the run's sessions, noted
+where a session accepts a response (``note_session``): the delivery form
+(``'listed'``: one list known up front; ``'stream'``: one event at a time) and
+the regions-per-pass plan in ``BRAINSCORE_REGIONS_PER_PASS`` at that moment.
+Either can change the last digits of a score, never its value otherwise.
+
 ponytail: the record is a ``ContextVar``. A response made in a worker thread or
 process is not noted. No behavioral path in core, vision, language or unified
 makes its response events there today (worker pools only extract features or
 compute metrics); copy the context into the worker if one ever does.
 """
 
+import os
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Iterator, Optional, Set, Tuple
 
 MEASURE_KINDS = ('reported', 'implied')
+# Read by BrainScoreModel (brainscore._model.channels), which owns the values;
+# the record keeps the raw setting a session ran under.
+_REGIONS_PER_PASS = 'BRAINSCORE_REGIONS_PER_PASS'
 
 _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', default=None)
 
@@ -37,6 +47,9 @@ class MeasureRecord:
         self.measures: Set[Tuple[str, Optional[str]]] = set()
         self.applied: Counter = Counter()
         self.undone: Counter = Counter()
+        self._deliveries: Set[str] = set()
+        self._region_plans: Set[str] = set()
+        self._plan_at_start = os.environ.get(_REGIONS_PER_PASS, 'all')
 
     @property
     def unreleased(self) -> Set[str]:
@@ -87,6 +100,8 @@ def record_measures() -> Iterator[MeasureRecord]:
             outer.measures |= record.measures
             outer.applied += record.applied
             outer.undone += record.undone
+            outer._deliveries |= record._deliveries
+            outer._region_plans |= record._region_plans
 
 
 def note_measure(assembly) -> None:
@@ -99,6 +114,29 @@ def note_measure(assembly) -> None:
     if isinstance(measure, dict) and measure.get('kind') in MEASURE_KINDS:
         source = measure.get('source')
         record.measures.add((measure['kind'], None if source is None else str(source)))
+
+
+def note_session(session) -> None:
+    """Note how ``session`` delivers its inputs and the regions-per-pass setting now."""
+    record = _active.get()
+    if record is None:
+        return
+    record._deliveries.add('stream' if session.streaming else 'listed')
+    record._region_plans.add(os.environ.get(_REGIONS_PER_PASS, 'all'))
+
+
+def execution_attrs(record: MeasureRecord) -> dict:
+    """``{'delivery': ..., 'regions_per_pass': ...}`` of a run, for the score's attrs.
+
+    Each value is one string, or a sorted tuple when the sessions differed.
+    ``delivery`` is None when no session answered; the plan then is the
+    setting when the run started.
+    """
+    def one(values, default):
+        values = sorted(values)
+        return default if not values else values[0] if len(values) == 1 else tuple(values)
+    return {'delivery': one(record._deliveries, None),
+            'regions_per_pass': one(record._region_plans, record._plan_at_start)}
 
 
 def note_response(event, request=None) -> None:

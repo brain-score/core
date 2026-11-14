@@ -39,8 +39,11 @@ processor default actually moved shifts its score by 0.038%.
 Uses only ``importlib.metadata`` so ``brainscore_core`` stays free of heavy
 dependencies (no torch/transformers import).
 """
+import platform
+import sys
 from importlib.metadata import version, PackageNotFoundError
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 # (distribution name, ok(version_tuple) -> bool, human-readable bound)
 _BOUNDS = [
@@ -127,3 +130,71 @@ def describe_env() -> List[Tuple[str, Optional[str], str, Optional[bool]]]:
         except Exception:
             rows.append((pkg, installed, expected, None))
     return rows
+
+
+# The libraries whose versions can change the numbers of a score, and the four
+# Brain-Score packages, by distribution name. Read from the installed metadata:
+# nothing is imported, so torch is never loaded here.
+_SCORE_LIBRARIES = ("numpy", "torch", "transformers", "scikit-learn", "xarray")
+_BRAINSCORE_PACKAGES = (("brainscore_core", "brainscore-core"), ("brainscore", "brainscore"),
+                        ("brainscore_vision", "brainscore_vision"),
+                        ("brainscore_language", "brainscore_language"))
+
+
+def _installed(distribution: str) -> Optional[str]:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return None
+
+
+def _git_commit(directory: Path) -> Optional[str]:
+    """The commit checked out where ``directory`` lives, read from the git files; None if not a checkout."""
+    for folder in (directory, *directory.parents):
+        dot_git = folder / ".git"
+        if dot_git.is_file():           # a worktree: ".git" names the git folder
+            git_dir = Path(dot_git.read_text().split("gitdir:", 1)[-1].strip())
+        elif dot_git.is_dir():
+            git_dir = dot_git
+        else:
+            continue
+        try:
+            head = (git_dir / "HEAD").read_text().strip()
+            if not head.startswith("ref:"):
+                return head
+            ref = head[4:].strip()
+            common = git_dir / "commondir"
+            roots = [git_dir] + ([(git_dir / common.read_text().strip()).resolve()]
+                                 if common.is_file() else [])
+            for root in roots:
+                if (root / ref).is_file():
+                    return (root / ref).read_text().strip()
+                packed = root / "packed-refs"
+                if packed.is_file():
+                    for line in packed.read_text().splitlines():
+                        if line.endswith(" " + ref):
+                            return line.split(" ", 1)[0]
+        except OSError:
+            return None
+        return None
+    return None
+
+
+def _score_environment() -> Dict[str, Dict[str, Optional[str]]]:
+    """``{'software': {name: version}, 'code_commits': {package: commit}}`` for a score's attrs.
+
+    Versions come from the installed metadata (None when absent). A commit is
+    read only for a Brain-Score package already imported, from the checkout its
+    files are in (None outside a git checkout); the installed version of an
+    editable package does not say which checkout runs.
+    """
+    software = {"python": platform.python_version()}
+    software.update({name: _installed(name) for name in _SCORE_LIBRARIES})
+    software.update({distribution: _installed(distribution)
+                     for _module, distribution in _BRAINSCORE_PACKAGES})
+    commits = {}
+    for module_name, _distribution in _BRAINSCORE_PACKAGES:
+        module = sys.modules.get(module_name)
+        path = getattr(module, "__file__", None)
+        commits[module_name] = _git_commit(Path(path).resolve().parent) if path else None
+    return {"software": software, "code_commits": commits}

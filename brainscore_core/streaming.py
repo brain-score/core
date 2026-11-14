@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional
 
-from brainscore_core._evaluation.measures import note_response
+from brainscore_core._evaluation.measures import note_response, note_session
 
 
 _FAMILY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -453,6 +453,7 @@ class Session(Source):
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
+        note_session(self)
         note_response(kept, request)
         self.emitted.append(kept)
         limit = self.source.history_limit
