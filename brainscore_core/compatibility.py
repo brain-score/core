@@ -42,11 +42,13 @@ from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_c
 
 
 class CompatibilityError(Exception):
-    """Raised when a subject cannot be scored on a benchmark: the pair is N/A.
+    """Raised when a subject cannot be scored on a benchmark.
 
-    ``channels`` are the channels that make the pair N/A (for example the
+    ``channels`` are the channels that cause the refusal (for example the
     requested outputs the subject does not produce); empty when the reason is
-    not a channel. ``score()`` turns this error into the N/A result.
+    not a channel. ``score()`` turns this error into the N/A result only when
+    the declaration check before the run raises it. A refusal during the run
+    is an error and propagates.
     """
 
     def __init__(self, message: str = '', channels=()):
