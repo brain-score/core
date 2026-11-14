@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-from brainscore_core import na_score, score_or_na
+import brainscore_core
+from brainscore_core import STATUS_NA, na_score
 from brainscore_core.compatibility import CompatibilityError, check_compatibility
 from brainscore_core.metrics import Score
 
@@ -10,62 +11,43 @@ class _Model:
     # Compatibility reads declarations only (Contract v3 rule 2.1).
     identifier = "text-model"
     in_channels = {"text"}
-    out_channels = set()
+    out_channels = {"behavior"}
     required_channels = set()
+    output_inputs = {}
+    traits = frozenset()
 
 
 class _Benchmark:
-    identifier = "vision-benchmark"
-    required_modalities = {"vision"}
+    identifier = "neural-benchmark"
+    required_input_channels = {"text"}
+    requested_output_channels = {"neural:IT"}
 
 
 def test_na_score_is_nan_and_distinguishable_from_zero():
-    score = na_score("missing vision", error_type="CompatibilityError")
+    score = na_score(CompatibilityError("missing vision", channels={"vision:image"}))
     zero = Score(0.0)
 
     assert np.isnan(score.item())
-    assert score.attrs["status"] == "N/A"
+    assert score.attrs["status"] == STATUS_NA == "N/A"
     assert score.attrs["reason"] == "missing vision"
-    assert score.attrs["error_type"] == "CompatibilityError"
+    assert score.attrs["missing_channels"] == ["vision:image"]
     assert zero.item() == 0.0
     assert zero.attrs.get("status") != "N/A"
 
 
-def test_score_or_na_converts_incompatible_pair_before_compute():
-    calls = []
-
-    def incompatible_score():
+def test_preflight_error_names_the_missing_channels():
+    with pytest.raises(CompatibilityError) as caught:
         check_compatibility(_Model(), _Benchmark())
-        calls.append("computed")
-        return Score(1.0)
-
-    score = score_or_na(incompatible_score)
-
-    assert calls == []
-    assert np.isnan(score.item())
-    assert score.attrs["status"] == "N/A"
-    assert "vision" in score.attrs["reason"]
+    assert caught.value.channels == {"neural:IT"}
+    score = na_score(caught.value)
+    assert score.attrs["missing_channels"] == ["neural:IT"]
+    assert "neural:IT" in score.attrs["reason"]
 
 
-def test_score_or_na_leaves_compatible_score_unchanged():
-    expected = Score(0.0)
-
-    def compatible_score():
-        return expected
-
-    assert score_or_na(compatible_score) is expected
-    assert expected.item() == 0.0
-    assert expected.attrs.get("status") != "N/A"
+def test_an_error_without_channels_gives_an_empty_list():
+    assert na_score(CompatibilityError("no part for the task")).attrs["missing_channels"] == []
 
 
-def test_score_or_na_does_not_hide_runtime_failures():
-    def failed_score():
-        raise RuntimeError("model crashed")
-
-    with pytest.raises(RuntimeError, match="model crashed"):
-        score_or_na(failed_score)
-
-
-def test_existing_compatibility_check_still_raises():
-    with pytest.raises(CompatibilityError):
-        check_compatibility(_Model(), _Benchmark())
+def test_there_is_no_separate_conversion_helper():
+    # score() returns the N/A result itself; no wrapper converts the error.
+    assert not hasattr(brainscore_core, "score_or_na")

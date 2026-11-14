@@ -1,19 +1,19 @@
-"""Helpers for explicit score result states.
+"""The N/A result of ``score()`` for a pair that is not applicable.
 
-UMI v2.0 distinguishes four score states:
+A score has four states:
 
-- compatible and scored: return the benchmark's actual score
-- compatible but failed: report failure metadata; never silently convert to 0
-- incompatible by contract: return an explicit N/A score when a caller asks for
-  N/A conversion
-- poor but compatible: return the actual score, including a genuine 0.0
+- compatible and scored: the benchmark's actual score;
+- compatible but failed: an error; never silently converted to 0;
+- not applicable (N/A): the subject cannot take part, decided from the
+  declarations in pre-flight or by the subject at the start of a session; the
+  error is a :class:`~brainscore_core.compatibility.CompatibilityError`;
+- poor but compatible: the actual score, including a genuine 0.0.
 
-The domain ``score()`` entry points keep their existing behavior and raise
-``CompatibilityError`` before compute. Orchestration layers that need a result
-object can catch that typed error directly, or call ``score_or_na``.
+Every ``score()`` entry point (``brainscore``, ``brainscore_vision``,
+``brainscore_language``) runs pre-flight and the benchmark in one ``try`` and
+returns :func:`na_score` for a ``CompatibilityError``. A memory-check failure is
+an error, not N/A.
 """
-
-from typing import Callable, TypeVar
 
 import numpy as np
 
@@ -22,26 +22,16 @@ from brainscore_core.metrics import Score
 
 
 STATUS_NA = "N/A"
-_T = TypeVar("_T")
 
 
-def na_score(reason: str, *, error_type: str | None = None) -> Score:
-    """Return a distinguishable N/A score for an incompatible pair."""
+def na_score(error: CompatibilityError) -> Score:
+    """The N/A result for an incompatible pair: NaN, never zero.
+
+    ``attrs`` carry ``status`` (``'N/A'``), ``reason`` (the error message) and
+    ``missing_channels`` (the channels that make the pair N/A, sorted).
+    """
     score = Score(np.nan)
     score.attrs["status"] = STATUS_NA
-    score.attrs["reason"] = str(reason)
-    if error_type is not None:
-        score.attrs["error_type"] = error_type
+    score.attrs["reason"] = str(error)
+    score.attrs["missing_channels"] = sorted(error.channels)
     return score
-
-
-def score_or_na(score_function: Callable[..., _T], *args, **kwargs) -> _T | Score:
-    """Run ``score_function`` and convert only compatibility failures to N/A.
-
-    Other exceptions propagate so compatible-but-failed pairs remain failures,
-    not N/A and not zero.
-    """
-    try:
-        return score_function(*args, **kwargs)
-    except CompatibilityError as error:
-        return na_score(str(error), error_type=type(error).__name__)
