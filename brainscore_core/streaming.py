@@ -432,8 +432,10 @@ class Session(Source):
 
         When outputs were requested, the response must be on one of them (exact
         string match) and its payload must pass the catalog check for its
-        channel; otherwise it raises ``ValueError``. When no outputs were
-        requested (``None``) nothing is checked and any response is kept.
+        channel; otherwise it raises ``ValueError`` (a malformed payload is never
+        kept). A well-formed behavioral format answer then gets each trial's state
+        (``response_formats.assign_states``). When no outputs were requested
+        (``None``) nothing is checked and any response is kept.
         """
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
@@ -445,6 +447,7 @@ class Session(Source):
                                  f"requested: {list(self.outputs)}")
             from . import io_catalog
             check_event(event, io_catalog.OUTPUT)
+            event = _with_states(event, self.task)
         self._check_answered_once(event)
         request = self._request_for(event)
         try:
@@ -545,6 +548,15 @@ class Session(Source):
             event = events[0]
             return event.payload if event.payload is not None else event.meta.get('handle_id')
         return events
+
+
+def _with_states(event: StreamEvent, task) -> StreamEvent:
+    """``event`` with core's state of each trial, for a behavioral format answer."""
+    from .response_formats import assign_states
+    payload = assign_states(event.payload, event.channel, getattr(task, 'response', None))
+    if payload is event.payload:
+        return event
+    return StreamEvent(event.channel, payload, event.t_ms, event.meta)
 
 
 def check_event(event: StreamEvent, direction: str) -> None:

@@ -17,7 +17,8 @@ each such column on its channel; pre-flight, the subject's projection of a table
 and ``BrainScoreModel`` read the same table.
 
 ``check_payload`` is a loose check on ``.ndim`` and ``.dtype``, so that core needs
-no heavy dependency. ``validate`` runs every check for one event.
+no heavy dependency. ``validate`` runs every check for one event, including the
+validator of a behavioral response format (``response_formats``).
 
 ``register_channel`` adds a family and, for an input family, the columns that
 feed it. Code outside core imports it from ``brainscore_core.extensions``.
@@ -29,6 +30,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
+from .response_formats import PAYLOAD_VALIDATORS
 from .streaming import parse_channel
 
 INPUT = "input"
@@ -305,6 +307,9 @@ def validate(
                 channel, entry.shape_validator(payload)
             )
         )
+    format_validator = PAYLOAD_VALIDATORS.get(channel)
+    if format_validator is not None:
+        warnings.extend(_normalise_shape_validator_result(channel, format_validator(payload)))
 
     return warnings
 
