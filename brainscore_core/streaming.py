@@ -435,32 +435,37 @@ class Session(Source):
         """Accept one subject response.
 
         When outputs were requested, the response must be on one of them (exact
-        string match) and its payload must pass the catalog check for its
-        channel; otherwise it raises ``ValueError`` (a malformed payload is never
-        kept). A well-formed behavioral format answer then gets each trial's state
-        (``response_formats.assign_states``). When no outputs were requested
-        (``None``) nothing is checked and any response is kept.
+        string match) and must pass the catalog check for its channel; otherwise it
+        raises ``ValueError`` and nothing is kept. An answer on an addressed
+        ``behavior`` channel is kept in the stored schema of its format, with each
+        trial's state (``response_formats``); the source and the observers get it
+        as sent. When no outputs were requested (``None``) nothing is checked and
+        any response is kept.
         """
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
         for rewrite in tuple(self._rewriters):
             event = rewrite(event)
+        stored = event
         if self.outputs is not None:
             if event.channel not in self.outputs:
                 raise ValueError(f"response on {event.channel!r} was not requested; "
                                  f"requested: {list(self.outputs)}")
             from . import io_catalog
-            check_event(event, io_catalog.OUTPUT)
-            event = _with_states(event, self.task)
+            check_event(event, io_catalog.OUTPUT, session=self)
+            stored = _stored(event, self)
         self._check_answered_once(event)
         request = self._request_for(event)
         try:
+            # The source and the observers get the response as the subject sent it.
             kept = self.source.respond(event)
         except BaseException as error:
             self._notify(2, event, error)
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
+        if kept is event:
+            kept = stored
         if not self._session_noted:
             self._session_noted = True
             note_session(self)
@@ -534,6 +539,9 @@ class Session(Source):
                 f"history_limit={self.source.history_limit} dropped {self.dropped} "
                 "response(s); stream them with observe() instead of collect()")
         events = [event for event in self.emitted if event.channel == channel]
+        if _addressed_behavior(channel) and events:
+            from .response_formats import _collect
+            return _collect(channel, [event.payload for event in events], None)
         if not events:
             raise ValueError(f'No emitted events for channel {channel!r}.')
         family, _ = parse_channel(channel)
@@ -554,30 +562,38 @@ class Session(Source):
         return events
 
 
-def _with_states(event: StreamEvent, task) -> StreamEvent:
-    """``event`` with core's state of each trial, for a behavioral format answer."""
-    from .response_formats import assign_states
-    payload = assign_states(event.payload, event.channel, getattr(task, 'response', None))
+def _addressed_behavior(channel: str) -> bool:
+    from .response_formats import _format
+    return _format(channel) is not None
+
+
+def _stored(event: StreamEvent, session: 'Session') -> StreamEvent:
+    """``event`` with its answer in the stored schema of its format (addressed behavior only)."""
+    from .response_formats import _store
+    payload = _store(event, session)
     if payload is event.payload:
         return event
     return StreamEvent(event.channel, payload, event.t_ms, event.meta)
 
 
-def check_event(event: StreamEvent, direction: str) -> None:
+def check_event(event: StreamEvent, direction: str, session: Any = None) -> None:
     """Raise ``ValueError`` unless ``event`` passes the channel catalog.
 
     The channel must be a catalog family, addressed as the family allows, used in
     ``direction`` (``io_catalog.INPUT`` or ``OUTPUT``), and its payload must pass
     the family's type, ndim, dtype and validator checks. An entry with none of
     those checks nothing. An input control event skips the payload checks; its
-    payload must be one of ``begin``, ``respond`` or ``end``.
+    payload must be one of ``begin``, ``respond`` or ``end``. ``session`` is the
+    session that accepts an output, for a validator that checks it against the
+    task and the trials.
     """
     from . import io_catalog
     if direction == io_catalog.INPUT and event.channel == CONTROL_CHANNEL:
         problems = ([] if event.payload in (BEGIN, RESPOND, END) else
                     [f"control payload must be 'begin', 'respond' or 'end'; got {event.payload!r}"])
     else:
-        problems = io_catalog.validate(event.channel, event.payload, direction=direction)
+        problems = io_catalog.validate(event.channel, event.payload, direction=direction,
+                                       event=event, session=session)
     if problems:
         raise ValueError(f"{direction} event on {event.channel!r} failed the channel catalog: "
                          + "; ".join(problems[:5]))

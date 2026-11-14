@@ -1,11 +1,9 @@
 """Conformance test T2 (Response Format Standard, section 11.1): invalid and missing trials are kept.
 
-A fake subject answers through ``participate`` with one valid, one invalid
-(an unparseable reply) and one missing trial (no reply). The session keeps
-every trial with its state, raw response and reason; ``collect`` returns them
-unchanged; the score's record says how the answer was given. Nothing is
-filled: the values of the invalid and missing trials stay NaN. A failure of
-the subject itself is an error of the run, never a trial.
+Through ``participate``, a valid, an invalid (an unreadable reply) and a missing
+trial (no reply) are each stored with their state, raw response and reason, and
+the score's record says how the answer was given. Nothing is filled. A
+failure of the subject is an error of the run, never a trial.
 """
 import numpy as np
 import pandas as pd
@@ -23,52 +21,57 @@ from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 RECORD = response_record('behavior:choice', 'external', parsed_by='model')
 REPLIES = {'s0': 'cat', 's1': 'a bird', 's2': None}     # valid, invalid, missing
+TASK = TaskContext(instruction='Which?', response=Choice(['cat', 'dog']))
 
 
-def _stimuli():
-    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': list(REPLIES), 'text': ['x', 'y', 'z']}))
-    stimuli.identifier = 't2-stimuli'
+def _stimuli(ids=tuple(REPLIES)):
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': list(ids), 'text': ['x'] * len(ids)}))
+    stimuli.identifier = f't2-{len(ids)}'
     return stimuli
 
 
+def _row(stimulus_id, reply):
+    labels = ['cat', 'dog']
+    chosen = reply if reply in labels else None
+    values = [[float(chosen == label) for label in labels]] if chosen else [[np.nan] * 2]
+    return BehavioralAssembly(
+        np.array(values, dtype=np.float32), dims=['presentation', 'choice'],
+        attrs={'response': RECORD},
+        coords={'stimulus_id': ('presentation', [stimulus_id]), 'choice': labels,
+                'raw_answer': ('presentation', [reply]),
+                'answer_valid': ('presentation', [chosen is not None]),
+                'parse_error': ('presentation',
+                                ['' if chosen or reply is None else 'no label in the reply'])})
+
+
 class _Replier(Subject):
-    """Answers each trial with a fixed reply; parses it like a model side does."""
+    """Answers each trial it reads with a fixed reply, parsed on the model side."""
     identifier = 'replier'
     in_channels = {'text'}
     out_channels = {'behavior:choice'}
     required_channels = set()
 
-    def __init__(self, fail=False):
-        self.fail = fail
+    def __init__(self, fail=False, skip=()):
+        self.fail, self.skip = fail, set(skip)
 
     def participate(self, session):
-        labels = ['cat', 'dog']
         while (event := session.next_input()) is not None:
             if self.fail:
                 raise RuntimeError('the model server is down')
             stimulus_id = event.meta['stimulus_id']
-            reply = REPLIES[stimulus_id]
-            chosen = reply if reply in labels else None
-            row = [[float(chosen == label) for label in labels]] if chosen else [[np.nan] * 2]
-            session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
-                row, dims=['presentation', 'choice'], attrs={'response': RECORD},
-                coords={'stimulus_id': ('presentation', [stimulus_id]), 'choice': labels,
-                        'raw_answer': ('presentation', [reply]),
-                        'answer_valid': ('presentation', [chosen is not None]),
-                        'parse_error': ('presentation',
-                                        ['' if chosen or reply is None else 'no label in the reply'])}),
-                event.t_ms, dict(event.meta)))
+            if stimulus_id in self.skip:
+                continue
+            session.respond(StreamEvent('behavior:choice', _row(stimulus_id, REPLIES[stimulus_id]),
+                                        event.t_ms, dict(event.meta)))
 
     def reset(self):
         pass
 
 
-TASK = TaskContext(instruction='Which?', response=Choice(['cat', 'dog']))
-
-
-def _run(subject):
+def _run(subject, stimuli=None):
     with record_measures() as measures:
-        session = stimulus_session(_stimuli(), ['behavior:choice'], TASK)
+        session = stimulus_session(stimuli if stimuli is not None else _stimuli(),
+                                   ['behavior:choice'], TASK)
         subject.participate(session)
         answer = session.collect('behavior:choice')
     score = stamp_score_metadata(Score(0.5), subject, {'behavior:choice'}, harness_id='t2',

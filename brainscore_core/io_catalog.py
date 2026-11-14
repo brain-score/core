@@ -17,8 +17,9 @@ each such column on its channel; pre-flight, the subject's projection of a table
 and ``BrainScoreModel`` read the same table.
 
 ``check_payload`` is a loose check on ``.ndim`` and ``.dtype``, so that core needs
-no heavy dependency. ``validate`` runs every check for one event, including the
-validator of a behavioral response format (``response_formats``).
+no heavy dependency. ``validate`` runs every check for one event. The validator of
+a family only core defines (``behavior``) also receives the event and the
+session, so it can check a response against the task and the trials.
 
 ``register_channel`` adds a family and, for an input family, the columns that
 feed it. Code outside core imports it from ``brainscore_core.extensions``. The
@@ -31,8 +32,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
-from .response_formats import PAYLOAD_VALIDATORS
-from .streaming import parse_channel
+from .streaming import StreamEvent, parse_channel
 
 INPUT = "input"
 OUTPUT = "output"
@@ -68,7 +68,9 @@ class CatalogEntry:
 
     ``name``, ``direction``, ``payload_contract``, ``meta_keys``, ``addressing``,
     ``expected_ndim``, ``expected_dtype``, ``shape_validator`` and ``payload_type``
-    are read by pre-flight and by sessions.
+    are read by pre-flight and by sessions. ``shape_validator(payload)`` returns
+    the problems of a payload; the validator of a family only core defines
+    (``behavior``) is called as ``shape_validator(payload, event, session)``.
     ``carried_by``, ``handled_by``, ``owner`` and ``materializers`` are notes for
     readers; no code reads them.
     """
@@ -285,6 +287,9 @@ def validate(
     channel: str,
     payload,
     direction: Optional[str] = None,
+    *,
+    event=None,
+    session=None,
 ) -> List[str]:
     """Validate a channel payload against the runtime-queryable registry.
 
@@ -323,12 +328,12 @@ def validate(
     if entry.shape_validator is not None:
         warnings.extend(
             _normalise_shape_validator_result(
-                channel, entry.shape_validator(payload)
+                channel, entry.shape_validator(
+                    payload, event if event is not None else StreamEvent(channel, payload, None),
+                    session)
+                if family in _CLOSED_FAMILIES else entry.shape_validator(payload)
             )
         )
-    format_validator = PAYLOAD_VALIDATORS.get(channel)
-    if format_validator is not None:
-        warnings.extend(_normalise_shape_validator_result(channel, format_validator(payload)))
 
     return warnings
 
@@ -361,6 +366,11 @@ RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "prov
 # external one; an event without it, or with one that does not match, is
 # presented alone. Rows of a one-column table carry no table_row.
 TABLE_ROW_META_KEYS = ("stimulus_id", "stimulus_index", "column", "table_row")
+
+def _check_behavior(payload, event=None, session=None) -> List[str]:
+    from .response_formats import _validate
+    return _validate(payload, event, session)
+
 
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
@@ -441,13 +451,16 @@ _SEED = [
                  materializers=("NeuroidAssembly",)),
     # --- outputs: behavior (a subject answer on behavior:<kind>) ---
     CatalogEntry("behavior", OUTPUT, "a subject answer on behavior:<kind>, as the task asks",
-                 "a label, a probability vector, or generated text",
+                 "one trial's cell (a str, a 1-D numeric array, one number) or an assembly "
+                 "of rows over presentation; the bare channel takes a label, a probability "
+                 "vector or text",
                  "a fitted readout or the model's generation path",
-                 meta_keys=("label_set",),
+                 meta_keys=("label_set", "units"),
+                 shape_validator=_check_behavior,
                  addressing=("address is the response format a TaskContext response asks for, "
                              "from the closed list CHANNEL_FORMS['behavior']: choice, "
-                             "probabilities, confidence, rating, rt or text; each format's payload "
-                             "is checked by its validator (response_formats.PAYLOAD_VALIDATORS)"),
+                             "probabilities, confidence, rating, rt or text; the validator checks "
+                             "each format against the task and the trials"),
                  materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
@@ -512,7 +525,9 @@ def _declare_payload_types() -> None:
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
         'neural': (DataAssembly, np.ndarray),
-        'behavior': (DataAssembly, str, np.ndarray),
+        # A number is one trial's cell on a rating, confidence or reaction-time
+        # channel; the behavior validator refuses it on the bare channel.
+        'behavior': (DataAssembly, str, np.ndarray, int, float, np.number),
         'perturbation': (PerturbationApplied, type(None)),
     }
     for family, payload_type in payload_types.items():
