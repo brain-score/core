@@ -678,7 +678,10 @@ def _table_missing(channel, session, template=None):
         return None
     ids = [ledger.ids[position] for position in positions]
     if _format(channel) in ('choice', 'probabilities'):
-        widths = {len(ledger.options(i, k) or ()) for i, k in zip(ids, occurrences)}
+        # Unknown options (no task gives them) are unknown, not zero options: the
+        # missing rows then take the width of the answered rows' axis.
+        known = (ledger.options(i, k) for i, k in zip(ids, occurrences))
+        widths = {len(options) for options in known if options is not None}
         if template is not None:
             widths.add(template.sizes['choice'])
         if len(widths) > 1:

@@ -381,3 +381,15 @@ def test_a_bounded_stream_keeps_no_state_per_stimulus_id():
     # No public observable shows the per-id counts; the smallest check reads the ledger.
     ledger = session.__dict__.get('_formats_ledger')
     assert ledger is None or not ledger.answered
+
+
+# --- unknown options keep the answered width (V02) -------------------------------
+
+def test_without_a_task_a_missing_row_takes_the_width_of_the_answered_rows():
+    session = stimulus_session(_table(['a', 'b']), ['behavior:choice'])
+    _drain(session)
+    session.respond(StreamEvent('behavior:choice', _choices(['a'], [[1, 0]]), None))
+    answer = session.collect('behavior:choice')
+    np.testing.assert_array_equal(answer.values, [[1, 0], [np.nan, np.nan]])
+    assert list(answer['choice'].values) == ['cat', 'dog']
+    assert list(answer['response_state'].values) == ['valid', 'missing']
