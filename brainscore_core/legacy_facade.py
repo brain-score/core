@@ -309,7 +309,8 @@ def resolve_invalid_answers(assembly, *, seed: int = 0):
 
     if 'choice' not in assembly.dims or assembly.ndim != 2:
         return assembly
-    # Only the generation path writes NaN rows; one marks an invalid answer.
+    # A row of NaN marks an invalid answer: a reply that could not be read, or
+    # a conversion of a source row that is not valid (for example a non-finite one).
     choice_axis = assembly.dims.index('choice')
     invalid = np.isnan(assembly.values).all(axis=choice_axis)
     if not invalid.any():

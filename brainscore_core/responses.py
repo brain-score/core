@@ -66,8 +66,9 @@ class Choice:
 
     ``raw_scores=True`` returns on ``behavior:probabilities`` the score of each
     option exactly as the model's ``likelihood`` part gave it (the summed log
-    probability of the option's tokens), not normalized; the measure attributes
-    say ``'scale': 'log'``. Only a ``likelihood`` part gives raw scores.
+    probability of the option's tokens), not normalized; the answer's response
+    record has ``category='model-derived'`` and ``parameters['scale'] == 'log'``.
+    Only a ``likelihood`` part gives raw scores.
 
     ``raw_text=True`` shows the stimulus text exactly as given: no directive is
     added, and an instruction is refused. A part that scores options scores
