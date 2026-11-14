@@ -18,6 +18,7 @@ of its own: every legacy call goes through this facade.
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from brainscore_core.compatibility import CompatibilityError
 from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
@@ -113,12 +114,13 @@ class LegacyBenchmarkFacade:
 
     def start_behavioral_task(self, task) -> None:
         if 'behavior' not in set(self._subject.out_channels):
-            raise NotImplementedError(
+            # A support refusal before any session: the pair is N/A.
+            raise CompatibilityError(
                 f"Subject {self.identifier!r} has no path for the legacy language "
                 f"behavioral task {getattr(task, 'value', task)!r} (reading times / "
                 f"next-word prediction): it declares no 'behavior' output. Legacy "
                 f"language behavioral benchmarks need a subject that implements "
-                f"that task.")
+                f"that task.", channels={'behavior'})
         self.start_task(task)
 
     def digest_text(self, text) -> Dict[str, Any]:
