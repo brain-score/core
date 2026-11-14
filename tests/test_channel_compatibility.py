@@ -217,7 +217,7 @@ def test_wrong_direction_channel_declaration_raises():
         requested_output_channels={"neural:IT"},
     )
 
-    with pytest.raises(CompatibilityError, match="behavior"):
+    with pytest.raises(ValueError, match="behavior"):
         check_channel_compatibility(subject, benchmark)
 
 
@@ -231,7 +231,7 @@ def test_invalid_addressed_channel_declaration_raises():
         requested_output_channels={"neural:IT"},
     )
 
-    with pytest.raises(CompatibilityError, match="not addressable"):
+    with pytest.raises(ValueError, match="not addressable"):
         check_channel_compatibility(subject, benchmark)
 
 
@@ -245,17 +245,17 @@ def test_invalid_channel_grammar_raises():
         requested_output_channels={"neural:"},
     )
 
-    with pytest.raises(CompatibilityError, match="invalid channel"):
+    with pytest.raises(ValueError, match="invalid channel"):
         check_channel_compatibility(subject, benchmark)
 
 
 def test_bare_vision_declaration_raises_for_subject_and_benchmark():
-    with pytest.raises(CompatibilityError, match="names its form"):
+    with pytest.raises(ValueError, match="names its form"):
         check_channel_compatibility(
             _Subject(in_channels={"vision"}, out_channels={"neural:IT"}),
             _Benchmark(required_input_channels={"vision:image"},
                        requested_output_channels={"neural:IT"}))
-    with pytest.raises(CompatibilityError, match="names its form"):
+    with pytest.raises(ValueError, match="names its form"):
         check_channel_compatibility(
             _Subject(in_channels={"vision:image"}, out_channels={"neural:IT"}),
             _Benchmark(required_input_channels={"vision"},
@@ -346,7 +346,7 @@ def test_listed_inputs_are_compared_with_the_inputs_the_subject_takes_in():
 ])
 def test_an_inconsistent_listing_is_an_error(listing, message):
     subject = _Listing(listing, in_channels={"vision:image", "text"}, out_channels={"neural:IT"})
-    with pytest.raises(CompatibilityError, match=message):
+    with pytest.raises(ValueError, match=message):
         check_channel_compatibility(subject, _Benchmark(
             required_input_channels={"vision:image"}, requested_output_channels={"neural:IT"}))
 
@@ -354,7 +354,7 @@ def test_an_inconsistent_listing_is_an_error(listing, message):
 def test_an_empty_listed_set_is_an_error_and_an_absent_entry_is_unrestricted():
     bench = _Benchmark(required_input_channels={"text"}, requested_output_channels={"neural:IT"})
     empty = _Listing({"neural:IT": frozenset()}, in_channels={"text"}, out_channels={"neural:IT"})
-    with pytest.raises(CompatibilityError, match="must name at least one input"):
+    with pytest.raises(ValueError, match="must name at least one input"):
         check_channel_compatibility(empty, bench)
     absent = _Listing({}, in_channels={"text"}, out_channels={"neural:IT"})
     assert check_channel_compatibility(absent, bench).kind == "full"

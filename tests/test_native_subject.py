@@ -133,7 +133,7 @@ def test_scoring_preflight_accepts_native_contract_without_legacy_properties():
 
 
 @pytest.mark.parametrize("overrides, missing", [
-    ({"required_input_channels": {"vision"}}, "vision"),
+    ({"required_input_channels": {"vision:image"}}, "vision:image"),
     ({"requested_output_channels": {"motor"}}, "motor"),
     ({"required_input_channels": {"instruction"}}, "text"),
 ])

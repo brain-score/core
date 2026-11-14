@@ -17,7 +17,8 @@ that takes in only some of them still runs: the streams it cannot take in
 never enter it. :func:`check_compatibility` returns the match as data
 (:class:`CompatibilityMatch`) so the score records which inputs were used.
 An incompatible pair raises :class:`CompatibilityError`; ``score()`` returns
-the N/A result for it (``brainscore_core.score_status.na_score``).
+the N/A result for it (``brainscore_core.score_status.na_score``). A malformed
+declaration raises ``ValueError``: it is a defect, not an incompatible pair.
 
 Benchmark inputs are ``required_input_channels`` when declared, otherwise the
 channels of ``required_modalities`` plus ``accepted_modalities``. A benchmark with no
@@ -105,7 +106,10 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     """Check the four compatibility conditions and return the match.
 
     Decides from declarations only (rule 5.3). Raises
-    :class:`CompatibilityError` before compute when a condition fails. Whether
+    :class:`CompatibilityError` before compute when valid declarations do not
+    fit, and ``ValueError`` when a declaration is malformed (a field spelled the
+    way benchmarks do not read, no inputs, a bad channel name, direction or form,
+    an inconsistent ``output_inputs``): that is a defect, not an N/A pair. Whether
     one part of the subject answers all requested outputs together (the
     support step) is decided by the subject when a session starts.
     Every declared channel must be registered in the catalog with the right
@@ -130,13 +134,13 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         misspelled = [name for name in near_names
                       if _looks_like_channels(getattr(benchmark, name, None))]
         if misspelled:
-            raise CompatibilityError(
+            raise ValueError(
                 f"Benchmark '{benchmark_id}' sets {', '.join(misspelled)}, which "
                 f"benchmarks do not read, so it was not checked. Use {field_name}."
             )
 
     if not bench_inputs:
-        raise CompatibilityError(
+        raise ValueError(
             f"Benchmark '{benchmark_id}' declares no input channels. A benchmark "
             f"states what it sends: set required_input_channels (rule 5.1)."
         )
@@ -224,16 +228,16 @@ def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id
     """Every listed output is declared, and every input listed for it is declared."""
     for output, inputs in output_inputs.items():
         if output not in out_channels:
-            raise CompatibilityError(
+            raise ValueError(
                 f"Subject '{subject_id}' lists {output!r} in output_inputs, but not in "
                 f"out_channels {_format_channels(set(out_channels))}.")
         if not inputs:
-            raise CompatibilityError(
+            raise ValueError(
                 f"Subject '{subject_id}' lists {output!r} in output_inputs with no input. "
                 "A listed output must name at least one input.")
         undeclared = set(inputs) - set(in_channels)
         if undeclared:
-            raise CompatibilityError(
+            raise ValueError(
                 f"Subject '{subject_id}' lists the inputs {_format_channels(undeclared)} for "
                 f"{output!r} in output_inputs, but not in in_channels "
                 f"{_format_channels(set(in_channels))}.")
@@ -277,14 +281,15 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
     """Validate channel names and direction against the shared catalog.
 
     Exploratory experiments may allow unregistered families with a warning.
-    Benchmark scoring requires registration. Invalid syntax or direction always
-    raises CompatibilityError.
+    Benchmark scoring requires registration: an unknown channel raises
+    CompatibilityError. Invalid syntax, direction, form or address is a
+    malformed declaration and raises ValueError.
     """
     for channel in sorted(channels, key=repr):
         try:
             family, address = parse_channel(channel)
         except (TypeError, ValueError) as error:
-            raise CompatibilityError(
+            raise ValueError(
                 f"{owner} declares invalid channel '{channel}': {error}."
             ) from error
 
@@ -303,17 +308,17 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
             ) from error
 
         if entry.direction not in (direction, io_catalog.BOTH):
-            raise CompatibilityError(
+            raise ValueError(
                 f"{owner} declares channel '{channel}' as {direction}, but "
                 f"the registry marks family '{family}' as {entry.direction}."
             )
 
         problem = io_catalog.form_problem(channel)
         if problem:
-            raise CompatibilityError(f"{owner} declares {problem}.")
+            raise ValueError(f"{owner} declares {problem}.")
 
         if address is not None and entry.addressing is None:
-            raise CompatibilityError(
+            raise ValueError(
                 f"{owner} declares addressed channel '{channel}', but family "
                 f"'{family}' is not addressable."
             )

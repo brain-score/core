@@ -92,13 +92,13 @@ class TestRequiredModalities:
     def test_benchmark_without_inputs_is_rejected_by_name(self):
         model = FakeModel(in_channels={'vision:image'})
         bench = FakeBenchmark(identifier='silent-bench')  # no input declaration
-        with pytest.raises(CompatibilityError, match="'silent-bench' declares no input channels"):
+        with pytest.raises(ValueError, match="'silent-bench' declares no input channels"):
             check_compatibility(model, bench)
 
     def test_empty_declared_inputs_are_rejected(self):
         bench = FakeBenchmark(identifier='empty-bench')
         bench.required_input_channels = frozenset()
-        with pytest.raises(CompatibilityError, match="'empty-bench' declares no input channels"):
+        with pytest.raises(ValueError, match="'empty-bench' declares no input channels"):
             check_compatibility(FakeModel(in_channels={'vision:image'}), bench)
 
     @pytest.mark.parametrize('name, field', [
@@ -108,14 +108,14 @@ class TestRequiredModalities:
         """Declarations under a subject or protocol name must not pass unchecked."""
         bench = FakeBenchmark()
         setattr(bench, name, {'text'} if name == 'input_channels' else {'neural:IT'})
-        with pytest.raises(CompatibilityError, match=field):
+        with pytest.raises(ValueError, match=field):
             check_compatibility(FakeModel(in_channels={'vision:image'}), bench)
 
     def test_half_misspelled_declaration_raises(self):
         bench = FakeBenchmark()
         bench.required_input_channels = {'vision'}
         bench.output_channels = {'neural:IT'}
-        with pytest.raises(CompatibilityError, match='requested_output_channels'):
+        with pytest.raises(ValueError, match='requested_output_channels'):
             check_compatibility(FakeModel(in_channels={'vision:image'}), bench)
 
     def test_unrelated_legacy_metadata_is_ignored(self):
@@ -172,7 +172,7 @@ class TestVisualFormsAreSeparateChannels:
     def test_a_bare_vision_declaration_is_refused(self):
         bench = FakeBenchmark()
         bench.required_input_channels = {'vision'}
-        with pytest.raises(CompatibilityError, match="names its form"):
+        with pytest.raises(ValueError, match="names its form"):
             check_compatibility(FakeModel(in_channels={'vision:image'}), bench)
 
 
