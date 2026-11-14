@@ -88,6 +88,14 @@ class DummyDomainPlugins(DomainPlugins):
         return Score([0.8, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
 
 
+class NotApplicableDomainPlugins(DummyDomainPlugins):
+    def score(self, model_identifier: str, benchmark_identifier: str) -> Score:
+        from brainscore_core.compatibility import CompatibilityError
+        from brainscore_core.score_status import na_score
+        return na_score(CompatibilityError("does not produce ['neural:IT']",
+                                           channels={'neural:IT'}))
+
+
 class TestRunScoring:
     test_database = None
 
@@ -171,6 +179,16 @@ class TestRunScoring:
         assert len(score_entries) == 1
         score_entry = score_entries[0]
         assert score_entry.score_raw == 0.8
+
+    def test_not_applicable_pair_stores_the_reason_and_no_score(self):
+        endpoint = RunScoringEndpoint(domain_plugins=NotApplicableDomainPlugins(),
+                                      db_secret=self.test_database)
+        endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                 jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+
+        score_entry, = list(database_models.Score.select())
+        assert score_entry.score_raw is None
+        assert score_entry.comment.startswith("N/A: does not produce ['neural:IT']")
 
     def test_full_scoring(self):
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC

@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Tuple, Union
 import requests
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
+from brainscore_core.score_status import STATUS_NA
 from brainscore_core.submission import database_models
 
 # User management imports
@@ -308,6 +309,15 @@ class RunScoringEndpoint:
             score_result = self.domain_plugins.score(
                 model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
             score_entry.end_timestamp = datetime.now()
+            if score_result.attrs.get('status') == STATUS_NA:
+                # Not applicable: no score value is stored; the reason is the comment.
+                logger.info(f'{model_identifier} on {benchmark_identifier} is N/A: '
+                            f'{score_result.attrs["reason"]}')
+                score_entry.comment = shorten_text(
+                    f'N/A: {score_result.attrs["reason"]}',
+                    max_length=database_models.Score.comment.max_length)
+                score_entry.save()
+                return
             # store in database
             logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)
