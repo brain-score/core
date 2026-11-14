@@ -34,6 +34,10 @@ def test_an_address_outside_the_list_is_refused_everywhere(channel):
     session = Session((), ['behavior:choice'])
     with pytest.raises(ValueError, match='not requested'):
         session.respond(StreamEvent(channel, 'cat', None))
+    unrequested = Session(())            # no outputs requested: still checked
+    with pytest.raises(ValueError, match='closed list'):
+        unrequested.respond(StreamEvent(channel, 'cat', None))
+    assert unrequested.emitted == []
 
 
 def test_bare_vision_keeps_its_own_message():

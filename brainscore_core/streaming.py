@@ -435,25 +435,22 @@ class Session(Source):
         """Accept one subject response.
 
         When outputs were requested, the response must be on one of them (exact
-        string match) and must pass the catalog check for its channel; otherwise it
-        raises ``ValueError`` and nothing is kept. An answer on an addressed
-        ``behavior`` channel is kept in the stored schema of its format, with each
-        trial's state (``response_formats``); the source and the observers get it
-        as sent. When no outputs were requested (``None``) nothing is checked and
-        any response is kept.
+        string match). Every response must pass the catalog check for its channel,
+        also when no outputs were requested (``None``); otherwise it raises
+        ``ValueError`` and nothing is kept. An answer on an addressed ``behavior``
+        channel is kept in the stored schema of its format, with each trial's state
+        (``response_formats``); the source and the observers get it as sent.
         """
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
         for rewrite in tuple(self._rewriters):
             event = rewrite(event)
-        stored = event
-        if self.outputs is not None:
-            if event.channel not in self.outputs:
-                raise ValueError(f"response on {event.channel!r} was not requested; "
-                                 f"requested: {list(self.outputs)}")
-            from . import io_catalog
-            check_event(event, io_catalog.OUTPUT, session=self)
-            stored = _stored(event, self)
+        if self.outputs is not None and event.channel not in self.outputs:
+            raise ValueError(f"response on {event.channel!r} was not requested; "
+                             f"requested: {list(self.outputs)}")
+        from . import io_catalog
+        check_event(event, io_catalog.OUTPUT, session=self)
+        stored = _stored(event, self)
         self._check_answered_once(event)
         request = self._request_for(event)
         try:

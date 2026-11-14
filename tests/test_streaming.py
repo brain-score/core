@@ -108,10 +108,20 @@ def test_session_drives_inputs_and_records_responses():
     assert session.next_input() is inputs[1]
     assert session.next_input() is None
 
-    output = StreamEvent(channel="behavior", payload={"choice": "cat"}, t_ms=12.0)
+    output = StreamEvent(channel="behavior", payload="cat", t_ms=12.0)
     session.respond(output)
 
     assert session.emitted == [output]
+
+
+def test_a_session_without_requested_outputs_still_checks_every_response():
+    import pytest
+    session = Session([])
+    with pytest.raises(ValueError, match="failed the channel catalog"):
+        session.respond(StreamEvent(channel="behavior", payload={"choice": "cat"}, t_ms=0.0))
+    with pytest.raises(ValueError, match="closed list"):
+        session.respond(StreamEvent(channel="behavior:unknown", payload="x", t_ms=0.0))
+    assert session.emitted == []
 
 
 def test_session_rejects_wrong_direction_at_construction():
