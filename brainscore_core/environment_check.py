@@ -142,9 +142,10 @@ _BRAINSCORE_PACKAGES = (("brainscore_core", "brainscore-core"), ("brainscore", "
 
 
 def _installed(distribution: str) -> Optional[str]:
+    """The installed version, or None for any failure (absent, or a broken ``.dist-info``)."""
     try:
         return version(distribution)
-    except PackageNotFoundError:
+    except Exception:
         return None
 
 

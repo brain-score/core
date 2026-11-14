@@ -1,4 +1,3 @@
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -47,3 +46,17 @@ def test_a_worktree_git_file_with_a_relative_gitdir_resolves(tmp_path):
     (worktree / ".git").write_text(f"gitdir: {relative}\n")
     assert (worktree / relative / "HEAD").is_file()
     assert _git_commit(worktree / "pkg") == COMMIT[::-1]
+
+
+def test_a_head_file_that_is_not_utf8_gives_none(tmp_path):
+    package = _checkout(tmp_path / "project")
+    (tmp_path / "project" / ".git" / "HEAD").write_bytes(b"\xff\xfe\x00bad")
+    assert _git_commit(package) is None
+
+
+def test_a_broken_dist_info_gives_none(monkeypatch):
+    def broken(name):
+        raise ValueError("broken metadata")
+    monkeypatch.setattr(environment_check, "version", broken)
+    assert _installed("numpy") is None
+    assert environment_check._score_environment()["software"]["numpy"] is None
