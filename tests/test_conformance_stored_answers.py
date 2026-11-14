@@ -355,3 +355,29 @@ def test_run_environment_returns_the_choice_as_sent():
                               task=CHOICE)
     assert actions == ['cat'] and environment.heard == ['cat']
 
+
+# --- a bounded stream keeps no per-id state (P05) --------------------------------
+
+class _Episodes(Source):
+    """Four one-answer episodes; the subject names a new id in each."""
+    history_limit = 1
+
+    def __init__(self):
+        self._events = iter([event for _ in range(4)
+                             for event in (begin_event(), respond_event(), end_event('terminal'))])
+
+    def next_input(self):
+        return next(self._events, None)
+
+
+def test_a_bounded_stream_keeps_no_state_per_stimulus_id():
+    session = Session(_Episodes(), ['behavior:text'], TEXT).declare_inputs({'control'})
+    turn = 0
+    while (event := session.next_input()) is not None:
+        if event.payload == 'respond':
+            session.respond(StreamEvent('behavior:text', 'ok', None, {'stimulus_id': str(turn)}))
+            turn += 1
+    assert turn == 4 and len(session.emitted) == 1 and session.dropped == 3
+    # No public observable shows the per-id counts; the smallest check reads the ledger.
+    ledger = session.__dict__.get('_formats_ledger')
+    assert ledger is None or not ledger.answered

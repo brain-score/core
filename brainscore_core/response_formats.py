@@ -245,9 +245,10 @@ def _table(session):
 class _Ledger:
     """What a session's table expects and what each channel has answered.
 
-    Built once per session: the occurrence count and the table positions of
-    each stimulus id, the per-row options, and for each channel the occurrences
-    answered so far.
+    Built once per session, for a session with a table only: the occurrence
+    count and the table positions of each stimulus id, the per-row options, and
+    for each channel the occurrences answered so far. A session without a table
+    keeps no per-id state, so nothing grows with the length of a stream.
     ``pending`` keeps the rows the validator built for the event the session is
     accepting, so each response is checked and packaged in one pass.
     """
@@ -614,7 +615,8 @@ def _store(channel, payload, event, session):
         rows = _rows(channel, payload, event, session)
     if ledger is not None:
         ledger.pending = None
-        ledger.answered.setdefault(channel, Counter()).update(rows[1]['stimulus_id'])
+        if ledger.counts is not None:   # occurrences matter only for a table's trials
+            ledger.answered.setdefault(channel, Counter()).update(rows[1]['stimulus_id'])
     values, coords, record, attrs = rows
     return _assembly(values, coords, record, attrs)
 
