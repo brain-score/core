@@ -286,6 +286,9 @@ class Session(Source):
         self.one_answer_per_trial = False
         self._observers: list[tuple] = []
         self._rewriters: list[Any] = []
+        # The requested addressed behavior channels not yet answered since the
+        # last respond signal of a session without a table.
+        self._awaiting: set = set()
 
     @property
     def streaming(self) -> bool:
@@ -360,6 +363,12 @@ class Session(Source):
             if not isinstance(event, StreamEvent):
                 return event
             if event.channel == CONTROL_CHANNEL:
+                if event.payload in (BEGIN, END):
+                    self._close_awaiting()
+                elif event.payload == RESPOND and self._control and self.stimuli is None:
+                    self._close_awaiting()
+                    self._awaiting = {channel for channel in self.outputs or ()
+                                      if _addressed_behavior(channel)}
                 if event.payload == BEGIN:
                     self._trial += 1
                     self._rows.append(None)
@@ -371,7 +380,18 @@ class Session(Source):
                 self._note_state_change(event)
                 return event
         self._read_all = True
+        self._close_awaiting()
         return None
+
+    def _close_awaiting(self) -> None:
+        """Store a missing trial on each channel the last respond signal got no answer on."""
+        if not self._awaiting:
+            return
+        from .response_formats import _missing_answer
+        for channel in sorted(self._awaiting):
+            self.emitted.append(StreamEvent(channel, _missing_answer(channel, self, [None]), None,
+                                            {'missing': True}))
+        self._awaiting = set()
 
     def _note_state_change(self, event: StreamEvent) -> None:
         from .events import StateChange
@@ -451,6 +471,7 @@ class Session(Source):
         from . import io_catalog
         check_event(event, io_catalog.OUTPUT, session=self)
         stored = _stored(event, self)
+        self._awaiting.discard(event.channel)
         self._check_answered_once(event)
         request = self._request_for(event)
         try:
@@ -519,7 +540,9 @@ class Session(Source):
         """Return the responses, shaped by the channel family.
 
         ``neural`` and ``behavior`` give an assembly (one, or all concatenated along
-        ``presentation``); ``perturbation`` gives its single payload (or the
+        ``presentation``); an addressed ``behavior`` channel of a session built from a
+        table has one row for each table row, a row with no answer being a missing
+        trial; ``perturbation`` gives its single payload (or the
         ``handle_id``); any other channel gives its events. With no channel: the
         events when nothing was requested, one result for one requested channel,
         else a dict keyed by requested channel.
@@ -536,9 +559,10 @@ class Session(Source):
                 f"history_limit={self.source.history_limit} dropped {self.dropped} "
                 "response(s); stream them with observe() instead of collect()")
         events = [event for event in self.emitted if event.channel == channel]
-        if _addressed_behavior(channel) and events:
+        if _addressed_behavior(channel) and (events or self.stimuli is not None):
+            # A stored answer: a table row with no answer is a missing trial.
             from .response_formats import _collect
-            return _collect(channel, [event.payload for event in events], None)
+            return _collect(channel, [event.payload for event in events], self)
         if not events:
             raise ValueError(f'No emitted events for channel {channel!r}.')
         family, _ = parse_channel(channel)
