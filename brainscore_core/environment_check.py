@@ -148,34 +148,50 @@ def _installed(distribution: str) -> Optional[str]:
         return None
 
 
+def _project_folder(directory: Path) -> Optional[Path]:
+    """The folder that holds the package's ``pyproject.toml`` or ``setup.py``: the package folder or its parent."""
+    for folder in (directory, directory.parent):
+        if (folder / "pyproject.toml").is_file() or (folder / "setup.py").is_file():
+            return folder
+    return None
+
+
 def _git_commit(directory: Path) -> Optional[str]:
-    """The commit checked out where ``directory`` lives, read from the git files; None if not a checkout."""
-    for folder in (directory, *directory.parents):
+    """The commit of the checkout that holds the package in ``directory``; None if there is none.
+
+    Only the package's own project folder is looked at, never a folder above it:
+    a package installed inside a virtual environment that sits in an unrelated
+    repository must not report that repository's commit. Any failure gives None,
+    so a stamp never loses a finished score.
+    """
+    try:
+        folder = _project_folder(Path(directory))
+        if folder is None:
+            return None
         dot_git = folder / ".git"
-        if dot_git.is_file():           # a worktree: ".git" names the git folder
-            git_dir = Path(dot_git.read_text().split("gitdir:", 1)[-1].strip())
+        if dot_git.is_file():           # a worktree: ".git" names the git folder, maybe relative
+            target = Path(dot_git.read_text().split("gitdir:", 1)[-1].strip())
+            git_dir = target if target.is_absolute() else (dot_git.parent / target).resolve()
         elif dot_git.is_dir():
             git_dir = dot_git
         else:
-            continue
-        try:
-            head = (git_dir / "HEAD").read_text().strip()
-            if not head.startswith("ref:"):
-                return head
-            ref = head[4:].strip()
-            common = git_dir / "commondir"
-            roots = [git_dir] + ([(git_dir / common.read_text().strip()).resolve()]
-                                 if common.is_file() else [])
-            for root in roots:
-                if (root / ref).is_file():
-                    return (root / ref).read_text().strip()
-                packed = root / "packed-refs"
-                if packed.is_file():
-                    for line in packed.read_text().splitlines():
-                        if line.endswith(" " + ref):
-                            return line.split(" ", 1)[0]
-        except OSError:
             return None
+        head = (git_dir / "HEAD").read_text().strip()
+        if not head.startswith("ref:"):
+            return head
+        ref = head[4:].strip()
+        common = git_dir / "commondir"
+        roots = [git_dir] + ([(git_dir / common.read_text().strip()).resolve()]
+                             if common.is_file() else [])
+        for root in roots:
+            if (root / ref).is_file():
+                return (root / ref).read_text().strip()
+            packed = root / "packed-refs"
+            if packed.is_file():
+                for line in packed.read_text().splitlines():
+                    if line.endswith(" " + ref):
+                        return line.split(" ", 1)[0]
+    except Exception:
         return None
     return None
 
