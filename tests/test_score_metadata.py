@@ -319,13 +319,15 @@ def _answer_session(session):
 
 
 def _stamped(events, monkeypatch, plan=None):
+    """Run one answered session; ``plan`` is what a subject that owns the setting passes."""
+    from brainscore_core._evaluation.measures import note_session
     from brainscore_core.streaming import Session
-    if plan is None:
-        monkeypatch.delenv('BRAINSCORE_REGIONS_PER_PASS', raising=False)
-    else:
-        monkeypatch.setenv('BRAINSCORE_REGIONS_PER_PASS', plan)
+    monkeypatch.setenv('BRAINSCORE_REGIONS_PER_PASS', 'one')   # core must not read it
     with record_measures() as measures:
-        _answer_session(Session(events, ['neural:IT']))
+        session = Session(events, ['neural:IT'])
+        if plan is not None:
+            note_session(session, plan)
+        _answer_session(session)
     return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
                                 protocol='neural', harness_id='test', measures=measures)
 
@@ -335,7 +337,7 @@ def _events():
 
 
 def test_a_listed_run_records_its_delivery_and_plan(monkeypatch):
-    score = _stamped(_events(), monkeypatch)
+    score = _stamped(_events(), monkeypatch, plan='all')
     assert score.attrs['delivery'] == 'listed'
     assert score.attrs['regions_per_pass'] == 'all'
     assert float(score) == 0.5
@@ -349,7 +351,6 @@ def test_a_streamed_run_records_its_delivery_and_plan(monkeypatch):
 
 def test_a_run_with_both_deliveries_lists_both(monkeypatch):
     from brainscore_core.streaming import Session
-    monkeypatch.delenv('BRAINSCORE_REGIONS_PER_PASS', raising=False)
     with record_measures() as measures:
         _answer_session(Session(_events(), ['neural:IT']))
         _answer_session(Session(iter(_events()), ['neural:IT']))
@@ -365,7 +366,15 @@ def test_a_run_without_sessions_records_no_delivery(monkeypatch):
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(),
                                  protocol=None, harness_id='test', measures=measures)
     assert score.attrs['delivery'] is None
-    assert score.attrs['regions_per_pass'] == 'one'
+    assert score.attrs['regions_per_pass'] is None
+
+
+def test_a_subject_that_passes_no_plan_is_stamped_none(monkeypatch):
+    """A legacy-style subject does not read the setting: core must not stamp it."""
+    score = _stamped(_events(), monkeypatch)       # the variable says 'one'; nobody passed it
+    assert score.attrs['delivery'] == 'listed'
+    assert score.attrs['regions_per_pass'] is None
+
 
 
 def test_the_score_records_software_versions_and_commits(monkeypatch):

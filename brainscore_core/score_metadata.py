@@ -29,7 +29,7 @@ def stamp_score_metadata(
     ``measures`` also gives the execution configuration of the run's sessions:
     ``attrs['delivery']`` (``'listed'``, ``'stream'``, both as a sorted tuple,
     or None when no session answered) and ``attrs['regions_per_pass']``
-    (the ``BRAINSCORE_REGIONS_PER_PASS`` setting the sessions ran under).
+    (the plan the subject used, or None for a subject that does not read it).
     ``attrs['software']`` gives the versions of python, the libraries that can
     change numbers and the four Brain-Score packages; ``attrs['code_commits']``
     the commit of each imported Brain-Score package's checkout.
