@@ -6,6 +6,7 @@ import numpy as np
 from ..contract import TaskContext
 from ..streaming import BEGIN, CONTROL_CHANNEL, Session, StreamEvent, parse_channel
 from ..events import StateChange
+from ..compatibility import ExecutionNotFeasibleError
 from .environment import EnvironmentSource, drive_environment_session
 from .payloads import (
     behavior_stimuli_from_session,
@@ -408,11 +409,12 @@ def refuse_variance(subject, session) -> None:
     """
     settings = measurement_settings(session)
     if settings.get("require_variance"):
-        raise NotImplementedError(
+        raise ExecutionNotFeasibleError(
             f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
             "cannot produce trial-to-trial variance (look_at(require_variance=True, "
             f"number_of_trials={settings.get('number_of_trials', 1)})). Legacy models "
-            "add it with microsaccades; this subject has no equivalent.")
+            "add it with microsaccades; this subject has no equivalent.",
+            task_type=getattr(getattr(session, 'task', None), 'task_type', None))
 
 
 def drive_behavior_session(

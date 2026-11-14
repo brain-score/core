@@ -9,6 +9,7 @@ from brainscore_core.contract import Subject, UnifiedModel, TaskContext
 from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
 from brainscore_core.streaming import NamedStreams
 from brainscore_core.streaming import StreamEvent
+from brainscore_core.compatibility import ExecutionNotFeasibleError
 from brainscore_core.streaming_helpers import (
     apply_state_change,
     environment_session,
@@ -672,7 +673,7 @@ class TestPublicSessionHelpers:
         subject = _TypedSubject()
         session = stimulus_session(_stimulus_set(), ['neural:IT'])
         session.settings = {'require_variance': True, 'number_of_trials': 3}
-        with pytest.raises(NotImplementedError, match='number_of_trials=3'):
+        with pytest.raises(ExecutionNotFeasibleError, match='number_of_trials=3'):
             drive_neural_session(subject, session)
         assert subject.calls == []
         assert session.emitted == []
@@ -703,6 +704,6 @@ class TestPublicSessionHelpers:
         subject = _TypedSubject()
         session = stimulus_session(_stimulus_set(), ['behavior'], context)
         session.settings = {'require_variance': True}
-        with pytest.raises(NotImplementedError, match='trial-to-trial variance'):
+        with pytest.raises(ExecutionNotFeasibleError, match='trial-to-trial variance'):
             drive_behavior_session(subject, session)
         assert subject.calls == []

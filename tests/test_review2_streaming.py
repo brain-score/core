@@ -9,6 +9,7 @@ from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.streaming_helpers import (
     drive_behavior_session_streaming, drive_neural_session, drive_typed_session, stimulus_session)
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly, NeuroidAssembly
+from brainscore_core.compatibility import ExecutionNotFeasibleError
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
 
@@ -74,7 +75,7 @@ def test_variance_request_is_refused_before_task_setup(streaming):
     session = stimulus_session(_table([0, 1], ['a', 'b']), ['behavior'], task, streaming=streaming,
                                settings={'require_variance': True, 'number_of_trials': 3})
     subject = _Subject()
-    with pytest.raises(NotImplementedError, match='variance'):
+    with pytest.raises(ExecutionNotFeasibleError, match='variance'):
         drive_typed_session(subject, session)
     assert subject.calls == []
 
