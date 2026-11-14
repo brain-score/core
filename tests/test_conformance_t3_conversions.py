@@ -173,7 +173,9 @@ class _Converter(Subject):
             source_format='behavior:log_probabilities')} if self.with_record else {})
         session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
             values, dims=['presentation', 'choice'], attrs=attrs,
-            coords={'stimulus_id': ('presentation', ['s0', 's1']), 'choice': ['cat', 'dog']}),
+            coords={'stimulus_id': ('presentation', ['s0', 's1']), 'choice': ['cat', 'dog'],
+                    # the source evidence: each row's log scores
+                    'raw_answer': ('presentation', ['[-1.0, -2.0]', '[-3.0, -0.5]'])}),
             None))
 
     def reset(self):

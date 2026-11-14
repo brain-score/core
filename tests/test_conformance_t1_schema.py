@@ -178,7 +178,7 @@ def test_a_malformed_response_raises_through_participate_and_is_not_kept(channel
 def test_a_cell_for_another_trial_than_its_event_names_raises():
     session = stimulus_session(_stimuli(), ['behavior:choice'], TASKS['behavior:choice'])
     one_row = _rows('behavior:choice', [[1, 0]], ids=['s1'])
-    with pytest.raises(ValueError, match='answers stimulus'):
+    with pytest.raises(ValueError, match='answers stimuli'):
         session.respond(StreamEvent('behavior:choice', one_row, None, {'stimulus_id': 's0'}))
 
 

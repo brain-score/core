@@ -286,9 +286,10 @@ class Session(Source):
         self.one_answer_per_trial = False
         self._observers: list[tuple] = []
         self._rewriters: list[Any] = []
-        # The requested addressed behavior channels not yet answered since the
-        # last respond signal of a session without a table.
-        self._awaiting: set = set()
+        # In a session without a table: the respond signals of the current episode
+        # and the answer rows of each addressed behavior channel since its begin.
+        self._signals = 0
+        self._signal_answers: dict = {}
 
     @property
     def streaming(self) -> bool:
@@ -363,12 +364,12 @@ class Session(Source):
             if not isinstance(event, StreamEvent):
                 return event
             if event.channel == CONTROL_CHANNEL:
+                # Read before the input filter: a subject that does not declare
+                # control still owes an answer to each respond signal.
                 if event.payload in (BEGIN, END):
-                    self._close_awaiting()
-                elif event.payload == RESPOND and self._control and self.stimuli is None:
-                    self._close_awaiting()
-                    self._awaiting = {channel for channel in self.outputs or ()
-                                      if _addressed_behavior(channel)}
+                    self._close_episode()
+                elif event.payload == RESPOND and self.stimuli is None:
+                    self._signals += 1
                 if event.payload == BEGIN:
                     self._trial += 1
                     self._rows.append(None)
@@ -380,18 +381,26 @@ class Session(Source):
                 self._note_state_change(event)
                 return event
         self._read_all = True
-        self._close_awaiting()
+        self._close_episode()
         return None
 
-    def _close_awaiting(self) -> None:
-        """Store a missing trial on each channel the last respond signal got no answer on."""
-        if not self._awaiting:
+    def _close_episode(self) -> None:
+        """Store a missing trial for each respond signal of the episode that got no answer.
+
+        Each requested addressed behavior channel owes one answer row per respond
+        signal; the rows it lacks are stored, in event order, when the episode ends.
+        """
+        signals, answers = self._signals, self._signal_answers
+        self._signals, self._signal_answers = 0, {}
+        if not signals:
             return
-        from .response_formats import _missing_answer
-        for channel in sorted(self._awaiting):
-            self.emitted.append(StreamEvent(channel, _missing_answer(channel, self, [None]), None,
-                                            {'missing': True}))
-        self._awaiting = set()
+        from .response_formats import _signal_missing
+        for channel in self.outputs or ():
+            if _addressed_behavior(channel):
+                for _ in range(signals - answers.get(channel, 0)):
+                    missing = StreamEvent(channel, _signal_missing(channel, self, 1), None,
+                                          {'missing': True})
+                    self._keep(missing, missing)
 
     def _note_state_change(self, event: StreamEvent) -> None:
         from .events import StateChange
@@ -470,8 +479,6 @@ class Session(Source):
                              f"requested: {list(self.outputs)}")
         from . import io_catalog
         check_event(event, io_catalog.OUTPUT, session=self)
-        stored = _stored(event, self)
-        self._awaiting.discard(event.channel)
         self._check_answered_once(event)
         request = self._request_for(event)
         try:
@@ -481,14 +488,25 @@ class Session(Source):
             self._notify(2, event, error)
             raise
         kept = event if kept is None else kept
-        self._notify(1, kept)
-        if kept is event:
-            kept = stored
+        stored = kept
+        if _addressed_behavior(event.channel):
+            # What core stores is packaged by the one schema path, from what the
+            # source accepted (its receipt, when it gives one); the source got the action.
+            from .response_formats import _store
+            payload = _store(event.channel, kept.payload, kept, self)
+            stored = StreamEvent(event.channel, payload, kept.t_ms, kept.meta)
+            self._signal_answers[event.channel] = (self._signal_answers.get(event.channel, 0)
+                                                   + payload.sizes['presentation'])
+        self._keep(stored, kept, request)
+
+    def _keep(self, stored: StreamEvent, observed: StreamEvent, request: Any = None) -> None:
+        """Keep one response: tell the observers, note it, store it within the history limit."""
+        self._notify(1, observed)
         if not self._session_noted:
             self._session_noted = True
             note_session(self)
-        note_response(kept, request)
-        self.emitted.append(kept)
+        note_response(stored, request)
+        self.emitted.append(stored)
         limit = self.source.history_limit
         if limit is not None and len(self.emitted) > limit:
             del self.emitted[0]
@@ -540,9 +558,10 @@ class Session(Source):
         """Return the responses, shaped by the channel family.
 
         ``neural`` and ``behavior`` give an assembly (one, or all concatenated along
-        ``presentation``); an addressed ``behavior`` channel of a session built from a
-        table has one row for each table row, a row with no answer being a missing
-        trial; ``perturbation`` gives its single payload (or the
+        ``presentation``); an addressed ``behavior`` channel gives its stored answer, rows
+        in the order they arrived, and, once a session built from a table has delivered
+        every input, a missing row for each table row with no answer (stored once, as a
+        response); ``perturbation`` gives its single payload (or the
         ``handle_id``); any other channel gives its events. With no channel: the
         events when nothing was requested, one result for one requested channel,
         else a dict keyed by requested channel.
@@ -554,15 +573,22 @@ class Session(Source):
             if len(channels) == 1:
                 return self.collect(channels[0])
             return {name: self.collect(name) for name in channels}
+        if _addressed_behavior(channel) and self._read_all and self.stimuli is not None:
+            # The session is complete: a table row with no answer is a missing trial.
+            from .response_formats import _table_missing
+            template = next((e.payload for e in self.emitted if e.channel == channel), None)
+            missing = _table_missing(channel, self, template)
+            if missing is not None:
+                event = StreamEvent(channel, missing, None, {'missing': True})
+                self._keep(event, event)
         if self.dropped:
             raise RuntimeError(
                 f"history_limit={self.source.history_limit} dropped {self.dropped} "
                 "response(s); stream them with observe() instead of collect()")
         events = [event for event in self.emitted if event.channel == channel]
-        if _addressed_behavior(channel) and (events or self.stimuli is not None):
-            # A stored answer: a table row with no answer is a missing trial.
+        if _addressed_behavior(channel) and events:
             from .response_formats import _collect
-            return _collect(channel, [event.payload for event in events], self)
+            return _collect(channel, [event.payload for event in events])
         if not events:
             raise ValueError(f'No emitted events for channel {channel!r}.')
         family, _ = parse_channel(channel)
@@ -586,15 +612,6 @@ class Session(Source):
 def _addressed_behavior(channel: str) -> bool:
     from .response_formats import _format
     return _format(channel) is not None
-
-
-def _stored(event: StreamEvent, session: 'Session') -> StreamEvent:
-    """``event`` with its answer in the stored schema of its format (addressed behavior only)."""
-    from .response_formats import _store
-    payload = _store(event, session)
-    if payload is event.payload:
-        return event
-    return StreamEvent(event.channel, payload, event.t_ms, event.meta)
 
 
 def check_event(event: StreamEvent, direction: str, session: Any = None) -> None:

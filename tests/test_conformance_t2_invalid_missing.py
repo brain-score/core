@@ -106,10 +106,11 @@ def test_the_score_carries_the_record_of_the_answers():
 
 def test_a_trial_with_no_answer_event_is_a_missing_row():
     answer, _ = _run(_Replier(skip={'s1'}))
-    assert list(answer['stimulus_id'].values) == ['s0', 's1', 's2']
+    # Answered rows in arrival order, then the missing rows in table order.
+    assert list(answer['stimulus_id'].values) == ['s0', 's2', 's1']
     assert list(answer['response_state'].values) == ['valid', 'missing', 'missing']
-    assert answer['response_reason'].values[1] == 'no answer event'
-    assert np.isnan(answer.values[1]).all()
+    assert list(answer['response_reason'].values)[1:] == ['no answer', 'no answer event']
+    assert np.isnan(answer.values[1:]).all()
 
 
 def test_a_batch_answer_after_every_input_completes_the_table():
@@ -124,9 +125,9 @@ def test_a_batch_answer_after_every_input_completes_the_table():
             session.respond(StreamEvent('behavior:choice', batch, None))
 
     answer, _ = _run(Batch(), _stimuli(('s0', 's1', 's2')))
-    assert list(answer['stimulus_id'].values) == ['s0', 's1', 's2']   # the table's order
-    assert list(answer['response_state'].values) == ['valid', 'missing', 'valid']
-    np.testing.assert_array_equal(answer.values[[0, 2]], [[0, 1], [1, 0]])
+    assert list(answer['stimulus_id'].values) == ['s2', 's0', 's1']   # arrival, then missing
+    assert list(answer['response_state'].values) == ['valid', 'valid', 'missing']
+    np.testing.assert_array_equal(answer.values[:2], [[1, 0], [0, 1]])
 
 
 def test_no_answer_at_all_gives_a_missing_row_for_every_trial():
@@ -136,9 +137,9 @@ def test_no_answer_at_all_gives_a_missing_row_for_every_trial():
 
 def test_an_answer_row_without_a_stimulus_cannot_be_matched_and_raises():
     session = stimulus_session(_stimuli(), ['behavior:choice'], TASK)
-    session.respond(StreamEvent('behavior:choice', 'cat', None))      # a cell with no stimulus_id
-    with pytest.raises(ValueError, match='no stimulus_id'):
-        session.collect('behavior:choice')
+    with pytest.raises(ValueError, match='no stimulus_id'):          # a cell with no stimulus_id
+        session.respond(StreamEvent('behavior:choice', 'cat', None))
+    assert session.emitted == []
 
 
 class _Speaker(Subject):

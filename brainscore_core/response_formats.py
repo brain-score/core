@@ -6,29 +6,41 @@ validates it; the benchmark scores it (Response Format Standard, section 0).
 - **Conversions**: ``argmax`` (probabilities to a choice), ``softmax``
   (continuation log-probabilities to probabilities) and ``softmax_argmax``
   (both in turn). Each returns the validity of every row with its result: a
-  row that is not a valid source row gives an invalid result.
+  non-finite source row, or a row that is not a valid probability row for
+  ``argmax``, gives an invalid result. Stage 1 exception: a finite positive
+  log value passes through ``softmax`` as valid.
 - **The response record** (``response_record``): the dict an answer carries
   in ``attrs['response']``. Scores copy the records of their answers.
 - **Storage**: the ``behavior`` catalog entry's validator checks a response
   on an addressed ``behavior:<format>`` channel against the session's task and
-  the event, and the session stores the checked answer in the schema of its
-  format (``_store``). The bare ``behavior`` channel is not checked or stored
-  here (legacy handling).
+  the trials it names, and the session stores the checked answer in the schema
+  of its format. The bare ``behavior`` channel is not checked or stored here
+  (legacy handling).
 
 What an addressed response can be: a cell for one trial (``behavior:text``
 and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
 with one value per option; ``behavior:rating``, ``behavior:confidence``,
 ``behavior:rt``: a number), or an assembly of rows over ``presentation``
-with a ``stimulus_id`` coordinate and a response record. A cell carries no
-record; core gives it a native record with ``method='external'`` (for
-``behavior:rt`` the units come from ``event.meta['units']``). A malformed
-response raises ``ValueError`` and is never stored. The stored answer has
+with a ``stimulus_id`` coordinate and a response record. A cell is always
+native: core gives it a record with ``method='external'`` (for ``behavior:rt``
+the units come from ``event.meta['units']``). A derived answer is an assembly
+(one row is fine) with its record and its source evidence in ``raw_answer``.
+A malformed response raises ``ValueError`` and is never stored.
+
+The stored answer keeps its rows in the order they arrived. Each row has
 ``raw_answer``, ``response_state`` (``valid``, ``invalid``, ``missing``) and
-``response_reason`` for every trial, and the record in its attrs. In a session
-built from a table, a table row with no answer is stored as a missing trial.
+``response_reason``; the attrs hold the record, except for an answer whose
+trials were all missing (nothing answered, so no record). An answer is
+expected for each row of a session's table (by occurrence: the k-th answer
+row with stimulus id X answers the k-th table row with id X) and, in a
+session without a table, for each ``respond`` signal of the source. A
+requested trial with no answer is stored as a missing row once the session is
+complete; a session with no table and no ``respond`` signal requests no trial,
+so nothing is missing there.
 """
 import json
 import math
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -44,6 +56,9 @@ _RT_UNITS = ('ms', 'monotone')
 _FIELDS = frozenset(('format', 'category', 'origin', 'method', 'conversion', 'source_format',
                      'parameters', 'parsed_by'))
 _FORMATS = ('choice', 'probabilities', 'rating', 'confidence', 'rt', 'text')
+# The format each conversion reads.
+_SOURCES = {'argmax': 'behavior:probabilities', 'softmax': 'behavior:log_probabilities',
+            'softmax_argmax': 'behavior:log_probabilities'}
 
 
 # --------------------------------------------------------------------------
@@ -63,6 +78,8 @@ def argmax(probabilities) -> Tuple[np.ndarray, np.ndarray]:
 
     Ties go to the first maximum in the given column order (numpy ``argmax``);
     the column order is the caller's, and its record says which order it is.
+    Stage 1 exception: a readout passes its own column order (``option_order``
+    ``'readout'``), not the trial's.
     A row that is not a valid probability row (a non-finite or negative value,
     or a sum that differs from 1 by more than 1e-4) has no choice: its index
     is -1 and ``valid`` is False. The result is the most probable option under
@@ -84,7 +101,8 @@ def softmax(log_probabilities, units: str = 'nats') -> Tuple[np.ndarray, np.ndar
     ln 2 first). The row's offset is lost: two rows that differ by a constant
     give the same probabilities, a distribution over the listed continuations
     only. A source row with a non-finite value (NaN, +inf or -inf) is invalid,
-    and so is its result; its values are computed as for any row.
+    and so is its result; its values are computed as for any row. Stage 1
+    exception: a finite positive log value passes as valid.
     """
     if units not in _UNITS:
         raise ValueError(f'units is one of {_UNITS}, not {units!r}')
@@ -181,6 +199,14 @@ def _record_problems(record, channel: str) -> List[str]:
                         f"{record['conversion']!r} and method {record['method']!r}")
     if derived != bool(record['source_format']):
         problems.append('a derived answer, and only a derived answer, names its source_format')
+    elif derived:
+        expected = _SOURCES.get(record['conversion'])
+        if expected is not None and record['source_format'] != expected:
+            problems.append(f"the {record['conversion']} conversion reads {expected!r}, not "
+                            f"{record['source_format']!r}")
+        elif expected is None and _format(record['source_format']) is None:
+            problems.append(f"a link names the behavior format it was computed from, not "
+                            f"{record['source_format']!r}")
     if not isinstance(record['parameters'], dict) or not _plain(record['parameters']):
         problems.append("the record's parameters are not a dict of plain values")
     else:
@@ -211,34 +237,63 @@ def _response_of(session):
     return getattr(getattr(session, 'task', None), 'response', None)
 
 
-def _row_options(session, stimulus_id, stimulus_index) -> Optional[list]:
-    """The options of one trial, from the task (and the table for per-row options)."""
-    from .responses import Choice
-    response = _response_of(session)
-    if isinstance(response, Choice):
-        if not isinstance(response.labels, str):
-            return list(response.labels)
-        table = getattr(session, 'stimuli', None)
-        if table is None:
-            return None
-        if stimulus_index is not None and stimulus_index in table.index:
-            return list(table.loc[stimulus_index, response.labels])
-        if stimulus_id is not None and 'stimulus_id' in table.columns:
-            rows = table[table['stimulus_id'] == stimulus_id]
-            if len(rows):
-                return list(rows.iloc[0][response.labels])
+def _table(session):
+    table = getattr(session, 'stimuli', None)
+    return table if table is not None and 'stimulus_id' in getattr(table, 'columns', ()) else None
+
+
+class _Ledger:
+    """What a session's table expects and what each channel has answered.
+
+    Built once per session: the occurrence count of each table stimulus id, the
+    options of each id (when the options differ by row), and for each channel
+    the occurrences answered so far. ``pending`` keeps the rows the validator
+    built for the event the session is accepting, so each response is checked
+    and packaged in one pass.
+    """
+
+    def __init__(self, session):
+        table = _table(session)
+        self.ids = None if table is None else list(table['stimulus_id'])
+        self.counts = None if table is None else Counter(self.ids)
+        self.answered: Dict[str, Counter] = {}
+        self.pending = None
+        self._session = session
+        self._options = None
+
+    def options(self, stimulus_id) -> Optional[list]:
+        """The options of the trial with this stimulus id."""
+        from .responses import Choice
+        response = _response_of(self._session)
+        if isinstance(response, Choice):
+            if not isinstance(response.labels, str):
+                return list(response.labels)
+            if self._options is None:
+                table = _table(self._session)
+                self._options = ({} if table is None else
+                                 dict(zip(reversed(table['stimulus_id'].tolist()),
+                                          reversed(table[response.labels].tolist()))))
+            options = self._options.get(stimulus_id)
+            return None if options is None else list(options)
+        label_set = getattr(getattr(self._session, 'task', None), 'label_set', None)
+        return list(label_set) if label_set else None
+
+
+def _ledger(session) -> Optional[_Ledger]:
+    if session is None:
         return None
-    label_set = getattr(getattr(session, 'task', None), 'label_set', None)
-    return list(label_set) if label_set else None
+    ledger = session.__dict__.get('_formats_ledger')
+    if ledger is None:
+        ledger = session.__dict__['_formats_ledger'] = _Ledger(session)
+    return ledger
 
 
 def _axis(session, options) -> Optional[list]:
     """The choice axis: the shared labels, or positions when options differ by row."""
     from .responses import Choice
-    response = _response_of(session)
     if options is None:
         return None
-    if isinstance(response, Choice) and isinstance(response.labels, str):
+    if isinstance(_response_of(session), Choice) and isinstance(_response_of(session).labels, str):
         return list(range(len(options)))
     return list(options)
 
@@ -270,108 +325,6 @@ def _raw_text(value) -> str:
     if isinstance(value, np.ndarray):
         return str([float(v) for v in value.ravel()])
     return str(value)
-
-
-def _cell_rows(fmt, channel, payload, event, session):
-    """A cell as ``(values, coords, record)`` of a one-row stored answer."""
-    meta = getattr(event, 'meta', None) or {}
-    stimulus_id = meta.get('stimulus_id')
-    options = (_row_options(session, stimulus_id, meta.get('stimulus_index'))
-               if fmt in ('choice', 'probabilities') else None)
-    coords = {'stimulus_id': [stimulus_id], 'answer_valid': [True], 'parse_error': ['']}
-    parameters = {}
-    if fmt in ('text', 'choice'):
-        if not isinstance(payload, str):
-            raise ValueError(f'a {channel} cell is a str, not {type(payload).__name__}')
-    if fmt == 'text':
-        values = np.array([payload], dtype=object)
-    elif fmt == 'choice':
-        if options is None:
-            raise ValueError(f'{channel}: the options of this trial are not known; send an '
-                             'assembly with a choice axis or give the task a Choice')
-        row = np.zeros(len(options), dtype=np.float32)
-        if payload in options:
-            row[options.index(payload)] = 1.0
-        else:
-            row[:] = np.nan
-            coords['answer_valid'], coords['parse_error'] = (
-                [False], [f'{payload!r} is not one of the options {options}'])
-        values = row[None, :]
-    elif fmt == 'probabilities':
-        array = np.asarray(payload) if isinstance(payload, np.ndarray) else None
-        if array is None or array.ndim != 1 or array.dtype.kind not in 'fiu':
-            raise ValueError(f'a {channel} cell is a 1-D numeric array')
-        if options is not None and len(array) != len(options):
-            raise ValueError(f'{channel}: {len(array)} values for {len(options)} options')
-        values = array.astype(np.float32)[None, :]
-    else:
-        if isinstance(payload, np.ndarray) and payload.ndim == 0:
-            payload = payload.item()
-        if not _number(payload):
-            raise ValueError(f'a {channel} cell is one number, not {type(payload).__name__}')
-        values = np.array([float(payload)], dtype=np.float64)
-        if fmt == 'rt':
-            parameters['units'] = meta.get('units')
-    coords['raw_answer'] = [_raw_text(payload)]
-    record = response_record(channel, 'external', parameters=parameters)
-    if fmt in ('choice', 'probabilities'):
-        coords['choice'] = _axis(session, options) or list(range(values.shape[1]))
-    return values, coords, record
-
-
-def _assembly_rows(fmt, channel, payload, event, session):
-    """An assembly as ``(values, coords, record)``, after the malformed checks."""
-    dims = ('presentation', 'choice') if fmt in ('choice', 'probabilities') else ('presentation',)
-    if tuple(payload.dims) != dims:
-        raise ValueError(f'{channel} payload dims are {tuple(payload.dims)}, not {dims}')
-    record = payload.attrs.get('response')
-    if record is None:
-        raise ValueError(f'a {channel} assembly carries its response record in attrs["response"]')
-    problems = _record_problems(record, channel)
-    if problems:
-        raise ValueError('; '.join(problems))
-    raw_scores = (fmt == 'probabilities' and record['category'] == 'model-derived'
-                  and record['parameters'].get('scale') == 'log')
-    values = np.asarray(payload.values)
-    dtype = {'choice': np.float32, 'probabilities': np.float64 if raw_scores else np.float32,
-             'text': object}.get(fmt, np.float64)
-    if values.dtype != np.dtype(dtype):
-        raise ValueError(f'{channel} values are {values.dtype}, not {np.dtype(dtype)}')
-    coords = _presentation_coords(payload)
-    if 'stimulus_id' not in coords:
-        raise ValueError(f'a {channel} assembly has a stimulus_id coordinate')
-    ids = coords['stimulus_id']
-    meta = getattr(event, 'meta', None) or {}
-    if 'stimulus_id' in meta and not isinstance(meta['stimulus_id'], (list, tuple)):
-        if ids != [meta['stimulus_id']]:
-            raise ValueError(f'{channel}: the event answers stimulus {meta["stimulus_id"]!r}, '
-                             f'but its rows are {ids}')
-    table = getattr(session, 'stimuli', None)
-    if table is not None and 'stimulus_id' in getattr(table, 'columns', ()):
-        known = set(table['stimulus_id'])
-        unknown = [i for i in ids if i not in known]
-        if unknown:
-            raise ValueError(f'{channel}: rows {unknown[:5]} are not stimuli of this session')
-    if fmt in ('choice', 'probabilities'):
-        axis = list(payload['choice'].values)
-        options = _row_options(session, ids[0], None) if ids else None
-        expected = _axis(session, options)
-        if expected is not None and [str(a) for a in axis] != [str(e) for e in expected]:
-            raise ValueError(f'{channel}: the choice axis is {axis}, not the trial options {expected}')
-    if fmt == 'choice':
-        known = np.isnan(values) | (values == 0) | (values == 1)
-        if not known.all():
-            raise ValueError(f'{channel} values are 0, 1 or NaN (one option, or none)')
-        mixed = np.isnan(values).any(axis=1) & ~np.isnan(values).all(axis=1)
-        if mixed.any():
-            raise ValueError(f'{channel}: a row is all NaN (no choice) or has no NaN')
-    if fmt == 'text':
-        if any(not (isinstance(v, str) or v is None) for v in values):
-            raise ValueError(f'{channel} values are str (or None for no reply)')
-    if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
-        raise ValueError(f"{channel}: the record's parameters name units {_RT_UNITS}")
-    coords.setdefault('raw_answer', [_raw_text(value) for value in values])
-    return values, coords, record
 
 
 def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
@@ -423,6 +376,112 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
     return reasons
 
 
+def _cell_rows(fmt, channel, payload, event, session, ledger):
+    """A cell as ``(values, coords, record)`` of a one-row stored answer."""
+    meta = getattr(event, 'meta', None) or {}
+    stimulus_id = meta.get('stimulus_id')
+    options = (ledger.options(stimulus_id) if ledger is not None and fmt in ('choice', 'probabilities')
+               else None)
+    coords = {'stimulus_id': [stimulus_id], 'answer_valid': [True], 'parse_error': ['']}
+    parameters = {}
+    if fmt in ('text', 'choice'):
+        if not isinstance(payload, str):
+            raise ValueError(f'a {channel} cell is a str, not {type(payload).__name__}')
+    if fmt == 'text':
+        values = np.array([payload], dtype=object)
+    elif fmt == 'choice':
+        if options is None:
+            raise ValueError(f'{channel}: the options of this trial are not known; send an '
+                             'assembly with a choice axis or give the task a Choice')
+        row = np.zeros(len(options), dtype=np.float32)
+        if payload in options:
+            row[options.index(payload)] = 1.0
+        else:
+            row[:] = np.nan
+            coords['answer_valid'], coords['parse_error'] = (
+                [False], [f'{payload!r} is not one of the options {options}'])
+        values = row[None, :]
+    elif fmt == 'probabilities':
+        array = np.asarray(payload) if isinstance(payload, np.ndarray) else None
+        if array is None or array.ndim != 1 or array.dtype.kind not in 'fiu':
+            raise ValueError(f'a {channel} cell is a 1-D numeric array')
+        if options is not None and len(array) != len(options):
+            raise ValueError(f'{channel}: {len(array)} values for {len(options)} options')
+        values = array.astype(np.float32)[None, :]
+    else:
+        if isinstance(payload, np.ndarray) and payload.ndim == 0:
+            payload = payload.item()
+        if not _number(payload):
+            raise ValueError(f'a {channel} cell is one number, not {type(payload).__name__}')
+        values = np.array([float(payload)], dtype=np.float64)
+        if fmt == 'rt':
+            parameters['units'] = meta.get('units')
+    coords['raw_answer'] = [_raw_text(payload)]
+    record = response_record(channel, 'external', parameters=parameters)
+    if fmt in ('choice', 'probabilities'):
+        coords['choice'] = _axis(session, options) or list(range(values.shape[1]))
+    return values, coords, record
+
+
+def _assembly_rows(fmt, channel, payload, event, session, ledger):
+    """An assembly as ``(values, coords, record)``, after the malformed checks."""
+    dims = ('presentation', 'choice') if fmt in ('choice', 'probabilities') else ('presentation',)
+    if tuple(payload.dims) != dims:
+        raise ValueError(f'{channel} payload dims are {tuple(payload.dims)}, not {dims}')
+    record = payload.attrs.get('response')
+    if record is None:
+        raise ValueError(f'a {channel} assembly carries its response record in attrs["response"]')
+    problems = _record_problems(record, channel)
+    if problems:
+        raise ValueError('; '.join(problems))
+    raw_scores = (fmt == 'probabilities' and record['category'] == 'model-derived'
+                  and record['parameters'].get('scale') == 'log')
+    values = np.asarray(payload.values)
+    dtype = {'choice': np.float32, 'probabilities': np.float64 if raw_scores else np.float32,
+             'text': object}.get(fmt, np.float64)
+    if values.dtype != np.dtype(dtype):
+        raise ValueError(f'{channel} values are {values.dtype}, not {np.dtype(dtype)}')
+    coords = _presentation_coords(payload)
+    if 'stimulus_id' not in coords:
+        raise ValueError(f'a {channel} assembly has a stimulus_id coordinate')
+    ids = coords['stimulus_id']
+    named = (getattr(event, 'meta', None) or {}).get('stimulus_id')
+    if named is not None:
+        named = list(named) if isinstance(named, (list, tuple)) else [named]
+        if ids != named:
+            raise ValueError(f'{channel}: the event answers stimuli {named}, but its rows are {ids}')
+    if fmt in ('choice', 'probabilities'):
+        axis = list(payload['choice'].values)
+        for stimulus_id in dict.fromkeys(ids):
+            options = ledger.options(stimulus_id) if ledger is not None else None
+            expected = _axis(session, options)
+            if expected is not None and [str(a) for a in axis] != [str(e) for e in expected]:
+                raise ValueError(f'{channel}: the choice axis is {axis}, not the options '
+                                 f'{expected} of stimulus {stimulus_id!r}')
+    if fmt == 'choice':
+        known = np.isnan(values) | (values == 0) | (values == 1)
+        if not known.all():
+            raise ValueError(f'{channel} values are 0, 1 or NaN (one option, or none)')
+        empty = np.isnan(values).all(axis=1)
+        if (np.isnan(values).any(axis=1) & ~empty).any():
+            raise ValueError(f'{channel}: a row is all NaN (no choice) or has no NaN')
+        supplied = coords.get('response_state')
+        if supplied is not None and any(state == 'invalid' and not row_empty
+                                        for state, row_empty in zip(supplied, empty)):
+            raise ValueError(f'{channel}: a row supplied as invalid is all NaN')
+    if fmt == 'text':
+        if any(not (isinstance(v, str) or v is None) for v in values):
+            raise ValueError(f'{channel} values are str (or None for no reply)')
+    if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
+        raise ValueError(f"{channel}: the record's parameters name units {_RT_UNITS}")
+    if 'raw_answer' not in coords:
+        if record['origin'] == 'derived':
+            raise ValueError(f'a derived {channel} assembly keeps its source evidence in '
+                             'raw_answer; core does not make it from the derived values')
+        coords['raw_answer'] = [_raw_text(value) for value in values]
+    return values, coords, record
+
+
 def _states(fmt, values, coords, record, response) -> Tuple[List[str], List[str]]:
     n = len(values)
     reasons = _value_reasons(fmt, values, record, response)
@@ -460,20 +519,38 @@ def _assembly(values, coords, record, attrs=None):
     return BehavioralAssembly(values, coords=built, dims=dims, attrs=attrs)
 
 
+def _check_occurrences(channel, ids, ledger) -> None:
+    """Refuse a row that the table does not expect (unknown id, or one occurrence too many)."""
+    if ledger is None or ledger.counts is None:
+        return
+    answered = ledger.answered.get(channel, Counter())
+    for stimulus_id, count in Counter(ids).items():
+        if _null(stimulus_id):
+            raise ValueError(f'{channel}: an answer row names no stimulus_id, so it cannot be '
+                             'matched to a trial of the table')
+        if stimulus_id not in ledger.counts:
+            raise ValueError(f'{channel}: stimulus {stimulus_id!r} is not in this session')
+        if answered[stimulus_id] + count > ledger.counts[stimulus_id]:
+            raise ValueError(f'{channel}: stimulus {stimulus_id!r} is answered more often than '
+                             f'the table has it ({ledger.counts[stimulus_id]})')
+
+
 def _rows(channel, payload, event, session):
     """The stored ``(values, coords, record, attrs)`` of a response, or ValueError."""
     fmt = _format(channel)
+    ledger = _ledger(session)
     if hasattr(payload, 'dims') and hasattr(payload, 'attrs'):
-        values, coords, record = _assembly_rows(fmt, channel, payload, event, session)
+        values, coords, record = _assembly_rows(fmt, channel, payload, event, session, ledger)
         if fmt in ('choice', 'probabilities'):
             coords['choice'] = list(payload['choice'].values)
         attrs = {key: value for key, value in payload.attrs.items() if key != 'response'}
     else:
-        values, coords, record = _cell_rows(fmt, channel, payload, event, session)
+        values, coords, record = _cell_rows(fmt, channel, payload, event, session, ledger)
         attrs = {}
     if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
         raise ValueError(f"{channel}: give the units of a reaction time ({_RT_UNITS}): the "
                          "record's parameters['units'], or meta['units'] for one number")
+    _check_occurrences(channel, coords['stimulus_id'], ledger)
     states, why = _states(fmt, values, coords, record, _response_of(session))
     supplied = coords.pop('response_state', None)
     if supplied is not None and list(supplied) != states:
@@ -485,120 +562,133 @@ def _rows(channel, payload, event, session):
 
 
 def _validate(payload, event=None, session=None) -> List[str]:
-    """The ``behavior`` catalog validator: why an addressed response is malformed."""
+    """The ``behavior`` catalog validator: why an addressed response is malformed.
+
+    The rows it builds are kept for the session, which stores them without a
+    second pass (``_store``).
+    """
     channel = getattr(event, 'channel', None)
     if _format(channel) is None:
         if channel == 'behavior' and _number(payload):
             return ['a number is not a payload of the bare behavior channel']
         return []
     try:
-        _rows(channel, payload, event, session)
+        rows = _rows(channel, payload, event, session)
     except ValueError as error:
         return [str(error)]
+    ledger = _ledger(session)
+    if ledger is not None:
+        ledger.pending = (event, payload, rows)
     return []
 
 
-def _store(event, session):
-    """The stored answer of a checked response on an addressed behavior channel."""
-    if _format(event.channel) is None:
-        return event.payload
-    values, coords, record, attrs = _rows(event.channel, event.payload, event, session)
+def _store(channel, payload, event, session):
+    """The stored answer of a checked response; the table's expected occurrences are counted."""
+    ledger = _ledger(session)
+    pending = ledger.pending if ledger is not None else None
+    if pending is not None and pending[0] is event and pending[1] is payload:
+        rows = pending[2]
+    else:
+        rows = _rows(channel, payload, event, session)
+    if ledger is not None:
+        ledger.pending = None
+        ledger.answered.setdefault(channel, Counter()).update(rows[1]['stimulus_id'])
+    values, coords, record, attrs = rows
     return _assembly(values, coords, record, attrs)
 
 
-def _table(session):
-    table = getattr(session, 'stimuli', None)
-    return table if table is not None and 'stimulus_id' in getattr(table, 'columns', ()) else None
+def _missing(channel, session, stimulus_ids: list, reason: str, template=None):
+    """A stored answer for trials with no answer: NaN (or None) values, state ``missing``.
 
-
-def _missing_rows(channel, session, stimulus_ids: list, axis, dtype):
-    """Values and coordinates of trials with no answer: NaN (or None), state ``missing``."""
+    It has no record: nothing was answered. ``template`` (an answer of the same
+    channel) gives the choice axis, the dtype and the coordinate names; a
+    coordinate that the table has is copied from the table.
+    """
     fmt = _format(channel)
     n = len(stimulus_ids)
+    coords = {'stimulus_id': list(stimulus_ids), 'raw_answer': [None] * n,
+              'answer_valid': [False] * n, 'parse_error': [''] * n,
+              'response_state': ['missing'] * n, 'response_reason': [reason] * n}
     if fmt in ('choice', 'probabilities'):
-        if axis is None:
-            axis = _axis(session, _row_options(session, stimulus_ids[0] if n else None, None))
+        if template is not None:
+            axis = list(template['choice'].values)
+        else:
+            ledger = _ledger(session)
+            options = ledger.options(stimulus_ids[0]) if ledger is not None and n else None
+            axis = _axis(session, options)
         if axis is None:
             raise ValueError(f'{channel}: trials {stimulus_ids[:5]} have no answer and their '
                              'options are not known, so they cannot be stored as missing')
-        values = np.full((n, len(axis)), np.nan, dtype=dtype or np.float32)
+        dtype = template.values.dtype if template is not None else np.float32
+        values = np.full((n, len(axis)), np.nan, dtype=dtype)
+        coords['choice'] = axis
     elif fmt == 'text':
         values = np.array([None] * n, dtype=object)
     else:
         values = np.full(n, np.nan, dtype=np.float64)
-    coords = {'stimulus_id': list(stimulus_ids), 'raw_answer': [None] * n,
-              'answer_valid': [False] * n, 'parse_error': [''] * n,
-              'response_state': ['missing'] * n, 'response_reason': ['no answer event'] * n}
-    return values, coords, axis
+    return values, coords
 
 
-def _missing_answer(channel, session, stimulus_ids: list):
-    """A stored answer whose trials all had no answer (no record: nothing answered)."""
-    values, coords, axis = _missing_rows(channel, session, stimulus_ids, None, None)
-    if axis is not None:
-        coords['choice'] = axis
+def _table_missing(channel, session, template=None):
+    """The stored missing rows of the table trials of ``channel`` with no answer, or None.
+
+    The k-th answer row with stimulus id X answers the k-th table row with id X,
+    so the missing rows are the later occurrences, in table order.
+    """
+    ledger = _ledger(session)
+    if ledger is None or ledger.ids is None:
+        return None
+    answered = Counter(ledger.answered.get(channel, ()))
+    positions = []
+    for position, stimulus_id in enumerate(ledger.ids):
+        if answered[stimulus_id] > 0:
+            answered[stimulus_id] -= 1
+        else:
+            positions.append(position)
+    if not positions:
+        return None
+    ids = [ledger.ids[position] for position in positions]
+    values, coords = _missing(channel, session, ids, 'no answer event', template)
+    table = _table(session)
+    names = _presentation_coords(template) if template is not None else {}
+    for name in names:
+        if name not in coords and name in table.columns:
+            coords[name] = table[name].iloc[positions].tolist()
+    ledger.answered.setdefault(channel, Counter()).update(ids)   # stored once
     return _assembly(values, coords, None)
 
 
-def _collect(channel, answers: list, session):
-    """One stored answer from the stored answers of a channel's events.
+def _signal_missing(channel, session, count: int):
+    """``count`` stored missing rows for respond signals that got no answer."""
+    values, coords = _missing(channel, session, [None] * count, 'no answer to the respond signal')
+    return _assembly(values, coords, None)
 
-    In a session built from a table, each table row that no answer row names
-    is added as a missing trial, and the rows follow the table's order. Raises
-    when an answer row cannot be matched to the table.
+
+def _collect(channel, answers: list):
+    """One stored answer from the stored answers of a channel, in the order they arrived.
+
+    The record and attrs are those of the first answer that has a record.
     """
-    table = _table(session)
-    if len(answers) == 1 and table is None:
+    if len(answers) == 1:
         return answers[0]
     parts = [(np.asarray(a.values), _presentation_coords(a)) for a in answers]
-    axis = list(answers[0]['choice'].values) if answers and 'choice' in answers[0].dims else None
-    for answer in answers[1:]:
+    axis = next((list(a['choice'].values) for a in answers if 'choice' in a.dims), None)
+    for answer in answers:
         if axis is not None and list(answer['choice'].values) != axis:
             raise ValueError(f'{channel}: the answers have different choice axes')
-    if table is not None:
-        wanted = list(table['stimulus_id'])
-        remaining = list(wanted)
-        for _, coords in parts:
-            for stimulus_id in coords['stimulus_id']:
-                if _null(stimulus_id):
-                    raise ValueError(f'{channel}: an answer has no stimulus_id, so the trials '
-                                     'without an answer cannot be found')
-                if stimulus_id not in remaining:
-                    raise ValueError(f'{channel}: stimulus {stimulus_id!r} is answered more '
-                                     'often than it is in the table')
-                remaining.remove(stimulus_id)
-        if remaining:
-            dtype = parts[0][0].dtype if parts else None
-            values, coords, axis = _missing_rows(channel, session, remaining, axis, dtype)
-            parts.append((values, coords))
-        elif len(answers) == 1:
-            return answers[0]
-    if not parts:
-        raise ValueError(f'No emitted events for channel {channel!r}.')
     names = list(dict.fromkeys(name for _, coords in parts for name in coords))
     merged = {}
     for name in names:
         column = []
         for _, coords in parts:
             n = len(coords['stimulus_id'])
-            if name in coords:
-                column += list(coords[name])
-            elif table is not None and name in table.columns:
-                column += [table.loc[table['stimulus_id'] == i, name].iloc[0]
-                           for i in coords['stimulus_id']]
-            else:
-                column += ([True] * n if name == 'answer_valid' else
-                           [''] * n if name == 'parse_error' else [None] * n)
+            column += (list(coords[name]) if name in coords else
+                       [True] * n if name == 'answer_valid' else
+                       [''] * n if name == 'parse_error' else [None] * n)
         merged[name] = column
-    values = np.concatenate([part[0] for part in parts])
-    if table is not None:
-        wanted = list(table['stimulus_id'])
-        order = sorted(range(len(values)), key=lambda i: wanted.index(merged['stimulus_id'][i]))
-        values = values[order]
-        merged = {name: [column[i] for i in order] for name, column in merged.items()}
     if axis is not None:
         merged['choice'] = axis
-    record = answers[0].attrs.get('response') if answers else None
-    attrs = {key: value for key, value in answers[0].attrs.items() if key != 'response'} \
-        if answers else {}
-    return _assembly(values, merged, record, attrs)
+    first = next((a for a in answers if 'response' in a.attrs), answers[0])
+    attrs = {key: value for key, value in first.attrs.items() if key != 'response'}
+    return _assembly(np.concatenate([part[0] for part in parts]), merged,
+                     first.attrs.get('response'), attrs)
