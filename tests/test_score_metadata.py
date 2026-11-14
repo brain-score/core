@@ -395,14 +395,22 @@ def test_the_score_records_software_versions_and_commits(monkeypatch):
 
 
 def _fake_package(monkeypatch, folder):
-    """Make ``brainscore_core`` look imported from ``folder/brainscore_core``."""
+    """Make a stand-in package look imported from ``folder/stand_in_package``.
+
+    The stand-in has its own name: a module registered under a real Brain-Score
+    name from a temporary folder would count as an import outside the installed
+    package in the installed-package checks.
+    """
     import sys
     import types
-    (folder / "brainscore_core").mkdir(parents=True)
-    (folder / "pyproject.toml").write_text("[project]\nname='brainscore-core'\n")
-    module = types.ModuleType("brainscore_core")
-    module.__file__ = str(folder / "brainscore_core" / "__init__.py")
-    monkeypatch.setitem(sys.modules, "brainscore_core", module)
+    from brainscore_core import environment_check
+    (folder / "stand_in_package").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='stand-in'\n")
+    module = types.ModuleType("stand_in_package")
+    module.__file__ = str(folder / "stand_in_package" / "__init__.py")
+    monkeypatch.setitem(sys.modules, "stand_in_package", module)
+    monkeypatch.setattr(environment_check, "_BRAINSCORE_PACKAGES",
+                        (("stand_in_package", "stand-in"),))
 
 
 def test_a_git_checkout_stamps_its_real_forty_digit_commit(monkeypatch, tmp_path):
@@ -414,7 +422,7 @@ def test_a_git_checkout_stamps_its_real_forty_digit_commit(monkeypatch, tmp_path
     subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "x"], check=True)
     expected = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True,
                               text=True).stdout.strip()
-    commit = _score_environment()["code_commits"]["brainscore_core"]
+    commit = _score_environment()["code_commits"]["stand_in_package"]
     assert len(commit) == 40 and all(c in "0123456789abcdef" for c in commit)
     assert commit == expected
 
@@ -422,7 +430,7 @@ def test_a_git_checkout_stamps_its_real_forty_digit_commit(monkeypatch, tmp_path
 def test_no_checkout_stamps_none(monkeypatch, tmp_path):
     from brainscore_core.environment_check import _score_environment
     _fake_package(monkeypatch, tmp_path)
-    assert _score_environment()["code_commits"]["brainscore_core"] is None
+    assert _score_environment()["code_commits"]["stand_in_package"] is None
 
 
 def test_software_keys_are_installed_distribution_names():
