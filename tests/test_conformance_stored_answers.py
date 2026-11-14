@@ -65,7 +65,7 @@ def test_an_event_that_names_fewer_stimuli_than_its_rows_raises():
 def test_a_later_row_with_another_number_of_options_raises():
     table = _table(['s0', 's1'], options=[('a', 'b'), ('a', 'b', 'c')])
     session = stimulus_session(table, ['behavior:choice'], TaskContext(response=Choice('options')))
-    with pytest.raises(ValueError, match="options .* of stimulus 's1'"):
+    with pytest.raises(ValueError, match=r"different numbers of options \[2, 3\]"):
         session.respond(StreamEvent('behavior:choice',
                                     _choices(['s0', 's1'], [[1, 0], [0, 1]], axis=(0, 1)), None))
 
@@ -283,6 +283,36 @@ def test_missing_rows_obey_the_history_limit():
     assert len(seen) == 3 and all(event.meta.get('missing') for event in seen)
 
 
+# --- options by occurrence (P01) ------------------------------------------------
+
+def _two_a(**kwargs):
+    table = _table(['a', 'a'], options=[('cat', 'dog'), ('red', 'green', 'blue')])
+    return stimulus_session(table, ['behavior:choice'], TaskContext(response=Choice('options')))
+
+
+def test_each_occurrence_is_checked_against_its_own_options():
+    session = _two_a()
+    _drain(session)
+    session.respond(StreamEvent('behavior:choice', 'cat', None, {'stimulus_id': 'a'}))
+    session.respond(StreamEvent('behavior:choice', 'blue', None, {'stimulus_id': 'a'}))
+    first, second = (event.payload for event in session.emitted)
+    np.testing.assert_array_equal(first.values, [[1, 0]])
+    np.testing.assert_array_equal(second.values, [[0, 0, 1]])
+    assert list(first['response_state'].values) == list(second['response_state'].values) == ['valid']
+    # Rows of different widths cannot be one assembly: collect says so, each stays in emitted.
+    with pytest.raises(ValueError, match='different choice axes .* session.emitted'):
+        session.collect('behavior:choice')
+
+
+def test_one_assembly_for_occurrences_with_different_widths_is_refused():
+    session = _two_a()
+    _drain(session)
+    with pytest.raises(ValueError, match='different numbers of options .* one row at a time'):
+        session.respond(StreamEvent('behavior:choice',
+                                    _choices(['a', 'a'], [[1, 0], [0, 1]], axis=(0, 1)), None))
+    assert session.emitted == []
+
+
 # --- a table and respond signals (P03) ------------------------------------------
 
 def test_a_table_session_whose_source_sends_respond_signals_is_refused():
@@ -324,3 +354,4 @@ def test_run_environment_returns_the_choice_as_sent():
     actions = run_environment(_Chooser(), environment, action_channel='behavior:choice',
                               task=CHOICE)
     assert actions == ['cat'] and environment.heard == ['cat']
+

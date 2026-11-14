@@ -245,38 +245,48 @@ def _table(session):
 class _Ledger:
     """What a session's table expects and what each channel has answered.
 
-    Built once per session: the occurrence count of each table stimulus id, the
-    options of each id (when the options differ by row), and for each channel
-    the occurrences answered so far. ``pending`` keeps the rows the validator
-    built for the event the session is accepting, so each response is checked
-    and packaged in one pass.
+    Built once per session: the occurrence count and the table positions of
+    each stimulus id, the per-row options, and for each channel the occurrences
+    answered so far.
+    ``pending`` keeps the rows the validator built for the event the session is
+    accepting, so each response is checked and packaged in one pass.
     """
 
     def __init__(self, session):
         table = _table(session)
         self.ids = None if table is None else list(table['stimulus_id'])
         self.counts = None if table is None else Counter(self.ids)
+        self.positions: Dict[Any, list] = {}
+        for position, stimulus_id in enumerate(self.ids or ()):
+            self.positions.setdefault(stimulus_id, []).append(position)
         self.answered: Dict[str, Counter] = {}
         self.pending = None
         self._session = session
-        self._options = None
+        self._column = None
 
-    def options(self, stimulus_id) -> Optional[list]:
-        """The options of the trial with this stimulus id."""
+    def options(self, stimulus_id, occurrence: int = 0) -> Optional[list]:
+        """The options of the ``occurrence``-th trial (from 0) with this stimulus id.
+
+        The k-th answer for an id answers the k-th table row with that id, so
+        per-row options are read from that row, not from the first one.
+        """
         from .responses import Choice
         response = _response_of(self._session)
         if isinstance(response, Choice):
             if not isinstance(response.labels, str):
                 return list(response.labels)
-            if self._options is None:
-                table = _table(self._session)
-                self._options = ({} if table is None else
-                                 dict(zip(reversed(table['stimulus_id'].tolist()),
-                                          reversed(table[response.labels].tolist()))))
-            options = self._options.get(stimulus_id)
-            return None if options is None else list(options)
+            positions = self.positions.get(stimulus_id, ())
+            if occurrence >= len(positions):
+                return None
+            if self._column is None:
+                self._column = _table(self._session)[response.labels].tolist()
+            return list(self._column[positions[occurrence]])
         label_set = getattr(getattr(self._session, 'task', None), 'label_set', None)
         return list(label_set) if label_set else None
+
+    def occurrence(self, channel, stimulus_id) -> int:
+        """How many rows of ``channel`` already answer this stimulus id."""
+        return self.answered.get(channel, Counter())[stimulus_id]
 
 
 def _ledger(session) -> Optional[_Ledger]:
@@ -380,8 +390,8 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
     """A cell as ``(values, coords, record)`` of a one-row stored answer."""
     meta = getattr(event, 'meta', None) or {}
     stimulus_id = meta.get('stimulus_id')
-    options = (ledger.options(stimulus_id) if ledger is not None and fmt in ('choice', 'probabilities')
-               else None)
+    options = (ledger.options(stimulus_id, ledger.occurrence(channel, stimulus_id))
+               if ledger is not None and fmt in ('choice', 'probabilities') else None)
     coords = {'stimulus_id': [stimulus_id], 'answer_valid': [True], 'parse_error': ['']}
     parameters = {}
     if fmt in ('text', 'choice'):
@@ -452,12 +462,24 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
             raise ValueError(f'{channel}: the event answers stimuli {named}, but its rows are {ids}')
     if fmt in ('choice', 'probabilities'):
         axis = list(payload['choice'].values)
-        for stimulus_id in dict.fromkeys(ids):
-            options = ledger.options(stimulus_id) if ledger is not None else None
-            expected = _axis(session, options)
-            if expected is not None and [str(a) for a in axis] != [str(e) for e in expected]:
-                raise ValueError(f'{channel}: the choice axis is {axis}, not the options '
-                                 f'{expected} of stimulus {stimulus_id!r}')
+        if ledger is not None:
+            seen = Counter()
+            expected_axes = []
+            for stimulus_id in ids:   # each row by occurrence, also inside one event
+                occurrence = ledger.occurrence(channel, stimulus_id) + seen[stimulus_id]
+                seen[stimulus_id] += 1
+                expected_axes.append((stimulus_id, _axis(session, ledger.options(stimulus_id,
+                                                                                  occurrence))))
+            widths = {len(expected) for _, expected in expected_axes if expected is not None}
+            if len(widths) > 1:
+                raise ValueError(f'{channel}: the rows of this answer need different numbers of '
+                                 f'options {sorted(widths)}, so they cannot be one assembly; '
+                                 'answer such trials one row at a time (a cell or a one-row '
+                                 'assembly each)')
+            for stimulus_id, expected in expected_axes:
+                if expected is not None and [str(a) for a in axis] != [str(e) for e in expected]:
+                    raise ValueError(f'{channel}: the choice axis is {axis}, not the options '
+                                     f'{expected} of stimulus {stimulus_id!r}')
     if fmt == 'choice':
         known = np.isnan(values) | (values == 0) | (values == 1)
         if not known.all():
@@ -597,15 +619,17 @@ def _store(channel, payload, event, session):
     return _assembly(values, coords, record, attrs)
 
 
-def _missing(channel, session, stimulus_ids: list, reason: str, template=None):
+def _missing(channel, session, stimulus_ids: list, reason: str, template=None,
+             occurrences=None):
     """A stored answer for trials with no answer: NaN (or None) values, state ``missing``.
 
     It has no record: nothing was answered. ``template`` (an answer of the same
-    channel) gives the choice axis, the dtype and the coordinate names; a
-    coordinate that the table has is copied from the table.
+    channel) gives the choice axis and the dtype; ``occurrences`` give the
+    table occurrence of each id, for its options.
     """
     fmt = _format(channel)
     n = len(stimulus_ids)
+    occurrences = occurrences or [0] * n
     coords = {'stimulus_id': list(stimulus_ids), 'raw_answer': [None] * n,
               'answer_valid': [False] * n, 'parse_error': [''] * n,
               'response_state': ['missing'] * n, 'response_reason': [reason] * n}
@@ -614,7 +638,8 @@ def _missing(channel, session, stimulus_ids: list, reason: str, template=None):
             axis = list(template['choice'].values)
         else:
             ledger = _ledger(session)
-            options = ledger.options(stimulus_ids[0]) if ledger is not None and n else None
+            options = (ledger.options(stimulus_ids[0], occurrences[0])
+                       if ledger is not None and n else None)
             axis = _axis(session, options)
         if axis is None:
             raise ValueError(f'{channel}: trials {stimulus_ids[:5]} have no answer and their '
@@ -633,22 +658,32 @@ def _table_missing(channel, session, template=None):
     """The stored missing rows of the table trials of ``channel`` with no answer, or None.
 
     The k-th answer row with stimulus id X answers the k-th table row with id X,
-    so the missing rows are the later occurrences, in table order.
+    so the missing rows are the later occurrences, in table order. The session
+    calls it only once a driver has read the source to its end.
     """
     ledger = _ledger(session)
     if ledger is None or ledger.ids is None:
         return None
-    answered = Counter(ledger.answered.get(channel, ()))
-    positions = []
+    answered = ledger.answered.get(channel, Counter())
+    seen = Counter()
+    positions, occurrences = [], []
     for position, stimulus_id in enumerate(ledger.ids):
-        if answered[stimulus_id] > 0:
-            answered[stimulus_id] -= 1
-        else:
+        if seen[stimulus_id] >= answered[stimulus_id]:   # a later occurrence: no answer
             positions.append(position)
+            occurrences.append(seen[stimulus_id])
+        seen[stimulus_id] += 1
     if not positions:
         return None
     ids = [ledger.ids[position] for position in positions]
-    values, coords = _missing(channel, session, ids, 'no answer event', template)
+    if _format(channel) in ('choice', 'probabilities'):
+        widths = {len(ledger.options(i, k) or ()) for i, k in zip(ids, occurrences)}
+        if template is not None:
+            widths.add(template.sizes['choice'])
+        if len(widths) > 1:
+            raise ValueError(f'{channel}: the trials of this table need different numbers of '
+                             f'options {sorted(widths)}, so their answers cannot be one '
+                             'assembly; read each answer from session.emitted')
+    values, coords = _missing(channel, session, ids, 'no answer event', template, occurrences)
     table = _table(session)
     names = _presentation_coords(template) if template is not None else {}
     for name in names:
@@ -659,7 +694,11 @@ def _table_missing(channel, session, template=None):
 
 
 def _signal_missing(channel, session, count: int):
-    """``count`` stored missing rows for respond signals that got no answer."""
+    """``count`` stored missing rows for respond signals that got no answer.
+
+    Recorded limit: the rows are placed at the end of the episode and carry no
+    identity of the single signal they stand for.
+    """
     values, coords = _missing(channel, session, [None] * count, 'no answer to the respond signal')
     return _assembly(values, coords, None)
 
@@ -667,7 +706,8 @@ def _signal_missing(channel, session, count: int):
 def _collect(channel, answers: list):
     """One stored answer from the stored answers of a channel, in the order they arrived.
 
-    The record and attrs are those of the first answer that has a record.
+    Recorded limit: the record and attrs are those of the first answer that has a
+    record; collection does not check that all answers' records agree.
     """
     if len(answers) == 1:
         return answers[0]
@@ -675,7 +715,9 @@ def _collect(channel, answers: list):
     axis = next((list(a['choice'].values) for a in answers if 'choice' in a.dims), None)
     for answer in answers:
         if axis is not None and list(answer['choice'].values) != axis:
-            raise ValueError(f'{channel}: the answers have different choice axes')
+            raise ValueError(f'{channel}: the answers have different choice axes ({axis} and '
+                             f"{list(answer['choice'].values)}), so they cannot be one assembly; "
+                             'each stored answer is in session.emitted')
     names = list(dict.fromkeys(name for _, coords in parts for name in coords))
     merged = {}
     for name in names:
