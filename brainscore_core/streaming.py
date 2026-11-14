@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional
 
-from brainscore_core._evaluation.measures import note_response
+from brainscore_core._evaluation.measures import note_response, note_session
 
 
 _FAMILY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -353,6 +353,7 @@ class Session(Source):
                 check_event(event, io_catalog.INPUT)
             self._notify(0, event)
             if not isinstance(event, StreamEvent):
+                note_session(self)
                 return event
             if event.channel == CONTROL_CHANNEL:
                 if event.payload == BEGIN:
@@ -360,10 +361,12 @@ class Session(Source):
                     self._rows.append(None)
                     self._row_trials.setdefault(None, []).append(self._trial)
                 if self._control:
+                    note_session(self)
                     return event
             elif self._declared is None or channel_declared(event.channel, self._declared):
                 self._note_row(event)
                 self._note_state_change(event)
+                note_session(self)
                 return event
         self._read_all = True
         return None
@@ -453,6 +456,7 @@ class Session(Source):
             raise
         kept = event if kept is None else kept
         self._notify(1, kept)
+        note_session(self)
         note_response(kept, request)
         self.emitted.append(kept)
         limit = self.source.history_limit

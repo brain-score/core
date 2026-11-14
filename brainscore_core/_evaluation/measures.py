@@ -1,5 +1,9 @@
 """Record how the behavioral responses of one scoring run were measured.
 
+The record also notes each session that delivered an input to the subject or
+accepted a response (``note_session``): it tells ``na_score`` whether the run
+computed before a ``CompatibilityError``.
+
 A behavioral assembly states its measure in ``attrs['measure']``:
 ``{'kind': 'reported' | 'implied', 'source': ...}`` (see
 ``brainscore_core.responses``). ``score()`` opens ``record_measures()`` around
@@ -35,6 +39,10 @@ class MeasureRecord:
         self.measures: Set[Tuple[str, Optional[str]]] = set()
         self.applied: Set[str] = set()
         self.undone: Set[str] = set()
+        # ``{id(session): requested outputs}`` of each session that delivered an
+        # input to the subject or accepted a response from it during the run, in
+        # order: the run has computed once this is not empty (read by ``na_score``).
+        self._sessions: dict = {}
 
     @property
     def unreleased(self) -> Set[str]:
@@ -72,6 +80,8 @@ def record_measures() -> Iterator[MeasureRecord]:
             outer.measures |= record.measures
             outer.applied |= record.applied
             outer.undone |= record.undone
+            for session_id, outputs in record._sessions.items():
+                outer._sessions.setdefault(session_id, outputs)
 
 
 def note_measure(assembly) -> None:
@@ -84,6 +94,13 @@ def note_measure(assembly) -> None:
     if isinstance(measure, dict) and measure.get('kind') in MEASURE_KINDS:
         source = measure.get('source')
         record.measures.add((measure['kind'], None if source is None else str(source)))
+
+
+def note_session(session) -> None:
+    """Note that ``session`` delivered an input to the subject or accepted a response."""
+    record = _active.get()
+    if record is not None:
+        record._sessions.setdefault(id(session), tuple(session.outputs or ()))
 
 
 def note_response(event, request=None) -> None:
