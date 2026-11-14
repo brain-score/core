@@ -1,5 +1,7 @@
 """The one stimulus session builder: any requested outputs, a task, and a streaming mode."""
 
+from collections import Counter
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -192,7 +194,7 @@ def test_a_perturbation_answer_without_meta_is_read_against_the_delivered_change
         session = _state_change_session(StateChange(kind='reset', handle_id='h'))
         session.next_input()
         session.respond(StreamEvent('perturbation', PerturbationApplied('h', None, None), 0.0))
-    assert record.undone == {'h': 1} and not record.applied
+    assert record.undone == {'h': 1} and record.applied == Counter()
 
 
 def test_a_subject_that_declares_the_family_receives_the_change():
