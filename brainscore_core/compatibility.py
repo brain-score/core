@@ -109,9 +109,11 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     :class:`CompatibilityError` before compute when valid declarations do not
     fit, and ``ValueError`` when a declaration is malformed (a field spelled the
     way benchmarks do not read, no inputs, a bad channel name, direction or form,
-    an inconsistent ``output_inputs``): that is a defect, not an N/A pair. Whether
-    one part of the subject answers all requested outputs together (the
-    support step) is decided by the subject when a session starts.
+    an inconsistent ``output_inputs`` or ``required_channels``, an unknown
+    ``trial_memory``): that is a defect, not an N/A pair. Both declarations are
+    validated before they are compared. Whether one part of the subject answers
+    all requested outputs together is decided by the subject when a session
+    starts; a refusal there is an error of the run, not N/A.
     Every declared channel must be registered in the catalog with the right
     direction.
     """
@@ -145,14 +147,37 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"states what it sends: set required_input_channels (rule 5.1)."
         )
 
-    validate_channels(subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels")
-    validate_channels(subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels")
-    validate_channels(subject_required, io_catalog.INPUT,
-                      f"subject '{subject_id}' required_channels")
-    validate_channels(bench_inputs, io_catalog.INPUT,
-                      f"benchmark '{benchmark_id}' input channels")
-    validate_channels(bench_requested, io_catalog.OUTPUT,
-                      f"benchmark '{benchmark_id}' requested_output_channels")
+    # Both declarations are validated completely before any comparison, so a
+    # defect (ValueError) is never hidden behind an unrelated mismatch. A channel
+    # outside the catalog is not a defect of form; it is reported after them.
+    unknown = None
+    for channels, direction, owner in (
+            (subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels"),
+            (subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels"),
+            (subject_required, io_catalog.INPUT, f"subject '{subject_id}' required_channels"),
+            (bench_inputs, io_catalog.INPUT, f"benchmark '{benchmark_id}' input channels"),
+            (bench_requested, io_catalog.OUTPUT,
+             f"benchmark '{benchmark_id}' requested_output_channels")):
+        try:
+            validate_channels(channels, direction, owner)
+        except CompatibilityError as error:
+            unknown = unknown or error
+    undeclared_required = subject_required - subject_in
+    if undeclared_required:
+        raise ValueError(
+            f"Subject '{subject_id}' requires {_format_channels(undeclared_required)}, which "
+            f"are not in its in_channels {_format_channels(subject_in)}.")
+    output_inputs = subject.output_inputs
+    _validate_output_inputs(output_inputs, subject_in, subject_out, subject_id)
+    if 'memory:trial_history' in getattr(subject, 'traits', ()) and CONTROL_CHANNEL not in subject_in:
+        raise ValueError(
+            f"Subject '{subject_id}' declares memory:trial_history but not the "
+            f"'{CONTROL_CHANNEL}' input, so it cannot know where a trial starts. "
+            f"Add '{CONTROL_CHANNEL}' to in_channels.")
+    required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
+                                           getattr(benchmark, 'trial_memory', 'none'))
+    if unknown is not None:
+        raise unknown
 
     missing_outputs = bench_requested - subject_out
     if missing_outputs:
@@ -187,8 +212,6 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"'{benchmark_id}' sends {_format_channels(bench_inputs)}.",
             channels=unmet_requirements)
 
-    output_inputs = subject.output_inputs
-    _validate_output_inputs(output_inputs, subject_in, subject_out, subject_id)
     for output in sorted(bench_requested):
         if output not in output_inputs:
             continue
@@ -200,20 +223,12 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
                 f"{_format_channels(consumed)} of what benchmark '{benchmark_id}' sends.",
                 channels=needed)
 
-    required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
-                                           getattr(benchmark, 'trial_memory', 'none'))
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
     if missing_traits:
         raise CompatibilityError(
             f"Benchmark '{benchmark_id}' requires subject traits {sorted(missing_traits)}; "
             f"subject '{subject_id}' declares {sorted(subject.traits) or 'none'}."
         )
-
-    if 'memory:trial_history' in getattr(subject, 'traits', ()) and CONTROL_CHANNEL not in subject_in:
-        raise CompatibilityError(
-            f"Subject '{subject_id}' declares memory:trial_history but not the "
-            f"'{CONTROL_CHANNEL}' input, so it cannot know where a trial starts. "
-            f"Add '{CONTROL_CHANNEL}' to in_channels.", channels={CONTROL_CHANNEL})
 
     return CompatibilityMatch(
         subject=subject_id,

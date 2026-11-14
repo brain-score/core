@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from brainscore_core.compatibility import (
@@ -358,3 +360,44 @@ def test_an_empty_listed_set_is_an_error_and_an_absent_entry_is_unrestricted():
         check_channel_compatibility(empty, bench)
     absent = _Listing({}, in_channels={"text"}, out_channels={"neural:IT"})
     assert check_channel_compatibility(absent, bench).kind == "full"
+
+
+# ── A defect is reported before any mismatch of the pair ──────────────────────
+
+class _DeclaredSubject:
+    identifier = 'declared'
+    in_channels = frozenset({'text'})
+    out_channels = frozenset({'behavior'})       # no neural:IT: a mismatch with the benchmark
+    required_channels = frozenset()
+    output_inputs = {}
+    traits = frozenset()
+
+
+def _mismatched_benchmark(**fields):
+    values = dict(identifier='mismatched', required_input_channels=frozenset({'text'}),
+                  requested_output_channels=frozenset({'neural:IT'}))
+    return SimpleNamespace(**(values | fields))
+
+
+@pytest.mark.parametrize('subject_fields, benchmark_fields, message', [
+    ({'output_inputs': {'behavior': frozenset({'audio'})}}, {}, 'output_inputs'),
+    ({'output_inputs': {'neural:V1': frozenset({'text'})}}, {}, 'output_inputs'),
+    ({'required_channels': frozenset({'audio'})}, {}, 'not in its in_channels'),
+    ({'traits': frozenset({'memory:trial_history'})}, {}, "'control'"),
+    ({}, {'trial_memory': 'forever'}, 'trial_memory'),
+    ({}, {'required_input_channels': frozenset({'vision'})}, 'vision'),
+    ({}, {'required_input_channels': frozenset({'neural:IT'})}, 'registry marks'),
+    ({'in_channels': frozenset({'text', 'neural:IT'})}, {}, 'registry marks'),
+], ids=['output-inputs-undeclared-input', 'output-inputs-undeclared-output', 'required-not-in-inputs',
+        'history-without-control', 'trial-memory', 'bare-vision', 'benchmark-direction',
+        'subject-direction'])
+def test_a_defect_is_reported_even_when_the_pair_also_mismatches(subject_fields, benchmark_fields,
+                                                                  message):
+    subject = type('Subject', (_DeclaredSubject,), subject_fields)()
+    with pytest.raises(ValueError, match=message):
+        check_channel_compatibility(subject, _mismatched_benchmark(**benchmark_fields))
+
+
+def test_the_mismatch_alone_is_not_applicable():
+    with pytest.raises(CompatibilityError, match='neural:IT'):
+        check_channel_compatibility(_DeclaredSubject(), _mismatched_benchmark())

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from brainscore_core.contract import Subject
-from brainscore_core.compatibility import CompatibilityError, check_channel_compatibility
+from brainscore_core.compatibility import check_channel_compatibility
 from brainscore_core.streaming import (
     Session, StreamEvent, begin_event, end_event, respond_event,
 )
@@ -84,10 +84,10 @@ class _Remembering(_Reader):
         return {'memory:trial_history'}
 
 
-def test_a_memory_subject_without_control_is_not_applicable():
+def test_a_memory_subject_without_control_is_a_malformed_declaration():
     bench = SimpleNamespace(identifier='b', required_input_channels={'text'},
                             requested_output_channels={'behavior'})
-    with pytest.raises(CompatibilityError, match="'control'"):
+    with pytest.raises(ValueError, match="'control'"):
         check_channel_compatibility(_Remembering(), bench)
     _Remembering.in_channels = {'text', 'control'}
     try:
