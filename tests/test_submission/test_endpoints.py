@@ -212,6 +212,38 @@ class TestRunScoring:
         score_entry, = list(database_models.Score.select())
         assert score_entry.score_raw == 0.8
 
+    def test_an_ordinary_nan_score_with_an_na_like_comment_is_retried(self):
+        import math
+        class NoCeiling(DummyDomainPlugins):
+            def __init__(self):
+                self.calls = 0
+
+            def score(self, model_identifier, benchmark_identifier):
+                self.calls += 1
+                score = Score([float('nan'), float('nan')], coords={'aggregation': ['center', 'error']},
+                              dims=['aggregation'])
+                score.attrs['comment'] = 'N/A: no ceiling estimate'
+                return score
+        plugins = NoCeiling()
+        endpoint = RunScoringEndpoint(domain_plugins=plugins, db_secret=self.test_database)
+        endpoint._upload_score_to_s3 = lambda *args, **kwargs: None
+        for _ in range(2):
+            endpoint(domain='test', model_identifier='dummymodel1', benchmark_identifier='dummybenchmark1',
+                     jenkins_id=123, user_id=1, model_type='artificial_subject', public=True, competition=None)
+        assert plugins.calls == 2                     # not a stored N/A result: run again
+        score_entry, = list(database_models.Score.select())
+        assert score_entry.score_raw is None or math.isnan(score_entry.score_raw)
+        assert score_entry.comment == 'Comment: N/A: no ceiling estimate'
+
+    def test_an_ordinary_comment_is_stored_unchanged(self):
+        from brainscore_core.submission.database import update_score
+        score = Score([0.5, 0.1], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+        score.attrs['comment'] = 'layers: {"IT": "layer4"}'
+        entry, _ = database_models.Score.get_or_create(
+            benchmark=BenchmarkInstance.get(), model=Model.get(name='dummymodel1'))
+        update_score(score, entry)
+        assert database_models.Score.get().comment == 'layers: {"IT": "layer4"}'
+
     def test_full_scoring(self):
         domain, models, benchmarks = 'test', ['dummymodel1'], RunScoringEndpoint.ALL_PUBLIC
 

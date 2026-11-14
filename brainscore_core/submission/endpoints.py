@@ -39,13 +39,11 @@ from brainscore_core.submission.database import (
     public_benchmark_identifiers)
 
 # Scoring imports
-from brainscore_core.submission.database import update_score
+from brainscore_core.submission.database import _NA_COMMENT, update_score
 from brainscore_core.submission.eligibility import require_leaderboard_eligible
 
 logger = logging.getLogger(__name__)
 
-
-_NA_COMMENT = f'{STATUS_NA}: '   # the comment of a stored N/A result
 
 class UserManager:
     """
