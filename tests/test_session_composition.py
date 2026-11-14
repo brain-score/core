@@ -74,10 +74,20 @@ def test_batch_and_streaming_drivers_ignore_control_events():
         session = stimulus_session(_table(2), ['neural:IT'],
                                    streaming=streaming).declare_inputs({'text'})
         data = list(iter(session.next_input, None))
+        # A table source marks its trials with begin and end only.
         session = stimulus_session(_table(2), ['neural:IT'], streaming=streaming)
         session.source = FixedSource([
+            begin_event(0.0), data[0], end_event('terminal', 2.0),
+            begin_event(3.0), data[1], end_event('terminal', 5.0)])
+        recorder = Recorder()
+        driver(recorder, session)
+        assert sum(recorder.sizes) == 2
+        assert session.collect('neural:IT').sizes['presentation'] == 2
+        # Without a table, a source can also send respond signals; the drivers ignore them.
+        session = Session(FixedSource([
             begin_event(0.0), data[0], respond_event(1.0), end_event('terminal', 2.0),
-            begin_event(3.0), data[1], respond_event(4.0), end_event('terminal', 5.0)])
+            begin_event(3.0), data[1], respond_event(4.0), end_event('terminal', 5.0)]),
+            ['neural:IT'])
         recorder = Recorder()
         driver(recorder, session)
         assert sum(recorder.sizes) == 2
