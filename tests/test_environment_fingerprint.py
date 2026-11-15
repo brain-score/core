@@ -1,5 +1,6 @@
 """The environment fingerprint and the accelerator in a score's ``software``."""
 import json
+import os
 import platform
 import sys
 from types import SimpleNamespace
@@ -24,7 +25,7 @@ class _Distribution:
 def _with(monkeypatch, packages):
     import importlib.metadata
     monkeypatch.setattr(importlib.metadata, 'distributions',
-                        lambda: [p if isinstance(p, _Distribution) else _Distribution(*p) for p in packages])
+                        lambda **kwargs: [p if isinstance(p, _Distribution) else _Distribution(*p) for p in packages])
     environment_fingerprint.cache_clear()
 
 
@@ -79,7 +80,7 @@ def test_it_is_computed_once_per_process(monkeypatch):
     calls = []
     import importlib.metadata
     monkeypatch.setattr(importlib.metadata, 'distributions',
-                        lambda: calls.append(1) or [_Distribution(*p) for p in BASE])
+                        lambda **kwargs: calls.append(1) or [_Distribution(*p) for p in BASE])
     environment_fingerprint.cache_clear()
     environment_fingerprint(), environment_fingerprint(), _score_environment()
     assert calls == [1]
@@ -172,3 +173,73 @@ def test_metadata_that_cannot_be_read_gives_an_unavailable_value(monkeypatch):
 def test_a_distribution_without_a_name_gives_an_unavailable_value(monkeypatch):
     _with(monkeypatch, BASE + [_Distribution(None, '1.0')])
     assert environment_fingerprint() == 'unavailable: a distribution has no name (at /site-packages/)'
+
+
+
+# The folders the fingerprint reads: those known when the interpreter starts (repair after the cloud check).
+
+def _dist_info(folder, name, version):
+    """A made-up installed distribution: ``<folder>/<name>-<version>.dist-info/METADATA``."""
+    info = folder / f'{name}-{version}.dist-info'
+    info.mkdir(parents=True)
+    (info / 'METADATA').write_text(f'Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n')
+
+
+def test_the_value_does_not_change_when_sys_path_gains_a_folder_with_a_distribution(tmp_path, monkeypatch):
+    before = environment_fingerprint()
+    environment_fingerprint.cache_clear()
+    _dist_info(tmp_path / 'added', 'made-up-added', '1.0')
+    monkeypatch.syspath_prepend(str(tmp_path / 'added'))
+    assert environment_fingerprint() == before
+
+
+def test_a_vendor_folder_inside_a_package_is_never_read(tmp_path, monkeypatch):
+    """As setuptools/_vendor joins sys.path when setuptools is imported."""
+    from brainscore_core.environment_check import _environment_folders
+    site_packages = tmp_path / 'site-packages'
+    _dist_info(site_packages, 'made-up-installed', '1.0')
+    _dist_info(site_packages / 'tool' / '_vendor', 'made-up-vendored', '9.9')
+    monkeypatch.setattr(environment_check, '_environment_folders', lambda: [str(site_packages)])
+    before = environment_fingerprint()
+    environment_fingerprint.cache_clear()
+    monkeypatch.setattr(sys, 'path', sys.path + [str(site_packages / 'tool' / '_vendor')])
+    assert environment_fingerprint() == before
+    assert str(site_packages / 'tool' / '_vendor') not in _environment_folders()
+
+
+def test_a_name_found_twice_counts_once_the_first_in_path_order(tmp_path, monkeypatch):
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    _dist_info(first, 'made-up', '1.0')
+    _dist_info(second, 'made-up', '2.0')
+    alone_first = tmp_path / 'alone'
+    _dist_info(alone_first, 'made-up', '1.0')
+    values = {}
+    for label, folders in (('both', [first, second]), ('first only', [alone_first]),
+                           ('second first', [second, first])):
+        monkeypatch.setattr(environment_check, '_environment_folders', lambda f=folders: [str(x) for x in f])
+        environment_fingerprint.cache_clear()
+        values[label] = environment_fingerprint()
+    assert values['both'] == values['first only']           # the later 2.0 adds nothing
+    assert values['second first'] != values['both']         # the first in order decides
+
+
+def test_a_folder_on_pythonpath_with_a_distribution_is_another_environment(tmp_path, monkeypatch):
+    from brainscore_core.environment_check import _environment_folders
+    before = environment_fingerprint()
+    _dist_info(tmp_path / 'extlibs', 'made-up-extlib', '1.0')
+    monkeypatch.setenv('PYTHONPATH', os.pathsep.join([str(tmp_path / 'extlibs'), os.environ.get('PYTHONPATH', '')]))
+    environment_fingerprint.cache_clear()
+    assert _environment_folders()[0] == str(tmp_path / 'extlibs')
+    assert environment_fingerprint() != before
+
+
+def test_the_doctor_a_score_and_another_process_give_one_value():
+    import subprocess
+    value = environment_fingerprint()
+    assert _score_environment()['software']['environment_fingerprint'] == value
+    other = subprocess.run(
+        [sys.executable, '-W', 'ignore', '-c',
+         'import sys; sys.path.append("/nonexistent/vendor"); import json, xml.dom.minidom; '
+         'from brainscore_core.environment_check import environment_fingerprint; print(environment_fingerprint())'],
+        capture_output=True, text=True, env=dict(os.environ), check=True)
+    assert other.stdout.strip().splitlines()[-1] == value

@@ -44,6 +44,7 @@ dependencies (no torch/transformers import).
 import functools
 import hashlib
 import json
+import os
 import platform
 import re
 import sys
@@ -176,15 +177,40 @@ def _source(distribution) -> str:
     return ""
 
 
+def _environment_folders() -> List[str]:
+    """The folders an import reads distributions from in this environment, in import order.
+
+    The entries of the ``PYTHONPATH`` variable, then the user and the interpreter's own
+    site-packages folders: all known when the interpreter starts. Folders that code
+    adds to ``sys.path`` later (a vendor folder inside a package, a test's folder)
+    are not read, so the value does not depend on what was imported before.
+    """
+    import site
+    folders = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
+    if site.ENABLE_USER_SITE:
+        folders.append(site.getusersitepackages())
+    folders.extend(site.getsitepackages())
+    seen, ordered = set(), []
+    for folder in (os.path.abspath(f) for f in folders):
+        if folder not in seen and os.path.isdir(folder):
+            seen.add(folder)
+            ordered.append(folder)
+    return ordered
+
+
 @functools.lru_cache(maxsize=1)
 def environment_fingerprint() -> str:
-    """SHA-256 of the sorted lines that name the Python, the platform and every installed distribution.
+    """SHA-256 of the sorted lines that name the Python, the platform and the distributions an import uses.
 
     One line ``python==<three numbers>``, one ``platform==<system> <machine>``, and per
     distribution ``<normalized name>==<version>``, followed by the commit of a package
     installed from a repository or the location of an editable install, when the
-    installer recorded it. The four Brain-Score packages are left out, because
-    ``code_commits`` names their code. Computed once per process.
+    installer recorded it. The distributions are those of ``_environment_folders()``
+    (the ``PYTHONPATH`` entries and the site-packages folders); for a name found more
+    than once, the first in import order counts, as an import uses it. The four
+    Brain-Score packages are left out, because ``code_commits`` names their code.
+    Computed once per process; two processes of one environment with the same
+    ``PYTHONPATH`` give the same value, whatever each imported before.
 
     Metadata that cannot be read gives ``'unavailable: <reason>'``, never a partial
     digest and never an exception: a finished score and the doctor keep running.
@@ -196,7 +222,8 @@ def environment_fingerprint() -> str:
         from importlib.metadata import distributions
         own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
         lines = {f"python=={platform.python_version()}", f"platform=={platform.system()} {platform.machine()}"}
-        for distribution in distributions():
+        first = set()
+        for distribution in distributions(path=_environment_folders()):
             try:
                 name = distribution.metadata["Name"]
                 version = distribution.version
@@ -204,8 +231,12 @@ def environment_fingerprint() -> str:
                 return f"{UNAVAILABLE}the metadata of a distribution cannot be read ({type(error).__name__}: {error})"
             if not name:
                 return f"{UNAVAILABLE}a distribution has no name (at {distribution.locate_file('')})"
-            if _normalized(name) not in own:
-                lines.add(f"{_normalized(name)}=={version}{_source(distribution)}")
+            key = _normalized(name)
+            if key in first:
+                continue            # a later entry of a name: an import uses the first
+            first.add(key)
+            if key not in own:
+                lines.add(f"{key}=={version}{_source(distribution)}")
         return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
     except Exception as error:
         return f"{UNAVAILABLE}{type(error).__name__}: {error}"
