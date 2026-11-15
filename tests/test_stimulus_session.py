@@ -267,3 +267,15 @@ def test_a_subject_that_does_not_declare_the_family_never_receives_the_change():
     with pytest.raises(ValueError, match="add 'lesion'"):
         drive_state_change_session(_Subject(), session)
     assert session.emitted == []
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+def test_only_the_table_builder_states_that_its_source_presents_exactly_its_table(streaming):
+    """A subject may plan from the whole table only then; a caller's own source with a table may not."""
+    from brainscore_core.streaming import Session
+    table = StimulusSet({'stimulus_id': ['a', 'b'], 'sentence': ['x', 'y']})
+    table.identifier = 'presents-table'
+    assert stimulus_session(table, ['behavior'], streaming=streaming)._presents_table is True
+    given = Session([StreamEvent('text', 'x', 0.0, {'stimulus_id': 'a'})], ['behavior'], stimuli=table)
+    assert given._presents_table is False
+    assert given.declare_inputs({'text'})._presents_table is False
