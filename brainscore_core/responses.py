@@ -1,10 +1,14 @@
 """The form a behavioral answer takes.
 
 A ``TaskContext`` says what the subject is asked to do; its ``response`` says
-what form the answer takes. A response knows how to phrase itself after the
-instruction (``directive``), how to read a reply (``parse``), and which output
-channels it produces. ``Choice``, ``Scale`` and ``Text`` are the core response
-classes; a task takes these classes only, not a subclass.
+what form the answer takes and which output channels it produces. ``Choice``,
+``Scale`` and ``Text`` are the core response classes; a task takes these classes
+only, not a subclass.
+
+``directive`` and ``parse`` are the model side's tools; a benchmark gives the
+specification only (the options, the scale, the instruction). A model part that
+generates text phrases the answer line with ``directive`` and reads its reply
+with ``parse``; each format defines both once, here.
 
 An answer comes from the model's reply, a likelihood part, a readout or a
 stated link. Every answer says which in its response record
@@ -287,12 +291,6 @@ def _cell(row, column):
 
 def response_channels(response) -> Tuple[str, ...]:
     return () if response is None else tuple(response.channels)
-
-
-def prompt_for(instruction: Optional[str], response) -> str:
-    """The text a replying model receives: the instruction, then the directive."""
-    parts = [part for part in ((instruction or '').strip(), response.directive()) if part]
-    return '\n\n'.join(parts)
 
 
 def labels_of(response) -> Optional[Sequence[str]]:
