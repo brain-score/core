@@ -150,3 +150,25 @@ def test_the_python_version_and_the_platform_count(monkeypatch, name, value):
     monkeypatch.setattr(platform, name, lambda: value)
     environment_fingerprint.cache_clear()
     assert environment_fingerprint() != first
+
+
+class _Broken(_Distribution):
+    @property
+    def metadata(self):
+        raise ValueError('bad METADATA file')
+
+    @metadata.setter
+    def metadata(self, value):
+        pass
+
+
+def test_metadata_that_cannot_be_read_gives_an_unavailable_value(monkeypatch):
+    _with(monkeypatch, BASE + [_Broken('broken', '1.0')])
+    value = environment_fingerprint()
+    assert value == 'unavailable: the metadata of a distribution cannot be read (ValueError: bad METADATA file)'
+    assert _score_environment()['software']['environment_fingerprint'] == value      # the stamp keeps running
+
+
+def test_a_distribution_without_a_name_gives_an_unavailable_value(monkeypatch):
+    _with(monkeypatch, BASE + [_Distribution(None, '1.0')])
+    assert environment_fingerprint() == 'unavailable: a distribution has no name (at /site-packages/)'

@@ -154,6 +154,9 @@ def _normalized(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+UNAVAILABLE = "unavailable: "
+
+
 def _source(distribution) -> str:
     """The source identity the installer recorded (``direct_url.json``, PEP 610), or ``''``.
 
@@ -183,17 +186,29 @@ def environment_fingerprint() -> str:
     installer recorded it. The four Brain-Score packages are left out, because
     ``code_commits`` names their code. Computed once per process.
 
-    Two scores are compared bit for bit only when their fingerprints are equal,
-    their ``accelerator`` values are equal, and every code commit is known and equal.
+    Metadata that cannot be read gives ``'unavailable: <reason>'``, never a partial
+    digest and never an exception: a finished score and the doctor keep running.
+    Two scores are compared bit for bit only when their fingerprints are equal and
+    not unavailable, their ``accelerator`` values are equal, and every code commit
+    is known and equal.
     """
-    from importlib.metadata import distributions
-    own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
-    lines = {f"python=={platform.python_version()}", f"platform=={platform.system()} {platform.machine()}"}
-    for distribution in distributions():
-        name = distribution.metadata["Name"]
-        if name and _normalized(name) not in own:
-            lines.add(f"{_normalized(name)}=={distribution.version}{_source(distribution)}")
-    return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
+    try:
+        from importlib.metadata import distributions
+        own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
+        lines = {f"python=={platform.python_version()}", f"platform=={platform.system()} {platform.machine()}"}
+        for distribution in distributions():
+            try:
+                name = distribution.metadata["Name"]
+                version = distribution.version
+            except Exception as error:
+                return f"{UNAVAILABLE}the metadata of a distribution cannot be read ({type(error).__name__}: {error})"
+            if not name:
+                return f"{UNAVAILABLE}a distribution has no name (at {distribution.locate_file('')})"
+            if _normalized(name) not in own:
+                lines.add(f"{_normalized(name)}=={version}{_source(distribution)}")
+        return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
+    except Exception as error:
+        return f"{UNAVAILABLE}{type(error).__name__}: {error}"
 
 
 def _accelerator() -> str:
