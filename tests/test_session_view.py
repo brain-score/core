@@ -120,3 +120,18 @@ def test_a_present_entry_no_input_provides_is_still_an_error():
     session.declare_inputs({'text'})
     with pytest.raises(ValueError, match='sentense'):
         trial_prompt(session.task, session.stimuli.iloc[0])
+
+
+def test_the_inputs_a_task_presents_from_a_table():
+    import pytest as _pytest
+    from brainscore_core.contract import TaskContext
+    from brainscore_core.responses import Choice
+    from brainscore_core.streaming_helpers import task_input_channels
+    from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+    table = StimulusSet([{'stimulus_id': 's0', 'sentence': 'cat', 'screen': '/a.png'}])
+    assert task_input_channels(table) == {'text'}
+    named = TaskContext(present=('text', 'image:screen'), response=Choice(['a', 'b']))
+    assert task_input_channels(table, named) == {'text', 'vision:image'}
+    missing = TaskContext(present=('image:word_9',), response=Choice(['a', 'b']))
+    with _pytest.raises(ValueError, match="names column 'word_9', which the stimulus table does not have"):
+        task_input_channels(table, missing)
