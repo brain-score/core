@@ -57,16 +57,16 @@ def test_stamp_score_metadata_adds_provenance_and_preserves_existing_attrs():
         score,
         _Subject(),
         requested_channels={"neural:IT"},
-        harness_id="test-harness")
+        entry_point="test-harness")
 
     assert returned is score
     assert score.attrs["runtime_sec"] == 0.01
     assert score.attrs["in_channels"] == ("text", "vision")
-    assert score.attrs["out_channels"] == ("neural:IT",)
+    assert score.attrs["requested_outputs"] == ("neural:IT",)
     assert score.attrs["response"] == ()
     assert "protocol" not in score.attrs and "measure" not in score.attrs
-    assert score.attrs["subject_id"] == "subject"
-    assert score.attrs["harness_id"] == "test-harness"
+    assert score.attrs["subject_identifier"] == "subject"
+    assert score.attrs["entry_point"] == "test-harness"
 
 
 class _NamedBenchmark:
@@ -82,7 +82,7 @@ class _MethodNamedBenchmark:
 
 
 def _stamp_identity(score, benchmark, requested):
-    return stamp_score_metadata(score, _Subject(), requested_channels=set(), harness_id='h',
+    return stamp_score_metadata(score, _Subject(), requested_channels=set(), entry_point='h',
                                 benchmark=benchmark, benchmark_identifier=requested)
 
 
@@ -114,7 +114,7 @@ def test_another_written_identifier_is_refused(written):
 
 
 def test_without_the_benchmark_arguments_the_stamp_writes_neither_key():
-    score = stamp_score_metadata(Score(1), _Subject(), requested_channels=set(), harness_id='h')
+    score = stamp_score_metadata(Score(1), _Subject(), requested_channels=set(), entry_point='h')
     assert 'benchmark_identifier' not in score.attrs and 'trial_memory' not in score.attrs
 
 
@@ -180,7 +180,7 @@ def _stimuli():
 
 
 def _stamp(subject, measures):
-    return stamp_score_metadata(Score(0.5), subject, {'behavior'}, harness_id='test',
+    return stamp_score_metadata(Score(0.5), subject, {'behavior'}, entry_point='test',
                                 measures=measures)
 
 
@@ -207,7 +207,7 @@ def test_legacy_facade_behavioral_benchmark_gets_the_record():
 
     with record_measures() as measures:
         score = benchmark(LegacyBenchmarkFacade(subject, visual_degrees=8))
-    stamp_score_metadata(score, subject, {'behavior'}, harness_id='test', measures=measures)
+    stamp_score_metadata(score, subject, {'behavior'}, entry_point='test', measures=measures)
 
     assert score.attrs['response'] == (REPLY,)
 
@@ -225,7 +225,7 @@ def test_two_records_are_both_on_the_score_once_each():
 
 
 def test_nothing_recorded_gives_an_empty_record():
-    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'}, harness_id='test')
+    score = stamp_score_metadata(Score(0.5), _Subject(), {'behavior'}, entry_point='test')
 
     assert score.attrs['response'] == ()
     assert 'protocol' not in score.attrs
@@ -376,7 +376,7 @@ def _stamped(events, monkeypatch, plan=None):
             note_session(session, plan)
         _answer_session(session)
     return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                harness_id='test', measures=measures)
+                                entry_point='test', measures=measures)
 
 
 def _events():
@@ -402,7 +402,7 @@ def test_a_run_with_both_deliveries_lists_both(monkeypatch):
         _answer_session(Session(_events(), ['neural:IT']))
         _answer_session(Session(iter(_events()), ['neural:IT']))
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                 harness_id='test', measures=measures)
+                                 entry_point='test', measures=measures)
     assert score.attrs['delivery'] == ('listed', 'stream')
 
 
@@ -411,7 +411,7 @@ def test_a_run_without_sessions_records_no_delivery(monkeypatch):
     with record_measures() as measures:
         pass
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(),
-                                 harness_id='test', measures=measures)
+                                 entry_point='test', measures=measures)
     assert score.attrs['delivery'] is None
     assert score.attrs['regions_per_pass'] is None
 
@@ -507,7 +507,7 @@ def test_reading_versions_does_not_import_torch():
             'from brainscore_core.score_metadata import stamp_score_metadata; '
             'from brainscore_core._evaluation.measures import MeasureRecord; '
             'from brainscore_core.metrics import Score; '
-            'stamp_score_metadata(Score(1), object(), set(), harness_id="t", '
+            'stamp_score_metadata(Score(1), object(), set(), entry_point="t", '
             'measures=MeasureRecord()); '
             'assert "torch" not in sys.modules; print("torch" in sys.modules)')
     out = subprocess.run([sys.executable, '-W', 'ignore', '-c', code], capture_output=True,
@@ -528,7 +528,7 @@ def _noted(entries, monkeypatch, disable='1', answer_with=None):
             note_session(session, provenance=entry)
             _answer_session(session)
     return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                harness_id='test', measures=measures)
+                                entry_point='test', measures=measures)
 
 
 def test_a_noted_entry_reaches_the_score_with_the_store_state(monkeypatch):
@@ -560,7 +560,7 @@ def test_a_subject_that_notes_nothing_gets_facts_not_stated(monkeypatch):
 
 
 def test_a_stamp_without_a_run_states_no_store():
-    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(), harness_id='test')
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(), entry_point='test')
     assert score.attrs['provenance'] == (
         {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'not stated'},)
 
@@ -595,7 +595,7 @@ def test_responses_and_their_attrs_are_not_read_for_provenance(monkeypatch):
             payload.attrs['provenance'] = {'dtype': 'x'}
             session.respond(StreamEvent('neural:IT', payload, event.t_ms, {'provenance': {'dtype': 'y'}}))
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                 harness_id='test', measures=measures)
+                                 entry_point='test', measures=measures)
     assert score.attrs['provenance'] == (
         {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},)
     assert session.emitted[0].payload.attrs == {'provenance': {'dtype': 'x'}}
@@ -629,7 +629,7 @@ def _two_subjects(monkeypatch, nested=False):
         else:
             run()
     return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                harness_id='test', measures=measures)
+                                entry_point='test', measures=measures)
 
 
 @pytest.mark.parametrize('nested', [False, True], ids=['one record', 'nested record'])
@@ -649,7 +649,7 @@ def test_an_unnamed_session_belongs_to_the_scored_subject(monkeypatch):
         note_session(noted, provenance={'subject': 'model', 'parts': []})
         _answer_session(Session(_events(), ['neural:IT']))
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                 harness_id='test', measures=measures)
+                                 entry_point='test', measures=measures)
     assert score.attrs['provenance'] == (     # sorted by content
         {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},
         {'subject': 'model', 'parts': [], 'activation_store': 'off'})
@@ -679,7 +679,7 @@ def test_an_inner_record_binds_its_unnamed_sessions_to_its_own_subject(monkeypat
         with record_measures(subject='inner-subject'):
             _answer_session(Session(_events(), ['neural:IT']))
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
-                                 harness_id='test', measures=outer)
+                                 entry_point='test', measures=outer)
     assert score.attrs['provenance'] == (
         {'subject': 'inner-subject', 'parts': 'not stated', 'activation_store': 'off'},)
 

@@ -79,7 +79,7 @@ def _run(subject, stimuli=None):
                                    ['behavior:choice'], TASK)
         subject.participate(session)
         answer = session.collect('behavior:choice')
-    score = stamp_score_metadata(Score(0.5), subject, {'behavior:choice'}, harness_id='t2',
+    score = stamp_score_metadata(Score(0.5), subject, {'behavior:choice'}, entry_point='t2',
                                  measures=measures)
     return answer, score
 
