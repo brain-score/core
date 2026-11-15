@@ -48,9 +48,10 @@ class Scale:
 class Choice:
     """One label from ``labels``.
 
-    A choice task can be answered as the choice (``behavior:choice``) and as
+    A choice task can be answered as the choice (``behavior:choice``), as
     the implied probability of each label (``behavior:probabilities``, from a
-    readout or a language model's likelihoods). ``channels`` names every format
+    readout or a language model's likelihoods) and as the log probability of
+    each option (``behavior:log_probabilities``). ``channels`` names every format
     the task can be answered in; the outputs that a session requests say which
     are answered. ``confidence=Scale(...)`` also asks the subject to report how
     sure it is, in the same reply.
@@ -109,7 +110,7 @@ class Choice:
 
     @property
     def channels(self) -> Tuple[str, ...]:
-        return (('behavior:choice', 'behavior:probabilities')
+        return (('behavior:choice', 'behavior:probabilities', 'behavior:log_probabilities')
                 + (('behavior:confidence',) if self.confidence is not None else ())
                 + (('behavior:rt',) if self.reaction_time is not None else ()))
 
