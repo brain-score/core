@@ -254,8 +254,8 @@ def test_records_outside_a_run_are_not_recorded():
 
 
 def test_mixed_records_in_one_collection_are_all_recorded():
-    """Two events with different records on one channel: concat keeps only
-    the first assembly's attrs, so each event is noted on its own."""
+    """Two events with different records on one channel: each event is noted on its
+    own, and collecting them as one assembly is refused (one assembly, one record)."""
     from brainscore_core.streaming import Session
     readout = response_record('behavior', 'readout')
 
@@ -269,10 +269,27 @@ def test_mixed_records_in_one_collection_are_all_recorded():
         session = Session((), outputs=['behavior'])
         session.respond(event(readout, 's0'))
         session.respond(event(REPLY, 's1'))
-        session.collect('behavior')
+        with pytest.raises(ValueError, match='different response records'):
+            session.collect('behavior')
 
     assert sorted(_stamp(_Subject(), measures).attrs['response'], key=repr) == sorted(
         [readout, REPLY], key=repr)
+
+
+def test_an_addressed_channel_refuses_answers_with_different_records():
+    from brainscore_core.response_formats import _collect
+    readout = response_record('behavior', 'readout')
+
+    def answer(record, stimulus):
+        return BehavioralAssembly(
+            [[1.0, 0.0]], coords={'stimulus_id': ('presentation', [stimulus]),
+                                  'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'], attrs={'response': record})
+
+    with pytest.raises(ValueError, match='different response records'):
+        _collect('behavior:probabilities', [answer(readout, 's0'), answer(REPLY, 's1')])
+    same = _collect('behavior:probabilities', [answer(REPLY, 's0'), answer(REPLY, 's1')])
+    assert same.attrs['response'] == REPLY and same.sizes['presentation'] == 2
 
 
 def test_an_inner_score_passes_its_records_to_the_outer_score():
