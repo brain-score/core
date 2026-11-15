@@ -16,6 +16,18 @@ from dataclasses import dataclass, replace
 from typing import Any, Optional, Sequence, Tuple, Union
 
 
+def _on_step(value: float, low: float, step: float) -> bool:
+    """Whether ``value`` is on the grid ``low + n * step``: the float nearest to a grid point.
+
+    The value is compared with the nearest grid point, with a tolerance of
+    ``max(1e-9 * step, 4 float spacings at the magnitude of the value)``: only float
+    rounding is forgiven, so 1.5 on a step of 1 is off the grid at any magnitude.
+    """
+    grid = low + round((value - low) / step) * step
+    tolerance = max(1e-9 * abs(step), 4 * math.ulp(max(abs(value), abs(grid))))
+    return abs(value - grid) <= tolerance
+
+
 @dataclass(frozen=True)
 class Scale:
     """A number on a scale, such as a 1 to 7 rating. ``step=None`` allows any value."""
@@ -38,8 +50,7 @@ class Scale:
         value = float(found.group())
         if not self.low <= value <= self.high:
             return None, f'{value} is outside {self.low} to {self.high}'
-        if self.step is not None and abs((value - self.low) / self.step
-                                         - round((value - self.low) / self.step)) > 1e-9:
+        if self.step is not None and not _on_step(value, self.low, self.step):
             return None, f'{value} is not on the scale step {self.step}'
         return value, None
 

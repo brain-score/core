@@ -48,7 +48,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 _TOLERANCE = 1e-4          # absolute, on the sum of a probability row
-_STEP_TOLERANCE = 1e-9     # on (value - low) / step, for a rating scale with a step
 _LOG_TOLERANCE = 1e-6      # nats: a log probability up to this far above 0 is a rounded 0
 _CONVERSIONS = ('argmax', 'softmax', 'softmax_argmax')
 _CATEGORIES = ('behavioral', 'model-derived')
@@ -440,14 +439,16 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
         scale = getattr(response, 'confidence', None) if fmt == 'confidence' else response
         low, high = getattr(scale, 'low', None), getattr(scale, 'high', None)
         step = getattr(scale, 'step', None)
+        # Bounds are inclusive and exact; the step is checked by the one rule of
+        # responses._on_step (the float nearest to a grid point is on the step).
+        from .responses import _on_step
         for value in values:
             value = float(value)
             if not np.isfinite(value):
                 reasons.append('no number')
             elif low is not None and not low <= value <= high:
                 reasons.append(f'{value} is outside {low} to {high}')
-            elif step is not None and abs((value - low) / step
-                                          - round((value - low) / step)) > _STEP_TOLERANCE:
+            elif step is not None and not _on_step(value, low, step):
                 reasons.append(f'{value} is not on the scale step {step}')
             else:
                 reasons.append(None)
