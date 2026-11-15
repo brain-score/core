@@ -24,7 +24,7 @@ def stamp_score_metadata(
     score,
     subject,
     requested_channels: Iterable[str],
-    harness_id: Optional[str],
+    entry_point: Optional[str],
     measures: Optional[MeasureRecord] = None,
     *,
     benchmark=None,
@@ -55,6 +55,11 @@ def stamp_score_metadata(
     noted (``note_session(..., provenance=)``; rule 6.3), sorted by content; a
     subject that noted none (an old model through an adapter, a custom subject)
     gets one entry whose facts are ``'not stated'``.
+
+    ``attrs['requested_outputs']`` names the outputs the benchmark requested (not the
+    subject's declared ``out_channels``), ``attrs['subject_identifier']`` the scored
+    subject and ``attrs['entry_point']`` the ``score()`` that made the score
+    (``'brainscore'``, ``'brainscore_vision'`` or ``'brainscore_language'``).
     """
     if benchmark_identifier is not None:
         recorded = score.attrs.get("benchmark_identifier", benchmark_identifier)
@@ -69,11 +74,12 @@ def stamp_score_metadata(
         score.attrs["trial_memory"] = getattr(benchmark, "trial_memory", "none")
     score.attrs["in_channels"] = _sorted_tuple(getattr(subject, "in_channels", ()))
     score.attrs["subject_traits"] = _sorted_tuple(getattr(subject, "traits", ()))
-    score.attrs["out_channels"] = _sorted_tuple(requested_channels)
-    score.attrs["subject_id"] = getattr(subject, "identifier", None)
-    score.attrs["harness_id"] = harness_id
+    score.attrs["requested_outputs"] = _sorted_tuple(requested_channels)
+    score.attrs["subject_identifier"] = getattr(subject, "identifier", None)
+    score.attrs["entry_point"] = entry_point
     score.attrs["response"] = measures.responses if measures is not None else ()
-    score.attrs["provenance"] = _measures.provenance_attrs(measures, score.attrs["subject_id"])
+    score.attrs["provenance"] = _measures.provenance_attrs(
+        measures, score.attrs["subject_identifier"])
     if measures is not None:
         score.attrs.update(_measures.execution_attrs(measures))
     score.attrs.update(_score_environment())
