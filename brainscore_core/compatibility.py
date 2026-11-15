@@ -176,7 +176,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     if not bench_inputs:
         raise ValueError(
             f"Benchmark '{benchmark_id}' declares no input channels. A benchmark "
-            f"states what it sends: set required_input_channels (rule 5.1)."
+            f"states what it sends: set required_input_channels, or keep the "
+            f"stimulus_set and task it presents as attributes (rule 5.1)."
         )
 
     # Both declarations are validated completely before any comparison, so a
@@ -318,12 +319,27 @@ def benchmark_input_channels(benchmark) -> Set[str]:
 
 
 def benchmark_required_input_channels(benchmark) -> Set[str]:
-    """Return v2 required input channels, deriving from v1.5 modalities."""
+    """Return the input channels a benchmark sends.
+
+    Its ``required_input_channels`` when declared; else the v1.5
+    ``required_modalities``; else what its ``stimulus_set`` presents under its
+    ``task`` (``task_input_channels``, plus ``instruction`` when the task gives one).
+    """
     declared = getattr(benchmark, "required_input_channels", None)
     if declared is not None:
         return set(declared)
     modalities = set(getattr(benchmark, "required_modalities", set()))
-    return modalities_to_input_channels(modalities)
+    if modalities:
+        return modalities_to_input_channels(modalities)
+    stimuli = getattr(benchmark, "stimulus_set", None)
+    if stimuli is None:
+        return set()
+    from brainscore_core._sessions.view import task_input_channels
+    task = getattr(benchmark, "task", None)
+    channels = set(task_input_channels(stimuli, task))
+    if getattr(task, "instruction", None):
+        channels.add("instruction")
+    return channels
 
 
 def benchmark_accepted_input_channels(benchmark) -> Set[str]:
