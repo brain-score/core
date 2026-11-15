@@ -258,3 +258,28 @@ def test_enter_blocks_while_the_transition_lock_is_held(cache_switch_environment
     t.join(timeout=2)
     assert cache._cache_disable_depth == 0
     assert os.environ.get('RESULTCACHING_DISABLE') is None
+
+
+@pytest.mark.parametrize('inference', [False, True])
+def test_a_part_fingerprint_comes_from_the_same_traversal(monkeypatch, inference):
+    """The whole key and one part's key from one pass: no tensor is hashed twice, with or without
+    version counters (a tensor made under inference mode has none)."""
+    import contextlib
+    import torch
+    from brainscore_core import extraction_cache as cache
+    calls, original = [], cache._hash_tensor
+    monkeypatch.setattr(cache, '_hash_tensor', lambda tensor: calls.append(1) or original(tensor))
+    with torch.inference_mode() if inference else contextlib.nullcontext():
+        weights = [torch.ones(3), torch.arange(4.0)]
+    configuration = {'configuration': {'weights': weights, 'batch_size': 2}, 'inputs': ['a', 'b']}
+    whole, part = extraction_fingerprint(configuration, part='configuration')
+    assert len(calls) == 2
+    assert whole == fingerprint(configuration)
+    assert part == fingerprint(configuration['configuration'])
+
+
+def test_a_part_of_a_disabled_or_opaque_configuration_is_none(monkeypatch):
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    assert extraction_fingerprint({'configuration': 1}, cache_identifier='x', part='configuration') == (None, None)
+    monkeypatch.delenv('RESULTCACHING_DISABLE')
+    assert extraction_fingerprint({'configuration': object()}, part='configuration') == (None, None)

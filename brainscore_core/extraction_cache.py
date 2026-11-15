@@ -272,22 +272,35 @@ def _canonical(value, active):
     raise UncacheableConfiguration(f'unsupported {_name(value)}; define cache_config()')
 
 
-def fingerprint(configuration):
-    """Return a stable, versioned key; never use repr() or object addresses."""
-    payload = json.dumps(_canonical(configuration, set()), sort_keys=True,
-                         separators=(',', ':'), ensure_ascii=True)
+def _digest(canonical):
+    payload = json.dumps(canonical, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     return 'v2-' + hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
-def extraction_fingerprint(configuration, *, cache_identifier=None):
-    """Fail closed for opaque third-party providers, leaving extraction runnable."""
+def fingerprint(configuration):
+    """Return a stable, versioned key; never use repr() or object addresses."""
+    return _digest(_canonical(configuration, set()))
+
+
+def extraction_fingerprint(configuration, *, cache_identifier=None, part=None):
+    """Fail closed for opaque third-party providers, leaving extraction runnable.
+
+    With ``part`` (a key of the ``configuration`` mapping), returns a pair: the
+    fingerprint of the whole configuration and the fingerprint of that part,
+    both from one traversal, so no tensor is read twice. The part's value equals
+    ``fingerprint(configuration[part])``. ``(None, None)`` where the whole is None.
+    """
     if cache_identifier is not None and not is_enabled(cache_identifier):
-        return None
+        return None if part is None else (None, None)
     try:
-        return fingerprint(configuration)
+        if part is None:
+            return fingerprint(configuration)
+        canonical = _canonical(configuration, set())
+        value = next(item for key, item in canonical['mapping'] if key == part)
+        return _digest(canonical), _digest(value)
     except UncacheableConfiguration as error:
         logger.warning('Activation cache bypassed: %s', error)
-        return None
+        return None if part is None else (None, None)
 
 
 def model_config(model):
