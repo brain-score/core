@@ -309,6 +309,10 @@ def resolve_invalid_answers(assembly, *, seed: int = 0):
 
     if 'choice' not in assembly.dims or assembly.ndim != 2:
         return assembly
+    if not np.issubdtype(np.asarray(assembly.values).dtype, np.floating):
+        # A legacy answer of labels or stimulus ids (label task, odd_one_out) has no
+        # NaN row to resolve; it reaches the benchmark unchanged.
+        return assembly
     # A row of NaN marks an invalid answer: a reply that could not be read, or
     # a conversion of a source row that is not valid (for example a non-finite one).
     choice_axis = assembly.dims.index('choice')

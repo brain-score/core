@@ -219,3 +219,32 @@ def test_text_identifiers_do_not_collide_on_the_delimiter():
     first = text_stimulus_set(['a|b', 'c'])
     second = text_stimulus_set(['a', 'b|c'])
     assert first.identifier != second.identifier
+
+
+class _LabelAnswerer(_Recorder):
+    """A subject whose bare behavior answer is a legacy label answer: strings, dims (choice, presentation)."""
+
+    def participate(self, session):
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        session.respond(StreamEvent('behavior', BehavioralAssembly(
+            [['cat'] * len(ids)], coords={'stimulus_id': ('presentation', ids),
+                                          'truth': ('presentation', ['cat'] * len(ids))},
+            dims=['choice', 'presentation']), None))
+
+
+def test_a_legacy_answer_of_labels_reaches_the_benchmark_unchanged():
+    """resolve_invalid_answers (core #208) called isnan on label strings and raised for
+    every legacy label task and odd_one_out task; a non-float answer now passes unchanged."""
+    from brainscore_core.legacy_facade import resolve_invalid_answers
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b']}))
+    stimuli.identifier = 'facade-labels'
+    facade = LegacyBenchmarkFacade(_LabelAnswerer(), visual_degrees=8)
+    facade.start_task('odd_one_out')
+    answer = facade.look_at(stimuli)
+    assert answer.dims == ('choice', 'presentation') and list(answer.values[0]) == ['cat', 'cat']
+    strings = BehavioralAssembly([['x', 'y']], coords={'stimulus_id': ('presentation', ['a', 'b'])},
+                                 dims=['choice', 'presentation'])
+    assert resolve_invalid_answers(strings) is strings
