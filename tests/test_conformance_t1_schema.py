@@ -242,20 +242,20 @@ def test_probability_rows_off_by_less_than_one_in_ten_thousand_are_valid():
     assert list(answer['response_state'].values) == ['valid', 'valid']
 
 
-def test_raw_log_scores_need_the_explicit_record():
+@pytest.mark.parametrize('parameters', [{'scale': 'log'}, {}], ids=['old raw-score record', 'plain'])
+def test_log_values_on_the_probabilities_format_are_refused(parameters):
+    # The temporary raw-score path is gone: probabilities are float32 rows, and log
+    # probabilities travel on behavior:log_probabilities.
     record = response_record('behavior:probabilities', 'likelihood', category='model-derived',
-                             parameters={'scale': 'log'})
-    payload = _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]], dtype=np.float64,
-                    record=record)
-    answer = _participate('behavior:probabilities', payload).collect('behavior:probabilities')
-    assert list(answer['response_state'].values) == ['valid', 'invalid']
-    # Without scale 'log', model-derived values are probabilities and float32.
-    other = response_record('behavior:probabilities', 'likelihood', category='model-derived')
+                             parameters=parameters)
     session = stimulus_session(_stimuli(), ['behavior:probabilities'],
                                TASKS['behavior:probabilities'])
-    with pytest.raises(ValueError, match='float64'):
+    with pytest.raises(ValueError, match='float64, not float32'):
         _Stub('behavior:probabilities', _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]],
-                                              dtype=np.float64, record=other)).participate(session)
+                                              dtype=np.float64, record=record)).participate(session)
+    float32 = _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]], record=record)
+    answer = _participate('behavior:probabilities', float32).collect('behavior:probabilities')
+    assert list(answer['response_state'].values) == ['invalid', 'invalid']   # negative values
 
 
 def test_a_supplied_state_that_agrees_is_kept():

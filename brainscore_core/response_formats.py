@@ -410,14 +410,10 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
             else:
                 reasons.append(None if (row == 1).sum() == 1 else 'not exactly one option chosen')
     elif fmt == 'probabilities':
-        raw_scores = (record['category'] == 'model-derived'
-                      and record['parameters'].get('scale') == 'log')
         for row in values:
             row = row.astype(np.float64)
             if not np.isfinite(row).all():
                 reasons.append('a value is not finite')
-            elif raw_scores:
-                reasons.append('a log probability is above 0' if (row > 0).any() else None)
             elif (row < 0).any():
                 reasons.append('a probability is negative')
             elif abs(float(row.sum()) - 1.0) > _TOLERANCE:
@@ -522,10 +518,8 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
     problems = _record_problems(record, channel)
     if problems:
         raise ValueError('; '.join(problems))
-    raw_scores = (fmt == 'probabilities' and record['category'] == 'model-derived'
-                  and record['parameters'].get('scale') == 'log')
     values = np.asarray(payload.values)
-    dtype = {'choice': np.float32, 'probabilities': np.float64 if raw_scores else np.float32,
+    dtype = {'choice': np.float32, 'probabilities': np.float32,
              'text': object}.get(fmt, np.float64)   # log_probabilities: float64
     if values.dtype != np.dtype(dtype):
         raise ValueError(f'the values are {values.dtype}, not {np.dtype(dtype)}')

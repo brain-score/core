@@ -41,7 +41,7 @@ def test_trial_prompt_carries_the_task_response(response):
 
 def test_a_plain_choice_is_unchanged():
     choice = Choice(['a', 'b'])
-    assert (choice.labels, choice.raw_scores, choice.verbatim) == (('a', 'b'), False, False)
+    assert (choice.labels, choice.verbatim) == (('a', 'b'), False)
     assert choice.channels == ('behavior:choice', 'behavior:probabilities',
                                'behavior:log_probabilities')
     assert choice.directive() == 'Answer with exactly one of: a, b.'
@@ -57,7 +57,7 @@ def test_a_choice_names_its_formats_and_has_no_probabilities_switch():
 
 
 def test_options_from_a_column_become_the_rows_labels():
-    choice = Choice('options', raw_scores=True, verbatim=True)
+    choice = Choice('options', verbatim=True)
     assert choice.channels == ('behavior:choice', 'behavior:probabilities',
                                'behavior:log_probabilities')
     task = TaskContext(response=choice)
@@ -66,7 +66,7 @@ def test_options_from_a_column_become_the_rows_labels():
     # Raw text: the text exactly as given, no directive.
     assert prompt.parts == (('text', 'the cat'),)
     assert prompt.response.labels == ('sat', 'ran')
-    assert prompt.response.raw_scores
+    assert prompt.response.verbatim
 
 
 def test_a_column_choice_without_verbatim_phrases_the_rows_options():
@@ -79,9 +79,7 @@ def test_a_column_choice_without_verbatim_phrases_the_rows_options():
     ({'labels': ''}, 'column name in labels must not be empty'),
     ({}, 'at least two labels'),
     ({'labels': ['a']}, 'at least two labels'),
-    ({'labels': ['a', 'b'], 'raw_scores': 1}, 'True or False'),
     ({'labels': ['a', 'b'], 'verbatim': 'yes'}, 'True or False'),
-    ({'labels': ['a', 'b'], 'raw_scores': True, 'reaction_time': 'surprisal'}, 'normalized'),
 ])
 def test_choice_fields_are_checked_when_the_task_is_made(fields, message):
     with pytest.raises(ValueError, match=message):
@@ -91,6 +89,12 @@ def test_choice_fields_are_checked_when_the_task_is_made(fields, message):
 def test_the_old_name_raw_text_is_gone():
     with pytest.raises(TypeError):
         Choice(['1', '2'], raw_text=True)
+
+
+def test_a_choice_has_no_raw_scores_switch():
+    # Log probabilities are their own format, behavior:log_probabilities.
+    with pytest.raises(TypeError):
+        Choice(['a', 'b'], raw_scores=True)
 
 
 def test_a_choice_has_no_confidence():

@@ -77,22 +77,20 @@ class Choice:
     position of each option in the row's cell, and ``Prompt.response`` holds
     that row's options as ``labels``.
 
-    ``raw_scores=True`` returns on ``behavior:probabilities`` the score of each
-    option exactly as the model's ``likelihood`` part gave it (the summed log
-    probability of the option's tokens), not normalized; the answer's response
-    record has ``category='model-derived'`` and ``parameters['scale'] == 'log'``.
-    Only a ``likelihood`` part gives raw scores.
+    The log probability of each option, exactly as the model's ``likelihood``
+    part gives it (``behavior:log_probabilities``), is requested by a session;
+    with ``verbatim=True`` the part scores the plain text, as EWoK does.
 
     ``verbatim=True`` shows the trial text exactly as given: no directive is
     added, and an instruction is refused. A part that scores options scores
     ``f"{text} {option}"`` as plain text, with no chat template and no
     beginning-of-sequence token, as EWoK's ``score`` does. A ``reply`` part
     keeps its own chat template, because a chat model cannot answer without one;
-    it gets no added sentence, and its answer's record notes its own template, if it has one.
+    it gets no added sentence, and its answer's record notes its own template,
+    if it has one.
     """
     labels: Union[Tuple[str, ...], str, None] = None   # the options, or the column holding each row's
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
-    raw_scores: bool = False
     verbatim: bool = False
 
     REACTION_TIMES = ('evidence_margin', 'surprisal')
@@ -105,11 +103,9 @@ class Choice:
             raise ValueError('Choice needs at least two labels')
         if self.reaction_time not in (None, *self.REACTION_TIMES):
             raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
-        for name in ('raw_scores', 'verbatim'):
+        for name in ('verbatim',):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f'{name} is True or False, not {getattr(self, name)!r}')
-        if self.raw_scores and self.reaction_time is not None:
-            raise ValueError('reaction_time reads normalized probabilities; it cannot use raw_scores')
         if not isinstance(self.labels, str):
             object.__setattr__(self, 'labels', tuple(self.labels))
 
