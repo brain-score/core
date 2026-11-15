@@ -1,9 +1,11 @@
 """Runtime check that installed dependencies fall within UMI's compatibility bounds.
 
 Public API: ``check_env_bounds`` (drift messages only), ``describe_env`` (one
-row per checked package, passing or not) and ``warn_on_drift`` (the warning
-``import brainscore_core`` emits). ``python -m brainscore.doctor`` prints
-``describe_env`` as a table.
+row per checked package, passing or not), ``warn_on_drift`` (the warning
+``import brainscore_core`` emits) and ``environment_fingerprint`` (the hash of
+the installed package list that every score's ``software`` carries).
+``python -m brainscore.doctor`` prints ``describe_env`` as a table and the
+fingerprint.
 
 These are the version ranges scoring is *verified against* — deliberately looser
 than any single install pin (that's the environment file's job). Drift outside
@@ -39,7 +41,10 @@ processor default actually moved shifts its score by 0.038%.
 Uses only ``importlib.metadata`` so ``brainscore_core`` stays free of heavy
 dependencies (no torch/transformers import).
 """
+import functools
+import hashlib
 import platform
+import re
 import sys
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
@@ -143,6 +148,49 @@ _BRAINSCORE_PACKAGES = (("brainscore_core", "brainscore-core"), ("brainscore", "
                         ("brainscore_language", "brainscore_language"))
 
 
+def _normalized(name: str) -> str:
+    """A distribution name in its normalized form (PEP 503): lower case, runs of ``-_.`` as ``-``."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+@functools.lru_cache(maxsize=1)
+def environment_fingerprint() -> str:
+    """SHA-256 of the sorted lines ``name==version`` of every installed distribution.
+
+    Names are normalized; the four Brain-Score packages are left out, because
+    ``code_commits`` names their code. Computed once per process. Two machines
+    with the same fingerprint have the same installed packages at the same
+    versions; two scores are compared bit for bit only when their fingerprints
+    are equal.
+    """
+    from importlib.metadata import distributions
+    own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
+    lines = set()
+    for distribution in distributions():
+        name = distribution.metadata["Name"]
+        if name and _normalized(name) not in own:
+            lines.add(f"{_normalized(name)}=={distribution.version}")
+    return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
+
+
+def _accelerator() -> str:
+    """The accelerator torch can use on this machine: the CUDA device name, ``'mps'`` or ``'cpu'``.
+
+    The device each model part used is in the score's ``provenance``. Read only
+    when torch is already imported (core never imports it); without torch
+    nothing ran on an accelerator through it, so the value is ``'cpu'``.
+    """
+    torch = sys.modules.get("torch")
+    try:
+        if torch is not None and torch.cuda.is_available():
+            return torch.cuda.get_device_name(torch.cuda.current_device())
+        if torch is not None and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        return "not stated"
+    return "cpu"
+
+
 def _installed(distribution: str) -> Optional[str]:
     """The installed version, or None for any failure (absent, or a broken ``.dist-info``)."""
     try:
@@ -210,12 +258,16 @@ def _score_environment() -> Dict[str, Dict[str, Optional[str]]]:
     Versions come from the installed metadata (None when absent). A commit is
     read only for a Brain-Score package already imported, from the checkout its
     files are in (None outside a git checkout); the installed version of an
-    editable package does not say which checkout runs.
+    editable package does not say which checkout runs. ``software`` also has
+    ``environment_fingerprint`` (every installed package and version) and
+    ``accelerator`` (the accelerator torch can use).
     """
     software = {"python": platform.python_version()}
     software.update({name: _installed(name) for name in _SCORE_LIBRARIES})
     software.update({distribution: _installed(distribution)
                      for _module, distribution in _BRAINSCORE_PACKAGES})
+    software["environment_fingerprint"] = environment_fingerprint()
+    software["accelerator"] = _accelerator()
     commits = {}
     for module_name, _distribution in _BRAINSCORE_PACKAGES:
         module = sys.modules.get(module_name)
