@@ -465,14 +465,17 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
     regions = ([recording_target] if recording_target is not None
                else _probe_regions(model, benchmark))
     if regions == [None]:
-        # A benchmark that requests no neural output (for example a behavior benchmark)
-        # holds no layer activations, so there is no feature width to measure.
+        # No neural region to record for this probe (for example a behavior benchmark with no
+        # region and no declared width): the width cannot be measured here. Not a failure of a
+        # probe, so one line and no traceback; the run still holds whatever features it uses.
         undeclared = getattr(benchmark, 'requested_output_channels', None) is None
         logger.warning(
-            "Memory check not run: benchmark %r names no neural output "
-            "(neural:<region>) to probe%s, so there is no feature width to measure.",
+            "Memory estimate not made: no neural region (neural:<region>) is available for the "
+            "feature-width probe of benchmark %r%s, so memory is not guarded for this run. To "
+            "estimate anyway, declare the width: check_memory(model, benchmark, feature_dim=...), "
+            "or expected_feature_dim on the benchmark or feature_dim on the model.",
             getattr(benchmark, 'identifier', type(benchmark).__name__),
-            ' and the subject declares no probe_safe_regions to probe instead' if undeclared else '')
+            ' (the subject declares no probe_safe_regions)' if undeclared else '')
         return None, None
     last_error = None
     for region in regions:
