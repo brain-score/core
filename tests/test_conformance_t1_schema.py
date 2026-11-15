@@ -22,7 +22,6 @@ TASKS = {
     'behavior:choice': TaskContext(response=Choice(['cat', 'dog'])),
     'behavior:probabilities': TaskContext(response=Choice(['cat', 'dog'])),
     'behavior:rating': TaskContext(response=Scale(1, 7, 1)),
-    'behavior:confidence': TaskContext(response=Choice(['cat', 'dog'], confidence=Scale(1, 5))),
     'behavior:rt': TaskContext(response=Choice(['cat', 'dog'], reaction_time='surprisal')),
     'behavior:text': TaskContext(response=Text()),
 }
@@ -83,7 +82,6 @@ WELL_FORMED = {
     'behavior:choice': [[1.0, 0.0], [0.0, 1.0]],
     'behavior:probabilities': [[0.25, 0.75], [0.5, 0.5]],
     'behavior:rating': [3.0, 7.0],
-    'behavior:confidence': [1.0, 5.0],
     'behavior:rt': [0.2, 1.5],
     'behavior:text': ['a cat', 'a dog'],
 }
@@ -103,7 +101,6 @@ CELLS = {   # one cell per trial: (cell, the stored value)
     'behavior:choice': ('dog', [0.0, 1.0]),
     'behavior:probabilities': (np.array([0.25, 0.75]), [0.25, 0.75]),
     'behavior:rating': (4, 4.0),
-    'behavior:confidence': (2.0, 2.0),
     'behavior:rt': (0.5, 0.5),
     'behavior:text': ('a cat', 'a cat'),
 }
@@ -156,7 +153,6 @@ MALFORMED = [
     ('behavior:rating', 'a label', lambda: 'seven'),
     ('behavior:rating', 'float32 values', lambda: _rows('behavior:rating', [1.0, 2.0],
                                                         dtype=np.float32)),
-    ('behavior:confidence', 'a label', lambda: 'sure'),
     ('behavior:rt', 'no units', lambda: _rows('behavior:rt', [0.1, 0.2],
                                               record=response_record('behavior:rt', 'external'))),
     ('behavior:rt', 'unknown units', lambda: _rows('behavior:rt', [0.1, 0.2], record=response_record(
@@ -219,7 +215,6 @@ INVALID = [
     ('behavior:rating', [9.0, 3.0], 'outside'),
     ('behavior:rating', [1.5, 3.0], 'scale step'),
     ('behavior:rating', [np.nan, 3.0], 'no number'),
-    ('behavior:confidence', [0.0, 3.0], 'outside'),
     ('behavior:rt', [-1.0, 0.5], 'negative'),
     ('behavior:rt', [np.inf, 0.5], 'not finite'),
 ]

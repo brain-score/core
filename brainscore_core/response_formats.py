@@ -19,7 +19,7 @@ validates it; the benchmark scores it (Response Format Standard, section 0).
 
 What an addressed response can be: a cell for one trial (``behavior:text``
 and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
-with one value per option; ``behavior:rating``, ``behavior:confidence``,
+with one value per option; ``behavior:rating`` and
 ``behavior:rt``: a number), or an assembly of rows over ``presentation``
 with a ``stimulus_id`` coordinate and a response record;
 ``behavior:log_probabilities`` takes an assembly only (model-derived and
@@ -57,7 +57,7 @@ _UNITS = ('nats', 'bits')
 _RT_UNITS = ('ms', 'monotone')
 _FIELDS = frozenset(('format', 'category', 'origin', 'method', 'conversion', 'source_format',
                      'parameters', 'parsed_by'))
-_FORMATS = ('choice', 'probabilities', 'log_probabilities', 'rating', 'confidence', 'rt', 'text')
+_FORMATS = ('choice', 'probabilities', 'log_probabilities', 'rating', 'rt', 'text')
 _AXIS_FORMATS = ('choice', 'probabilities', 'log_probabilities')   # rows over a choice axis
 # The schema of behavior:log_probabilities, in its record's parameters (standard 2.3).
 _LOG_PROBABILITY_SCHEMA = {
@@ -435,8 +435,8 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
                 reasons.append('a log probability is above 0')
             else:
                 reasons.append(None)
-    elif fmt in ('rating', 'confidence'):
-        scale = getattr(response, 'confidence', None) if fmt == 'confidence' else response
+    elif fmt == 'rating':
+        scale = response
         low, high = getattr(scale, 'low', None), getattr(scale, 'high', None)
         step = getattr(scale, 'step', None)
         # Bounds are inclusive and exact; the step is checked by the one rule of

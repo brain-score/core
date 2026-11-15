@@ -64,11 +64,9 @@ class Choice:
     readout or a language model's likelihoods) and as the log probability of
     each option (``behavior:log_probabilities``). ``channels`` names every format
     the task can be answered in; the outputs that a session requests say which
-    are answered. ``confidence=Scale(...)`` also asks the subject to report how
-    sure it is, in the same reply.
-    ``reaction_time`` also returns an implied reaction time from those
-    probabilities, scored by correlation with human RTs as Futrell2018 scores
-    surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
+    are answered. ``reaction_time`` also returns an implied reaction time from
+    those probabilities, scored by correlation with human RTs as Futrell2018
+    scores surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
     probable labels; close calls are slow) or ``'surprisal'`` (-log2 of the
     chosen label's probability).
 
@@ -93,7 +91,6 @@ class Choice:
     it gets no added sentence, and its answer's record says the template was used.
     """
     labels: Union[Tuple[str, ...], str, None] = None   # the options, or the column holding each row's
-    confidence: Optional[Scale] = None
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
     raw_scores: bool = False
     verbatim: bool = False
@@ -113,16 +110,12 @@ class Choice:
                 raise ValueError(f'{name} is True or False, not {getattr(self, name)!r}')
         if self.raw_scores and self.reaction_time is not None:
             raise ValueError('reaction_time reads normalized probabilities; it cannot use raw_scores')
-        if self.confidence is not None and (self.raw_scores or self.verbatim):
-            raise ValueError('A reported confidence needs a reply with a directive; '
-                             'it cannot be used with raw_scores or verbatim')
         if not isinstance(self.labels, str):
             object.__setattr__(self, 'labels', tuple(self.labels))
 
     @property
     def channels(self) -> Tuple[str, ...]:
         return (('behavior:choice', 'behavior:probabilities', 'behavior:log_probabilities')
-                + (('behavior:confidence',) if self.confidence is not None else ())
                 + (('behavior:rt',) if self.reaction_time is not None else ()))
 
     def directive(self) -> str:
@@ -130,11 +123,7 @@ class Choice:
             return ''
         if isinstance(self.labels, str):
             raise ValueError("The directive needs the row's options; trial_prompt gives them")
-        text = f'Answer with exactly one of: {", ".join(self.labels)}.'
-        if self.confidence is not None:
-            text += (f' Then, on a new line, rate your confidence from '
-                     f'{self.confidence.low:g} to {self.confidence.high:g}.')
-        return text
+        return f'Answer with exactly one of: {", ".join(self.labels)}.'
 
     def parse(self, reply: str) -> Tuple[Optional[str], Optional[str]]:
         first = (reply or '').strip().splitlines()[0].strip().lower() if (reply or '').strip() else ''
@@ -147,12 +136,6 @@ class Choice:
             return found[0], None
         return None, ('no label in the reply' if not found
                       else f'several labels in the reply: {found}')
-
-    def parse_confidence(self, reply: str) -> Tuple[Optional[float], Optional[str]]:
-        lines = (reply or '').strip().splitlines()
-        if len(lines) < 2:
-            return None, 'no confidence line in the reply'
-        return self.confidence.parse(' '.join(lines[1:]))
 
 
 @dataclass(frozen=True)

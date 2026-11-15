@@ -82,7 +82,6 @@ def test_a_column_choice_without_verbatim_phrases_the_rows_options():
     ({'labels': ['a', 'b'], 'raw_scores': 1}, 'True or False'),
     ({'labels': ['a', 'b'], 'verbatim': 'yes'}, 'True or False'),
     ({'labels': ['a', 'b'], 'raw_scores': True, 'reaction_time': 'surprisal'}, 'normalized'),
-    ({'labels': ['a', 'b'], 'verbatim': True, 'confidence': Scale(1, 5, 1)}, 'confidence'),
 ])
 def test_choice_fields_are_checked_when_the_task_is_made(fields, message):
     with pytest.raises(ValueError, match=message):
@@ -92,6 +91,12 @@ def test_choice_fields_are_checked_when_the_task_is_made(fields, message):
 def test_the_old_name_raw_text_is_gone():
     with pytest.raises(TypeError):
         Choice(['1', '2'], raw_text=True)
+
+
+def test_a_choice_has_no_confidence():
+    with pytest.raises(TypeError):
+        Choice(['a', 'b'], confidence=Scale(1, 5))
+    assert not hasattr(Choice(['a', 'b']), 'parse_confidence')
 
 
 def test_verbatim_refuses_an_instruction():

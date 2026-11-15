@@ -14,18 +14,18 @@ from brainscore_core.responses import Choice, Scale, Text
 from brainscore_core.streaming import Session, StreamEvent
 
 ADDRESSES = ('behavior', 'behavior:choice', 'behavior:probabilities',
-             'behavior:log_probabilities', 'behavior:confidence', 'behavior:rating', 'behavior:rt',
-             'behavior:text')
+             'behavior:log_probabilities', 'behavior:rating', 'behavior:rt', 'behavior:text')
 
 
 def test_the_closed_list_is_the_formats_that_exist():
     assert io_catalog.CHANNEL_FORMS['behavior'] == (
-        None, 'choice', 'probabilities', 'log_probabilities', 'confidence', 'rating', 'rt', 'text')
+        None, 'choice', 'probabilities', 'log_probabilities', 'rating', 'rt', 'text')
     for channel in ADDRESSES:
         assert io_catalog.form_problem(channel) is None
 
 
-@pytest.mark.parametrize('channel', ['behavior:logprobs', 'behavior:answer', 'behavior:Choice'])
+@pytest.mark.parametrize('channel', ['behavior:logprobs', 'behavior:answer', 'behavior:Choice',
+                                     'behavior:confidence'])
 def test_an_address_outside_the_list_is_refused_everywhere(channel):
     assert 'closed list' in io_catalog.form_problem(channel)
     with pytest.raises(ValueError, match='closed list'):
