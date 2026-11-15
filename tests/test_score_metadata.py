@@ -69,6 +69,55 @@ def test_stamp_score_metadata_adds_provenance_and_preserves_existing_attrs():
     assert score.attrs["harness_id"] == "test-harness"
 
 
+class _NamedBenchmark:
+    def __init__(self, identifier, trial_memory=None):
+        self.identifier = identifier
+        if trial_memory is not None:
+            self.trial_memory = trial_memory
+
+
+class _MethodNamedBenchmark:
+    def identifier(self):
+        return 'Method.identifier'
+
+
+def _stamp_identity(score, benchmark, requested):
+    return stamp_score_metadata(score, _Subject(), requested_channels=set(), harness_id='h',
+                                benchmark=benchmark, benchmark_identifier=requested)
+
+
+def test_the_stamp_writes_the_requested_identifier_and_the_trial_memory():
+    score = _stamp_identity(Score(1), _NamedBenchmark('Bench.v1'), 'Bench-alias')
+    assert score.attrs['benchmark_identifier'] == 'Bench-alias'
+    assert score.attrs['trial_memory'] == 'none'          # declared by no attribute
+    score = _stamp_identity(Score(1), _NamedBenchmark('Bench.v1', trial_memory='history'), 'Bench.v1')
+    assert score.attrs['trial_memory'] == 'history'
+
+
+@pytest.mark.parametrize('benchmark, requested, written', [
+    (_NamedBenchmark('Bench.v1'), 'Bench-alias', 'Bench.v1'),       # the benchmark's own identifier
+    (_NamedBenchmark('Bench.v1'), 'Bench-alias', 'Bench-alias'),    # the requested alias
+    (_MethodNamedBenchmark(), 'alias', 'Method.identifier'),        # identifier() as a method
+])
+def test_a_benchmark_may_write_its_own_identifier_or_the_requested_one(benchmark, requested, written):
+    score = Score(1)
+    score.attrs['benchmark_identifier'] = written
+    assert _stamp_identity(score, benchmark, requested).attrs['benchmark_identifier'] == written
+
+
+@pytest.mark.parametrize('written', ['Other.benchmark', 7])
+def test_another_written_identifier_is_refused(written):
+    score = Score(1)
+    score.attrs['benchmark_identifier'] = written
+    with pytest.raises(ValueError, match='must match the requested identifier'):
+        _stamp_identity(score, _NamedBenchmark('Bench.v1'), 'Bench-alias')
+
+
+def test_without_the_benchmark_arguments_the_stamp_writes_neither_key():
+    score = stamp_score_metadata(Score(1), _Subject(), requested_channels=set(), harness_id='h')
+    assert 'benchmark_identifier' not in score.attrs and 'trial_memory' not in score.attrs
+
+
 def test_requested_output_channels_use_explicit_or_region_fallback():
     assert requested_output_channels_for_score(
         _Benchmark(requested_output_channels={"behavior"})

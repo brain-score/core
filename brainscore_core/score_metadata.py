@@ -18,8 +18,19 @@ def stamp_score_metadata(
     requested_channels: Iterable[str],
     harness_id: Optional[str],
     measures: Optional[MeasureRecord] = None,
+    *,
+    benchmark=None,
+    benchmark_identifier: Optional[str] = None,
 ):
     """Add channel and response provenance attrs to a returned score.
+
+    The three ``score()`` functions call it after the run with the same steps.
+    With ``benchmark_identifier`` (the identifier the caller asked for),
+    ``attrs['benchmark_identifier']`` is that identifier, or the one the
+    benchmark wrote itself when it is the benchmark's own identifier (a
+    benchmark can name a qualified identity); any other value raises
+    ``ValueError``. With ``benchmark``, ``attrs['trial_memory']`` is the
+    benchmark's ``trial_memory`` (``'none'`` when it declares none).
 
     ``attrs['response']`` copies the response record of every behavioral answer
     the run's sessions accepted (``record_measures()``): a tuple of records,
@@ -33,6 +44,17 @@ def stamp_score_metadata(
     change numbers and the four Brain-Score packages; ``attrs['code_commits']``
     the commit of each imported Brain-Score package's checkout.
     """
+    if benchmark_identifier is not None:
+        recorded = score.attrs.get("benchmark_identifier", benchmark_identifier)
+        own = _identifier_of(benchmark) or benchmark_identifier
+        if not isinstance(recorded, str) or recorded not in (benchmark_identifier, own):
+            raise ValueError(
+                f"Score benchmark_identifier {recorded!r} must match the requested identifier "
+                f"{benchmark_identifier!r} or the benchmark's identifier {own!r}"
+            )
+        score.attrs["benchmark_identifier"] = recorded
+    if benchmark is not None:
+        score.attrs["trial_memory"] = getattr(benchmark, "trial_memory", "none")
     score.attrs["in_channels"] = _sorted_tuple(getattr(subject, "in_channels", ()))
     score.attrs["subject_traits"] = _sorted_tuple(getattr(subject, "traits", ()))
     score.attrs["out_channels"] = _sorted_tuple(requested_channels)
@@ -59,6 +81,17 @@ def requested_output_channels_for_score(benchmark) -> Set[str]:
     if "perturb" in parent:
         return {"perturbation"}
     return set()
+
+
+def _identifier_of(obj) -> Optional[str]:
+    """The identifier of a benchmark (a property or a method), or None."""
+    identifier = getattr(obj, "identifier", None)
+    if callable(identifier):
+        try:
+            identifier = identifier()
+        except Exception:
+            identifier = None
+    return identifier if isinstance(identifier, str) else None
 
 
 def _sorted_tuple(values: Iterable[str]) -> tuple[str, ...]:
