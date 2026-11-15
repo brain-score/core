@@ -325,6 +325,23 @@ class TestCheckMemory:
             with pytest.warns(ResourceWarning, match="OOM risk"):
                 check_memory(model, bench)
 
+    def test_a_benchmark_with_no_neural_output_gets_one_line_and_no_traceback(self, caplog):
+        # A behavior benchmark holds no layer activations: the check cannot apply. It says so
+        # in one line, with no traceback and no "OOM guard is OFF", and nothing runs.
+        import logging
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-choice', n_stimuli=10)
+        bench.requested_output_channels = frozenset({'behavior:choice'})
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000):
+            with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+                check_memory(model, bench)
+        messages = [r for r in caplog.records if r.name == 'brainscore_core.memory']
+        assert [r.getMessage() for r in messages] == [
+            "Memory check not run: benchmark 'test-choice' names no neural output "
+            "(neural:<region>) to probe, so there is no feature width to measure."]
+        assert messages[0].exc_info is None
+        assert not getattr(model, 'calls', [])
+
     def test_graceful_when_probe_fails(self):
         model = FailingModel()
         bench = FakeBenchmark(n_stimuli=10)

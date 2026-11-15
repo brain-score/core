@@ -464,16 +464,21 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
     time_bins = getattr(benchmark, 'timebins', None)
     regions = ([recording_target] if recording_target is not None
                else _probe_regions(model, benchmark))
+    if regions == [None]:
+        # A benchmark that requests no neural output (for example a behavior benchmark)
+        # holds no layer activations, so there is no feature width to measure.
+        undeclared = getattr(benchmark, 'requested_output_channels', None) is None
+        logger.warning(
+            "Memory check not run: benchmark %r names no neural output "
+            "(neural:<region>) to probe%s, so there is no feature width to measure.",
+            getattr(benchmark, 'identifier', type(benchmark).__name__),
+            ' and the subject declares no probe_safe_regions to probe instead' if undeclared else '')
+        return None, None
     last_error = None
     for region in regions:
         # One session through participate, the same way every subject is
         # evaluated; no probing of the subject's methods or class.
         try:
-            if region is None:
-                raise ValueError('Feature-width probe requires a neural output '
-                                 'channel (neural:<region>); for a benchmark that names '
-                                 'none, only the subject\'s probe_safe_regions are '
-                                 'probed when it declares them')
             result = neural_response(model, one, [f'neural:{region}'], time_bins=time_bins)
         except Exception as e:
             last_error = e
