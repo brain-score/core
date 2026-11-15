@@ -78,7 +78,7 @@ class CatalogEntry:
     direction: str                     # INPUT, OUTPUT, or BOTH
     carried_by: str                    # note: what carries it (a table column, a task, a policy)
     payload_contract: str              # human-readable dtype / shape / units
-    handled_by: str                    # note: which harness or wrapper interprets the payload
+    handled_by: str                    # note: which extractor or harness interprets the payload
     meta_keys: Tuple[str, ...] = ()     # recognized metadata keys
     addressing: Optional[str] = None    # how the ':address' suffix is interpreted, if any
     expected_ndim: Tuple[int, ...] = ()  # allowed array ndims; empty means unchecked
@@ -378,7 +378,7 @@ _SEED = [
     # (H, W, 3) payloads and `vision:video` takes (T, H, W, 3) payloads.
     CatalogEntry("vision", INPUT, "StimulusSet column",
                  "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, a table of frames, or a path to one",
-                 "image/video preprocessor + a vision model harness (wrapper)",
+                 "image/video preprocessor + a vision extractor (wrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(3, 4), expected_dtype="uint8",
                  addressing=("address is the form a subject takes natively: 'image' "
                              "(images) or 'video' (video); a subject declares each form it "
@@ -386,11 +386,11 @@ _SEED = [
                  materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
                  "a Python str",
-                 "tokenizer + a text model harness (TextWrapper)",
+                 "tokenizer + a text extractor (TextWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, materializers=("StimulusSet",)),
     CatalogEntry("audio", INPUT, "StimulusSet column",
                  "(samples,) float32 waveform, or a path; sample rate read from the file header",
-                 "an audio model harness (AudioWrapper)",
+                 "an audio extractor (AudioWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS + ("sample_rate_hz",), expected_ndim=(1,),
                  materializers=("StimulusSet",)),
     CatalogEntry("instruction", INPUT, "TaskContext.instruction or a closed-loop row entry",
@@ -478,17 +478,17 @@ _SEED = [
                  "the model's intervention (state_change_fn)",
                  owner="core",
                  materializers=("PerturbationApplied",)),
-    # --- outputs: physiological readouts (reserved for human harnesses) ---
-    CatalogEntry("pupil", OUTPUT, "human harness recording",
+    # --- outputs: physiological readouts (reserved for human subjects) ---
+    CatalogEntry("pupil", OUTPUT, "human subject recording",
                  "(t,) float pupil diameter time series, or scalar diameter",
-                 "the human harness (eye tracker)",
+                 "the human subject (eye tracker)",
                  meta_keys=("signal_type",),
-                 owner="human harness"),
-    CatalogEntry("skin_conductance", OUTPUT, "human harness recording",
+                 owner="human subject"),
+    CatalogEntry("skin_conductance", OUTPUT, "human subject recording",
                  "(t,) float skin conductance time series, or scalar value",
-                 "the human harness (physiological sensor)",
+                 "the human subject (physiological sensor)",
                  meta_keys=("signal_type",),
-                 owner="human harness"),
+                 owner="human subject"),
 ]
 
 for _entry in _SEED:
