@@ -2,9 +2,8 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
 
-from .events import InputEvent, OutputEvent
 
 if TYPE_CHECKING:
     from .streaming import Session
@@ -211,60 +210,4 @@ class Subject(ABC):
 
     def reset(self) -> None:
         """Clear state between independent runs; stateless subjects do nothing."""
-        pass
-
-
-class UnifiedModel(Subject):
-    """Subject base for models evaluated through typed paths.
-
-    Implementations provide ``process``, ``start_task``, ``start_recording``,
-    a layer map and ``in_channels`` (and ``required_channels`` when an input
-    is required). ``participate`` (the evaluation method of the contract) runs
-    a session through those typed paths, so a typed model needs no session
-    code of its own. ``process`` is a typed convenience of this base, not part
-    of the subject contract.
-
-    New session-native implementations should inherit ``Subject`` directly.
-    """
-
-    @property
-    @abstractmethod
-    def identifier(self) -> str:
-        ...
-
-    @property
-    @abstractmethod
-    def region_layer_map(self) -> Mapping[str, Any]:
-        ...
-
-    @property
-    def out_channels(self) -> Set[str]:
-        """Output channels: ``neural:<region>`` for every mapped region.
-
-        Typed models that also answer tasks or act override this to add
-        ``behavior`` or ``motor``; nothing is discovered from attribute names.
-        """
-        return {f"neural:{region}" for region in self.region_layer_map}
-
-    def process(self, input_event: InputEvent) -> OutputEvent:
-        """Typed convenience used by the default ``participate``; not part of the contract."""
-        raise NotImplementedError(
-            f"{type(self).__name__} defines no process(); implement participate(session) "
-            "or process(input_event) for the typed session driver.")
-
-    def participate(self, session: "Session") -> None:
-        """Run ``session`` through this model's typed paths."""
-        from brainscore_core.streaming_helpers import drive_typed_session
-        drive_typed_session(self, session)
-
-    def start_task(self, task: TaskContext) -> None:
-        self._task: Optional[TaskContext] = task
-
-    def start_recording(self,
-                        recording_target: Union[str, List[str]],
-                        time_bins: Optional[List[Tuple[int, int]]] = None,
-                        recording_type: Optional[str] = None) -> None:
-        pass
-
-    def reset(self) -> None:
         pass

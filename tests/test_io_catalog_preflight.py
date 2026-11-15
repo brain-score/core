@@ -7,7 +7,7 @@ import warnings
 
 import pytest
 
-from brainscore_core.contract import UnifiedModel
+from tests.typed_subject import TypedSubject
 from brainscore_core.compatibility import (
     check_compatibility,
     CompatibilityError,
@@ -15,7 +15,7 @@ from brainscore_core.compatibility import (
 )
 
 
-class _Model(UnifiedModel):
+class _Model(TypedSubject):
     def __init__(self, available, region_map=None):
         self._av = set(available)
         self._rm = region_map or {}

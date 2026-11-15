@@ -1,10 +1,10 @@
-"""The minimal subject and the legacy compatibility base remain interoperable."""
+"""The subject contract is one abstract class; core has no typed base class."""
 from abc import ABC
 
 import pytest
 
 import brainscore_core
-from brainscore_core.contract import Subject, UnifiedModel
+from brainscore_core.contract import Subject
 
 
 class TestSubjectRename:
@@ -13,10 +13,6 @@ class TestSubjectRename:
         with pytest.raises(TypeError):
             Subject()  # abstract, cannot instantiate
 
-    def test_unified_model_is_a_subject(self):
-        assert issubclass(UnifiedModel, Subject)
-        assert UnifiedModel is not Subject
-
     def test_subject_exported_from_package(self):
         assert brainscore_core.Subject is Subject
-        assert brainscore_core.UnifiedModel is UnifiedModel
+        assert not hasattr(brainscore_core, 'UnifiedModel')      # deleted; inherit Subject
