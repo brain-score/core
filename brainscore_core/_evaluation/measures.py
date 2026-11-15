@@ -91,13 +91,17 @@ class MeasureRecord:
 
 
 @contextmanager
-def record_measures() -> Iterator[MeasureRecord]:
+def record_measures(subject: Optional[str] = None) -> Iterator[MeasureRecord]:
     """Collect the measure of each behavioral response until the block ends.
 
     A record opened inside another one (a benchmark that calls ``score()``)
     passes its measures to the outer record when it ends without an error, so
     the outer score describes the responses its result came from. A failed
     inner run passes nothing on: its result does not reach the outer score.
+
+    ``subject`` is the identifier of the subject the score runs. When the block
+    ends, every session no note named is bound to it, before the record passes
+    to an outer one: a session belongs to the subject of the score that ran it.
     """
     outer = _active.get()
     record = MeasureRecord()
@@ -108,6 +112,9 @@ def record_measures() -> Iterator[MeasureRecord]:
         succeeded = True
     finally:
         _active.reset(token)
+        if subject is not None:
+            record._sessions = {key: subject if named is None else named
+                                for key, named in record._sessions.items()}
         if succeeded and outer is not None:
             outer._records.update(record._records)
             outer.applied += record.applied

@@ -668,3 +668,29 @@ def test_the_record_keeps_no_session_alive():
         gc.collect()
         assert reference() is None
     assert list(measures._sessions.values()) == ['custom']
+
+
+def test_an_inner_record_binds_its_unnamed_sessions_to_its_own_subject(monkeypatch):
+    """The session of an inner score that no note names belongs to the inner score's subject,
+    also after the inner record passes to the outer one."""
+    from brainscore_core.streaming import Session
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    with record_measures(subject='subject') as outer:
+        with record_measures(subject='inner-subject'):
+            _answer_session(Session(_events(), ['neural:IT']))
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                 harness_id='test', measures=outer)
+    assert score.attrs['provenance'] == (
+        {'subject': 'inner-subject', 'parts': 'not stated', 'activation_store': 'off'},)
+
+
+def test_a_named_session_keeps_its_name_when_the_record_binds_the_others(monkeypatch):
+    from brainscore_core._evaluation.measures import note_session
+    from brainscore_core.streaming import Session
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    with record_measures(subject='subject') as measures:
+        named = Session(_events(), ['neural:IT'])
+        note_session(named, subject='partner')
+        _answer_session(named)
+        _answer_session(Session(_events(), ['neural:IT']))
+    assert sorted(measures._sessions.values()) == ['partner', 'subject']
