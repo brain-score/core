@@ -5,7 +5,20 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from brainscore_core.plugin_management.import_plugin import import_plugin, ImportPlugin
+
+# The three tests that install packages from the network run unless the suite was started with
+# BS_INSTALL_DEPENDENCIES=no (unset means 'yes' for the installer). A developer machine and
+# the offline UMI runs start with 'no': the tests install into the running environment.
+_INSTALLS = pytest.mark.skipif(
+    os.getenv('BS_INSTALL_DEPENDENCIES') == 'no',
+    reason="installs packages from the network into the running environment; "
+           "the suite was started with BS_INSTALL_DEPENDENCIES=no")
+# What those tests install: two packages named in the plugins' requirements.txt, and the two
+# distributions of the plugins' setup.py files.
+_INSTALLED_BY_TESTS = ['pyaztro', 'pyfiglet', 'dummy-model-requirements-and-setup', 'dummy-model-setup-only']
 
 
 class TestImportPlugin:
@@ -22,7 +35,8 @@ class TestImportPlugin:
         model_registry = self._model_registry()
         for model_id in list(model_registry.keys()):
             del model_registry[model_id]
-        subprocess.run(f'pip uninstall pyaztro pyfiglet --yes', shell=True)
+        if TestImportPlugin.current_dependencies_pref != 'no':  # a 'no' run installs nothing: remove nothing
+            subprocess.run([sys.executable, '-m', 'pip', 'uninstall', '--yes', *_INSTALLED_BY_TESTS])
         shutil.rmtree(TestImportPlugin.dummy_container_dirpath)
         if TestImportPlugin.current_dependencies_pref:  # value was set
             os.environ['BS_INSTALL_DEPENDENCIES'] = TestImportPlugin.current_dependencies_pref
@@ -35,6 +49,7 @@ class TestImportPlugin:
         brainscore_dummy = __import__('brainscore_dummy')
         return brainscore_dummy.model_registry
 
+    @_INSTALLS
     def test_yes_dependency_installation(self):
         os.environ['BS_INSTALL_DEPENDENCIES'] = 'yes'
         model_registry = self._model_registry()
@@ -52,6 +67,7 @@ class TestImportPlugin:
         except Exception as e:
             assert "No module named 'pyaztro'" in str(e)
 
+    @_INSTALLS
     def test_dependency_install_from_setup_py(self):
         os.environ['BS_INSTALL_DEPENDENCIES'] = 'yes'
         model_registry = self._model_registry()
@@ -59,6 +75,7 @@ class TestImportPlugin:
         import_plugin('brainscore_dummy', 'models', 'dummy-model-setup-py')
         assert 'dummy-model-setup-py' in model_registry
 
+    @_INSTALLS
     def test_dependency_install_from_setup_py_with_requirements_txt(self):
         os.environ['BS_INSTALL_DEPENDENCIES'] = 'yes'
         model_registry = self._model_registry()
