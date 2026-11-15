@@ -1,6 +1,5 @@
 import os
 import yaml
-import torch.nn as nn
 import re
 import requests
 from brainscore_core.plugin_management.import_plugin import import_plugin
