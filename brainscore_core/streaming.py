@@ -478,6 +478,14 @@ class Session(Source):
         packaged in the schema of its format, with each trial's state
         (``response_formats``). A missing row the session adds also reaches the
         observers and ``emitted`` (``meta['missing']``).
+
+        A subject that answers one trial with one cell (a str, a 1-D array or
+        one number on ``behavior:<format>``) names two keys in ``event.meta``:
+        ``stimulus_id``, the trial's row, in a table session; and ``units``
+        (``'ms'`` or ``'monotone'``) for a ``behavior:rt`` cell::
+
+            session.respond(StreamEvent('behavior:rt', 412.0, None,
+                                        {'stimulus_id': 's0', 'units': 'ms'}))
         """
         if not isinstance(event, StreamEvent):
             raise TypeError("event must be a StreamEvent")
@@ -644,6 +652,9 @@ def check_event(event: StreamEvent, direction: str, session: Any = None) -> None
         problems = io_catalog.validate(event.channel, event.payload, direction=direction,
                                        event=event, session=session)
     if problems:
+        # The message names the channel once: drop the catalog's per-problem label.
+        label = f'{event.channel}: '
+        problems = [p[len(label):] if p.startswith(label) else p for p in problems]
         raise ValueError(f"{direction} event on {event.channel!r} failed the channel catalog: "
                          + "; ".join(problems[:5]))
 

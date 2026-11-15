@@ -464,7 +464,7 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
 def _cell_rows(fmt, channel, payload, event, session, ledger):
     """A cell as ``(values, coords, record)`` of a one-row stored answer."""
     if fmt == 'log_probabilities':
-        raise ValueError(f'a {channel} answer is an assembly with its response record')
+        raise ValueError('an answer is an assembly with its response record')
     meta = getattr(event, 'meta', None) or {}
     stimulus_id = meta.get('stimulus_id')
     options = (ledger.options(stimulus_id, ledger.occurrence(channel, stimulus_id))
@@ -473,12 +473,12 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
     parameters = {}
     if fmt in ('text', 'choice'):
         if not isinstance(payload, str):
-            raise ValueError(f'a {channel} cell is a str, not {type(payload).__name__}')
+            raise ValueError(f'a cell is a str, not {type(payload).__name__}')
     if fmt == 'text':
         values = np.array([payload], dtype=object)
     elif fmt == 'choice':
         if options is None:
-            raise ValueError(f'{channel}: the options of this trial are not known; send an '
+            raise ValueError('the options of this trial are not known; send an '
                              'assembly with a choice axis or give the task a Choice')
         row = np.zeros(len(options), dtype=np.float32)
         if payload in options:
@@ -491,15 +491,15 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
     elif fmt == 'probabilities':
         array = np.asarray(payload) if isinstance(payload, np.ndarray) else None
         if array is None or array.ndim != 1 or array.dtype.kind not in 'fiu':
-            raise ValueError(f'a {channel} cell is a 1-D numeric array')
+            raise ValueError('a cell is a 1-D numeric array')
         if options is not None and len(array) != len(options):
-            raise ValueError(f'{channel}: {len(array)} values for {len(options)} options')
+            raise ValueError(f'{len(array)} values for {len(options)} options')
         values = array.astype(np.float32)[None, :]
     else:
         if isinstance(payload, np.ndarray) and payload.ndim == 0:
             payload = payload.item()
         if not _number(payload):
-            raise ValueError(f'a {channel} cell is one number, not {type(payload).__name__}')
+            raise ValueError(f'a cell is one number, not {type(payload).__name__}')
         values = np.array([float(payload)], dtype=np.float64)
         if fmt == 'rt':
             parameters['units'] = meta.get('units')
@@ -514,10 +514,10 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
     """An assembly as ``(values, coords, record)``, after the malformed checks."""
     dims = ('presentation', 'choice') if fmt in _AXIS_FORMATS else ('presentation',)
     if tuple(payload.dims) != dims:
-        raise ValueError(f'{channel} payload dims are {tuple(payload.dims)}, not {dims}')
+        raise ValueError(f'the payload dims are {tuple(payload.dims)}, not {dims}')
     record = payload.attrs.get('response')
     if record is None:
-        raise ValueError(f'a {channel} assembly carries its response record in attrs["response"]')
+        raise ValueError('an assembly carries its response record in attrs["response"]')
     problems = _record_problems(record, channel)
     if problems:
         raise ValueError('; '.join(problems))
@@ -527,16 +527,16 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
     dtype = {'choice': np.float32, 'probabilities': np.float64 if raw_scores else np.float32,
              'text': object}.get(fmt, np.float64)   # log_probabilities: float64
     if values.dtype != np.dtype(dtype):
-        raise ValueError(f'{channel} values are {values.dtype}, not {np.dtype(dtype)}')
+        raise ValueError(f'the values are {values.dtype}, not {np.dtype(dtype)}')
     coords = _presentation_coords(payload)
     if 'stimulus_id' not in coords:
-        raise ValueError(f'a {channel} assembly has a stimulus_id coordinate')
+        raise ValueError('an assembly has a stimulus_id coordinate')
     ids = coords['stimulus_id']
     named = (getattr(event, 'meta', None) or {}).get('stimulus_id')
     if named is not None:
         named = list(named) if isinstance(named, (list, tuple)) else [named]
         if ids != named:
-            raise ValueError(f'{channel}: the event answers stimuli {named}, but its rows are {ids}')
+            raise ValueError(f'the event answers stimuli {named}, but its rows are {ids}')
     if fmt in _AXIS_FORMATS:
         axis = list(payload['choice'].values)
         if ledger is not None:
@@ -549,33 +549,33 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
                                                                                   occurrence))))
             widths = {len(expected) for _, expected in expected_axes if expected is not None}
             if len(widths) > 1:
-                raise ValueError(f'{channel}: the rows of this answer need different numbers of '
+                raise ValueError('the rows of this answer need different numbers of '
                                  f'options {sorted(widths)}, so they cannot be one assembly; '
                                  'answer such trials one row at a time (a cell or a one-row '
                                  'assembly each)')
             for stimulus_id, expected in expected_axes:
                 if expected is not None and [str(a) for a in axis] != [str(e) for e in expected]:
-                    raise ValueError(f'{channel}: the choice axis is {axis}, not the options '
+                    raise ValueError(f'the choice axis is {axis}, not the options '
                                      f'{expected} of stimulus {stimulus_id!r}')
     if fmt == 'choice':
         known = np.isnan(values) | (values == 0) | (values == 1)
         if not known.all():
-            raise ValueError(f'{channel} values are 0, 1 or NaN (one option, or none)')
+            raise ValueError('the values are 0, 1 or NaN (one option, or none)')
         empty = np.isnan(values).all(axis=1)
         if (np.isnan(values).any(axis=1) & ~empty).any():
-            raise ValueError(f'{channel}: a row is all NaN (no choice) or has no NaN')
+            raise ValueError('a row is all NaN (no choice) or has no NaN')
         supplied = coords.get('response_state')
         if supplied is not None and any(state == 'invalid' and not row_empty
                                         for state, row_empty in zip(supplied, empty)):
-            raise ValueError(f'{channel}: a row supplied as invalid is all NaN')
+            raise ValueError('a row supplied as invalid is all NaN')
     if fmt == 'text':
         if any(not (isinstance(v, str) or v is None) for v in values):
-            raise ValueError(f'{channel} values are str (or None for no reply)')
+            raise ValueError('the values are str (or None for no reply)')
     if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
-        raise ValueError(f"{channel}: the record's parameters name units {_RT_UNITS}")
+        raise ValueError(f"the record's parameters name units {_RT_UNITS}")
     if 'raw_answer' not in coords:
         if record['origin'] == 'derived':
-            raise ValueError(f'a derived {channel} assembly keeps its source evidence in '
+            raise ValueError('a derived assembly keeps its source evidence in '
                              'raw_answer; core does not make it from the derived values')
         coords['raw_answer'] = [_raw_text(value) for value in values]
     return values, coords, record
@@ -625,12 +625,12 @@ def _check_occurrences(channel, ids, ledger) -> None:
     answered = ledger.answered.get(channel, Counter())
     for stimulus_id, count in Counter(ids).items():
         if _null(stimulus_id):
-            raise ValueError(f'{channel}: an answer row names no stimulus_id, so it cannot be '
+            raise ValueError('an answer row names no stimulus_id, so it cannot be '
                              'matched to a trial of the table')
         if stimulus_id not in ledger.counts:
-            raise ValueError(f'{channel}: stimulus {stimulus_id!r} is not in this session')
+            raise ValueError(f'stimulus {stimulus_id!r} is not in this session')
         if answered[stimulus_id] + count > ledger.counts[stimulus_id]:
-            raise ValueError(f'{channel}: stimulus {stimulus_id!r} is answered more often than '
+            raise ValueError(f'stimulus {stimulus_id!r} is answered more often than '
                              f'the table has it ({ledger.counts[stimulus_id]})')
 
 
@@ -647,13 +647,13 @@ def _rows(channel, payload, event, session):
         values, coords, record = _cell_rows(fmt, channel, payload, event, session, ledger)
         attrs = {}
     if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
-        raise ValueError(f"{channel}: give the units of a reaction time ({_RT_UNITS}): the "
+        raise ValueError(f"give the units of a reaction time ({_RT_UNITS}): the "
                          "record's parameters['units'], or meta['units'] for one number")
     _check_occurrences(channel, coords['stimulus_id'], ledger)
     states, why = _states(fmt, values, coords, record, _response_of(session))
     supplied = coords.pop('response_state', None)
     if supplied is not None and list(supplied) != states:
-        raise ValueError(f'{channel}: the supplied states {list(supplied)} contradict the '
+        raise ValueError(f'the supplied states {list(supplied)} contradict the '
                          f'values, which give {states}')
     coords.pop('response_reason', None)
     coords['response_state'], coords['response_reason'] = states, why

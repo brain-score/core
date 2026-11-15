@@ -182,6 +182,27 @@ def test_a_cell_for_another_trial_than_its_event_names_raises():
         session.respond(StreamEvent('behavior:choice', one_row, None, {'stimulus_id': 's0'}))
 
 
+def test_a_malformed_cell_names_its_channel_once():
+    session = stimulus_session(_stimuli(), ['behavior:choice'])   # no task: no options
+    with pytest.raises(ValueError) as raised:
+        session.respond(StreamEvent('behavior:choice', 'a', None, {'stimulus_id': 's0'}))
+    assert str(raised.value) == (
+        "output event on 'behavior:choice' failed the channel catalog: the options of this "
+        "trial are not known; send an assembly with a choice axis or give the task a Choice")
+    session = stimulus_session(_stimuli(), ['behavior:rating'], TASKS['behavior:rating'])
+    with pytest.raises(ValueError) as raised:
+        session.respond(StreamEvent('behavior:rating', 'seven', None, {'stimulus_id': 's0'}))
+    assert str(raised.value) == ("output event on 'behavior:rating' failed the channel catalog: "
+                                 "a cell is one number, not str")
+
+
+def test_the_catalog_names_the_meta_keys_of_a_cell_answer():
+    from brainscore_core import io_catalog
+    entry = io_catalog.get('behavior')
+    assert {'stimulus_id', 'units'} <= set(entry.meta_keys)
+    assert "meta['stimulus_id']" in entry.payload_contract and "meta['units']" in entry.payload_contract
+
+
 def test_a_reaction_time_cell_without_units_raises():
     session = stimulus_session(_stimuli(), ['behavior:rt'], TASKS['behavior:rt'])
     with pytest.raises(ValueError, match='units'):

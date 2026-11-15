@@ -454,9 +454,11 @@ _SEED = [
     CatalogEntry("behavior", OUTPUT, "a subject answer on behavior:<kind>, as the task asks",
                  "one trial's cell (a str, a 1-D numeric array, one number) or an assembly "
                  "of rows over presentation (behavior:log_probabilities: an assembly only); "
-                 "the bare channel takes a label, a probability vector or text",
+                 "the bare channel takes a label, a probability vector or text; a cell "
+                 "names its trial in meta['stimulus_id'] (in a table session) and a "
+                 "reaction-time cell its unit in meta['units'] ('ms' or 'monotone')",
                  "a fitted readout or the model's generation path",
-                 meta_keys=("label_set", "units"),
+                 meta_keys=("stimulus_id", "units", "label_set"),
                  shape_validator=_check_behavior,
                  addressing=("address is the response format a TaskContext response asks for, "
                              "from the closed list CHANNEL_FORMS['behavior']: choice, "

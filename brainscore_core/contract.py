@@ -126,7 +126,27 @@ class Subject(ABC):
     Declare identity and supported channels, then implement ``participate`` to
     consume inputs with ``session.next_input()`` and submit responses with
     ``session.respond(event)``. A subject need not expose layers, modalities, or
-    legacy model methods. Declarations may be properties or class attributes.
+    legacy model methods.
+
+    Declare with class attributes, or with properties when a declaration depends
+    on a constructor argument. ``self.out_channels = ...`` in ``__init__`` does
+    not work: the abstract properties must be defined on the class::
+
+        class Fixed(Subject):
+            identifier = 'fixed'
+            in_channels = {'text'}
+            out_channels = {'behavior:choice'}
+
+        class Configured(Subject):
+            def __init__(self, outputs):
+                self._outputs = set(outputs)
+
+            identifier = 'configured'
+            in_channels = {'text'}
+
+            @property
+            def out_channels(self):
+                return self._outputs
 
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
     override it to clear memory, task setup and interventions between independent
