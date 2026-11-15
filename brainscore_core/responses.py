@@ -85,18 +85,18 @@ class Choice:
     record has ``category='model-derived'`` and ``parameters['scale'] == 'log'``.
     Only a ``likelihood`` part gives raw scores.
 
-    ``raw_text=True`` shows the stimulus text exactly as given: no directive is
+    ``verbatim=True`` shows the trial text exactly as given: no directive is
     added, and an instruction is refused. A part that scores options scores
     ``f"{text} {option}"`` as plain text, with no chat template and no
     beginning-of-sequence token, as EWoK's ``score`` does. A ``reply`` part
-    still answers through its own chat template, because a chat model cannot
-    answer without one; it gets no added sentence.
+    keeps its own chat template, because a chat model cannot answer without one;
+    it gets no added sentence, and its answer's record says the template was used.
     """
     labels: Union[Tuple[str, ...], str, None] = None   # the options, or the column holding each row's
     confidence: Optional[Scale] = None
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
     raw_scores: bool = False
-    raw_text: bool = False
+    verbatim: bool = False
 
     REACTION_TIMES = ('evidence_margin', 'surprisal')
 
@@ -108,14 +108,14 @@ class Choice:
             raise ValueError('Choice needs at least two labels')
         if self.reaction_time not in (None, *self.REACTION_TIMES):
             raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
-        for name in ('raw_scores', 'raw_text'):
+        for name in ('raw_scores', 'verbatim'):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f'{name} is True or False, not {getattr(self, name)!r}')
         if self.raw_scores and self.reaction_time is not None:
             raise ValueError('reaction_time reads normalized probabilities; it cannot use raw_scores')
-        if self.confidence is not None and (self.raw_scores or self.raw_text):
+        if self.confidence is not None and (self.raw_scores or self.verbatim):
             raise ValueError('A reported confidence needs a reply with a directive; '
-                             'it cannot be used with raw_scores or raw_text')
+                             'it cannot be used with raw_scores or verbatim')
         if not isinstance(self.labels, str):
             object.__setattr__(self, 'labels', tuple(self.labels))
 
@@ -126,7 +126,7 @@ class Choice:
                 + (('behavior:rt',) if self.reaction_time is not None else ()))
 
     def directive(self) -> str:
-        if self.raw_text:
+        if self.verbatim:
             return ''
         if isinstance(self.labels, str):
             raise ValueError("The directive needs the row's options; trial_prompt gives them")

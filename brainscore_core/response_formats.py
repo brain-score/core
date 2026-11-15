@@ -392,7 +392,7 @@ def _null(value) -> bool:
     return value is None or (isinstance(value, float) and value != value)
 
 
-def _raw_text(value) -> str:
+def _answer_text(value) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, np.ndarray):
@@ -504,7 +504,7 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
         values = np.array([float(payload)], dtype=np.float64)
         if fmt == 'rt':
             parameters['units'] = meta.get('units')
-    coords['raw_answer'] = [_raw_text(payload)]
+    coords['raw_answer'] = [_answer_text(payload)]
     record = response_record(channel, 'external', parameters=parameters)
     if fmt in ('choice', 'probabilities'):
         coords['choice'] = _axis(session, options) or list(range(values.shape[1]))
@@ -578,7 +578,7 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
         if record['origin'] == 'derived':
             raise ValueError('a derived assembly keeps its source evidence in '
                              'raw_answer; core does not make it from the derived values')
-        coords['raw_answer'] = [_raw_text(value) for value in values]
+        coords['raw_answer'] = [_answer_text(value) for value in values]
     return values, coords, record
 
 
