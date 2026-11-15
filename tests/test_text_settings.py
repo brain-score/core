@@ -42,9 +42,17 @@ def test_trial_prompt_carries_the_task_response(response):
 def test_a_plain_choice_is_unchanged():
     choice = Choice(['a', 'b'])
     assert (choice.labels, choice.raw_scores, choice.raw_text) == (('a', 'b'), False, False)
-    assert choice.channels == ('behavior:choice',)
+    assert choice.channels == ('behavior:choice', 'behavior:probabilities')
     assert choice.directive() == 'Answer with exactly one of: a, b.'
     assert TaskContext(response=choice).label_set == ['a', 'b']
+
+
+def test_a_choice_names_its_formats_and_has_no_probabilities_switch():
+    # The session's requested outputs say which formats are answered.
+    with pytest.raises(TypeError):
+        Choice(['a', 'b'], probabilities=True)
+    assert Choice(['a', 'b'], reaction_time='surprisal').channels == (
+        'behavior:choice', 'behavior:probabilities', 'behavior:rt')
 
 
 def test_options_from_a_column_become_the_rows_labels():

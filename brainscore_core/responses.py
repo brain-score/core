@@ -48,9 +48,12 @@ class Scale:
 class Choice:
     """One label from ``labels``.
 
-    ``probabilities=True`` also returns the implied probability of each label
-    (from a readout or a language model's likelihoods). ``confidence=Scale(...)``
-    also asks the subject to report how sure it is, in the same reply.
+    A choice task can be answered as the choice (``behavior:choice``) and as
+    the implied probability of each label (``behavior:probabilities``, from a
+    readout or a language model's likelihoods). ``channels`` names every format
+    the task can be answered in; the outputs that a session requests say which
+    are answered. ``confidence=Scale(...)`` also asks the subject to report how
+    sure it is, in the same reply.
     ``reaction_time`` also returns an implied reaction time from those
     probabilities, scored by correlation with human RTs as Futrell2018 scores
     surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
@@ -78,7 +81,6 @@ class Choice:
     answer without one; it gets no added sentence.
     """
     labels: Union[Tuple[str, ...], str, None] = None   # the options, or the column holding each row's
-    probabilities: bool = False
     confidence: Optional[Scale] = None
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
     raw_scores: bool = False
@@ -94,7 +96,7 @@ class Choice:
             raise ValueError('Choice needs at least two labels')
         if self.reaction_time not in (None, *self.REACTION_TIMES):
             raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
-        for name in ('probabilities', 'raw_scores', 'raw_text'):
+        for name in ('raw_scores', 'raw_text'):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f'{name} is True or False, not {getattr(self, name)!r}')
         if self.raw_scores and self.reaction_time is not None:
@@ -107,8 +109,7 @@ class Choice:
 
     @property
     def channels(self) -> Tuple[str, ...]:
-        return (('behavior:choice',)
-                + (('behavior:probabilities',) if self.probabilities or self.raw_scores else ())
+        return (('behavior:choice', 'behavior:probabilities')
                 + (('behavior:confidence',) if self.confidence is not None else ())
                 + (('behavior:rt',) if self.reaction_time is not None else ()))
 

@@ -20,7 +20,7 @@ from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 IDS = ['s0', 's1']
 TASKS = {
     'behavior:choice': TaskContext(response=Choice(['cat', 'dog'])),
-    'behavior:probabilities': TaskContext(response=Choice(['cat', 'dog'], probabilities=True)),
+    'behavior:probabilities': TaskContext(response=Choice(['cat', 'dog'])),
     'behavior:rating': TaskContext(response=Scale(1, 7, 1)),
     'behavior:confidence': TaskContext(response=Choice(['cat', 'dog'], confidence=Scale(1, 5))),
     'behavior:rt': TaskContext(response=Choice(['cat', 'dog'], reaction_time='surprisal')),
