@@ -196,3 +196,65 @@ def test_direct_extraction_keeps_strict_content_checks():
     before = fingerprint(tensor)
     tensor.data.mul_(2)
     assert fingerprint(tensor) != before
+
+
+@pytest.fixture
+def cache_switch_environment():
+    """Keep the cache switch tests from changing the environment of later tests."""
+    previous = os.environ.get('RESULTCACHING_DISABLE')
+    yield
+    if previous is None:
+        os.environ.pop('RESULTCACHING_DISABLE', None)
+    else:
+        os.environ['RESULTCACHING_DISABLE'] = previous
+
+
+def test_reentrant_disable_restores_only_at_outermost(cache_switch_environment):
+    """Interleaved enter/exit must keep the flag set until the OUTERMOST exit."""
+    from brainscore_core.extraction_cache import activation_cache_disabled
+    os.environ.pop('RESULTCACHING_DISABLE', None)
+    a, b = activation_cache_disabled(), activation_cache_disabled()
+    a.__enter__()
+    assert os.environ.get('RESULTCACHING_DISABLE') == '1'
+    b.__enter__()
+    a.__exit__(None, None, None)                       # inner exits first
+    assert os.environ.get('RESULTCACHING_DISABLE') == '1'   # still disabled
+    b.__exit__(None, None, None)                       # outermost exits
+    assert os.environ.get('RESULTCACHING_DISABLE') is None  # restored
+
+
+def test_enter_blocks_while_the_transition_lock_is_held(cache_switch_environment):
+    """The depth/flag transition must run under ``_cache_disable_lock`` so a
+    second thread cannot interleave the read-modify of the shared counter.
+
+    Racing two threads to hit the exact bad schedule is GIL-nondeterministic, so
+    we prove the invariant directly and deterministically: hold the lock, then a
+    worker entering ``activation_cache_disabled()`` must BLOCK until we release.
+    Against a lockless implementation the worker enters immediately and the first
+    assert fails — which is exactly the regression this guards."""
+    import threading
+    import brainscore_core.extraction_cache as cache
+    from brainscore_core.extraction_cache import activation_cache_disabled
+    os.environ.pop('RESULTCACHING_DISABLE', None)
+    cache._cache_disable_depth = 0
+    cache._cache_disable_prev = None
+
+    entered = threading.Event()
+
+    def worker():
+        with activation_cache_disabled():
+            entered.set()
+
+    cache._cache_disable_lock.acquire()
+    t = threading.Thread(target=worker)
+    try:
+        t.start()
+        # lock held -> the guarded transition cannot start (lockless impl: it can)
+        assert not entered.wait(timeout=0.5)
+    finally:
+        cache._cache_disable_lock.release()
+    # released -> the worker proceeds and completes cleanly
+    assert entered.wait(timeout=2)
+    t.join(timeout=2)
+    assert cache._cache_disable_depth == 0
+    assert os.environ.get('RESULTCACHING_DISABLE') is None

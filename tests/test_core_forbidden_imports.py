@@ -24,11 +24,9 @@ import brainscore_core
 FRAMEWORKS = {'torch', 'transformers', 'tensorflow', 'jax', 'cv2', 'sklearn'}
 PACKAGES = {'brainscore', 'brainscore_vision', 'brainscore_language'}
 
-# (path inside brainscore_core, imported module): reason
-ALLOWED = {
-    ('plugin_management/generate_benchmark_metadata.py', 'torch.nn'):
-        'legacy metadata generator counts torch layers; known violation of rule 11.1',
-}
+# (path inside brainscore_core, imported module): reason. Empty: core has no
+# known violation.
+ALLOWED = {}
 
 
 def forbidden_imports(source):
@@ -83,7 +81,7 @@ def test_check_fails_on_a_new_violation(tmp_path):
 def test_check_fails_on_a_stale_entry(tmp_path):
     (tmp_path / 'clean.py').write_text('import numpy\n')
     with pytest.raises(AssertionError, match='no longer violate'):
-        check(tmp_path, ALLOWED)
+        check(tmp_path, {('clean.py', 'torch'): 'stale'})
 
 
 @pytest.mark.parametrize('source', [

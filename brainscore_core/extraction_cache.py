@@ -13,7 +13,9 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import sys
+import threading
 import types
 import weakref
 from collections.abc import Mapping
@@ -47,6 +49,41 @@ def weight_fingerprint_scope():
         yield
     finally:
         _weight_hashes.reset(token)
+
+
+# The process-wide activation cache switch while a subject's intervention is
+# active. Known gap (Contract Rule 4.4): the legacy vision store reads only the
+# RESULTCACHING_DISABLE variable, so the switch is that variable.
+_cache_disable_depth = 0
+_cache_disable_prev = None
+_cache_disable_lock = threading.Lock()
+
+
+@contextmanager
+def activation_cache_disabled():
+    """Bypass result_caching for the duration. Used when an intervention makes the
+    cached (unchanged) activations invalid but the cache key cannot see it.
+
+    Reentrancy- and thread-safe via a lock-guarded depth counter: nested,
+    interleaved, or concurrent contexts only restore the original
+    ``RESULTCACHING_DISABLE`` when the outermost/last one exits (a plain
+    save/restore would clear the flag early; an unlocked counter would race)."""
+    global _cache_disable_depth, _cache_disable_prev
+    with _cache_disable_lock:
+        if _cache_disable_depth == 0:
+            _cache_disable_prev = os.environ.get('RESULTCACHING_DISABLE')
+            os.environ['RESULTCACHING_DISABLE'] = '1'
+        _cache_disable_depth += 1
+    try:
+        yield
+    finally:
+        with _cache_disable_lock:
+            _cache_disable_depth -= 1
+            if _cache_disable_depth == 0:
+                if _cache_disable_prev is None:
+                    os.environ.pop('RESULTCACHING_DISABLE', None)
+                else:
+                    os.environ['RESULTCACHING_DISABLE'] = _cache_disable_prev
 
 
 class UncacheableConfiguration(ValueError):
