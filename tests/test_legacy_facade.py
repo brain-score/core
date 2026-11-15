@@ -350,3 +350,16 @@ def test_the_label_route_keeps_the_count_of_invalid_answers():
     assert 'response' not in labels.attrs
     assert labels.attrs == {key: value for key, value in old.attrs.items() if key != 'response'}
 
+
+def test_only_text_answers_pass_resolve_invalid_answers_unchanged():
+    """S9-02: text labels (string or object dtype) pass; a numeric answer of any kind
+    takes the invalid-answer path (a complex all-NaN answer raises the limit error)."""
+    from brainscore_core.legacy_facade import resolve_invalid_answers
+    ids = {'stimulus_id': ('presentation', ['a', 'b'])}
+    for values in (np.array([['x', 'y']]), np.array([['x', 'y']], dtype=object)):
+        answer = BehavioralAssembly(values, coords=ids, dims=['choice', 'presentation'])
+        assert resolve_invalid_answers(answer) is answer
+    complex_nan = BehavioralAssembly(np.full((2, 2), np.nan, dtype=complex),
+                                     coords={**ids, 'choice': ['x', 'y']}, dims=['presentation', 'choice'])
+    with pytest.raises(ValueError, match='above the 10% limit'):
+        resolve_invalid_answers(complex_nan)
