@@ -44,6 +44,7 @@ dependencies (no torch/transformers import).
 import functools
 import hashlib
 import json
+import os
 import platform
 import re
 import sys
@@ -176,15 +177,98 @@ def _source(distribution) -> str:
     return ""
 
 
+# The PYTHONPATH entries made absolute when this module is first imported (the start of a
+# process, in practice), so a later change of the current directory does not move them.
+_STARTUP_PYTHONPATH = [os.path.abspath(entry) for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
+
+
+def _key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _pth_folders(site_folder: str) -> List[str]:
+    """The folders named by the plain path lines of the ``.pth`` files in ``site_folder``.
+
+    As ``site`` reads them at start: files in name order, blank and ``#`` lines skipped.
+    A line that starts with ``import`` is neither run nor read.
+    """
+    import glob
+    folders = []
+    for pth in sorted(glob.glob(os.path.join(site_folder, "*.pth"))):
+        try:
+            with open(pth, encoding="utf-8", errors="replace") as file:
+                lines = file.read().splitlines()
+        except OSError:
+            continue
+        folders += [os.path.join(site_folder, line.rstrip()) for line in lines
+                    if line.strip() and not line.startswith(("#", "import ", "import\t"))]
+    return folders
+
+
+def _environment_locations() -> List[str]:
+    """The ``sys.path`` entries an import reads distributions from, in ``sys.path`` order.
+
+    Only entries known at start count: the ``PYTHONPATH`` entries (``_STARTUP_PYTHONPATH``),
+    the interpreter's site-packages folders, the user site when it is on, and the folders
+    the plain path lines of their ``.pth`` files name. The order of ``sys.path`` is Python's
+    own precedence (a virtual environment before the user site). An entry need not be a
+    folder: an archive on ``PYTHONPATH`` is read as ``importlib.metadata`` reads it. Entries
+    that code adds to ``sys.path`` later (a vendor folder inside a package, a test's folder)
+    are not read, so the value does not depend on what was imported before.
+    """
+    import site
+    sites = list(site.getsitepackages()) + ([site.getusersitepackages()] if site.ENABLE_USER_SITE else [])
+    known = {_key(path) for path in _STARTUP_PYTHONPATH + sites + [f for s in sites for f in _pth_folders(s)]}
+    seen, located = set(), []
+    for entry in sys.path:
+        if entry and _key(entry) in known and _key(entry) not in seen:
+            seen.add(_key(entry))
+            located.append(entry)
+    return located
+
+
+class _Unreadable(Exception):
+    """Metadata of a distribution that cannot be read; the message is the reason."""
+
+
+def environment_distributions() -> Dict[str, tuple]:
+    """``{normalized name: (version, distribution)}`` of the distributions an import uses.
+
+    The distributions of ``_environment_locations()``; for a name found more than once,
+    the first in ``sys.path`` order counts, as an import uses it. The one inventory of the
+    environment fingerprint and the doctor's lock section. Raises ``_Unreadable`` when the
+    metadata of a distribution cannot be read or has no name.
+    """
+    from importlib.metadata import distributions
+    first: Dict[str, tuple] = {}
+    for distribution in distributions(path=_environment_locations()):
+        try:
+            name, version = distribution.metadata["Name"], distribution.version
+        except Exception as error:
+            raise _Unreadable(f"the metadata of a distribution cannot be read ({type(error).__name__}: {error})")
+        if not name:
+            raise _Unreadable(f"a distribution has no name (at {distribution.locate_file('')})")
+        first.setdefault(_normalized(name), (version, distribution))
+    return first
+
+
 @functools.lru_cache(maxsize=1)
 def environment_fingerprint() -> str:
-    """SHA-256 of the sorted lines that name the Python, the platform and every installed distribution.
+    """SHA-256 of the sorted lines that name the Python, the platform and the distributions an import uses.
 
     One line ``python==<three numbers>``, one ``platform==<system> <machine>``, and per
     distribution ``<normalized name>==<version>``, followed by the commit of a package
     installed from a repository or the location of an editable install, when the
-    installer recorded it. The four Brain-Score packages are left out, because
-    ``code_commits`` names their code. Computed once per process.
+    installer recorded it. The distributions are those of ``environment_distributions()``
+    (the ``sys.path`` entries known at start, first entry of a name in ``sys.path`` order).
+    The four Brain-Score packages are left out, because ``code_commits`` names their code.
+    Computed once per process; two processes of one environment with the same
+    ``PYTHONPATH`` give the same value, whatever each imported before.
+
+    Limit: an identity made of distributions cannot see a module with no metadata that
+    shadows a distribution (a loose ``.py`` earlier on the path). Equal fingerprints are
+    necessary for a bit-for-bit comparison; they are not a proof that every imported
+    file is equal.
 
     Metadata that cannot be read gives ``'unavailable: <reason>'``, never a partial
     digest and never an exception: a finished score and the doctor keep running.
@@ -193,20 +277,14 @@ def environment_fingerprint() -> str:
     is known and equal.
     """
     try:
-        from importlib.metadata import distributions
         own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
         lines = {f"python=={platform.python_version()}", f"platform=={platform.system()} {platform.machine()}"}
-        for distribution in distributions():
-            try:
-                name = distribution.metadata["Name"]
-                version = distribution.version
-            except Exception as error:
-                return f"{UNAVAILABLE}the metadata of a distribution cannot be read ({type(error).__name__}: {error})"
-            if not name:
-                return f"{UNAVAILABLE}a distribution has no name (at {distribution.locate_file('')})"
-            if _normalized(name) not in own:
-                lines.add(f"{_normalized(name)}=={version}{_source(distribution)}")
+        for key, (version, distribution) in environment_distributions().items():
+            if key not in own:
+                lines.add(f"{key}=={version}{_source(distribution)}")
         return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
+    except _Unreadable as error:
+        return f"{UNAVAILABLE}{error}"
     except Exception as error:
         return f"{UNAVAILABLE}{type(error).__name__}: {error}"
 
