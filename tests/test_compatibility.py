@@ -112,8 +112,11 @@ class TestRequiredModalities:
         from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
         bench = FakeBenchmark(identifier='typo-bench')
         bench.stimulus_set = StimulusSet({'stimulus_id': ['a'], 'image_file': ['a.png']})
-        with pytest.raises(ValueError, match="'typo-bench' declares no input channels.*stimulus_set and task"):
+        with pytest.raises(ValueError, match="'typo-bench' declares no input channels.*stimulus_set and task") as error:
             check_compatibility(FakeModel(in_channels={'vision:image'}), bench)
+        message = str(error.value)
+        assert "columns ['image_file', 'stimulus_id']" in message
+        assert 'vision:image: image_file_name, image_path, filename' in message and 'text: sentence, text' in message
 
     def test_empty_declared_inputs_are_rejected(self):
         bench = FakeBenchmark(identifier='empty-bench')

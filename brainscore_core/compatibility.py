@@ -179,6 +179,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"Benchmark '{benchmark_id}' declares no input channels. A benchmark "
             f"states what it sends: set required_input_channels, or keep the "
             f"stimulus_set and task it presents as attributes (rule 5.1)."
+            + _no_stimulus_column_hint(getattr(benchmark, "stimulus_set", None))
         )
 
     # Both declarations are validated completely before any comparison, so a
@@ -281,6 +282,18 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         dropped_inputs=frozenset(bench_inputs - consumed),
         requested_output_channels=frozenset(bench_requested),
     )
+
+
+def _no_stimulus_column_hint(stimuli) -> str:
+    """For a kept table with no catalog column: its columns and the accepted ones."""
+    if stimuli is None:
+        return ""
+    accepted: Dict[str, list] = {}
+    for column, channel in io_catalog.stimulus_columns().items():
+        accepted.setdefault(channel, []).append(column)
+    names = "; ".join(f"{channel}: {', '.join(columns)}" for channel, columns in sorted(accepted.items()))
+    return (f" Its stimulus_set has the columns {sorted(map(str, stimuli.columns))}, none of which "
+            f"feeds an input. Name the stimulus column by one of the accepted names ({names}).")
 
 
 def _answering_inputs(output, output_inputs, subject_in):
