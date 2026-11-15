@@ -173,15 +173,15 @@ def test_domain_loaders_mark_legacy_benchmarks_and_scoring_wraps_them():
     assert mark_legacy_benchmark(legacy).subject_api == 'legacy'
     session_native = SimpleNamespace(identifier='native', required_input_channels={'vision'})
     assert mark_legacy_benchmark(session_native).subject_api == 'session'
-    typed = SimpleNamespace(identifier='typed', subject_api='typed')
-    assert mark_legacy_benchmark(typed).subject_api == 'typed'
+    assert mark_legacy_benchmark(legacy).subject_api == 'legacy'   # a second call keeps the mark
+    unmarked = SimpleNamespace(identifier='unmarked')
 
     subject = _Recorder()
     facade = subject_for_benchmark(subject, legacy, visual_degrees=8)
     assert isinstance(facade, LegacyBenchmarkFacade)
     assert facade.subject is subject and facade.visual_degrees() == 8
     assert subject_for_benchmark(subject, session_native) is subject
-    assert subject_for_benchmark(subject, typed) is subject
+    assert subject_for_benchmark(subject, unmarked) is subject
 
 
 # --- setup once, measure many times (review findings 1 to 4) ---------------
