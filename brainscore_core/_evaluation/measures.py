@@ -31,6 +31,7 @@ makes its response events there today (worker pools only extract features or
 compute metrics); copy the context into the worker if one ever does.
 """
 
+import itertools
 import json
 import os
 from copy import deepcopy
@@ -56,6 +57,8 @@ class MeasureRecord:
         self._region_plans: Set[str] = set()
         self._provenance: Dict[str, dict] = {}   # one per distinct session entry, keyed by its JSON
         self._store_states: Set[str] = set()
+        self._sessions: Dict[int, Optional[str]] = {}   # session key -> the subject that took part, if named
+        self._stated: Set[str] = set()                  # subjects that stated their parts
 
     @property
     def unreleased(self) -> Set[str]:
@@ -113,6 +116,8 @@ def record_measures() -> Iterator[MeasureRecord]:
             outer._region_plans |= record._region_plans
             outer._provenance.update(record._provenance)
             outer._store_states |= record._store_states
+            outer._sessions.update(record._sessions)
+            outer._stated |= record._stated
 
 
 def _note_record(payload) -> None:
@@ -139,16 +144,19 @@ def _store_state() -> str:
 
 
 def note_session(session, regions_per_pass: Optional[str] = None,
-                 provenance: Optional[dict] = None) -> None:
-    """Note how ``session`` delivers its inputs and, when given, the plan the subject used
-    and the provenance of the session.
+                 provenance: Optional[dict] = None, subject: Optional[str] = None) -> None:
+    """Note how ``session`` delivers its inputs and, when given, the plan the subject used,
+    the provenance of the session and the subject that takes part in it.
 
     ``regions_per_pass`` comes from the subject that owns the setting and validated
     it (``BrainScoreModel``); a subject that does not read it passes none.
-    ``provenance`` is one entry (a mapping of plain values) from the subject that
-    owns the parts; core adds ``activation_store`` (the store state of the session)
-    and keeps a copy. A subject that passes none gets the entry of
-    ``provenance_attrs`` with its facts ``'not stated'``.
+    ``provenance`` is one entry (a mapping of plain values with a ``subject``) from
+    the subject that owns the parts; core adds ``activation_store`` (the store state
+    of the session) and keeps a copy. An entry with ``parts`` says that its subject
+    stated its parts. ``subject`` names the subject that takes part in ``session``,
+    for a caller that runs several subjects (a conversation harness); a session that
+    no note names belongs to the scored subject. Each subject that took part and
+    stated no parts gets an entry with its facts ``'not stated'`` (``provenance_attrs``).
     """
     record = _active.get()
     if record is None:
@@ -157,9 +165,30 @@ def note_session(session, regions_per_pass: Optional[str] = None,
     record._store_states.add(_store_state())
     if regions_per_pass is not None:
         record._region_plans.add(regions_per_pass)
+    key = _session_key(session)
+    named = subject if subject is not None else (provenance or {}).get('subject')
+    if named is not None or key not in record._sessions:
+        record._sessions[key] = named if named is not None else record._sessions.get(key)
     if provenance is not None:
         entry = {**deepcopy(dict(provenance)), 'activation_store': _store_state()}
         record._provenance[json.dumps(entry, sort_keys=True, default=str)] = entry
+        if 'parts' in entry:
+            record._stated.add(entry.get('subject'))
+
+
+_SESSION_KEYS = itertools.count()
+
+
+def _session_key(session) -> int:
+    """A number for ``session`` that lasts as long as the session: the record keeps no session alive."""
+    key = getattr(session, '_measure_key', None)
+    if key is None:
+        key = next(_SESSION_KEYS)
+        try:
+            session._measure_key = key
+        except AttributeError:
+            key = id(session)
+    return key
 
 
 def execution_attrs(record: MeasureRecord) -> dict:
@@ -180,17 +209,26 @@ NOT_STATED = 'not stated'
 
 
 def provenance_attrs(record: Optional[MeasureRecord], subject_identifier) -> Tuple[dict, ...]:
-    """``attrs['provenance']`` of a score: the run's entries, or one entry of facts not stated.
+    """``attrs['provenance']`` of a score: the noted entries, and one entry per silent participant.
 
-    A subject that noted no entry (an old model through an adapter, a custom
-    subject) gets ``{'subject': ..., 'parts': 'not stated', 'activation_store': ...}``;
-    the store state is the run's (``'not stated'`` when no session answered).
+    A subject that took part in a session of the score and stated no parts (an old
+    model through an adapter, a custom subject, a subject beside a model in a
+    conversation) gets ``{'subject': ..., 'parts': 'not stated', 'activation_store': ...}``
+    beside the entries of the others. A session that no note names belongs to the
+    scored subject (``subject_identifier``); with no session at all, the scored subject
+    is the one participant. The store state is the run's (``'not stated'`` when no
+    session answered). Entries are sorted by content.
     """
-    if record is not None and record._provenance:
-        return record.provenance
+    sessions = record._sessions if record is not None else {}
+    participants = ({subject_identifier if named is None else named for named in sessions.values()}
+                    if sessions else {subject_identifier})
+    stated = record._stated if record is not None else set()
     states = sorted(record._store_states) if record is not None else []
     store = NOT_STATED if not states else states[0] if len(states) == 1 else tuple(states)
-    return ({'subject': subject_identifier, 'parts': NOT_STATED, 'activation_store': store},)
+    entries = list(record._provenance.values()) if record is not None else []
+    entries += [{'subject': participant, 'parts': NOT_STATED, 'activation_store': store}
+                for participant in participants - stated]
+    return tuple(sorted(entries, key=lambda entry: json.dumps(entry, sort_keys=True, default=str)))
 
 
 def note_response(event, request=None) -> None:

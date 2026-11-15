@@ -541,8 +541,8 @@ def test_a_noted_entry_reaches_the_score_with_the_store_state(monkeypatch):
 @pytest.mark.parametrize('disable,state', [('1', 'off'), ('0', 'on'), ('', 'on'),
                                            ('pkg.Wrapper', 'off for: pkg.Wrapper')])
 def test_the_store_state_follows_the_switch(monkeypatch, disable, state):
-    score = _noted([{'subject': 'subject'}], monkeypatch, disable=disable)
-    assert score.attrs['provenance'] == ({'subject': 'subject', 'activation_store': state},)
+    score = _noted([{'subject': 'subject', 'parts': []}], monkeypatch, disable=disable)
+    assert score.attrs['provenance'] == ({'subject': 'subject', 'parts': [], 'activation_store': state},)
 
 
 def test_the_same_entry_is_kept_once_and_two_entries_both(monkeypatch):
@@ -566,7 +566,7 @@ def test_a_stamp_without_a_run_states_no_store():
 
 
 def test_the_score_keeps_a_copy_of_the_entry(monkeypatch):
-    entry = {'subject': 'subject', 'registration': {'shard': 'x'}}
+    entry = {'subject': 'subject', 'parts': [], 'registration': {'shard': 'x'}}
     score = _noted([entry], monkeypatch)
     entry['registration']['shard'] = 'edited'
     assert score.attrs['provenance'][0]['registration'] == {'shard': 'x'}
@@ -599,3 +599,72 @@ def test_responses_and_their_attrs_are_not_read_for_provenance(monkeypatch):
     assert score.attrs['provenance'] == (
         {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},)
     assert session.emitted[0].payload.attrs == {'provenance': {'dtype': 'x'}}
+
+
+def test_a_registration_entry_alone_does_not_state_parts(monkeypatch):
+    registration = {'subject': 'subject', 'registration': {'dtype': 'bf16'}}
+    score = _noted([registration], monkeypatch)
+    assert score.attrs['provenance'] == (
+        {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},
+        {**registration, 'activation_store': 'off'})
+
+
+def _two_subjects(monkeypatch, nested=False):
+    """A model that states its parts and a custom subject, each in its own session of one score."""
+    from brainscore_core._evaluation.measures import note_session
+    from brainscore_core.streaming import Session
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+
+    def run():
+        model_session = Session(_events(), ['neural:IT'])
+        _answer_session(model_session)
+        note_session(model_session, provenance={'subject': 'model', 'parts': [{'serves': 'neural:IT'}]})
+        custom_session = Session(_events(), ['neural:IT'])
+        note_session(custom_session, subject='custom')        # the caller that runs it names it
+        _answer_session(custom_session)
+    with record_measures() as measures:
+        if nested:
+            with record_measures():
+                run()
+        else:
+            run()
+    return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                harness_id='test', measures=measures)
+
+
+@pytest.mark.parametrize('nested', [False, True], ids=['one record', 'nested record'])
+def test_a_silent_subject_beside_a_noted_one_gets_its_own_entry(monkeypatch, nested):
+    assert _two_subjects(monkeypatch, nested).attrs['provenance'] == (
+        {'subject': 'custom', 'parts': 'not stated', 'activation_store': 'off'},
+        {'subject': 'model', 'parts': [{'serves': 'neural:IT'}], 'activation_store': 'off'})
+
+
+def test_an_unnamed_session_belongs_to_the_scored_subject(monkeypatch):
+    """A noted model and a session nobody names: the scored subject took part and stated nothing."""
+    from brainscore_core._evaluation.measures import note_session
+    from brainscore_core.streaming import Session
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    with record_measures() as measures:
+        noted = Session(_events(), ['neural:IT'])
+        note_session(noted, provenance={'subject': 'model', 'parts': []})
+        _answer_session(Session(_events(), ['neural:IT']))
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                 harness_id='test', measures=measures)
+    assert score.attrs['provenance'] == (     # sorted by content
+        {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},
+        {'subject': 'model', 'parts': [], 'activation_store': 'off'})
+
+
+def test_the_record_keeps_no_session_alive():
+    import gc
+    import weakref
+    from brainscore_core._evaluation.measures import note_session
+    from brainscore_core.streaming import Session
+    with record_measures() as measures:
+        session = Session(_events(), ['neural:IT'])
+        note_session(session, subject='custom')
+        reference = weakref.ref(session)
+        del session
+        gc.collect()
+        assert reference() is None
+    assert list(measures._sessions.values()) == ['custom']
