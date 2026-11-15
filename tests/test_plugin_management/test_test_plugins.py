@@ -1,6 +1,5 @@
 import pytest
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -11,8 +10,8 @@ class TestPluginTestRunner:
     def setup_method(self):
         self.library_path = Path(tempfile.mkdtemp("plugin-library"))
         local_resource = Path(__file__).parent / 'test_test_plugins__brainscore_dummy'
-        # `shutil.copytree(..., dirs_exist_ok=True)` would be preferable here but is not available in python 3.7
-        subprocess.run(f"cp -r {local_resource}/* {self.library_path}", shell=True, text=True, check=True)
+        # Not a shell `cp`: a checkout path can contain a space.
+        shutil.copytree(local_resource, self.library_path, dirs_exist_ok=True)
 
     def teardown_method(self):
         shutil.rmtree(self.library_path)
@@ -52,7 +51,9 @@ class TestPluginTestRunner:
         with pytest.raises(Exception):
             plugin_test_runner.validate_plugin()
 
+    @pytest.mark.slow
     def test_run_tests(self):
+        """Creates a conda environment, installs from the network, and purges the pip and conda caches."""
         dummy_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
         plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
         plugin_test_runner.run_tests()
