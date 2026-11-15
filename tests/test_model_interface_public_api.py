@@ -86,3 +86,13 @@ def test_types_keep_public_pickle_references(module_name, type_name):
     definition = vars(module)[type_name]
     assert definition.__module__ == 'brainscore_core.' + module_name
     assert pickle.loads(pickle.dumps(definition)) is definition
+
+
+def test_the_score_metadata_module_lists_its_public_names():
+    """note_session is public (a subject that owns its plan calls it); __all__ names it."""
+    from brainscore_core import score_metadata
+    assert set(score_metadata.__all__) == {
+        'MeasureRecord', 'note_session', 'record_measures',
+        'requested_output_channels_for_score', 'stamp_score_metadata'}
+    assert all(callable(getattr(score_metadata, name)) for name in score_metadata.__all__)
+

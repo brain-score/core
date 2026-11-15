@@ -79,18 +79,16 @@ subject needs the trait `memory:trial_history`).
 
 ## Choose helpers for your subject
 
-`UnifiedModel` is a `Subject` base with task, recording, and `process()` methods.
-It requires `identifier`, `region_layer_map` and `in_channels`; it may declare
-`required_channels`. Use `BrainScoreModel` from the
+Every subject inherits `Subject`; core has no other base class (`UnifiedModel` was
+deleted). Use `BrainScoreModel` from the
 unified `brainscore` package (`from brainscore import BrainScoreModel`) for a
 configurable implementation with extraction helpers. Core no longer contains
 it: `brainscore_core.BrainScoreModel`, the unit selectors and
 `brainscore_core.capabilities` moved to `brainscore`, `brainscore.selection`
-and `brainscore.capabilities`.
-
-`UnifiedModel` is a subclass of `Subject`, not an alias. `BrainScoreModel` and
-the vision and language adapters inherit this compatibility base, so they
-remain subjects and keep their existing computation paths.
+and `brainscore.capabilities`. `BrainScoreModel` and the vision and language
+adapters inherit `Subject` and keep their existing computation paths; a subject
+with `process` and `start_task` / `start_recording` methods can run a session
+through them with `brainscore_core.streaming_helpers.drive_typed_session`.
 
 Implement `Subject` directly when you want to own session handling. Benchmarks
 reach any subject the same way:

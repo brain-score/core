@@ -1,4 +1,9 @@
-"""Score metadata helpers for UMI v2.0 provenance fields."""
+"""Score metadata helpers for UMI v2.0 provenance fields.
+
+Public names (``__all__``): the score stamp, the output channels for a score, and the
+run-measure helpers. ``note_session`` is public on purpose: a subject that chooses its own
+execution plan (unified ``BrainScoreModel``) calls it so the run record names that plan.
+"""
 
 from typing import Iterable, Optional, Set
 
@@ -10,6 +15,9 @@ from brainscore_core._evaluation.measures import (  # noqa: F401  (re-exported)
 )
 from brainscore_core._evaluation import measures as _measures
 from brainscore_core.environment_check import _score_environment
+
+__all__ = ['MeasureRecord', 'note_session', 'record_measures',
+           'requested_output_channels_for_score', 'stamp_score_metadata']
 
 
 def stamp_score_metadata(

@@ -617,6 +617,9 @@ class Session(Source):
             if all('presentation' in getattr(event.payload, 'dims', ()) for event in events):
                 if len(events) == 1:
                     return events[0].payload
+                if family == 'behavior':
+                    from .response_formats import _check_one_record
+                    _check_one_record(channel, [event.payload for event in events])
                 import xarray as xr
                 return xr.concat([event.payload for event in events], dim='presentation')
             return (_collect_neural_events(channel, events) if family == 'neural'

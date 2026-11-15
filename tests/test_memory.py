@@ -10,7 +10,7 @@ from brainscore_core.memory import (
     estimate_metric_memory,
     check_memory,
 )
-from brainscore_core.contract import UnifiedModel
+from tests.typed_subject import TypedSubject
 from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
 from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
 
@@ -27,7 +27,7 @@ def FakeResult(nbytes=8000, n_features=1000):
                                    'neuroid_id': ('neuroid', list(range(n_features)))})
 
 
-class FakeModel(UnifiedModel):
+class FakeModel(TypedSubject):
 
     def __init__(self, identifier='test-model', in_channels=None,
                  region_layer_map=None, process_result=None,

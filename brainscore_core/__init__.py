@@ -3,7 +3,6 @@ from .benchmarks import Benchmark
 from .contract import (
     TaskContext,
     Subject,
-    UnifiedModel,  # compatibility base for the legacy typed interface
 )
 from .events import (
     Selection,

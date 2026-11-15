@@ -15,6 +15,13 @@ tells us is the recording layer's feature width — which is *stimulus-invariant
 so a single-stimulus probe (or an explicit ``feature_dim`` / ``expected_feature_dim``
 declaration) suffices, and everything else is arithmetic.
 
+What it reads from a benchmark (listed for authors in the unified benchmark guide):
+``stimulus_set``, ``train_assembly``, ``test_assembly``, ``expected_n_presentations``,
+``n_targets``, ``alpha_coord``, ``expected_feature_dim``, ``region``, ``timebins``,
+``requested_output_channels``, ``execution_plan`` and ``identifier``. Stated exception
+(rule 2.2): Brain-Score 2.0 benchmarks keep their sizes in the private ``_assembly`` and
+``_similarity_metric``, which cannot be edited, so those two are read as well.
+
 Cross-platform: CUDA (torch.cuda), MPS (psutil), CPU (psutil).
 brainscore_core stays free of heavy dependencies -- torch is optional.
 """

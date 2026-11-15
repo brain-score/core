@@ -5,7 +5,8 @@ import pytest
 import xarray as xr
 
 from brainscore_core import io_catalog
-from brainscore_core.contract import Subject, UnifiedModel, TaskContext
+from brainscore_core.contract import Subject, TaskContext
+from tests.typed_subject import TypedSubject
 from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
 from brainscore_core.streaming import NamedStreams
 from brainscore_core.streaming import StreamEvent
@@ -76,7 +77,7 @@ def _assembly():
     )
 
 
-class _SyntheticSubject(UnifiedModel):
+class _SyntheticSubject(TypedSubject):
     def __init__(self, output):
         self.output = output
         self.recording_target = None
@@ -102,7 +103,7 @@ class _SyntheticSubject(UnifiedModel):
         return self.output
 
 
-class _NonNativeEnvironmentSubject(UnifiedModel):
+class _NonNativeEnvironmentSubject(TypedSubject):
     def __init__(self, action_fn):
         self.action_fn = action_fn
         self.processed_rows = []
@@ -242,7 +243,7 @@ def test_neural_response_matches_process_assembly_exactly():
     subject = _SyntheticSubject(expected)
     stimuli = _stimulus_set()
 
-    assert type(subject).participate is UnifiedModel.participate
+    assert type(subject).participate is TypedSubject.participate
     scored = neural_response(subject, stimuli, ['neural:IT'])
 
     assert subject.recording_target == "IT"
@@ -326,7 +327,7 @@ def test_behavioral_response_falls_back_for_non_native_subject():
 
     scored = behavioral_response(subject, scoring, context)
 
-    assert type(subject).participate is UnifiedModel.participate
+    assert type(subject).participate is TypedSubject.participate
     assert subject.process_input is scoring
     xr.testing.assert_identical(scored, expected)
 
@@ -430,7 +431,7 @@ def test_run_environment_falls_back_for_non_native_subjects():
 
     trajectory = run_environment(subject, env)
 
-    assert type(subject).participate is UnifiedModel.participate
+    assert type(subject).participate is TypedSubject.participate
     assert len(subject.processed_rows) == 3 and len(trajectory) == 3
     assert set(subject.processed_rows[0]['vision:image']) == {'exterior_1', 'exterior_2', 'wrist'}
     assert subject.processed_rows[1]['instruction'] == "reach the goal"
@@ -536,7 +537,7 @@ def test_apply_state_change_falls_back_for_non_native_subject():
 
     result = apply_state_change(subject, state_change)
 
-    assert type(subject).participate is UnifiedModel.participate
+    assert type(subject).participate is TypedSubject.participate
     assert subject.process_input is state_change
     assert result is applied
 
