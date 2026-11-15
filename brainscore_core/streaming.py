@@ -265,6 +265,7 @@ class Session(Source):
                 if problem:
                     raise ValueError(f'A session cannot request {problem}')
         self.task = task
+        _refuse_formats_the_response_does_not_name(self.outputs, task)
         self._session_noted = False   # note_session runs once per session
         self.stimuli = stimuli
         self.time_bins = time_bins
@@ -631,6 +632,23 @@ class Session(Source):
 def _addressed_behavior(channel: str) -> bool:
     from .response_formats import _format
     return _format(channel) is not None
+
+
+def _refuse_formats_the_response_does_not_name(outputs, task) -> None:
+    """Refuse an addressed behavior format that the task's response does not name (rule 3.4).
+
+    Only a task with a response is checked; bare ``behavior`` and other families
+    are not. The request of the benchmark is malformed, so this is a ``ValueError``.
+    """
+    response = getattr(task, 'response', None)
+    if outputs is None or response is None:
+        return
+    given = tuple(response.channels)
+    unnamed = [c for c in outputs if c.startswith('behavior:') and c not in given]
+    if unnamed:
+        raise ValueError(f"{unnamed} requested, but the task's response "
+                         f"{type(response).__name__} answers only on {list(given)}; "
+                         f"ask for those or change the response.")
 
 
 def check_event(event: StreamEvent, direction: str, session: Any = None) -> None:
