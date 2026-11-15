@@ -4,6 +4,7 @@ from typing import Dict, Set
 
 from brainscore_core.compatibility import (
     CompatibilityError,
+    benchmark_required_input_channels,
     check_compatibility,
 )
 from brainscore_core.contract import UnifiedModel
@@ -94,6 +95,28 @@ class TestRequiredModalities:
         bench = FakeBenchmark(identifier='silent-bench')  # no input declaration
         with pytest.raises(ValueError, match="'silent-bench' declares no input channels"):
             check_compatibility(model, bench)
+
+    def test_inputs_are_read_from_a_kept_table_and_task(self):
+        from brainscore_core.contract import TaskContext
+        from brainscore_core.responses import Choice
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        bench = FakeBenchmark(identifier='table-bench')
+        bench.stimulus_set = StimulusSet({'stimulus_id': ['a'], 'sentence': ['cat'], 'label': ['real']})
+        assert benchmark_required_input_channels(bench) == {'text'}
+        bench.task = TaskContext(instruction='Real or not?', response=Choice(['real', 'pseudo']))
+        assert benchmark_required_input_channels(bench) == {'text', 'instruction'}
+        bench.required_input_channels = frozenset({'text', 'lesion'})    # a declaration is read first
+        assert benchmark_required_input_channels(bench) == {'text', 'lesion'}
+
+    def test_a_table_without_a_stimulus_column_is_rejected(self):
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        bench = FakeBenchmark(identifier='typo-bench')
+        bench.stimulus_set = StimulusSet({'stimulus_id': ['a'], 'image_file': ['a.png']})
+        with pytest.raises(ValueError, match="'typo-bench' declares no input channels.*stimulus_set and task") as error:
+            check_compatibility(FakeModel(in_channels={'vision:image'}), bench)
+        message = str(error.value)
+        assert "columns ['image_file', 'stimulus_id']" in message
+        assert 'vision:image: image_file_name, image_path, filename' in message and 'text: sentence, text' in message
 
     def test_empty_declared_inputs_are_rejected(self):
         bench = FakeBenchmark(identifier='empty-bench')

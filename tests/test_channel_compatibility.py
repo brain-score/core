@@ -320,6 +320,38 @@ def test_a_listed_output_is_na_when_the_benchmark_sends_none_of_its_inputs():
         required_input_channels={"text"}, requested_output_channels={"neural:language"}))
 
 
+@pytest.mark.parametrize("subject_in", [{"text", "stimulation"}, {"text"}])
+def test_an_unlisted_perturbation_record_is_answered_only_from_intervention_inputs(subject_in):
+    """A lesion record answers a lesion: a subject that takes no intervention the benchmark sends is N/A."""
+    benchmark = _Benchmark(required_input_channels={"text", "lesion"},
+                           requested_output_channels={"behavior", "perturbation"})
+    subject = _Subject(subject_in, {"behavior", "perturbation"})
+    with pytest.raises(CompatibilityError, match=r"answers 'perturbation' only from the inputs"):
+        check_channel_compatibility(subject, benchmark)
+    assert not subject.process_called
+    match = check_channel_compatibility(_Subject({"text", "lesion"}, {"behavior", "perturbation"}), benchmark)
+    assert match.consumed_inputs == {"text", "lesion"}
+
+
+def test_a_listed_perturbation_record_keeps_the_listing():
+    subject = _Listing({"perturbation": frozenset({"stimulation"})},
+                       in_channels={"text", "stimulation", "lesion"}, out_channels={"perturbation"})
+    with pytest.raises(CompatibilityError, match=r"answers 'perturbation' only from the inputs \{'stimulation'\}"):
+        check_channel_compatibility(subject, _Benchmark(required_input_channels={"text", "lesion"},
+                                                        requested_output_channels={"perturbation"}))
+
+
+@pytest.mark.parametrize("listed", [{"text"}, {"text", "lesion"}])
+def test_a_perturbation_record_listed_from_another_input_is_a_malformed_declaration(listed):
+    """The record answers an intervention in every case, also when a subject lists it itself."""
+    subject = _Listing({"perturbation": frozenset(listed)},
+                       in_channels={"text", "lesion"}, out_channels={"perturbation"})
+    with pytest.raises(ValueError, match=r"lists 'perturbation' in output_inputs from \{'text'\}.*"
+                                         r"list only intervention inputs"):
+        check_channel_compatibility(subject, _Benchmark(required_input_channels={"text", "lesion"},
+                                                        requested_output_channels={"perturbation"}))
+
+
 def test_the_existing_rules_still_hold_with_a_listing():
     with pytest.raises(CompatibilityError, match="cannot produce output channels"):
         check_channel_compatibility(_vision_language(), _Benchmark(
