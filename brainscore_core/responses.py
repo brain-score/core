@@ -88,7 +88,7 @@ class Choice:
     ``f"{text} {option}"`` as plain text, with no chat template and no
     beginning-of-sequence token, as EWoK's ``score`` does. A ``reply`` part
     keeps its own chat template, because a chat model cannot answer without one;
-    it gets no added sentence, and its answer's record says the template was used.
+    it gets no added sentence, and its answer's record notes its own template, if it has one.
     """
     labels: Union[Tuple[str, ...], str, None] = None   # the options, or the column holding each row's
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
