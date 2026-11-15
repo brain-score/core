@@ -261,8 +261,10 @@ def mark_legacy_benchmark(benchmark):
 
     A benchmark that declares its own input channels drives sessions itself;
     one that declares none calls the legacy methods. A benchmark class may
-    set ``subject_api`` itself (``'typed'`` for the retained
-    ``start_recording`` + ``process`` convention).
+    set ``subject_api`` itself (``'typed'``: the subject receives the
+    ``start_recording`` + ``process`` calls itself; no registered benchmark
+    sets it since the ``-unified`` MajajHong2015 and Pereira2018 copies were
+    deleted).
     """
     if getattr(benchmark, 'subject_api', None) is None:
         declares_channels = getattr(benchmark, 'required_input_channels', None) is not None
