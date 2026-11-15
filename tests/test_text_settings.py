@@ -116,3 +116,10 @@ def test_bad_row_options_fail_before_any_compute(options, message):
     task = TaskContext(response=Choice('options', verbatim=True))
     with pytest.raises(ValueError, match=message):
         trial_prompt(task, {'stimulus_id': 'a', 'text': 'x', 'options': options})
+
+
+def test_directive_and_parse_are_the_model_side_tools_and_prompt_for_is_gone():
+    import brainscore_core.responses as responses
+    assert not hasattr(responses, 'prompt_for')
+    assert ("``directive`` and ``parse`` are the model side's tools; a benchmark gives the\n"
+            "specification only") in responses.__doc__
