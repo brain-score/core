@@ -235,7 +235,8 @@ def _labels_from_choice(answer):
 
     One label per stimulus, dims ``('choice', 'presentation')``, with every
     presentation coordinate of the stored answer in its order, except the ones core
-    adds to a stored answer (``_STORED_ONLY``). Each row is one-hot (an invalid row
+    adds to a stored answer (``_STORED_ONLY``), and every attribute except the
+    format's response record (``n_invalid_answers`` stays). Each row is one-hot (an invalid row
     was made a valid label by ``resolve_invalid_answers`` before).
     """
     import numpy as np
@@ -249,7 +250,10 @@ def _labels_from_choice(answer):
               if coord.dims == ('presentation',) and name != 'presentation' and name not in names]
     coords = {name: ('presentation', list(answer[name].values))
               for name in names if name not in _STORED_ONLY}
-    return BehavioralAssembly([chosen], coords=coords, dims=['choice', 'presentation'])
+    # Every attribute that is not the format's own response record stays, among them
+    # the count of invalid answers that resolve_invalid_answers set.
+    attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
+    return BehavioralAssembly([chosen], coords=coords, dims=['choice', 'presentation'], attrs=attrs)
 
 
 def mark_legacy_benchmark(benchmark):

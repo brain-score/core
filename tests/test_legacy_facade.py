@@ -309,3 +309,44 @@ def test_a_label_task_refuses_a_subject_without_a_choice_output():
     with pytest.raises(ExecutionNotFeasibleError, match="declares no 'behavior:choice' output"):
         facade.look_at(_label_stimuli())
     assert subject.sessions == []
+
+
+class _RowsWithOneInvalid(_Recorder):
+    """Answers 20 stimuli with one-hot rows; row 3 is all NaN (an invalid answer). It answers
+    behavior:choice (the new label route) and bare behavior (the plain old path) alike."""
+    out_channels = {'behavior', 'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        rows = np.zeros((len(ids), 2), dtype=np.float32)
+        rows[:, 0] = 1.0
+        rows[3] = np.nan
+        (channel,) = session.outputs
+        attrs = ({'response': response_record('behavior:choice', 'test')}
+                 if channel == 'behavior:choice' else {})
+        session.respond(StreamEvent(channel, BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids), 'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'], attrs=attrs), None))
+
+
+def test_the_label_route_keeps_the_count_of_invalid_answers():
+    """S9-01: the turn back from the choice keeps every attribute but the format's record."""
+    from brainscore_core.contract import TaskContext
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': [f's{i}' for i in range(20)]}))
+    stimuli.identifier = 'facade-invalid-count'
+    new = LegacyBenchmarkFacade(_RowsWithOneInvalid(), visual_degrees=8)
+    new.start_task('label', ['cat', 'dog'])
+    plain = LegacyBenchmarkFacade(_RowsWithOneInvalid(), visual_degrees=8)
+    plain.start_task(TaskContext(task_type='label', fitting_stimuli=['cat', 'dog']))   # bare behavior
+    with pytest.warns(UserWarning, match='1 invalid answers'):
+        labels = new.look_at(stimuli)
+    with pytest.warns(UserWarning, match='1 invalid answers'):
+        old = plain.look_at(stimuli)
+    assert labels.attrs['n_invalid_answers'] == 1
+    assert 'response' not in labels.attrs
+    assert labels.attrs == {key: value for key, value in old.attrs.items() if key != 'response'}
+
