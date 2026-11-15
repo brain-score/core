@@ -123,8 +123,15 @@ def _looks_like_channels(value) -> bool:
             and all(isinstance(item, str) for item in value))
 
 
+# The channel that says what to do; it is not a stimulus (rule 5.2).
+_INSTRUCTION = 'instruction'
+
+
 def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMatch:
     """Check the four compatibility conditions and return the match.
+
+    The subject must take in at least one benchmark input that is a stimulus:
+    an instruction alone does not make a pair applicable (rule 5.2).
 
     Decides from declarations only (rule 5.3). Raises
     :class:`CompatibilityError` before compute when valid declarations do not
@@ -224,6 +231,16 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"'{benchmark_id}' sends: {_format_channels(bench_inputs)}. "
             f"Subject in_channels: {_format_channels(subject_in)}.",
             channels=bench_inputs)
+    if not consumed - {_INSTRUCTION}:
+        # Rule 5.2: an instruction alone does not make a pair applicable; it says what
+        # to do, it is not a stimulus.
+        stimuli = bench_inputs - {_INSTRUCTION}
+        raise CompatibilityError(
+            f"Subject '{subject_id}' takes in only the instruction of benchmark "
+            f"'{benchmark_id}', none of its stimulus inputs {_format_channels(stimuli)}; "
+            f"an instruction alone does not make a pair applicable. "
+            f"Subject in_channels: {_format_channels(subject_in)}.",
+            channels=stimuli)
 
     unmet_requirements = subject_required - bench_inputs
     if unmet_requirements:
