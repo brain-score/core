@@ -12,4 +12,4 @@ from .events import (
     Selection,
     StateChange,
 )
-from .contract import Subject, TaskContext, UnifiedModel
+from .contract import Subject, TaskContext

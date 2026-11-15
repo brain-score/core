@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from brainscore_core.compatibility import check_channel_compatibility
-from brainscore_core.contract import Subject, TaskContext, UnifiedModel
+from brainscore_core.contract import Subject, TaskContext
 from brainscore_core.environment import DiscreteSpec, MappingSpec, TextSpec
 from brainscore_core.legacy_facade import LegacyBenchmarkFacade
 from brainscore_core.streaming import StreamEvent
@@ -74,9 +74,7 @@ def test_subject_has_exactly_one_abstract_evaluation_method():
     assert Subject.__abstractmethods__ == {
         'identifier', 'in_channels', 'out_channels', 'participate'}
     assert not hasattr(Subject, 'process')
-    # Typed bases add conveniences, never a second abstract evaluation method.
-    assert {'participate', 'process'}.isdisjoint(UnifiedModel.__abstractmethods__)
-    for cls in (Subject, UnifiedModel, LegacyBenchmarkFacade):
+    for cls in (Subject, LegacyBenchmarkFacade):
         assert not hasattr(cls, 'interact'), cls
 
 

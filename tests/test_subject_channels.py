@@ -1,9 +1,9 @@
 import pytest
 
-from brainscore_core.contract import UnifiedModel
+from tests.typed_subject import TypedSubject
 
 
-class _ChannelSubject(UnifiedModel):
+class _ChannelSubject(TypedSubject):
     def __init__(self):
         self._behavioral_readout_layer = "readout"
 
@@ -64,29 +64,6 @@ def test_typed_participate_default_runs_sessions_and_rejects_unknown_outputs():
     subject = _ChannelSubject()
     with pytest.raises(NotImplementedError, match="runs sessions requesting"):
         subject.participate(Session((), outputs=["pupil"]))
-
-
-def test_legacy_subclass_still_instantiates_without_participate():
-    class ExistingSubject(UnifiedModel):
-        @property
-        def identifier(self):
-            return "existing"
-
-        @property
-        def region_layer_map(self):
-            return {}
-
-        @property
-        def in_channels(self):
-            return {"vision:image"}
-
-        def process(self, input_event):
-            return "ok"
-
-    subject = ExistingSubject()
-
-    assert subject.process(None) == "ok"
-    assert subject.in_channels == {"vision:image"}
 
 
 def test_typed_model_without_multi_modality_runs_multimodal_session():

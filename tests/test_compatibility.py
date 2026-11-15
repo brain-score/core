@@ -7,12 +7,12 @@ from brainscore_core.compatibility import (
     benchmark_required_input_channels,
     check_compatibility,
 )
-from brainscore_core.contract import UnifiedModel
+from tests.typed_subject import TypedSubject
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-class FakeModel(UnifiedModel):
+class FakeModel(TypedSubject):
 
     def __init__(self, identifier='test-model', in_channels=None,
                  region_layer_map=None, required_channels=None):
@@ -321,13 +321,13 @@ class TestModelRequiredModalities:
         assert 'test-model' in message and 'movie-watching-no-sound' in message
         assert 'audio' in message
 
-# ── Input declaration on UnifiedModel ──────────────────────────────
+# ── Input declaration on a typed subject ──────────────────────────────
 
 class TestTypedModelDeclaresItsInputs:
     """A typed model declares ``in_channels``; it requires no input by default."""
 
     def test_in_channels_are_declared_and_nothing_is_required(self):
-        class _OnlyInputs(UnifiedModel):
+        class _OnlyInputs(TypedSubject):
             identifier = 'only-inputs'
             region_layer_map = {}
             in_channels = {'vision:image', 'text'}
@@ -337,7 +337,7 @@ class TestTypedModelDeclaresItsInputs:
         assert not model.required_channels
 
     def test_a_typed_model_without_in_channels_cannot_be_built(self):
-        class _NoInputs(UnifiedModel):
+        class _NoInputs(TypedSubject):
             identifier = 'no-inputs'
             region_layer_map = {}
 
