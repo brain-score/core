@@ -25,7 +25,6 @@ from brainscore_core._sessions.buffered import stimulus_session
 PASSIVE = 'passive'
 
 LEGACY_API = 'legacy'     # calls look_at / digest_text and friends
-TYPED_API = 'typed'       # calls start_recording + process on the subject
 SESSION_API = 'session'   # declares channels and drives participate itself
 
 
@@ -260,11 +259,9 @@ def mark_legacy_benchmark(benchmark):
     """Record a benchmark's calling convention at a domain loader.
 
     A benchmark that declares its own input channels drives sessions itself;
-    one that declares none calls the legacy methods. A benchmark class may
-    set ``subject_api`` itself (``'typed'``: the subject receives the
-    ``start_recording`` + ``process`` calls itself; no registered benchmark
-    sets it since the ``-unified`` MajajHong2015 and Pereira2018 copies were
-    deleted).
+    one that declares none calls the legacy methods. A value set before is
+    kept, so a second call changes nothing. Only a benchmark marked legacy
+    receives the facade (``subject_for_benchmark``).
     """
     if getattr(benchmark, 'subject_api', None) is None:
         declares_channels = getattr(benchmark, 'required_input_channels', None) is not None
