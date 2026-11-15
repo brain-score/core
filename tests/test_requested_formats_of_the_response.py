@@ -82,3 +82,11 @@ def test_a_task_without_a_response_is_not_checked(builder, task):
 def test_an_environment_session_with_a_named_format_is_allowed():
     assert environment_session(_Conversation(1), None, TEXT,
                                action_channel='behavior:text').outputs == ('behavior:text',)
+
+
+def test_the_rule_is_one_public_function():
+    from brainscore_core.streaming import check_response_formats
+    check_response_formats(['behavior:choice', 'behavior'], CHOICE)
+    check_response_formats(['behavior:rating'], None)
+    with pytest.raises(ValueError, match=r"\['behavior:rating'\] requested, but the task's response Choice"):
+        check_response_formats(['behavior:rating'], CHOICE)
