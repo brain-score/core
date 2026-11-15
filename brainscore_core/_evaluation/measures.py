@@ -17,6 +17,12 @@ regions_per_pass)``). Core does not read the plan itself: only the subject that
 owns it knows whether it honors it, so a subject that passes none is stamped
 None. Either can change the last digits of a score, never its value otherwise.
 
+The record also keeps the provenance of each accepted response (rule 6.3): the
+mapping in ``event.meta['provenance']`` or in ``payload.attrs['provenance']``,
+which the subject or its extractor writes (model revision, weights, precision,
+device, the extraction fingerprint, whether the activation store gave the
+values). Core copies the distinct mappings; it never reads the subject.
+
 ponytail: the record is a ``ContextVar``. A response made in a worker thread or
 process is not noted. No behavioral path in core, vision, language or unified
 makes its response events there today (worker pools only extract features or
@@ -24,6 +30,7 @@ compute metrics); copy the context into the worker if one ever does.
 """
 
 import json
+from copy import deepcopy
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -44,6 +51,7 @@ class MeasureRecord:
         self.undone: Counter = Counter()
         self._deliveries: Set[str] = set()
         self._region_plans: Set[str] = set()
+        self._provenance: Dict[str, dict] = {}   # one per distinct mapping, keyed by its JSON
 
     @property
     def unreleased(self) -> Set[str]:
@@ -68,6 +76,11 @@ class MeasureRecord:
         """The distinct response records of the run, sorted by format, then content."""
         return tuple(self._records[key] for key in sorted(
             self._records, key=lambda key: (self._records[key]['format'], key)))
+
+    @property
+    def provenance(self) -> Tuple[dict, ...]:
+        """The distinct provenance mappings of the run's accepted responses, sorted by content."""
+        return tuple(self._provenance[key] for key in sorted(self._provenance))
 
 
 @contextmanager
@@ -94,6 +107,7 @@ def record_measures() -> Iterator[MeasureRecord]:
             outer.undone += record.undone
             outer._deliveries |= record._deliveries
             outer._region_plans |= record._region_plans
+            outer._provenance.update(record._provenance)
 
 
 def _note_record(payload) -> None:
@@ -105,6 +119,18 @@ def _note_record(payload) -> None:
     response = attrs.get('response') if isinstance(attrs, dict) else None
     if isinstance(response, dict) and 'format' in response:
         record._records[json.dumps(response, sort_keys=True, default=str)] = response
+
+
+def _note_provenance(event) -> None:
+    """Add the provenance mapping of ``event`` (in its meta and in its payload's attrs) to the open record."""
+    record = _active.get()
+    if record is None:
+        return
+    attrs = getattr(getattr(event, 'payload', None), 'attrs', None)
+    for mapping in ((getattr(event, 'meta', None) or {}).get('provenance'),
+                    attrs.get('provenance') if isinstance(attrs, dict) else None):
+        if isinstance(mapping, dict) and mapping:
+            record._provenance[json.dumps(mapping, sort_keys=True, default=str)] = deepcopy(mapping)
 
 
 def note_session(session, regions_per_pass: Optional[str] = None) -> None:
@@ -143,6 +169,7 @@ def note_response(event, request=None) -> None:
     else the request; the response is an undo when the request or the meta says
     ``kind == 'reset'``.
     """
+    _note_provenance(event)
     channel = getattr(event, 'channel', None)
     if is_behavior_channel(channel):
         _note_record(event.payload)

@@ -43,6 +43,10 @@ def stamp_score_metadata(
     ``attrs['software']`` gives the versions of python, the libraries that can
     change numbers and the four Brain-Score packages; ``attrs['code_commits']``
     the commit of each imported Brain-Score package's checkout.
+    ``attrs['provenance']`` copies the distinct provenance mappings of the
+    run's accepted responses (``event.meta['provenance']`` or the payload's
+    ``attrs['provenance']``; rule 6.3), sorted by content; empty when no
+    response carried one (an old model through the facade gives none).
     """
     if benchmark_identifier is not None:
         recorded = score.attrs.get("benchmark_identifier", benchmark_identifier)
@@ -61,6 +65,7 @@ def stamp_score_metadata(
     score.attrs["subject_id"] = getattr(subject, "identifier", None)
     score.attrs["harness_id"] = harness_id
     score.attrs["response"] = measures.responses if measures is not None else ()
+    score.attrs["provenance"] = measures.provenance if measures is not None else ()
     if measures is not None:
         score.attrs.update(_measures.execution_attrs(measures))
     score.attrs.update(_score_environment())

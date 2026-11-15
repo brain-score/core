@@ -495,3 +495,62 @@ def test_reading_versions_does_not_import_torch():
     out = subprocess.run([sys.executable, '-W', 'ignore', '-c', code], capture_output=True,
                          text=True, check=True).stdout.strip()
     assert out == 'False'
+
+
+# Provenance of the run's responses (rule 6.3)
+
+def _answer_with(session, payload_provenance=None, meta_provenance=None):
+    """Answer each input on the one requested output, with provenance on the payload or the meta."""
+    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+    while (event := session.next_input()) is not None:
+        payload = NeuroidAssembly(
+            np.ones((1, 1)), dims=['presentation', 'neuroid'],
+            coords={'stimulus_id': ('presentation', ['s0']), 'neuroid_id': ('neuroid', ['n0'])})
+        if payload_provenance is not None:
+            payload.attrs['provenance'] = payload_provenance
+        meta = {'provenance': meta_provenance} if meta_provenance is not None else {}
+        session.respond(StreamEvent(session.outputs[0], payload, event.t_ms, meta))
+
+
+def _provenance_score(*answers):
+    from brainscore_core.streaming import Session
+    with record_measures() as measures:
+        for payload_provenance, meta_provenance in answers:
+            _answer_with(Session(_events(), ['neural:IT']), payload_provenance, meta_provenance)
+    return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                harness_id='test', measures=measures)
+
+
+def test_the_provenance_of_a_payload_and_of_a_meta_reach_the_score():
+    extraction = {'extractor': 'pkg.Wrapper', 'extraction': 'v2-a', 'activation_store': False}
+    model = {'dtype': 'torch.bfloat16', 'weights_sha256': {'shard': 'x'}}
+    score = _provenance_score((extraction, None), (None, model))
+    assert score.attrs['provenance'] == (extraction, model)   # sorted by their JSON
+    assert float(score) == 0.5
+
+
+def test_the_same_provenance_on_meta_and_payload_is_kept_once():
+    model = {'dtype': 'torch.float32'}
+    score = _provenance_score((model, model), (model, None))
+    assert score.attrs['provenance'] == (model,)
+
+
+def test_a_run_without_provenance_stamps_an_empty_tuple():
+    assert _provenance_score((None, None)).attrs['provenance'] == ()
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(), harness_id='test')
+    assert score.attrs['provenance'] == ()
+
+
+def test_the_score_keeps_a_copy_of_the_provenance():
+    model = {'weights_sha256': {'shard': 'x'}}
+    score = _provenance_score((model, None))
+    model['weights_sha256']['shard'] = 'edited'
+    assert score.attrs['provenance'] == ({'weights_sha256': {'shard': 'x'}},)
+
+
+def test_an_inner_score_passes_its_provenance_to_the_outer_record():
+    from brainscore_core.streaming import Session
+    with record_measures() as outer:
+        with record_measures():
+            _answer_with(Session(_events(), ['neural:IT']), {'extraction': 'v2-inner'})
+    assert outer.provenance == ({'extraction': 'v2-inner'},)
