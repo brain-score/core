@@ -788,14 +788,26 @@ def _signal_missing(channel, session, count: int):
     return _assembly(values, coords, None)
 
 
+def _check_one_record(channel, answers) -> None:
+    """Refuse answers that carry different response records: one assembly holds one record."""
+    records = [a.attrs['response'] for a in answers if 'response' in getattr(a, 'attrs', {})]
+    for record in records[1:]:
+        if record != records[0]:
+            raise ValueError(f'{channel}: the answers carry different response records '
+                             f'({records[0]!r} and {record!r}), so they cannot be one assembly; '
+                             'each stored answer is in session.emitted')
+
+
 def _collect(channel, answers: list):
     """One stored answer from the stored answers of a channel, in the order they arrived.
 
-    Recorded limit: the record and attrs are those of the first answer that has a
-    record; collection does not check that all answers' records agree.
+    The answers that carry a response record must carry the same one (one format, one
+    unit, one layout); answers with different records are refused, since one assembly
+    can hold one record. The attrs are those of the first answer that has a record.
     """
     if len(answers) == 1:
         return answers[0]
+    _check_one_record(channel, answers)
     parts = [(np.asarray(a.values), _presentation_coords(a)) for a in answers]
     axis = next((list(a['choice'].values) for a in answers if 'choice' in a.dims), None)
     for answer in answers:
