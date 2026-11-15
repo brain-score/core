@@ -1,6 +1,6 @@
 """Deterministic provenance for activation extraction (no framework imports).
 
-Wrappers declare their extraction settings; custom stateful providers can expose
+Wrappers declare their extraction settings; custom stateful objects can expose
 ``cache_config()`` returning immutable configuration, excluding counters and lazy
 memoization. Unsupported or cyclic state bypasses caching, never falls back to a
 name-only key. File contents are checked at each lookup. Tensor hashes can be
@@ -174,7 +174,7 @@ def _version(value):
 
 def _canonical(value, active):
     if len(active) > 64:
-        raise UncacheableConfiguration('provider state is too deeply nested; define cache_config()')
+        raise UncacheableConfiguration('the state is too deeply nested; define cache_config()')
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
     if isinstance(value, np.generic):
@@ -283,7 +283,7 @@ def fingerprint(configuration):
 
 
 def extraction_fingerprint(configuration, *, cache_identifier=None, part=None):
-    """Fail closed for opaque third-party providers, leaving extraction runnable.
+    """Fail closed for opaque third-party objects, leaving extraction runnable.
 
     With ``part`` (a key of the ``configuration`` mapping), returns a pair: the
     fingerprint of the whole configuration and the fingerprint of that part,
