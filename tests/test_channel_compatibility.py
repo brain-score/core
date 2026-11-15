@@ -420,3 +420,27 @@ def test_an_unknown_channel_alone_is_not_applicable():
     subject = type('Subject', (_DeclaredSubject,), {'in_channels': frozenset({'text', 'aardvark'})})()
     with pytest.raises(CompatibilityError, match='aardvark'):
         check_channel_compatibility(subject, _mismatched_benchmark())
+
+
+# --- rule 5.2: an instruction alone does not make a pair applicable ----------------
+
+def test_an_instruction_alone_does_not_make_a_pair_applicable():
+    subject = _Subject({"instruction"}, {"behavior:choice"}, identifier="instruction-only")
+    benchmark = _Benchmark(required_input_channels={"instruction", "text"},
+                           requested_output_channels={"behavior:choice"}, identifier="reading")
+    with pytest.raises(CompatibilityError) as raised:
+        check_channel_compatibility(subject, benchmark)
+    assert str(raised.value) == (
+        "Subject 'instruction-only' takes in only the instruction of benchmark 'reading', "
+        "none of its stimulus inputs {'text'}; an instruction alone does not make a pair "
+        "applicable. Subject in_channels: {'instruction'}.")
+    assert not subject.process_called
+
+
+def test_a_stimulus_input_with_the_instruction_makes_a_pair_applicable():
+    benchmark = _Benchmark(required_input_channels={"instruction", "text"},
+                           requested_output_channels={"behavior:choice"})
+    match = check_channel_compatibility(_Subject({"instruction", "text"}, {"behavior:choice"}), benchmark)
+    assert match.consumed_inputs == {"instruction", "text"}
+    match = check_channel_compatibility(_Subject({"text"}, {"behavior:choice"}), benchmark)
+    assert match.consumed_inputs == {"text"}
