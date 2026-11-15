@@ -248,3 +248,64 @@ def test_a_legacy_answer_of_labels_reaches_the_benchmark_unchanged():
     strings = BehavioralAssembly([['x', 'y']], coords={'stimulus_id': ('presentation', ['a', 'b'])},
                                  dims=['choice', 'presentation'])
     assert resolve_invalid_answers(strings) is strings
+
+
+class _ChoiceAnswerer(_Recorder):
+    """Answers behavior:choice with one-hot rows (the second label for every stimulus)."""
+    out_channels = {'behavior', 'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        labels = list(session.task.response.labels)
+        rows = np.zeros((len(ids), len(labels)), dtype=np.float32)
+        rows[:, 1] = 1.0
+        session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids),
+                          'truth': ('presentation', list(session.stimuli['truth'])),
+                          'choice': labels},
+            dims=['presentation', 'choice'],
+            attrs={'response': response_record('behavior:choice', 'test')}), None))
+
+
+def _label_stimuli():
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b'], 'truth': ['dog', 'cat']}))
+    stimuli.identifier = 'facade-label-task'
+    return stimuli
+
+
+def test_a_label_task_with_a_list_is_asked_as_a_choice_and_answered_as_labels():
+    from brainscore_core.responses import Choice
+    subject = _ChoiceAnswerer()
+    facade = LegacyBenchmarkFacade(subject, visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    labels = facade.look_at(_label_stimuli())
+    (session,) = subject.sessions
+    assert session.task.response == Choice(['cat', 'dog'])
+    assert session.task.instruction is None and session.task.fitting_stimuli is None
+    assert list(session.outputs) == ['behavior:choice']
+    assert labels.dims == ('choice', 'presentation')
+    assert list(labels.values[0]) == ['dog', 'dog']
+    assert list(labels['truth'].values) == ['dog', 'cat']
+    assert 'response_state' not in labels.coords and 'raw_answer' not in labels.coords
+
+
+@pytest.mark.parametrize('task, setting', [('label', 'imagenet'), ('label', ['cat']),
+                                          ('probabilities', None), ('odd_one_out', None)])
+def test_other_legacy_tasks_stay_on_bare_behavior(task, setting):
+    facade = LegacyBenchmarkFacade(_ChoiceAnswerer(), visual_degrees=8)
+    facade.start_task(task, setting)
+    assert facade._task.response is None and facade._task.task_type == task
+
+
+def test_a_label_task_refuses_a_subject_without_a_choice_output():
+    from brainscore_core.compatibility import ExecutionNotFeasibleError
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject, visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    with pytest.raises(ExecutionNotFeasibleError, match="declares no 'behavior:choice' output"):
+        facade.look_at(_label_stimuli())
+    assert subject.sessions == []
