@@ -133,13 +133,28 @@ def reconstruct_stimulus_set_from_events(events: list[StreamEvent]):
             rows_by_key[key] = {}
             row_order.append(key)
         row = rows_by_key[key]
-        # Only the stream input column is reconstructible in this fallback.
-        column = event.meta.get("column", event.channel)
+        # Only the stream input column is reconstructible in this fallback: the
+        # event's own column, else the catalog's column for its channel.
+        column = event.meta.get("column", _catalog_column(event.channel))
         row[column] = event.payload
         if "stimulus_id" in event.meta:
             row.setdefault("stimulus_id", event.meta["stimulus_id"])
 
     return StimulusSet(pd.DataFrame([rows_by_key[key] for key in row_order]))
+
+
+def _catalog_column(channel: str) -> str:
+    """The column a rebuilt row gives an event of ``channel`` that names none.
+
+    The channel's name when it is a catalog column itself (``text``, ``audio``),
+    else the first catalog column that feeds it: ``image_file_name`` for
+    ``vision:image``, ``video_path`` for ``vision:video``. So a picture or a clip
+    from a raw event stream is a part of the trial's prompt, an answer part's row
+    and an extractor's input, as it is in a table.
+    """
+    if column_channel(channel) == channel:
+        return channel
+    return next((column for column, fed in stimulus_columns().items() if fed == channel), channel)
 
 
 def session_outputs(session) -> list[str]:
