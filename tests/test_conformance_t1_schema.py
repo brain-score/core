@@ -440,6 +440,9 @@ F6_MALFORMED = [   # (case, the reason it names, payload)
     ('three continuations for two options', r"choice axis is \['a', 'b', 'c'\]",
      lambda: _f6([[-0.1, -2.3, -3.0]], axis=('a', 'b', 'c'))),
     ('a row for a stimulus not in the table', 'not in this session', lambda: _f6(GOOD, ids=('s9',))),
+    # Review S1, F6-03: an unhashable layout is a malformed payload, not a TypeError.
+    ('layout a list', "layout is \\[\\]", lambda: _f6(GOOD, record=_f6_record(layout=[]))),
+    ('layout a dict', "layout is \\{\\}", lambda: _f6(GOOD, record=_f6_record(layout={}))),
 ]
 
 
@@ -450,6 +453,20 @@ def test_a_malformed_f6_response_raises_and_nothing_is_stored(name, reason, make
         session.respond(StreamEvent(F6, make(), None))
     assert raised.match(reason)
     assert session.emitted == []
+
+
+SEGMENT = {'layout': 'segment', 'context': 'prefix'}
+
+
+def test_a_segment_answer_has_the_positions_as_its_axis():
+    # Review S1, F6-01: the axis of a segment answer is the positions 1 to R, whatever
+    # the task's options; other coordinates are refused, also without a task.
+    answer = _f6_answer(_f6([[-1.0, -2.0]], axis=(1, 2), record=_f6_record(**SEGMENT)))
+    assert list(answer['response_state'].values) == ['valid']
+    for table in (True, False):
+        with pytest.raises(ValueError, match=r"positions 1 to 2, not \['wrong', 'axis'\]"):
+            _f6_answer(_f6([[-1.0, -2.0]], axis=('wrong', 'axis'), record=_f6_record(**SEGMENT)),
+                       table=table)
 
 
 def test_response_record_refuses_a_malformed_f6_record():

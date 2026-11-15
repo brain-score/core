@@ -257,7 +257,8 @@ def _log_probability_problems(record) -> List[str]:
     for name, allowed in _LOG_PROBABILITY_SCHEMA.items():
         if parameters[name] not in allowed:
             problems.append(f'the schema field {name} is {parameters[name]!r}, not one of {allowed}')
-    expected = _CONTEXTS.get(parameters['layout'])
+    layout = parameters['layout']
+    expected = _CONTEXTS.get(layout) if isinstance(layout, str) else None
     context = parameters['context']
     if expected and context in _CONTEXTS.values() and context != expected:
         problems.append(f"the {parameters['layout']} layout has context {expected!r}, not "
@@ -532,7 +533,14 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
         named = list(named) if isinstance(named, (list, tuple)) else [named]
         if ids != named:
             raise ValueError(f'the event answers stimuli {named}, but its rows are {ids}')
-    if fmt in _AXIS_FORMATS:
+    segment = fmt == 'log_probabilities' and record['parameters'].get('layout') == 'segment'
+    if segment:
+        # A segment answer's axis is the positions 1 to R of the trial's segments (standard 2.3).
+        axis = list(payload['choice'].values)
+        if [str(a) for a in axis] != [str(i) for i in range(1, len(axis) + 1)]:
+            raise ValueError(f'the choice axis of a segment answer is the positions 1 to '
+                             f'{len(axis)}, not {axis}')
+    elif fmt in _AXIS_FORMATS:
         axis = list(payload['choice'].values)
         if ledger is not None:
             seen = Counter()
