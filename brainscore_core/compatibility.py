@@ -11,6 +11,10 @@ A subject is compatible with a benchmark when all four hold:
    inputs;
 4. every requested output that ``subject.output_inputs`` lists can be answered:
    the subject takes in at least one of its listed inputs from the benchmark.
+   A ``perturbation`` record answers an intervention, so when the subject does
+   not list it, it is answered only from the intervention inputs (the catalog's
+   ``StateChange`` channels: ``lesion``, ``stimulation``, ``pharmacological``)
+   the subject takes in.
 
 The benchmark declares the inputs its human participants received. A subject
 that takes in only some of them still runs: the streams it cannot take in
@@ -251,15 +255,15 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             channels=unmet_requirements)
 
     for output in sorted(bench_requested):
-        if output not in output_inputs:
+        needed = _answering_inputs(output, output_inputs, subject_in)
+        if needed is None:
             continue
-        needed = set(output_inputs[output])
         if not needed & consumed:
             raise CompatibilityError(
                 f"Subject '{subject_id}' answers {output!r} only from the inputs "
-                f"{_format_channels(needed)}, but it takes in only "
+                f"{_format_channels(needed) if needed else '(none it takes in)'}, but it takes in only "
                 f"{_format_channels(consumed)} of what benchmark '{benchmark_id}' sends.",
-                channels=needed)
+                channels=needed or {output})
 
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
     if missing_traits:
@@ -275,6 +279,18 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         dropped_inputs=frozenset(bench_inputs - consumed),
         requested_output_channels=frozenset(bench_requested),
     )
+
+
+def _answering_inputs(output, output_inputs, subject_in):
+    """The inputs ``output`` can be answered from, or None when any input will do (rule 4)."""
+    if output in output_inputs:
+        return set(output_inputs[output])
+    if output == 'perturbation':
+        from brainscore_core.events import StateChange
+        interventions = {entry.name for entry in io_catalog.all_entries()
+                         if entry.direction == io_catalog.INPUT and entry.payload_type is StateChange}
+        return {channel for channel in subject_in if parse_channel(channel)[0] in interventions}
+    return None
 
 
 def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id) -> None:

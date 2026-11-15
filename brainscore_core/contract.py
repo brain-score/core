@@ -184,8 +184,10 @@ class Subject(ABC):
 
         The subject answers a listed output when it takes in at least one of its
         inputs. An output that is not listed can be answered from any input the
-        subject takes. A listed output must be in ``out_channels`` and its inputs
-        in ``in_channels``. None is listed by default.
+        subject takes, except ``perturbation``: a record of an intervention, it is
+        answered only from the intervention inputs the subject takes in. A listed
+        output must be in ``out_channels`` and its inputs in ``in_channels``. None
+        is listed by default.
         """
         return {}
 
