@@ -1,9 +1,11 @@
 """Runtime check that installed dependencies fall within UMI's compatibility bounds.
 
 Public API: ``check_env_bounds`` (drift messages only), ``describe_env`` (one
-row per checked package, passing or not) and ``warn_on_drift`` (the warning
-``import brainscore_core`` emits). ``python -m brainscore.doctor`` prints
-``describe_env`` as a table.
+row per checked package, passing or not), ``warn_on_drift`` (the warning
+``import brainscore_core`` emits) and ``environment_fingerprint`` (the hash of
+the installed package list that every score's ``software`` carries).
+``python -m brainscore.doctor`` prints ``describe_env`` as a table and the
+fingerprint.
 
 These are the version ranges scoring is *verified against* — deliberately looser
 than any single install pin (that's the environment file's job). Drift outside
@@ -39,7 +41,11 @@ processor default actually moved shifts its score by 0.038%.
 Uses only ``importlib.metadata`` so ``brainscore_core`` stays free of heavy
 dependencies (no torch/transformers import).
 """
+import functools
+import hashlib
+import json
 import platform
+import re
 import sys
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
@@ -143,6 +149,86 @@ _BRAINSCORE_PACKAGES = (("brainscore_core", "brainscore-core"), ("brainscore", "
                         ("brainscore_language", "brainscore_language"))
 
 
+def _normalized(name: str) -> str:
+    """A distribution name in its normalized form (PEP 503): lower case, runs of ``-_.`` as ``-``."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+UNAVAILABLE = "unavailable: "
+
+
+def _source(distribution) -> str:
+    """The source identity the installer recorded (``direct_url.json``, PEP 610), or ``''``.
+
+    The commit of a package installed from a repository (``commit=<id>``); the
+    location of an editable install (``editable=<url>``). A package from an index
+    or a wheel file records neither.
+    """
+    text = distribution.read_text("direct_url.json")
+    if not text:
+        return ""
+    record = json.loads(text)
+    commit = (record.get("vcs_info") or {}).get("commit_id")
+    if commit:
+        return f" commit={commit}"
+    if (record.get("dir_info") or {}).get("editable"):
+        return f" editable={record.get('url')}"
+    return ""
+
+
+@functools.lru_cache(maxsize=1)
+def environment_fingerprint() -> str:
+    """SHA-256 of the sorted lines that name the Python, the platform and every installed distribution.
+
+    One line ``python==<three numbers>``, one ``platform==<system> <machine>``, and per
+    distribution ``<normalized name>==<version>``, followed by the commit of a package
+    installed from a repository or the location of an editable install, when the
+    installer recorded it. The four Brain-Score packages are left out, because
+    ``code_commits`` names their code. Computed once per process.
+
+    Metadata that cannot be read gives ``'unavailable: <reason>'``, never a partial
+    digest and never an exception: a finished score and the doctor keep running.
+    Two scores are compared bit for bit only when their fingerprints are equal and
+    not unavailable, their ``accelerator`` values are equal, and every code commit
+    is known and equal.
+    """
+    try:
+        from importlib.metadata import distributions
+        own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
+        lines = {f"python=={platform.python_version()}", f"platform=={platform.system()} {platform.machine()}"}
+        for distribution in distributions():
+            try:
+                name = distribution.metadata["Name"]
+                version = distribution.version
+            except Exception as error:
+                return f"{UNAVAILABLE}the metadata of a distribution cannot be read ({type(error).__name__}: {error})"
+            if not name:
+                return f"{UNAVAILABLE}a distribution has no name (at {distribution.locate_file('')})"
+            if _normalized(name) not in own:
+                lines.add(f"{_normalized(name)}=={version}{_source(distribution)}")
+        return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
+    except Exception as error:
+        return f"{UNAVAILABLE}{type(error).__name__}: {error}"
+
+
+def _accelerator() -> str:
+    """The accelerator torch can use on this machine: the CUDA device name, ``'mps'`` or ``'cpu'``.
+
+    The device each model part used is in the score's ``provenance``. Read only
+    when torch is already imported (core never imports it); without torch
+    nothing ran on an accelerator through it, so the value is ``'cpu'``.
+    """
+    torch = sys.modules.get("torch")
+    try:
+        if torch is not None and torch.cuda.is_available():
+            return torch.cuda.get_device_name(torch.cuda.current_device())
+        if torch is not None and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        return "not stated"
+    return "cpu"
+
+
 def _installed(distribution: str) -> Optional[str]:
     """The installed version, or None for any failure (absent, or a broken ``.dist-info``)."""
     try:
@@ -164,8 +250,11 @@ def _git_commit(directory: Path) -> Optional[str]:
 
     Only the package's own project folder is looked at, never a folder above it:
     a package installed inside a virtual environment that sits in an unrelated
-    repository must not report that repository's commit. Any failure gives None,
-    so a stamp never loses a finished score.
+    repository must not report that repository's commit. A copy without
+    ``.git`` (an archive) states its commit in a file ``COMMIT`` in the project
+    folder, written when the archive is made (``git rev-parse HEAD > COMMIT``);
+    only a 40-character hexadecimal commit counts. Any failure gives None, so a
+    stamp never loses a finished score.
     """
     try:
         folder = _project_folder(Path(directory))
@@ -178,7 +267,9 @@ def _git_commit(directory: Path) -> Optional[str]:
         elif dot_git.is_dir():
             git_dir = dot_git
         else:
-            return None
+            stated = folder / "COMMIT"
+            commit = stated.read_text().strip() if stated.is_file() else ""
+            return commit if len(commit) == 40 and all(c in "0123456789abcdef" for c in commit) else None
         head = (git_dir / "HEAD").read_text().strip()
         if not head.startswith("ref:"):
             return head
@@ -205,12 +296,16 @@ def _score_environment() -> Dict[str, Dict[str, Optional[str]]]:
     Versions come from the installed metadata (None when absent). A commit is
     read only for a Brain-Score package already imported, from the checkout its
     files are in (None outside a git checkout); the installed version of an
-    editable package does not say which checkout runs.
+    editable package does not say which checkout runs. ``software`` also has
+    ``environment_fingerprint`` (every installed package and version) and
+    ``accelerator`` (the accelerator torch can use).
     """
     software = {"python": platform.python_version()}
     software.update({name: _installed(name) for name in _SCORE_LIBRARIES})
     software.update({distribution: _installed(distribution)
                      for _module, distribution in _BRAINSCORE_PACKAGES})
+    software["environment_fingerprint"] = environment_fingerprint()
+    software["accelerator"] = _accelerator()
     commits = {}
     for module_name, _distribution in _BRAINSCORE_PACKAGES:
         module = sys.modules.get(module_name)

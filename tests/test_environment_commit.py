@@ -60,3 +60,31 @@ def test_a_broken_dist_info_gives_none(monkeypatch):
     monkeypatch.setattr(environment_check, "version", broken)
     assert _installed("numpy") is None
     assert environment_check._score_environment()["software"]["numpy"] is None
+
+
+def _archive(root: Path, commit_file=None) -> Path:
+    """A project folder without .git, as copied from an archive, maybe with a COMMIT file."""
+    (root / "pkg").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[project]\nname='x'\n")
+    if commit_file is not None:
+        (root / "COMMIT").write_text(commit_file)
+    return root / "pkg"
+
+
+def test_an_archive_states_its_commit_in_a_commit_file(tmp_path):
+    assert _git_commit(_archive(tmp_path / "a", COMMIT + "\n")) == COMMIT
+
+
+@pytest.mark.parametrize("content", ["", "main\n", COMMIT[:39], COMMIT.upper(), COMMIT + "0"])
+def test_a_commit_file_that_names_no_commit_gives_none(tmp_path, content):
+    assert _git_commit(_archive(tmp_path / "a", content)) is None
+
+
+def test_an_archive_without_a_commit_file_gives_none(tmp_path):
+    assert _git_commit(_archive(tmp_path / "a")) is None
+
+
+def test_a_checkout_ignores_a_commit_file(tmp_path):
+    package = _checkout(tmp_path / "project")
+    (tmp_path / "project" / "COMMIT").write_text("f" * 40)
+    assert _git_commit(package) == COMMIT
