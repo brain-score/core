@@ -1,7 +1,9 @@
+import importlib.util
 import logging
 from collections import namedtuple
 
 import botocore.exceptions
+import pytest
 
 from brainscore_core import Score, Benchmark
 from brainscore_core.submission import database_models
@@ -38,6 +40,8 @@ class TestUserManager:
         logger.info('Clean database')
         clear_schema()
 
+    @pytest.mark.skipif(importlib.util.find_spec('requests_mock') is None,
+                        reason='requests-mock is not installed; install brainscore_core[test]')
     def test_create_new_user(self, requests_mock):
         # mock GET & POST responses
         get_adapter = requests_mock.get('https://www.brain-score.org/signup', cookies={'cookie_name': 'cookie_value'})
