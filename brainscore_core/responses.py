@@ -17,15 +17,19 @@ from typing import Any, Optional, Sequence, Tuple, Union
 
 
 def _on_step(value: float, low: float, step: float) -> bool:
-    """Whether ``value`` is on the grid ``low + n * step``: the float nearest to a grid point.
+    """Whether ``value`` is on the step of a scale.
 
-    The value is compared with the nearest grid point, with a tolerance of
-    ``max(1e-9 * step, 4 float spacings at the magnitude of the value)``: only float
-    rounding is forgiven, so 1.5 on a step of 1 is off the grid at any magnitude.
+    The grid of a scale is decimal: the points Decimal(repr(low)) + n * Decimal(repr(step)).
+    A value is on the step when its decimal index is within 1e-9 of an integer n, or when
+    it is the float of the grid point n.
     """
-    grid = low + round((value - low) / step) * step
-    tolerance = max(1e-9 * abs(step), 4 * math.ulp(max(abs(value), abs(grid))))
-    return abs(value - grid) <= tolerance
+    from decimal import Decimal, localcontext
+    with localcontext() as context:
+        context.prec = 50
+        low_d, step_d = Decimal(repr(float(low))), Decimal(repr(float(step)))
+        index = (Decimal(repr(float(value))) - low_d) / step_d
+        n = index.to_integral_value()
+        return abs(index - n) <= Decimal('1e-9') or float(low_d + n * step_d) == float(value)
 
 
 @dataclass(frozen=True)

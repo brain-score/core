@@ -437,7 +437,7 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
         low, high = getattr(scale, 'low', None), getattr(scale, 'high', None)
         step = getattr(scale, 'step', None)
         # Bounds are inclusive and exact; the step is checked by the one rule of
-        # responses._on_step (the float nearest to a grid point is on the step).
+        # responses._on_step (the decimal grid of the scale).
         from .responses import _on_step
         for value in values:
             value = float(value)

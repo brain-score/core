@@ -1,5 +1,7 @@
-"""The step rule of a rating scale: a value is on the step when it is the float nearest
-to a grid point ``low + n * step``. One rule serves the reply parse and the stored check."""
+"""The step rule of a rating scale. The grid of a scale is decimal: the points
+Decimal(repr(low)) + n * Decimal(repr(step)). A value is on the step when its decimal index
+is within 1e-9 of an integer n, or when it is the float of the grid point n. One rule
+serves the reply parse and the stored check."""
 import pandas as pd
 import pytest
 
@@ -23,6 +25,10 @@ TABLE = [
     (100000000.35, 100000000.0, 100000001.0, 0.1, False),
     (1e12 + 3.0, 1e12, 1e12 + 10, 1, True),
     (1e12 + 1.5, 1e12, 1e12 + 10, 1, False),
+    (1.1 + 12 * 0.1, 1.1, 7.1, 0.1, True),                      # computed in float
+    (0.1, -1e15, 1, 0.1, True),                                 # review S4-02
+    (1000000000000000.5, 0, 1000000000000001, 1, False),        # review S4-03
+    (1e14 + 0.0625, 0, 1e15, 1, False),                         # review S4-03
 ]
 
 
