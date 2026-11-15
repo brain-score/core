@@ -337,7 +337,7 @@ def benchmark_required_input_channels(benchmark) -> Set[str]:
 
     Its ``required_input_channels`` when declared; else the v1.5
     ``required_modalities``; else what its ``stimulus_set`` presents under its
-    ``task`` (``task_input_channels``, plus ``instruction`` when the task gives one).
+    ``task`` (``task_input_channels``, with ``instruction`` when the task gives one).
     """
     declared = getattr(benchmark, "required_input_channels", None)
     if declared is not None:
@@ -349,11 +349,7 @@ def benchmark_required_input_channels(benchmark) -> Set[str]:
     if stimuli is None:
         return set()
     from brainscore_core._sessions.view import task_input_channels
-    task = getattr(benchmark, "task", None)
-    channels = set(task_input_channels(stimuli, task))
-    if getattr(task, "instruction", None):
-        channels.add("instruction")
-    return channels
+    return set(task_input_channels(stimuli, getattr(benchmark, "task", None)))
 
 
 def benchmark_accepted_input_channels(benchmark) -> Set[str]:

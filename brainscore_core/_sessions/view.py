@@ -63,17 +63,24 @@ def task_input_channels(stimulus_set, task=None) -> frozenset:
 
     When the task gives ``present``, they are the channels of its entries (a
     ``'kind:column'`` entry presents that column as its kind); otherwise the
-    channels of the table's catalog columns. An entry that names a column the
-    table does not have is refused with ``ValueError``.
+    channels of the table's catalog columns. ``instruction`` is one more when
+    the task gives one (the session carries it in its task). An entry that
+    names a column the table does not have is refused with ``ValueError``. The
+    one derivation of a table's inputs: a benchmark that keeps its table and
+    task (pre-flight) and a ``TaskProtocol`` both use it.
     """
     columns = set(getattr(stimulus_set, 'columns', ()))
     present = getattr(task, 'present', None)
     if present is None:
         from brainscore_core.io_catalog import column_channel
-        return frozenset(c for c in map(column_channel, columns) if c is not None)
-    for entry in present:
-        _check_present(entry, columns)
-    return frozenset(_present_channel(entry) for entry in present)
+        channels = {c for c in map(column_channel, columns) if c is not None}
+    else:
+        for entry in present:
+            _check_present(entry, columns)
+        channels = {_present_channel(entry) for entry in present}
+    if getattr(task, 'instruction', None):
+        channels.add('instruction')
+    return frozenset(channels)
 
 
 def _declared_task(task, stimulus_set, channels):
