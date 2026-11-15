@@ -164,8 +164,11 @@ def _git_commit(directory: Path) -> Optional[str]:
 
     Only the package's own project folder is looked at, never a folder above it:
     a package installed inside a virtual environment that sits in an unrelated
-    repository must not report that repository's commit. Any failure gives None,
-    so a stamp never loses a finished score.
+    repository must not report that repository's commit. A copy without
+    ``.git`` (an archive) states its commit in a file ``COMMIT`` in the project
+    folder, written when the archive is made (``git rev-parse HEAD > COMMIT``);
+    only a 40-character hexadecimal commit counts. Any failure gives None, so a
+    stamp never loses a finished score.
     """
     try:
         folder = _project_folder(Path(directory))
@@ -178,7 +181,9 @@ def _git_commit(directory: Path) -> Optional[str]:
         elif dot_git.is_dir():
             git_dir = dot_git
         else:
-            return None
+            stated = folder / "COMMIT"
+            commit = stated.read_text().strip() if stated.is_file() else ""
+            return commit if len(commit) == 40 and all(c in "0123456789abcdef" for c in commit) else None
         head = (git_dir / "HEAD").read_text().strip()
         if not head.startswith("ref:"):
             return head
