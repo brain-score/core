@@ -11,6 +11,11 @@ A subject is compatible with a benchmark when all four hold:
    inputs;
 4. every requested output that ``subject.output_inputs`` lists can be answered:
    the subject takes in at least one of its listed inputs from the benchmark.
+   A ``perturbation`` record answers an intervention, so it is answered only
+   from the intervention inputs (the catalog's ``StateChange`` channels:
+   ``lesion``, ``stimulation``, ``pharmacological``) the subject takes in. A
+   subject that lists ``perturbation`` from another input has a malformed
+   declaration (``ValueError``, at pre-flight).
 
 The benchmark declares the inputs its human participants received. A subject
 that takes in only some of them still runs: the streams it cannot take in
@@ -172,7 +177,9 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     if not bench_inputs:
         raise ValueError(
             f"Benchmark '{benchmark_id}' declares no input channels. A benchmark "
-            f"states what it sends: set required_input_channels (rule 5.1)."
+            f"states what it sends: set required_input_channels, or keep the "
+            f"stimulus_set and task it presents as attributes (rule 5.1)."
+            + _no_stimulus_column_hint(getattr(benchmark, "stimulus_set", None))
         )
 
     # Both declarations are validated completely before any comparison, so a
@@ -251,15 +258,15 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             channels=unmet_requirements)
 
     for output in sorted(bench_requested):
-        if output not in output_inputs:
+        needed = _answering_inputs(output, output_inputs, subject_in)
+        if needed is None:
             continue
-        needed = set(output_inputs[output])
         if not needed & consumed:
             raise CompatibilityError(
                 f"Subject '{subject_id}' answers {output!r} only from the inputs "
-                f"{_format_channels(needed)}, but it takes in only "
+                f"{_format_channels(needed) if needed else '(none it takes in)'}, but it takes in only "
                 f"{_format_channels(consumed)} of what benchmark '{benchmark_id}' sends.",
-                channels=needed)
+                channels=needed or {output})
 
     missing_traits = required_traits - set(subject.traits) if required_traits else set()
     if missing_traits:
@@ -275,6 +282,36 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         dropped_inputs=frozenset(bench_inputs - consumed),
         requested_output_channels=frozenset(bench_requested),
     )
+
+
+def _no_stimulus_column_hint(stimuli) -> str:
+    """For a kept table with no catalog column: its columns and the accepted ones."""
+    if stimuli is None:
+        return ""
+    accepted: Dict[str, list] = {}
+    for column, channel in io_catalog.stimulus_columns().items():
+        accepted.setdefault(channel, []).append(column)
+    names = "; ".join(f"{channel}: {', '.join(columns)}" for channel, columns in sorted(accepted.items()))
+    return (f" Its stimulus_set has the columns {sorted(map(str, stimuli.columns))}, none of which "
+            f"feeds an input. Name the stimulus column by one of the accepted names ({names}).")
+
+
+def _answering_inputs(output, output_inputs, subject_in):
+    """The inputs ``output`` can be answered from, or None when any input will do (rule 4)."""
+    if output in output_inputs:
+        return set(output_inputs[output])
+    if output == 'perturbation':
+        return {channel for channel in subject_in if _is_intervention(channel)}
+    return None
+
+
+def _is_intervention(channel) -> bool:
+    """An input channel whose payload is a ``StateChange`` (``lesion``, ``stimulation``, ...)."""
+    from brainscore_core.events import StateChange
+    if not io_catalog.has(channel):
+        return False
+    entry = io_catalog.get(channel)
+    return entry.direction == io_catalog.INPUT and entry.payload_type is StateChange
 
 
 def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id) -> None:
@@ -294,6 +331,13 @@ def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id
                 f"Subject '{subject_id}' lists the inputs {_format_channels(undeclared)} for "
                 f"{output!r} in output_inputs, but not in in_channels "
                 f"{_format_channels(set(in_channels))}.")
+        if output == 'perturbation':
+            other = {channel for channel in inputs if not _is_intervention(channel)}
+            if other:
+                raise ValueError(
+                    f"Subject '{subject_id}' lists 'perturbation' in output_inputs from "
+                    f"{_format_channels(other)}. A perturbation record answers an intervention: "
+                    "list only intervention inputs (lesion, stimulation, pharmacological).")
 
 
 def benchmark_input_channels(benchmark) -> Set[str]:
@@ -302,12 +346,23 @@ def benchmark_input_channels(benchmark) -> Set[str]:
 
 
 def benchmark_required_input_channels(benchmark) -> Set[str]:
-    """Return v2 required input channels, deriving from v1.5 modalities."""
+    """Return the input channels a benchmark sends.
+
+    Its ``required_input_channels`` when declared; else the v1.5
+    ``required_modalities``; else what its ``stimulus_set`` presents under its
+    ``task`` (``task_input_channels``, with ``instruction`` when the task gives one).
+    """
     declared = getattr(benchmark, "required_input_channels", None)
     if declared is not None:
         return set(declared)
     modalities = set(getattr(benchmark, "required_modalities", set()))
-    return modalities_to_input_channels(modalities)
+    if modalities:
+        return modalities_to_input_channels(modalities)
+    stimuli = getattr(benchmark, "stimulus_set", None)
+    if stimuli is None:
+        return set()
+    from brainscore_core._sessions.view import task_input_channels
+    return set(task_input_channels(stimuli, getattr(benchmark, "task", None)))
 
 
 def benchmark_accepted_input_channels(benchmark) -> Set[str]:
