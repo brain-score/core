@@ -79,6 +79,13 @@ class LegacyBenchmarkFacade:
             self._task = task
             return
         metadata = {'task_settings': dict(settings)} if settings else {}
+        labels = _label_list(task, fitting_stimuli)
+        if labels is not None:
+            # The label task with a list of labels is a choice among them
+            # (behavior:choice); the benchmark still receives the label of each stimulus.
+            from brainscore_core.responses import Choice
+            self._task = TaskContext(response=Choice(labels), metadata=metadata)
+            return
         self._task = TaskContext(task_type=task, fitting_stimuli=fitting_stimuli,
                                  metadata=metadata)
 
@@ -98,11 +105,21 @@ class LegacyBenchmarkFacade:
         """
         if settings:
             raise TypeError(f'look_at got unsupported settings {sorted(settings)}')
-        channel = 'behavior' if self._behavior_requested() else self._neural_channel('look_at')
+        if self._choice_requested():
+            channel = 'behavior:choice'
+            if channel not in set(self._subject.out_channels):
+                raise ExecutionNotFeasibleError(
+                    f"Subject {self.identifier!r} refused the legacy label task: it is asked "
+                    f"as a choice among the labels, and the subject declares no "
+                    f"'behavior:choice' output.", channels={channel}, task_type='label')
+        else:
+            channel = 'behavior' if self._behavior_requested() else self._neural_channel('look_at')
         measured = self._measure(stimuli, [channel], {
             'number_of_trials': number_of_trials,
             'require_variance': require_variance,
         })
+        if channel == 'behavior:choice':
+            return _labels_from_choice(resolve_invalid_answers(measured[channel]))
         if channel == 'behavior':
             return resolve_invalid_answers(measured[channel])
         return measured[channel]
@@ -160,6 +177,10 @@ class LegacyBenchmarkFacade:
     def _behavior_requested(self) -> bool:
         return self._task is not None and self._task.task_type != PASSIVE
 
+    def _choice_requested(self) -> bool:
+        from brainscore_core.responses import Choice
+        return self._task is not None and isinstance(self._task.response, Choice)
+
     def _session_task(self) -> TaskContext:
         """The task sent with each measurement: the recorded one, else one passive task."""
         if self._task is not None:
@@ -186,6 +207,53 @@ class LegacyBenchmarkFacade:
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
+
+
+def _label_list(task, fitting_stimuli):
+    """The labels of a legacy label task with a list of labels, else ``None``.
+
+    ``start_task('label', [...])`` names the options of a forced choice. The label
+    task with ``'imagenet'`` (1000 synsets, which core does not list) and every other
+    task stay on bare ``behavior``.
+    """
+    if task != 'label' or isinstance(fitting_stimuli, str) or \
+            not isinstance(fitting_stimuli, (list, tuple)):
+        return None
+    labels = list(fitting_stimuli)
+    if len(labels) < 2 or len(set(labels)) != len(labels) or \
+            not all(isinstance(label, str) for label in labels):
+        return None
+    return labels
+
+
+# Coordinates core adds to a stored answer; the legacy label answer has none of them.
+_STORED_ONLY = ('raw_answer', 'response_state', 'response_reason', 'answer_valid', 'parse_error')
+
+
+def _labels_from_choice(answer):
+    """A stored ``behavior:choice`` answer as the legacy label answer.
+
+    One label per stimulus, dims ``('choice', 'presentation')``, with every
+    presentation coordinate of the stored answer in its order, except the ones core
+    adds to a stored answer (``_STORED_ONLY``), and every attribute except the
+    format's response record (``n_invalid_answers`` stays). Each row is one-hot (an invalid row
+    was made a valid label by ``resolve_invalid_answers`` before).
+    """
+    import numpy as np
+    from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+    labels = [str(label) for label in answer['choice'].values]
+    rows = np.asarray(answer.transpose('presentation', 'choice').values)
+    chosen = [labels[int(np.argmax(row))] for row in rows]
+    index = answer.indexes.get('presentation')
+    names = [name for name in (getattr(index, 'names', None) or ()) if name and name != 'presentation']
+    names += [name for name, coord in answer.coords.items()
+              if coord.dims == ('presentation',) and name != 'presentation' and name not in names]
+    coords = {name: ('presentation', list(answer[name].values))
+              for name in names if name not in _STORED_ONLY}
+    # Every attribute that is not the format's own response record stays, among them
+    # the count of invalid answers that resolve_invalid_answers set.
+    attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
+    return BehavioralAssembly([chosen], coords=coords, dims=['choice', 'presentation'], attrs=attrs)
 
 
 def mark_legacy_benchmark(benchmark):
@@ -308,6 +376,11 @@ def resolve_invalid_answers(assembly, *, seed: int = 0):
     import numpy as np
 
     if 'choice' not in assembly.dims or assembly.ndim != 2:
+        return assembly
+    if np.asarray(assembly.values).dtype.kind in ('U', 'S', 'O'):
+        # A legacy answer of text labels or stimulus ids (label task, odd_one_out) has
+        # no NaN row to resolve; it reaches the benchmark unchanged. A numeric answer of
+        # any kind takes the path below.
         return assembly
     # A row of NaN marks an invalid answer: a reply that could not be read, or
     # a conversion of a source row that is not valid (for example a non-finite one).

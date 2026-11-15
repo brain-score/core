@@ -219,3 +219,147 @@ def test_text_identifiers_do_not_collide_on_the_delimiter():
     first = text_stimulus_set(['a|b', 'c'])
     second = text_stimulus_set(['a', 'b|c'])
     assert first.identifier != second.identifier
+
+
+class _LabelAnswerer(_Recorder):
+    """A subject whose bare behavior answer is a legacy label answer: strings, dims (choice, presentation)."""
+
+    def participate(self, session):
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        session.respond(StreamEvent('behavior', BehavioralAssembly(
+            [['cat'] * len(ids)], coords={'stimulus_id': ('presentation', ids),
+                                          'truth': ('presentation', ['cat'] * len(ids))},
+            dims=['choice', 'presentation']), None))
+
+
+def test_a_legacy_answer_of_labels_reaches_the_benchmark_unchanged():
+    """resolve_invalid_answers (core #208) called isnan on label strings and raised for
+    every legacy label task and odd_one_out task; a non-float answer now passes unchanged."""
+    from brainscore_core.legacy_facade import resolve_invalid_answers
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b']}))
+    stimuli.identifier = 'facade-labels'
+    facade = LegacyBenchmarkFacade(_LabelAnswerer(), visual_degrees=8)
+    facade.start_task('odd_one_out')
+    answer = facade.look_at(stimuli)
+    assert answer.dims == ('choice', 'presentation') and list(answer.values[0]) == ['cat', 'cat']
+    strings = BehavioralAssembly([['x', 'y']], coords={'stimulus_id': ('presentation', ['a', 'b'])},
+                                 dims=['choice', 'presentation'])
+    assert resolve_invalid_answers(strings) is strings
+
+
+class _ChoiceAnswerer(_Recorder):
+    """Answers behavior:choice with one-hot rows (the second label for every stimulus)."""
+    out_channels = {'behavior', 'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        labels = list(session.task.response.labels)
+        rows = np.zeros((len(ids), len(labels)), dtype=np.float32)
+        rows[:, 1] = 1.0
+        session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids),
+                          'truth': ('presentation', list(session.stimuli['truth'])),
+                          'choice': labels},
+            dims=['presentation', 'choice'],
+            attrs={'response': response_record('behavior:choice', 'test')}), None))
+
+
+def _label_stimuli():
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b'], 'truth': ['dog', 'cat']}))
+    stimuli.identifier = 'facade-label-task'
+    return stimuli
+
+
+def test_a_label_task_with_a_list_is_asked_as_a_choice_and_answered_as_labels():
+    from brainscore_core.responses import Choice
+    subject = _ChoiceAnswerer()
+    facade = LegacyBenchmarkFacade(subject, visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    labels = facade.look_at(_label_stimuli())
+    (session,) = subject.sessions
+    assert session.task.response == Choice(['cat', 'dog'])
+    assert session.task.instruction is None and session.task.fitting_stimuli is None
+    assert list(session.outputs) == ['behavior:choice']
+    assert labels.dims == ('choice', 'presentation')
+    assert list(labels.values[0]) == ['dog', 'dog']
+    assert list(labels['truth'].values) == ['dog', 'cat']
+    assert 'response_state' not in labels.coords and 'raw_answer' not in labels.coords
+
+
+@pytest.mark.parametrize('task, setting', [('label', 'imagenet'), ('label', ['cat']),
+                                          ('probabilities', None), ('odd_one_out', None)])
+def test_other_legacy_tasks_stay_on_bare_behavior(task, setting):
+    facade = LegacyBenchmarkFacade(_ChoiceAnswerer(), visual_degrees=8)
+    facade.start_task(task, setting)
+    assert facade._task.response is None and facade._task.task_type == task
+
+
+def test_a_label_task_refuses_a_subject_without_a_choice_output():
+    from brainscore_core.compatibility import ExecutionNotFeasibleError
+    subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject, visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    with pytest.raises(ExecutionNotFeasibleError, match="declares no 'behavior:choice' output"):
+        facade.look_at(_label_stimuli())
+    assert subject.sessions == []
+
+
+class _RowsWithOneInvalid(_Recorder):
+    """Answers 20 stimuli with one-hot rows; row 3 is all NaN (an invalid answer). It answers
+    behavior:choice (the new label route) and bare behavior (the plain old path) alike."""
+    out_channels = {'behavior', 'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        rows = np.zeros((len(ids), 2), dtype=np.float32)
+        rows[:, 0] = 1.0
+        rows[3] = np.nan
+        (channel,) = session.outputs
+        attrs = ({'response': response_record('behavior:choice', 'test')}
+                 if channel == 'behavior:choice' else {})
+        session.respond(StreamEvent(channel, BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids), 'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'], attrs=attrs), None))
+
+
+def test_the_label_route_keeps_the_count_of_invalid_answers():
+    """S9-01: the turn back from the choice keeps every attribute but the format's record."""
+    from brainscore_core.contract import TaskContext
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': [f's{i}' for i in range(20)]}))
+    stimuli.identifier = 'facade-invalid-count'
+    new = LegacyBenchmarkFacade(_RowsWithOneInvalid(), visual_degrees=8)
+    new.start_task('label', ['cat', 'dog'])
+    plain = LegacyBenchmarkFacade(_RowsWithOneInvalid(), visual_degrees=8)
+    plain.start_task(TaskContext(task_type='label', fitting_stimuli=['cat', 'dog']))   # bare behavior
+    with pytest.warns(UserWarning, match='1 invalid answers'):
+        labels = new.look_at(stimuli)
+    with pytest.warns(UserWarning, match='1 invalid answers'):
+        old = plain.look_at(stimuli)
+    assert labels.attrs['n_invalid_answers'] == 1
+    assert 'response' not in labels.attrs
+    assert labels.attrs == {key: value for key, value in old.attrs.items() if key != 'response'}
+
+
+def test_only_text_answers_pass_resolve_invalid_answers_unchanged():
+    """S9-02: text labels (string or object dtype) pass; a numeric answer of any kind
+    takes the invalid-answer path (a complex all-NaN answer raises the limit error)."""
+    from brainscore_core.legacy_facade import resolve_invalid_answers
+    ids = {'stimulus_id': ('presentation', ['a', 'b'])}
+    for values in (np.array([['x', 'y']]), np.array([['x', 'y']], dtype=object)):
+        answer = BehavioralAssembly(values, coords=ids, dims=['choice', 'presentation'])
+        assert resolve_invalid_answers(answer) is answer
+    complex_nan = BehavioralAssembly(np.full((2, 2), np.nan, dtype=complex),
+                                     coords={**ids, 'choice': ['x', 'y']}, dims=['presentation', 'choice'])
+    with pytest.raises(ValueError, match='above the 10% limit'):
+        resolve_invalid_answers(complex_nan)
