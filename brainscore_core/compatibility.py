@@ -11,10 +11,11 @@ A subject is compatible with a benchmark when all four hold:
    inputs;
 4. every requested output that ``subject.output_inputs`` lists can be answered:
    the subject takes in at least one of its listed inputs from the benchmark.
-   A ``perturbation`` record answers an intervention, so when the subject does
-   not list it, it is answered only from the intervention inputs (the catalog's
-   ``StateChange`` channels: ``lesion``, ``stimulation``, ``pharmacological``)
-   the subject takes in.
+   A ``perturbation`` record answers an intervention, so it is answered only
+   from the intervention inputs (the catalog's ``StateChange`` channels:
+   ``lesion``, ``stimulation``, ``pharmacological``) the subject takes in. A
+   subject that lists ``perturbation`` from another input has a malformed
+   declaration (``ValueError``, at pre-flight).
 
 The benchmark declares the inputs its human participants received. A subject
 that takes in only some of them still runs: the streams it cannot take in
@@ -287,11 +288,17 @@ def _answering_inputs(output, output_inputs, subject_in):
     if output in output_inputs:
         return set(output_inputs[output])
     if output == 'perturbation':
-        from brainscore_core.events import StateChange
-        interventions = {entry.name for entry in io_catalog.all_entries()
-                         if entry.direction == io_catalog.INPUT and entry.payload_type is StateChange}
-        return {channel for channel in subject_in if parse_channel(channel)[0] in interventions}
+        return {channel for channel in subject_in if _is_intervention(channel)}
     return None
+
+
+def _is_intervention(channel) -> bool:
+    """An input channel whose payload is a ``StateChange`` (``lesion``, ``stimulation``, ...)."""
+    from brainscore_core.events import StateChange
+    if not io_catalog.has(channel):
+        return False
+    entry = io_catalog.get(channel)
+    return entry.direction == io_catalog.INPUT and entry.payload_type is StateChange
 
 
 def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id) -> None:
@@ -311,6 +318,13 @@ def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id
                 f"Subject '{subject_id}' lists the inputs {_format_channels(undeclared)} for "
                 f"{output!r} in output_inputs, but not in in_channels "
                 f"{_format_channels(set(in_channels))}.")
+        if output == 'perturbation':
+            other = {channel for channel in inputs if not _is_intervention(channel)}
+            if other:
+                raise ValueError(
+                    f"Subject '{subject_id}' lists 'perturbation' in output_inputs from "
+                    f"{_format_channels(other)}. A perturbation record answers an intervention: "
+                    "list only intervention inputs (lesion, stimulation, pharmacological).")
 
 
 def benchmark_input_channels(benchmark) -> Set[str]:

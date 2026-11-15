@@ -341,6 +341,17 @@ def test_a_listed_perturbation_record_keeps_the_listing():
                                                         requested_output_channels={"perturbation"}))
 
 
+@pytest.mark.parametrize("listed", [{"text"}, {"text", "lesion"}])
+def test_a_perturbation_record_listed_from_another_input_is_a_malformed_declaration(listed):
+    """The record answers an intervention in every case, also when a subject lists it itself."""
+    subject = _Listing({"perturbation": frozenset(listed)},
+                       in_channels={"text", "lesion"}, out_channels={"perturbation"})
+    with pytest.raises(ValueError, match=r"lists 'perturbation' in output_inputs from \{'text'\}.*"
+                                         r"list only intervention inputs"):
+        check_channel_compatibility(subject, _Benchmark(required_input_channels={"text", "lesion"},
+                                                        requested_output_channels={"perturbation"}))
+
+
 def test_the_existing_rules_still_hold_with_a_listing():
     with pytest.raises(CompatibilityError, match="cannot produce output channels"):
         check_channel_compatibility(_vision_language(), _Benchmark(

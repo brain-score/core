@@ -186,8 +186,9 @@ class Subject(ABC):
         inputs. An output that is not listed can be answered from any input the
         subject takes, except ``perturbation``: a record of an intervention, it is
         answered only from the intervention inputs the subject takes in. A listed
-        output must be in ``out_channels`` and its inputs in ``in_channels``. None
-        is listed by default.
+        output must be in ``out_channels`` and its inputs in ``in_channels``;
+        ``perturbation`` may list only intervention inputs (pre-flight raises
+        ``ValueError`` otherwise). None is listed by default.
         """
         return {}
 
