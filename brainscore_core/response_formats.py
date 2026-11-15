@@ -21,9 +21,11 @@ What an addressed response can be: a cell for one trial (``behavior:text``
 and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
 with one value per option; ``behavior:rating``, ``behavior:confidence``,
 ``behavior:rt``: a number), or an assembly of rows over ``presentation``
-with a ``stimulus_id`` coordinate and a response record. A cell is always
-native: core gives it a record with ``method='external'`` (for ``behavior:rt``
-the units come from ``event.meta['units']``). A derived answer is an assembly
+with a ``stimulus_id`` coordinate and a response record;
+``behavior:log_probabilities`` takes an assembly only (model-derived and
+native, its schema in the record's parameters). A cell is always native: core
+gives it a record with ``method='external'`` (for ``behavior:rt`` the units
+come from ``event.meta['units']``). A derived answer is an assembly
 (one row is fine) with its record and its source evidence in ``raw_answer``.
 A malformed response raises ``ValueError`` and is never stored.
 
@@ -47,6 +49,7 @@ import numpy as np
 
 _TOLERANCE = 1e-4          # absolute, on the sum of a probability row
 _STEP_TOLERANCE = 1e-9     # on (value - low) / step, for a rating scale with a step
+_LOG_TOLERANCE = 1e-6      # nats: a log probability up to this far above 0 is a rounded 0
 _CONVERSIONS = ('argmax', 'softmax', 'softmax_argmax')
 _CATEGORIES = ('behavioral', 'model-derived')
 _ORIGINS = ('native', 'derived')
@@ -55,7 +58,17 @@ _UNITS = ('nats', 'bits')
 _RT_UNITS = ('ms', 'monotone')
 _FIELDS = frozenset(('format', 'category', 'origin', 'method', 'conversion', 'source_format',
                      'parameters', 'parsed_by'))
-_FORMATS = ('choice', 'probabilities', 'rating', 'confidence', 'rt', 'text')
+_FORMATS = ('choice', 'probabilities', 'log_probabilities', 'rating', 'confidence', 'rt', 'text')
+_AXIS_FORMATS = ('choice', 'probabilities', 'log_probabilities')   # rows over a choice axis
+# The schema of behavior:log_probabilities, in its record's parameters (standard 2.3).
+_LOG_PROBABILITY_SCHEMA = {
+    'layout': ('continuation', 'segment'),
+    'context': ('shared', 'prefix'),
+    'aggregation': ('sum', 'mean'),
+    'units': _UNITS,
+}
+_CONTEXTS = {'continuation': 'shared', 'segment': 'prefix'}
+_TOKENIZATION = {'special_tokens': ('none', 'tokenizer_default'), 'template': ('none', 'chat')}
 # The format each conversion reads.
 _SOURCES = {'argmax': 'behavior:probabilities', 'softmax': 'behavior:log_probabilities',
             'softmax_argmax': 'behavior:log_probabilities'}
@@ -214,6 +227,56 @@ def _record_problems(record, channel: str) -> List[str]:
             json.dumps(record['parameters'], allow_nan=False)
         except ValueError:
             problems.append("the record's parameters are not serializable")
+        if channel == 'behavior:log_probabilities':
+            problems += _log_probability_problems(record)
+    return problems
+
+
+def _log_probability_problems(record) -> List[str]:
+    """Why a ``behavior:log_probabilities`` record breaks the format's schema; empty when it does not.
+
+    The answer is model-derived and native (never converted, never a link). Its
+    parameters are exactly ``layout``, ``context`` (``'shared'`` for the
+    continuation layout, ``'prefix'`` for the segment layout), ``tokenization``
+    (``join``: a nonempty str; ``special_tokens``: ``'none'`` or
+    ``'tokenizer_default'``; ``template``: ``'none'`` or ``'chat'``;
+    ``truncation``: ``'none'`` or the model's window as a positive int),
+    ``aggregation`` (``'sum'``, ``'mean'``) and ``units`` (``'nats'``, ``'bits'``).
+    """
+    problems = []
+    if record['category'] != 'model-derived':
+        problems.append(f"a behavior:log_probabilities answer is model-derived, not "
+                        f"{record['category']!r}")
+    if record['origin'] != 'native':
+        problems.append('a behavior:log_probabilities answer is native: it has no conversion '
+                        'and is not a link')
+    parameters = record['parameters']
+    fields = set(_LOG_PROBABILITY_SCHEMA) | {'tokenization'}
+    if set(parameters) != fields:
+        return problems + [f"the record's parameters are {sorted(parameters)}, not the "
+                           f'behavior:log_probabilities schema {sorted(fields)}']
+    for name, allowed in _LOG_PROBABILITY_SCHEMA.items():
+        if parameters[name] not in allowed:
+            problems.append(f'the schema field {name} is {parameters[name]!r}, not one of {allowed}')
+    expected = _CONTEXTS.get(parameters['layout'])
+    context = parameters['context']
+    if expected and context in _CONTEXTS.values() and context != expected:
+        problems.append(f"the {parameters['layout']} layout has context {expected!r}, not "
+                        f"{parameters['context']!r}")
+    tokenization = parameters['tokenization']
+    keys = {'join', 'truncation', *_TOKENIZATION}
+    if not isinstance(tokenization, dict) or set(tokenization) != keys:
+        return problems + [f'the schema field tokenization is a dict with keys {sorted(keys)}']
+    for name, allowed in _TOKENIZATION.items():
+        if tokenization[name] not in allowed:
+            problems.append(f'tokenization {name} is {tokenization[name]!r}, not one of {allowed}')
+    if not isinstance(tokenization['join'], str) or not tokenization['join']:
+        problems.append(f"tokenization join is a nonempty str, not {tokenization['join']!r}")
+    truncation = tokenization['truncation']
+    if truncation != 'none' and not (isinstance(truncation, int) and not isinstance(truncation, bool)
+                                     and truncation > 0):
+        problems.append(f"tokenization truncation is 'none' or the model's window (a positive "
+                        f'int), not {truncation!r}')
     return problems
 
 
@@ -362,6 +425,17 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
                 reasons.append(f'the probabilities sum to {float(row.sum())!r}, not 1')
             else:
                 reasons.append(None)
+    elif fmt == 'log_probabilities':
+        # The tolerance is in nats: a value in bits is converted to nats first,
+        # so the largest valid value is 1e-6 nats, 1e-6 / ln 2 bits.
+        to_nats = math.log(2) if record['parameters']['units'] == 'bits' else 1.0
+        for row in values:
+            if not np.isfinite(row).all():
+                reasons.append('a value is not finite')
+            elif (row * to_nats > _LOG_TOLERANCE).any():
+                reasons.append('a log probability is above 0')
+            else:
+                reasons.append(None)
     elif fmt in ('rating', 'confidence'):
         scale = getattr(response, 'confidence', None) if fmt == 'confidence' else response
         low, high = getattr(scale, 'low', None), getattr(scale, 'high', None)
@@ -389,6 +463,8 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
 
 def _cell_rows(fmt, channel, payload, event, session, ledger):
     """A cell as ``(values, coords, record)`` of a one-row stored answer."""
+    if fmt == 'log_probabilities':
+        raise ValueError(f'a {channel} answer is an assembly with its response record')
     meta = getattr(event, 'meta', None) or {}
     stimulus_id = meta.get('stimulus_id')
     options = (ledger.options(stimulus_id, ledger.occurrence(channel, stimulus_id))
@@ -436,7 +512,7 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
 
 def _assembly_rows(fmt, channel, payload, event, session, ledger):
     """An assembly as ``(values, coords, record)``, after the malformed checks."""
-    dims = ('presentation', 'choice') if fmt in ('choice', 'probabilities') else ('presentation',)
+    dims = ('presentation', 'choice') if fmt in _AXIS_FORMATS else ('presentation',)
     if tuple(payload.dims) != dims:
         raise ValueError(f'{channel} payload dims are {tuple(payload.dims)}, not {dims}')
     record = payload.attrs.get('response')
@@ -449,7 +525,7 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
                   and record['parameters'].get('scale') == 'log')
     values = np.asarray(payload.values)
     dtype = {'choice': np.float32, 'probabilities': np.float64 if raw_scores else np.float32,
-             'text': object}.get(fmt, np.float64)
+             'text': object}.get(fmt, np.float64)   # log_probabilities: float64
     if values.dtype != np.dtype(dtype):
         raise ValueError(f'{channel} values are {values.dtype}, not {np.dtype(dtype)}')
     coords = _presentation_coords(payload)
@@ -461,7 +537,7 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
         named = list(named) if isinstance(named, (list, tuple)) else [named]
         if ids != named:
             raise ValueError(f'{channel}: the event answers stimuli {named}, but its rows are {ids}')
-    if fmt in ('choice', 'probabilities'):
+    if fmt in _AXIS_FORMATS:
         axis = list(payload['choice'].values)
         if ledger is not None:
             seen = Counter()
@@ -564,7 +640,7 @@ def _rows(channel, payload, event, session):
     ledger = _ledger(session)
     if hasattr(payload, 'dims') and hasattr(payload, 'attrs'):
         values, coords, record = _assembly_rows(fmt, channel, payload, event, session, ledger)
-        if fmt in ('choice', 'probabilities'):
+        if fmt in _AXIS_FORMATS:
             coords['choice'] = list(payload['choice'].values)
         attrs = {key: value for key, value in payload.attrs.items() if key != 'response'}
     else:
@@ -635,7 +711,7 @@ def _missing(channel, session, stimulus_ids: list, reason: str, template=None,
     coords = {'stimulus_id': list(stimulus_ids), 'raw_answer': [None] * n,
               'answer_valid': [False] * n, 'parse_error': [''] * n,
               'response_state': ['missing'] * n, 'response_reason': [reason] * n}
-    if fmt in ('choice', 'probabilities'):
+    if fmt in _AXIS_FORMATS:
         if template is not None:
             axis = list(template['choice'].values)
         else:
@@ -646,7 +722,8 @@ def _missing(channel, session, stimulus_ids: list, reason: str, template=None,
         if axis is None:
             raise ValueError(f'{channel}: trials {stimulus_ids[:5]} have no answer and their '
                              'options are not known, so they cannot be stored as missing')
-        dtype = template.values.dtype if template is not None else np.float32
+        dtype = (template.values.dtype if template is not None
+                 else np.float64 if fmt == 'log_probabilities' else np.float32)
         values = np.full((n, len(axis)), np.nan, dtype=dtype)
         coords['choice'] = axis
     elif fmt == 'text':
@@ -677,7 +754,7 @@ def _table_missing(channel, session, template=None):
     if not positions:
         return None
     ids = [ledger.ids[position] for position in positions]
-    if _format(channel) in ('choice', 'probabilities'):
+    if _format(channel) in _AXIS_FORMATS:
         # Unknown options (no task gives them) are unknown, not zero options: the
         # missing rows then take the width of the answered rows' axis.
         known = (ledger.options(i, k) for i, k in zip(ids, occurrences))

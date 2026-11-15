@@ -178,3 +178,43 @@ def test_a_respond_signal_without_an_answer_is_a_missing_trial():
 def test_a_failure_of_the_subject_is_an_error_not_a_missing_trial():
     with pytest.raises(RuntimeError, match='server is down'):
         _run(_Replier(fail=True))
+
+
+# --- behavior:log_probabilities (F6): a trial with no answer is a missing row -----
+
+F6 = 'behavior:log_probabilities'
+F6_RECORD = response_record(F6, 'likelihood', category='model-derived', parameters={
+    'layout': 'continuation', 'context': 'shared', 'aggregation': 'sum', 'units': 'nats',
+    'tokenization': {'join': 'space', 'special_tokens': 'none', 'template': 'none',
+                     'truncation': 'none'}})
+
+
+def _f6_session(ids):
+    return stimulus_session(_stimuli(ids), [F6], TaskContext(response=Choice(('a', 'b'))))
+
+
+def test_an_f6_trial_with_no_answer_is_one_missing_row_of_width_two():
+    session = _f6_session(('s0', 's1'))
+    while session.next_input() is not None:
+        pass
+    session.respond(StreamEvent(F6, BehavioralAssembly(
+        np.array([[-0.1, -2.3]]), dims=['presentation', 'choice'], attrs={'response': F6_RECORD},
+        coords={'stimulus_id': ('presentation', ['s0']), 'choice': ['a', 'b']}), None))
+    answer = session.collect(F6)
+    assert list(answer['stimulus_id'].values) == ['s0', 's1']
+    assert list(answer['response_state'].values) == ['valid', 'missing']
+    assert list(answer['response_reason'].values) == ['', 'no answer event']
+    assert answer.shape == (2, 2) and answer.values.dtype == np.float64
+    assert np.isnan(answer.values[1]).all()
+    assert answer.attrs['response'] == F6_RECORD
+
+
+def test_an_f6_session_with_no_answer_at_all_stores_float64_missing_rows():
+    session = _f6_session(('s0',))
+    while session.next_input() is not None:
+        pass
+    answer = session.collect(F6)
+    assert list(answer['response_state'].values) == ['missing']
+    assert answer.shape == (1, 2) and answer.values.dtype == np.float64
+    assert list(answer['choice'].values) == ['a', 'b']
+    assert 'response' not in answer.attrs        # nothing answered, so no record

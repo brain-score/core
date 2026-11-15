@@ -13,18 +13,19 @@ from brainscore_core.extensions import register_channel
 from brainscore_core.responses import Choice, Scale, Text
 from brainscore_core.streaming import Session, StreamEvent
 
-ADDRESSES = ('behavior', 'behavior:choice', 'behavior:probabilities', 'behavior:confidence',
-             'behavior:rating', 'behavior:rt', 'behavior:text')
+ADDRESSES = ('behavior', 'behavior:choice', 'behavior:probabilities',
+             'behavior:log_probabilities', 'behavior:confidence', 'behavior:rating', 'behavior:rt',
+             'behavior:text')
 
 
 def test_the_closed_list_is_the_formats_that_exist():
     assert io_catalog.CHANNEL_FORMS['behavior'] == (
-        None, 'choice', 'probabilities', 'confidence', 'rating', 'rt', 'text')
+        None, 'choice', 'probabilities', 'log_probabilities', 'confidence', 'rating', 'rt', 'text')
     for channel in ADDRESSES:
         assert io_catalog.form_problem(channel) is None
 
 
-@pytest.mark.parametrize('channel', ['behavior:log_probabilities', 'behavior:answer', 'behavior:Choice'])
+@pytest.mark.parametrize('channel', ['behavior:logprobs', 'behavior:answer', 'behavior:Choice'])
 def test_an_address_outside_the_list_is_refused_everywhere(channel):
     assert 'closed list' in io_catalog.form_problem(channel)
     with pytest.raises(ValueError, match='closed list'):
@@ -38,6 +39,12 @@ def test_an_address_outside_the_list_is_refused_everywhere(channel):
     with pytest.raises(ValueError, match='closed list'):
         unrequested.respond(StreamEvent(channel, 'cat', None))
     assert unrequested.emitted == []
+
+
+def test_log_probabilities_is_an_address_a_session_and_a_subject_can_name():
+    assert io_catalog.form_problem('behavior:log_probabilities') is None
+    validate_channels({'behavior:log_probabilities'}, io_catalog.OUTPUT, 'subject out_channels')
+    assert Session((), ['behavior:log_probabilities']).outputs == ('behavior:log_probabilities',)
 
 
 def test_bare_vision_keeps_its_own_message():

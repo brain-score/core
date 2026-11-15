@@ -188,7 +188,8 @@ def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
 # that exist; the bare ``behavior`` channel stays for legacy tasks.
 CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({
     "vision": ("image", "video"),
-    "behavior": (None, "choice", "probabilities", "confidence", "rating", "rt", "text"),
+    "behavior": (None, "choice", "probabilities", "log_probabilities", "confidence", "rating",
+                 "rt", "text"),
 })
 # Families only core defines: ``register_channel`` refuses them outside the seed.
 _CLOSED_FAMILIES = ("behavior",)
@@ -452,15 +453,16 @@ _SEED = [
     # --- outputs: behavior (a subject answer on behavior:<kind>) ---
     CatalogEntry("behavior", OUTPUT, "a subject answer on behavior:<kind>, as the task asks",
                  "one trial's cell (a str, a 1-D numeric array, one number) or an assembly "
-                 "of rows over presentation; the bare channel takes a label, a probability "
-                 "vector or text",
+                 "of rows over presentation (behavior:log_probabilities: an assembly only); "
+                 "the bare channel takes a label, a probability vector or text",
                  "a fitted readout or the model's generation path",
                  meta_keys=("label_set", "units"),
                  shape_validator=_check_behavior,
                  addressing=("address is the response format a TaskContext response asks for, "
                              "from the closed list CHANNEL_FORMS['behavior']: choice, "
-                             "probabilities, confidence, rating, rt or text; the validator checks "
-                             "each format against the task and the trials"),
+                             "probabilities, log_probabilities, confidence, rating, rt or text; "
+                             "the validator checks each format against the task and the "
+                             "trials"),
                  materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",

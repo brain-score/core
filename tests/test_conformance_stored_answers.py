@@ -393,3 +393,34 @@ def test_without_a_task_a_missing_row_takes_the_width_of_the_answered_rows():
     np.testing.assert_array_equal(answer.values, [[1, 0], [np.nan, np.nan]])
     assert list(answer['choice'].values) == ['cat', 'dog']
     assert list(answer['response_state'].values) == ['valid', 'missing']
+
+
+# --- behavior:log_probabilities (F6): rows by occurrence, collected in arrival order ---
+
+F6 = 'behavior:log_probabilities'
+F6_RECORD = response_record(F6, 'likelihood', category='model-derived', parameters={
+    'layout': 'continuation', 'context': 'shared', 'aggregation': 'sum', 'units': 'bits',
+    'tokenization': {'join': 'space', 'special_tokens': 'none', 'template': 'none',
+                     'truncation': 'none'}})
+
+
+def _f6(ids, values):
+    return BehavioralAssembly(
+        np.array(values, dtype=np.float64), dims=['presentation', 'choice'],
+        attrs={'response': F6_RECORD},
+        coords={'stimulus_id': ('presentation', list(ids)), 'choice': ['a', 'b']})
+
+
+def test_f6_answers_of_several_events_are_one_stored_answer_in_arrival_order():
+    session = stimulus_session(_table(['s0', 's1', 's0']), [F6],
+                               TaskContext(response=Choice(('a', 'b'))))
+    session.respond(StreamEvent(F6, _f6(['s1'], [[-1.0, -2.0]]), None))
+    session.respond(StreamEvent(F6, _f6(['s0', 's0'], [[-0.5, 0.5], [-3.0, -0.25]]), None))
+    answer = session.collect(F6)
+    assert list(answer['stimulus_id'].values) == ['s1', 's0', 's0']
+    assert list(answer['response_state'].values) == ['valid', 'invalid', 'valid']
+    assert answer.values.dtype == np.float64
+    np.testing.assert_array_equal(answer.values, [[-1.0, -2.0], [-0.5, 0.5], [-3.0, -0.25]])
+    assert answer.attrs['response']['parameters']['units'] == 'bits'
+    with pytest.raises(ValueError, match='answered more often'):     # a third s0 row
+        session.respond(StreamEvent(F6, _f6(['s0'], [[-1.0, -1.0]]), None))

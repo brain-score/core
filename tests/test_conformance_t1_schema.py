@@ -274,3 +274,174 @@ def test_per_row_options_use_positions():
     rows = {i: row for i, row in zip(answer['stimulus_id'].values, answer.values)}
     np.testing.assert_array_equal(rows['s0'], [1, 0])
     np.testing.assert_array_equal(rows['s1'], [0, 1])
+
+
+# --- behavior:log_probabilities (F6; standard 2.2 and 2.3) ---------------------
+
+F6 = 'behavior:log_probabilities'
+F6_TASK = TaskContext(response=Choice(('a', 'b')))
+TOKENIZATION = {'join': 'space', 'special_tokens': 'none', 'template': 'none', 'truncation': 'none'}
+F6_PARAMETERS = {'layout': 'continuation', 'context': 'shared', 'tokenization': TOKENIZATION,
+                 'aggregation': 'sum', 'units': 'nats'}
+
+
+def _f6_record(**changes):
+    """A well-formed F6 record as a plain dict, with ``changes`` to its parameters."""
+    parameters = {**F6_PARAMETERS, **changes}
+    return {'format': F6, 'category': 'model-derived', 'origin': 'native', 'method': 'likelihood',
+            'conversion': None, 'source_format': None, 'parameters': parameters,
+            'parsed_by': None}
+
+
+def _f6(values, ids=('s0',), axis=('a', 'b'), dtype=np.float64, record=None):
+    return BehavioralAssembly(
+        np.array(values, dtype=dtype), dims=['presentation', 'choice'],
+        attrs={'response': record if record is not None else _f6_record()},
+        coords={'stimulus_id': ('presentation', list(ids)), 'choice': list(axis)})
+
+
+def _f6_table(ids=('s0',)):
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': list(ids), 'text': ['x'] * len(ids)}))
+    stimuli.identifier = 'f6-' + '-'.join(ids)
+    return stimuli
+
+
+def _f6_answer(payload, table=True):
+    session = (stimulus_session(_f6_table(), [F6], F6_TASK) if table
+               else Session((), [F6]))
+    session.respond(StreamEvent(F6, payload, None))
+    return session.collect(F6)
+
+
+def test_the_f6_record_is_built_by_response_record():
+    assert response_record(F6, 'likelihood', category='model-derived',
+                           parameters=F6_PARAMETERS) == _f6_record()
+
+
+@pytest.mark.parametrize('table', [True, False], ids=['stimulus_session', 'Session'])
+def test_a_well_formed_f6_assembly_is_stored_valid_in_float64(table):
+    answer = _f6_answer(_f6([[-0.1, -2.3]]), table)
+    assert answer.dims == ('presentation', 'choice')
+    assert answer.values.dtype == np.float64
+    np.testing.assert_array_equal(answer.values, [[-0.1, -2.3]])
+    assert list(answer['choice'].values) == ['a', 'b']
+    assert list(answer['stimulus_id'].values) == ['s0']
+    assert list(answer['response_state'].values) == ['valid']
+    assert list(answer['response_reason'].values) == ['']
+    assert list(answer['raw_answer'].values) == ['[-0.1, -2.3]']
+    assert answer.attrs['response'] == _f6_record()
+
+
+@pytest.mark.parametrize('values, state, reason', [
+    ([[0.5, -1.0]], 'invalid', 'a log probability is above 0'),
+    ([[5e-7, -1.0]], 'valid', ''),
+    ([[np.nan, -1.0]], 'invalid', 'a value is not finite'),
+    ([[np.inf, -1.0]], 'invalid', 'a value is not finite'),
+    ([[-np.inf, -1.0]], 'invalid', 'a value is not finite'),
+])
+@pytest.mark.parametrize('table', [True, False], ids=['stimulus_session', 'Session'])
+def test_an_f6_value_that_is_not_a_log_probability_is_stored_invalid(values, state, reason, table):
+    answer = _f6_answer(_f6(values), table)
+    assert list(answer['response_state'].values) == [state]
+    assert list(answer['response_reason'].values) == [reason]
+    assert answer.values.dtype == np.float64
+
+
+@pytest.mark.parametrize('units, value, state', [
+    ('nats', 1e-6, 'valid'),          # the tolerance itself
+    ('nats', 1.1e-6, 'invalid'),
+    ('bits', 1.4e-6, 'valid'),        # 1.4e-6 bits = 9.7e-7 nats
+    ('bits', 1.5e-6, 'invalid'),      # 1.5e-6 bits = 1.04e-6 nats
+    ('bits', 1.1e-6, 'valid'),        # above 1e-6 as a number, below it in nats
+])
+def test_the_positive_tolerance_is_one_millionth_of_a_nat_in_both_units(units, value, state):
+    answer = _f6_answer(_f6([[value, -1.0]], record=_f6_record(units=units)))
+    assert list(answer['response_state'].values) == [state]
+
+
+def _without(name):
+    record = _f6_record()
+    del record['parameters'][name]
+    return record
+
+
+def _tokenization(**changes):
+    return _f6_record(tokenization={**TOKENIZATION, **changes})
+
+
+def _tokenization_without(name):
+    return _f6_record(tokenization={k: v for k, v in TOKENIZATION.items() if k != name})
+
+
+def _record_with(**fields):
+    return {**_f6_record(), **fields}
+
+
+GOOD = [[-0.1, -2.3]]
+SCHEMA = 'not the behavior:log_probabilities schema'
+TOKENS = 'tokenization is a dict with keys'
+NATIVE = 'native: it has no conversion'
+F6_MALFORMED = [   # (case, the reason it names, payload)
+    *[(f'no {name}', SCHEMA, lambda name=name: _f6(GOOD, record=_without(name)))
+      for name in F6_PARAMETERS],
+    *[(f'no tokenization {name}', TOKENS,
+       lambda name=name: _f6(GOOD, record=_tokenization_without(name))) for name in TOKENIZATION],
+    ('an extra parameter', SCHEMA, lambda: _f6(GOOD, record=_f6_record(scale='log'))),
+    ('layout rows', "layout is 'rows'", lambda: _f6(GOOD, record=_f6_record(layout='rows'))),
+    ('units log10', "units is 'log10'", lambda: _f6(GOOD, record=_f6_record(units='log10'))),
+    ('aggregation max', "aggregation is 'max'",
+     lambda: _f6(GOOD, record=_f6_record(aggregation='max'))),
+    ('context other', "context is 'other'", lambda: _f6(GOOD, record=_f6_record(context='other'))),
+    ('continuation with prefix context', "continuation layout has context 'shared'",
+     lambda: _f6(GOOD, record=_f6_record(context='prefix'))),
+    ('segment with shared context', "segment layout has context 'prefix'",
+     lambda: _f6(GOOD, record=_f6_record(layout='segment'))),
+    ('tokenization not a dict', TOKENS, lambda: _f6(GOOD, record=_f6_record(tokenization='bpe'))),
+    ('special tokens other', "special_tokens is 'bos'",
+     lambda: _f6(GOOD, record=_tokenization(special_tokens='bos'))),
+    ('template other', "template is 'instruct'",
+     lambda: _f6(GOOD, record=_tokenization(template='instruct'))),
+    ('empty join', 'join is a nonempty str', lambda: _f6(GOOD, record=_tokenization(join=''))),
+    ('truncation zero', 'a positive int', lambda: _f6(GOOD, record=_tokenization(truncation=0))),
+    ('truncation true', 'a positive int', lambda: _f6(GOOD, record=_tokenization(truncation=True))),
+    ('category behavioral', "model-derived, not 'behavioral'",
+     lambda: _f6(GOOD, record=_record_with(category='behavioral'))),
+    ('a softmax conversion', NATIVE, lambda: _f6(GOOD, record=_record_with(
+        conversion='softmax', origin='derived', source_format=F6))),
+    ('a link', NATIVE, lambda: _f6(GOOD, record=_record_with(
+        method='link', origin='derived', source_format='behavior:probabilities'))),
+    ('no record', 'carries its response record', lambda: BehavioralAssembly(
+        np.array(GOOD), dims=['presentation', 'choice'],
+        coords={'stimulus_id': ('presentation', ['s0']), 'choice': ['a', 'b']})),
+    ('float32 values', 'float32, not float64', lambda: _f6(GOOD, dtype=np.float32)),
+    ('a cell', 'an assembly with its response record', lambda: np.array([-1.0, -2.0])),
+    ('a number', 'an assembly with its response record', lambda: -1.0),
+    ('one dimension', r"dims are \('presentation',\)", lambda: BehavioralAssembly(
+        np.array([-0.1]), dims=['presentation'], attrs={'response': _f6_record()},
+        coords={'stimulus_id': ('presentation', ['s0'])})),
+    ('choice coordinates that are not the options', r"choice axis is \['b', 'a'\]",
+     lambda: _f6(GOOD, axis=('b', 'a'))),
+    ('three continuations for two options', r"choice axis is \['a', 'b', 'c'\]",
+     lambda: _f6([[-0.1, -2.3, -3.0]], axis=('a', 'b', 'c'))),
+    ('a row for a stimulus not in the table', 'not in this session', lambda: _f6(GOOD, ids=('s9',))),
+]
+
+
+@pytest.mark.parametrize('name, reason, make', F6_MALFORMED, ids=[n for n, _, _ in F6_MALFORMED])
+def test_a_malformed_f6_response_raises_and_nothing_is_stored(name, reason, make):
+    session = stimulus_session(_f6_table(), [F6], F6_TASK)
+    with pytest.raises(ValueError, match='failed the channel catalog') as raised:
+        session.respond(StreamEvent(F6, make(), None))
+    assert raised.match(reason)
+    assert session.emitted == []
+
+
+def test_response_record_refuses_a_malformed_f6_record():
+    with pytest.raises(ValueError, match='model-derived'):
+        response_record(F6, 'likelihood', parameters=F6_PARAMETERS)
+    with pytest.raises(ValueError, match='native'):
+        response_record(F6, 'likelihood', category='model-derived', conversion='softmax',
+                        source_format=F6, parameters=F6_PARAMETERS)
+    with pytest.raises(ValueError, match="context 'prefix'"):
+        response_record(F6, 'likelihood', category='model-derived',
+                        parameters={**F6_PARAMETERS, 'layout': 'segment'})
