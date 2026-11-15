@@ -325,6 +325,25 @@ class TestCheckMemory:
             with pytest.warns(ResourceWarning, match="OOM risk"):
                 check_memory(model, bench)
 
+    def test_no_neural_region_to_probe_gives_one_line_and_no_traceback(self, caplog):
+        # No neural region for the probe: no estimate. One line that says memory is not
+        # guarded and how to declare the width; no traceback, and nothing runs.
+        import logging
+        model = FakeModel()
+        bench = FakeBenchmark(identifier='test-choice', n_stimuli=10)
+        bench.requested_output_channels = frozenset({'behavior:choice'})
+        with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000):
+            with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+                check_memory(model, bench)
+        messages = [r for r in caplog.records if r.name == 'brainscore_core.memory']
+        assert [r.getMessage() for r in messages] == [
+            "Memory estimate not made: no neural region (neural:<region>) is available for the "
+            "feature-width probe of benchmark 'test-choice', so memory is not guarded for this "
+            "run. To estimate anyway, declare the width: check_memory(model, benchmark, "
+            "feature_dim=...), or expected_feature_dim on the benchmark or feature_dim on the model."]
+        assert messages[0].exc_info is None
+        assert not getattr(model, 'calls', [])
+
     def test_graceful_when_probe_fails(self):
         model = FailingModel()
         bench = FakeBenchmark(n_stimuli=10)
