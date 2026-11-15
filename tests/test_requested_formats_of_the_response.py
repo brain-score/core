@@ -58,14 +58,13 @@ def test_a_format_the_response_does_not_name_is_refused_when_the_session_is_buil
 ALLOWED = [
     (CHOICE, ['behavior:choice', 'behavior:probabilities', 'behavior:log_probabilities']),
     (TaskContext(response=Choice(['cat', 'dog'], reaction_time='surprisal')), ['behavior:rt']),
-    (TaskContext(response=Choice(['cat', 'dog'], confidence=Scale(1, 5))), ['behavior:confidence']),
     (SCALE, ['behavior:rating', 'behavior', 'neural:IT']),
     (TEXT, ['behavior:text']),
 ]
 
 
 @pytest.mark.parametrize('builder', ['Session', 'stimulus_session'])
-@pytest.mark.parametrize('task, outputs', ALLOWED, ids=['choice', 'rt', 'confidence', 'scale', 'text'])
+@pytest.mark.parametrize('task, outputs', ALLOWED, ids=['choice', 'rt', 'scale', 'text'])
 def test_formats_the_response_names_bare_behavior_and_other_families_are_allowed(builder, task, outputs):
     assert BUILDERS[builder](outputs, task).outputs == tuple(outputs)
 

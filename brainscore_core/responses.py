@@ -17,15 +17,19 @@ from typing import Any, Optional, Sequence, Tuple, Union
 
 
 def _on_step(value: float, low: float, step: float) -> bool:
-    """Whether ``value`` is on the grid ``low + n * step``: the float nearest to a grid point.
+    """Whether ``value`` is on the step of a scale.
 
-    The value is compared with the nearest grid point, with a tolerance of
-    ``max(1e-9 * step, 4 float spacings at the magnitude of the value)``: only float
-    rounding is forgiven, so 1.5 on a step of 1 is off the grid at any magnitude.
+    The grid of a scale is decimal: the points Decimal(repr(low)) + n * Decimal(repr(step)).
+    A value is on the step when its decimal index is within 1e-9 of an integer n, or when
+    it is the float of the grid point n.
     """
-    grid = low + round((value - low) / step) * step
-    tolerance = max(1e-9 * abs(step), 4 * math.ulp(max(abs(value), abs(grid))))
-    return abs(value - grid) <= tolerance
+    from decimal import Decimal, localcontext
+    with localcontext() as context:
+        context.prec = 50
+        low_d, step_d = Decimal(repr(float(low))), Decimal(repr(float(step)))
+        index = (Decimal(repr(float(value))) - low_d) / step_d
+        n = index.to_integral_value()
+        return abs(index - n) <= Decimal('1e-9') or float(low_d + n * step_d) == float(value)
 
 
 @dataclass(frozen=True)
@@ -64,11 +68,9 @@ class Choice:
     readout or a language model's likelihoods) and as the log probability of
     each option (``behavior:log_probabilities``). ``channels`` names every format
     the task can be answered in; the outputs that a session requests say which
-    are answered. ``confidence=Scale(...)`` also asks the subject to report how
-    sure it is, in the same reply.
-    ``reaction_time`` also returns an implied reaction time from those
-    probabilities, scored by correlation with human RTs as Futrell2018 scores
-    surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
+    are answered. ``reaction_time`` also returns an implied reaction time from
+    those probabilities, scored by correlation with human RTs as Futrell2018
+    scores surprisal: ``'evidence_margin'`` (1 minus the gap between the two most
     probable labels; close calls are slow) or ``'surprisal'`` (-log2 of the
     chosen label's probability).
 
@@ -79,24 +81,21 @@ class Choice:
     position of each option in the row's cell, and ``Prompt.response`` holds
     that row's options as ``labels``.
 
-    ``raw_scores=True`` returns on ``behavior:probabilities`` the score of each
-    option exactly as the model's ``likelihood`` part gave it (the summed log
-    probability of the option's tokens), not normalized; the answer's response
-    record has ``category='model-derived'`` and ``parameters['scale'] == 'log'``.
-    Only a ``likelihood`` part gives raw scores.
+    The log probability of each option, exactly as the model's ``likelihood``
+    part gives it (``behavior:log_probabilities``), is requested by a session;
+    with ``verbatim=True`` the part scores the plain text, as EWoK does.
 
-    ``raw_text=True`` shows the stimulus text exactly as given: no directive is
+    ``verbatim=True`` shows the trial text exactly as given: no directive is
     added, and an instruction is refused. A part that scores options scores
     ``f"{text} {option}"`` as plain text, with no chat template and no
     beginning-of-sequence token, as EWoK's ``score`` does. A ``reply`` part
-    still answers through its own chat template, because a chat model cannot
-    answer without one; it gets no added sentence.
+    keeps its own chat template, because a chat model cannot answer without one;
+    it gets no added sentence, and its answer's record notes its own template,
+    if it has one.
     """
     labels: Union[Tuple[str, ...], str, None] = None   # the options, or the column holding each row's
-    confidence: Optional[Scale] = None
     reaction_time: Optional[str] = None   # 'evidence_margin' or 'surprisal': an implied RT
-    raw_scores: bool = False
-    raw_text: bool = False
+    verbatim: bool = False
 
     REACTION_TIMES = ('evidence_margin', 'surprisal')
 
@@ -108,33 +107,23 @@ class Choice:
             raise ValueError('Choice needs at least two labels')
         if self.reaction_time not in (None, *self.REACTION_TIMES):
             raise ValueError(f'reaction_time is one of {self.REACTION_TIMES}, not {self.reaction_time!r}')
-        for name in ('raw_scores', 'raw_text'):
+        for name in ('verbatim',):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f'{name} is True or False, not {getattr(self, name)!r}')
-        if self.raw_scores and self.reaction_time is not None:
-            raise ValueError('reaction_time reads normalized probabilities; it cannot use raw_scores')
-        if self.confidence is not None and (self.raw_scores or self.raw_text):
-            raise ValueError('A reported confidence needs a reply with a directive; '
-                             'it cannot be used with raw_scores or raw_text')
         if not isinstance(self.labels, str):
             object.__setattr__(self, 'labels', tuple(self.labels))
 
     @property
     def channels(self) -> Tuple[str, ...]:
         return (('behavior:choice', 'behavior:probabilities', 'behavior:log_probabilities')
-                + (('behavior:confidence',) if self.confidence is not None else ())
                 + (('behavior:rt',) if self.reaction_time is not None else ()))
 
     def directive(self) -> str:
-        if self.raw_text:
+        if self.verbatim:
             return ''
         if isinstance(self.labels, str):
             raise ValueError("The directive needs the row's options; trial_prompt gives them")
-        text = f'Answer with exactly one of: {", ".join(self.labels)}.'
-        if self.confidence is not None:
-            text += (f' Then, on a new line, rate your confidence from '
-                     f'{self.confidence.low:g} to {self.confidence.high:g}.')
-        return text
+        return f'Answer with exactly one of: {", ".join(self.labels)}.'
 
     def parse(self, reply: str) -> Tuple[Optional[str], Optional[str]]:
         first = (reply or '').strip().splitlines()[0].strip().lower() if (reply or '').strip() else ''
@@ -147,12 +136,6 @@ class Choice:
             return found[0], None
         return None, ('no label in the reply' if not found
                       else f'several labels in the reply: {found}')
-
-    def parse_confidence(self, reply: str) -> Tuple[Optional[float], Optional[str]]:
-        lines = (reply or '').strip().splitlines()
-        if len(lines) < 2:
-            return None, 'no confidence line in the reply'
-        return self.confidence.parse(' '.join(lines[1:]))
 
 
 @dataclass(frozen=True)

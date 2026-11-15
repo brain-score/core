@@ -105,8 +105,8 @@ class TaskContext:
             if (kind == 'choice' and self.label_set is None
                     and not isinstance(self.response.labels, str)):
                 self.label_set = list(self.response.labels)
-            if kind == 'choice' and self.response.raw_text and (self.instruction or '').strip():
-                raise ValueError('A raw_text response shows the stimulus text exactly as given; '
+            if kind == 'choice' and self.response.verbatim and (self.instruction or '').strip():
+                raise ValueError('A verbatim response shows the stimulus text exactly as given; '
                                  'remove the instruction or put it in the text.')
         elif self.task_type is None:
             raise ValueError("Give a response (Choice, Scale, Text) or task_type='passive'.")

@@ -188,8 +188,7 @@ def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
 # that exist; the bare ``behavior`` channel stays for legacy tasks.
 CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({
     "vision": ("image", "video"),
-    "behavior": (None, "choice", "probabilities", "log_probabilities", "confidence", "rating",
-                 "rt", "text"),
+    "behavior": (None, "choice", "probabilities", "log_probabilities", "rating", "rt", "text"),
 })
 # Families only core defines: ``register_channel`` refuses them outside the seed.
 _CLOSED_FAMILIES = ("behavior",)
@@ -462,7 +461,7 @@ _SEED = [
                  shape_validator=_check_behavior,
                  addressing=("address is the response format a TaskContext response asks for, "
                              "from the closed list CHANNEL_FORMS['behavior']: choice, "
-                             "probabilities, log_probabilities, confidence, rating, rt or text; "
+                             "probabilities, log_probabilities, rating, rt or text; "
                              "the validator checks each format against the task and the "
                              "trials"),
                  materializers=("BehavioralAssembly",)),
@@ -529,7 +528,7 @@ def _declare_payload_types() -> None:
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
         'neural': (DataAssembly, np.ndarray),
-        # A number is one trial's cell on a rating, confidence or reaction-time
+        # A number is one trial's cell on a rating or reaction-time
         # channel; the behavior validator refuses it on the bare channel.
         'behavior': (DataAssembly, str, np.ndarray, int, float, np.number),
         'perturbation': (PerturbationApplied, type(None)),

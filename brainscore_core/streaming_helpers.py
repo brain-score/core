@@ -41,4 +41,4 @@ from brainscore_core._sessions.payloads import (
     session_stimuli,
 )
 
-from brainscore_core._sessions.view import declared_only
+from brainscore_core._sessions.view import declared_only, task_input_channels

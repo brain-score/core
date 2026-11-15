@@ -19,7 +19,7 @@ validates it; the benchmark scores it (Response Format Standard, section 0).
 
 What an addressed response can be: a cell for one trial (``behavior:text``
 and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
-with one value per option; ``behavior:rating``, ``behavior:confidence``,
+with one value per option; ``behavior:rating`` and
 ``behavior:rt``: a number), or an assembly of rows over ``presentation``
 with a ``stimulus_id`` coordinate and a response record;
 ``behavior:log_probabilities`` takes an assembly only (model-derived and
@@ -57,7 +57,7 @@ _UNITS = ('nats', 'bits')
 _RT_UNITS = ('ms', 'monotone')
 _FIELDS = frozenset(('format', 'category', 'origin', 'method', 'conversion', 'source_format',
                      'parameters', 'parsed_by'))
-_FORMATS = ('choice', 'probabilities', 'log_probabilities', 'rating', 'confidence', 'rt', 'text')
+_FORMATS = ('choice', 'probabilities', 'log_probabilities', 'rating', 'rt', 'text')
 _AXIS_FORMATS = ('choice', 'probabilities', 'log_probabilities')   # rows over a choice axis
 # The schema of behavior:log_probabilities, in its record's parameters (standard 2.3).
 _LOG_PROBABILITY_SCHEMA = {
@@ -257,7 +257,8 @@ def _log_probability_problems(record) -> List[str]:
     for name, allowed in _LOG_PROBABILITY_SCHEMA.items():
         if parameters[name] not in allowed:
             problems.append(f'the schema field {name} is {parameters[name]!r}, not one of {allowed}')
-    expected = _CONTEXTS.get(parameters['layout'])
+    layout = parameters['layout']
+    expected = _CONTEXTS.get(layout) if isinstance(layout, str) else None
     context = parameters['context']
     if expected and context in _CONTEXTS.values() and context != expected:
         problems.append(f"the {parameters['layout']} layout has context {expected!r}, not "
@@ -392,7 +393,7 @@ def _null(value) -> bool:
     return value is None or (isinstance(value, float) and value != value)
 
 
-def _raw_text(value) -> str:
+def _answer_text(value) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, np.ndarray):
@@ -410,14 +411,10 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
             else:
                 reasons.append(None if (row == 1).sum() == 1 else 'not exactly one option chosen')
     elif fmt == 'probabilities':
-        raw_scores = (record['category'] == 'model-derived'
-                      and record['parameters'].get('scale') == 'log')
         for row in values:
             row = row.astype(np.float64)
             if not np.isfinite(row).all():
                 reasons.append('a value is not finite')
-            elif raw_scores:
-                reasons.append('a log probability is above 0' if (row > 0).any() else None)
             elif (row < 0).any():
                 reasons.append('a probability is negative')
             elif abs(float(row.sum()) - 1.0) > _TOLERANCE:
@@ -435,12 +432,12 @@ def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
                 reasons.append('a log probability is above 0')
             else:
                 reasons.append(None)
-    elif fmt in ('rating', 'confidence'):
-        scale = getattr(response, 'confidence', None) if fmt == 'confidence' else response
+    elif fmt == 'rating':
+        scale = response
         low, high = getattr(scale, 'low', None), getattr(scale, 'high', None)
         step = getattr(scale, 'step', None)
         # Bounds are inclusive and exact; the step is checked by the one rule of
-        # responses._on_step (the float nearest to a grid point is on the step).
+        # responses._on_step (the decimal grid of the scale).
         from .responses import _on_step
         for value in values:
             value = float(value)
@@ -504,7 +501,7 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
         values = np.array([float(payload)], dtype=np.float64)
         if fmt == 'rt':
             parameters['units'] = meta.get('units')
-    coords['raw_answer'] = [_raw_text(payload)]
+    coords['raw_answer'] = [_answer_text(payload)]
     record = response_record(channel, 'external', parameters=parameters)
     if fmt in ('choice', 'probabilities'):
         coords['choice'] = _axis(session, options) or list(range(values.shape[1]))
@@ -522,10 +519,8 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
     problems = _record_problems(record, channel)
     if problems:
         raise ValueError('; '.join(problems))
-    raw_scores = (fmt == 'probabilities' and record['category'] == 'model-derived'
-                  and record['parameters'].get('scale') == 'log')
     values = np.asarray(payload.values)
-    dtype = {'choice': np.float32, 'probabilities': np.float64 if raw_scores else np.float32,
+    dtype = {'choice': np.float32, 'probabilities': np.float32,
              'text': object}.get(fmt, np.float64)   # log_probabilities: float64
     if values.dtype != np.dtype(dtype):
         raise ValueError(f'the values are {values.dtype}, not {np.dtype(dtype)}')
@@ -538,7 +533,14 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
         named = list(named) if isinstance(named, (list, tuple)) else [named]
         if ids != named:
             raise ValueError(f'the event answers stimuli {named}, but its rows are {ids}')
-    if fmt in _AXIS_FORMATS:
+    segment = fmt == 'log_probabilities' and record['parameters'].get('layout') == 'segment'
+    if segment:
+        # A segment answer's axis is the positions 1 to R of the trial's segments (standard 2.3).
+        axis = list(payload['choice'].values)
+        if [str(a) for a in axis] != [str(i) for i in range(1, len(axis) + 1)]:
+            raise ValueError(f'the choice axis of a segment answer is the positions 1 to '
+                             f'{len(axis)}, not {axis}')
+    elif fmt in _AXIS_FORMATS:
         axis = list(payload['choice'].values)
         if ledger is not None:
             seen = Counter()
@@ -578,7 +580,7 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
         if record['origin'] == 'derived':
             raise ValueError('a derived assembly keeps its source evidence in '
                              'raw_answer; core does not make it from the derived values')
-        coords['raw_answer'] = [_raw_text(value) for value in values]
+        coords['raw_answer'] = [_answer_text(value) for value in values]
     return values, coords, record
 
 

@@ -22,7 +22,6 @@ TASKS = {
     'behavior:choice': TaskContext(response=Choice(['cat', 'dog'])),
     'behavior:probabilities': TaskContext(response=Choice(['cat', 'dog'])),
     'behavior:rating': TaskContext(response=Scale(1, 7, 1)),
-    'behavior:confidence': TaskContext(response=Choice(['cat', 'dog'], confidence=Scale(1, 5))),
     'behavior:rt': TaskContext(response=Choice(['cat', 'dog'], reaction_time='surprisal')),
     'behavior:text': TaskContext(response=Text()),
 }
@@ -83,7 +82,6 @@ WELL_FORMED = {
     'behavior:choice': [[1.0, 0.0], [0.0, 1.0]],
     'behavior:probabilities': [[0.25, 0.75], [0.5, 0.5]],
     'behavior:rating': [3.0, 7.0],
-    'behavior:confidence': [1.0, 5.0],
     'behavior:rt': [0.2, 1.5],
     'behavior:text': ['a cat', 'a dog'],
 }
@@ -103,7 +101,6 @@ CELLS = {   # one cell per trial: (cell, the stored value)
     'behavior:choice': ('dog', [0.0, 1.0]),
     'behavior:probabilities': (np.array([0.25, 0.75]), [0.25, 0.75]),
     'behavior:rating': (4, 4.0),
-    'behavior:confidence': (2.0, 2.0),
     'behavior:rt': (0.5, 0.5),
     'behavior:text': ('a cat', 'a cat'),
 }
@@ -156,7 +153,6 @@ MALFORMED = [
     ('behavior:rating', 'a label', lambda: 'seven'),
     ('behavior:rating', 'float32 values', lambda: _rows('behavior:rating', [1.0, 2.0],
                                                         dtype=np.float32)),
-    ('behavior:confidence', 'a label', lambda: 'sure'),
     ('behavior:rt', 'no units', lambda: _rows('behavior:rt', [0.1, 0.2],
                                               record=response_record('behavior:rt', 'external'))),
     ('behavior:rt', 'unknown units', lambda: _rows('behavior:rt', [0.1, 0.2], record=response_record(
@@ -219,7 +215,6 @@ INVALID = [
     ('behavior:rating', [9.0, 3.0], 'outside'),
     ('behavior:rating', [1.5, 3.0], 'scale step'),
     ('behavior:rating', [np.nan, 3.0], 'no number'),
-    ('behavior:confidence', [0.0, 3.0], 'outside'),
     ('behavior:rt', [-1.0, 0.5], 'negative'),
     ('behavior:rt', [np.inf, 0.5], 'not finite'),
 ]
@@ -247,20 +242,20 @@ def test_probability_rows_off_by_less_than_one_in_ten_thousand_are_valid():
     assert list(answer['response_state'].values) == ['valid', 'valid']
 
 
-def test_raw_log_scores_need_the_explicit_record():
+@pytest.mark.parametrize('parameters', [{'scale': 'log'}, {}], ids=['old raw-score record', 'plain'])
+def test_log_values_on_the_probabilities_format_are_refused(parameters):
+    # The temporary raw-score path is gone: probabilities are float32 rows, and log
+    # probabilities travel on behavior:log_probabilities.
     record = response_record('behavior:probabilities', 'likelihood', category='model-derived',
-                             parameters={'scale': 'log'})
-    payload = _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]], dtype=np.float64,
-                    record=record)
-    answer = _participate('behavior:probabilities', payload).collect('behavior:probabilities')
-    assert list(answer['response_state'].values) == ['valid', 'invalid']
-    # Without scale 'log', model-derived values are probabilities and float32.
-    other = response_record('behavior:probabilities', 'likelihood', category='model-derived')
+                             parameters=parameters)
     session = stimulus_session(_stimuli(), ['behavior:probabilities'],
                                TASKS['behavior:probabilities'])
-    with pytest.raises(ValueError, match='float64'):
+    with pytest.raises(ValueError, match='float64, not float32'):
         _Stub('behavior:probabilities', _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]],
-                                              dtype=np.float64, record=other)).participate(session)
+                                              dtype=np.float64, record=record)).participate(session)
+    float32 = _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]], record=record)
+    answer = _participate('behavior:probabilities', float32).collect('behavior:probabilities')
+    assert list(answer['response_state'].values) == ['invalid', 'invalid']   # negative values
 
 
 def test_a_supplied_state_that_agrees_is_kept():
@@ -445,6 +440,9 @@ F6_MALFORMED = [   # (case, the reason it names, payload)
     ('three continuations for two options', r"choice axis is \['a', 'b', 'c'\]",
      lambda: _f6([[-0.1, -2.3, -3.0]], axis=('a', 'b', 'c'))),
     ('a row for a stimulus not in the table', 'not in this session', lambda: _f6(GOOD, ids=('s9',))),
+    # Review S1, F6-03: an unhashable layout is a malformed payload, not a TypeError.
+    ('layout a list', "layout is \\[\\]", lambda: _f6(GOOD, record=_f6_record(layout=[]))),
+    ('layout a dict', "layout is \\{\\}", lambda: _f6(GOOD, record=_f6_record(layout={}))),
 ]
 
 
@@ -455,6 +453,20 @@ def test_a_malformed_f6_response_raises_and_nothing_is_stored(name, reason, make
         session.respond(StreamEvent(F6, make(), None))
     assert raised.match(reason)
     assert session.emitted == []
+
+
+SEGMENT = {'layout': 'segment', 'context': 'prefix'}
+
+
+def test_a_segment_answer_has_the_positions_as_its_axis():
+    # Review S1, F6-01: the axis of a segment answer is the positions 1 to R, whatever
+    # the task's options; other coordinates are refused, also without a task.
+    answer = _f6_answer(_f6([[-1.0, -2.0]], axis=(1, 2), record=_f6_record(**SEGMENT)))
+    assert list(answer['response_state'].values) == ['valid']
+    for table in (True, False):
+        with pytest.raises(ValueError, match=r"positions 1 to 2, not \['wrong', 'axis'\]"):
+            _f6_answer(_f6([[-1.0, -2.0]], axis=('wrong', 'axis'), record=_f6_record(**SEGMENT)),
+                       table=table)
 
 
 def test_response_record_refuses_a_malformed_f6_record():
