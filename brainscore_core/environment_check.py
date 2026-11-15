@@ -43,6 +43,7 @@ dependencies (no torch/transformers import).
 """
 import functools
 import hashlib
+import json
 import platform
 import re
 import sys
@@ -153,23 +154,45 @@ def _normalized(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _source(distribution) -> str:
+    """The source identity the installer recorded (``direct_url.json``, PEP 610), or ``''``.
+
+    The commit of a package installed from a repository (``commit=<id>``); the
+    location of an editable install (``editable=<url>``). A package from an index
+    or a wheel file records neither.
+    """
+    text = distribution.read_text("direct_url.json")
+    if not text:
+        return ""
+    record = json.loads(text)
+    commit = (record.get("vcs_info") or {}).get("commit_id")
+    if commit:
+        return f" commit={commit}"
+    if (record.get("dir_info") or {}).get("editable"):
+        return f" editable={record.get('url')}"
+    return ""
+
+
 @functools.lru_cache(maxsize=1)
 def environment_fingerprint() -> str:
-    """SHA-256 of the sorted lines ``name==version`` of every installed distribution.
+    """SHA-256 of the sorted lines that name the Python, the platform and every installed distribution.
 
-    Names are normalized; the four Brain-Score packages are left out, because
-    ``code_commits`` names their code. Computed once per process. Two machines
-    with the same fingerprint have the same installed packages at the same
-    versions; two scores are compared bit for bit only when their fingerprints
-    are equal.
+    One line ``python==<three numbers>``, one ``platform==<system> <machine>``, and per
+    distribution ``<normalized name>==<version>``, followed by the commit of a package
+    installed from a repository or the location of an editable install, when the
+    installer recorded it. The four Brain-Score packages are left out, because
+    ``code_commits`` names their code. Computed once per process.
+
+    Two scores are compared bit for bit only when their fingerprints are equal,
+    their ``accelerator`` values are equal, and every code commit is known and equal.
     """
     from importlib.metadata import distributions
     own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
-    lines = set()
+    lines = {f"python=={platform.python_version()}", f"platform=={platform.system()} {platform.machine()}"}
     for distribution in distributions():
         name = distribution.metadata["Name"]
         if name and _normalized(name) not in own:
-            lines.add(f"{_normalized(name)}=={distribution.version}")
+            lines.add(f"{_normalized(name)}=={distribution.version}{_source(distribution)}")
     return hashlib.sha256("\n".join(sorted(lines)).encode("utf-8")).hexdigest()
 
 

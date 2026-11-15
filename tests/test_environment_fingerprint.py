@@ -1,4 +1,6 @@
 """The environment fingerprint and the accelerator in a score's ``software``."""
+import json
+import platform
 import sys
 from types import SimpleNamespace
 
@@ -9,14 +11,20 @@ from brainscore_core.environment_check import _accelerator, _score_environment, 
 
 
 class _Distribution:
-    def __init__(self, name, version):
-        self.metadata, self.version = {'Name': name}, version
+    def __init__(self, name, version, direct_url=None):
+        self.metadata, self.version, self._direct_url = {'Name': name}, version, direct_url
+
+    def read_text(self, filename):
+        return json.dumps(self._direct_url) if filename == 'direct_url.json' and self._direct_url else None
+
+    def locate_file(self, path):
+        return '/site-packages/' + path
 
 
 def _with(monkeypatch, packages):
     import importlib.metadata
     monkeypatch.setattr(importlib.metadata, 'distributions',
-                        lambda: [_Distribution(name, version) for name, version in packages])
+                        lambda: [p if isinstance(p, _Distribution) else _Distribution(*p) for p in packages])
     environment_fingerprint.cache_clear()
 
 
@@ -107,3 +115,38 @@ def test_a_failing_query_is_not_stated(monkeypatch):
         raise RuntimeError('driver')
     monkeypatch.setitem(sys.modules, 'torch', SimpleNamespace(cuda=SimpleNamespace(is_available=fail)))
     assert _accelerator() == 'not stated'
+
+
+def _git(commit):
+    return {'url': 'https://example.org/quickbrain.git', 'vcs_info': {'vcs': 'git', 'commit_id': commit}}
+
+
+def test_another_commit_of_a_repository_install_gives_another_value(monkeypatch):
+    _with(monkeypatch, BASE + [_Distribution('quickbrain', '0.1', _git('a' * 40))])
+    first = environment_fingerprint()
+    _with(monkeypatch, BASE + [_Distribution('quickbrain', '0.1', _git('b' * 40))])
+    assert environment_fingerprint() != first
+
+
+def test_another_location_of_an_editable_install_gives_another_value(monkeypatch):
+    editable = lambda url: {'url': url, 'dir_info': {'editable': True}}
+    _with(monkeypatch, BASE + [_Distribution('helper', '1.0', editable('file:///one/helper'))])
+    first = environment_fingerprint()
+    _with(monkeypatch, BASE + [_Distribution('helper', '1.0', editable('file:///two/helper'))])
+    assert environment_fingerprint() != first
+
+
+def test_a_wheel_file_records_no_source(monkeypatch):
+    _with(monkeypatch, BASE + [_Distribution('helper', '1.0')])
+    first = environment_fingerprint()
+    _with(monkeypatch, BASE + [_Distribution('helper', '1.0', {'url': 'file:///w.whl', 'archive_info': {}})])
+    assert environment_fingerprint() == first
+
+
+@pytest.mark.parametrize('name, value', [('python_version', '0.0.1'), ('system', 'TestSystem'), ('machine', 'test-machine')])
+def test_the_python_version_and_the_platform_count(monkeypatch, name, value):
+    _with(monkeypatch, BASE)
+    first = environment_fingerprint()
+    monkeypatch.setattr(platform, name, lambda: value)
+    environment_fingerprint.cache_clear()
+    assert environment_fingerprint() != first
