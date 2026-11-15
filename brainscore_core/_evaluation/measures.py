@@ -17,11 +17,13 @@ regions_per_pass)``). Core does not read the plan itself: only the subject that
 owns it knows whether it honors it, so a subject that passes none is stamped
 None. Either can change the last digits of a score, never its value otherwise.
 
-The record also keeps the provenance of each accepted response (rule 6.3): the
-mapping in ``event.meta['provenance']`` or in ``payload.attrs['provenance']``,
-which the subject or its extractor writes (model revision, weights, precision,
-device, the extraction fingerprint, whether the activation store gave the
-values). Core copies the distinct mappings; it never reads the subject.
+The same note carries the provenance of a session (rule 6.3), once per session:
+``note_session(session, provenance=entry)``, where the subject that owns its
+parts says which parts the session used and their facts (``BrainScoreModel``
+lists each extractor and answering part; a registration adds its own facts as
+a separate entry). Core adds the activation store state of the session (the
+``RESULTCACHING_DISABLE`` value at that moment) and keeps the distinct entries.
+No response, payload or event meta is read or changed for it.
 
 ponytail: the record is a ``ContextVar``. A response made in a worker thread or
 process is not noted. No behavioral path in core, vision, language or unified
@@ -30,6 +32,7 @@ compute metrics); copy the context into the worker if one ever does.
 """
 
 import json
+import os
 from copy import deepcopy
 from collections import Counter
 from contextlib import contextmanager
@@ -51,7 +54,8 @@ class MeasureRecord:
         self.undone: Counter = Counter()
         self._deliveries: Set[str] = set()
         self._region_plans: Set[str] = set()
-        self._provenance: Dict[str, dict] = {}   # one per distinct mapping, keyed by its JSON
+        self._provenance: Dict[str, dict] = {}   # one per distinct session entry, keyed by its JSON
+        self._store_states: Set[str] = set()
 
     @property
     def unreleased(self) -> Set[str]:
@@ -79,7 +83,7 @@ class MeasureRecord:
 
     @property
     def provenance(self) -> Tuple[dict, ...]:
-        """The distinct provenance mappings of the run's accepted responses, sorted by content."""
+        """The distinct provenance entries the run's sessions noted, sorted by content."""
         return tuple(self._provenance[key] for key in sorted(self._provenance))
 
 
@@ -108,6 +112,7 @@ def record_measures() -> Iterator[MeasureRecord]:
             outer._deliveries |= record._deliveries
             outer._region_plans |= record._region_plans
             outer._provenance.update(record._provenance)
+            outer._store_states |= record._store_states
 
 
 def _note_record(payload) -> None:
@@ -121,30 +126,40 @@ def _note_record(payload) -> None:
         record._records[json.dumps(response, sort_keys=True, default=str)] = response
 
 
-def _note_provenance(event) -> None:
-    """Add the provenance mapping of ``event`` (in its meta and in its payload's attrs) to the open record."""
-    record = _active.get()
-    if record is None:
-        return
-    attrs = getattr(getattr(event, 'payload', None), 'attrs', None)
-    for mapping in ((getattr(event, 'meta', None) or {}).get('provenance'),
-                    attrs.get('provenance') if isinstance(attrs, dict) else None):
-        if isinstance(mapping, dict) and mapping:
-            record._provenance[json.dumps(mapping, sort_keys=True, default=str)] = deepcopy(mapping)
+def _store_state() -> str:
+    """The activation store state now: ``'on'``, ``'off'``, or ``'off for: <prefixes>'``.
+
+    The rule of ``result_caching.is_enabled``: ``'1'`` disables every function,
+    an empty value or ``'0'`` none, any other value the listed identifier prefixes.
+    """
+    value = os.environ.get('RESULTCACHING_DISABLE', '0')
+    if value == '1':
+        return 'off'
+    return 'on' if value in ('', '0') else f'off for: {value}'
 
 
-def note_session(session, regions_per_pass: Optional[str] = None) -> None:
-    """Note how ``session`` delivers its inputs and, when given, the plan the subject used.
+def note_session(session, regions_per_pass: Optional[str] = None,
+                 provenance: Optional[dict] = None) -> None:
+    """Note how ``session`` delivers its inputs and, when given, the plan the subject used
+    and the provenance of the session.
 
     ``regions_per_pass`` comes from the subject that owns the setting and validated
     it (``BrainScoreModel``); a subject that does not read it passes none.
+    ``provenance`` is one entry (a mapping of plain values) from the subject that
+    owns the parts; core adds ``activation_store`` (the store state of the session)
+    and keeps a copy. A subject that passes none gets the entry of
+    ``provenance_attrs`` with its facts ``'not stated'``.
     """
     record = _active.get()
     if record is None:
         return
     record._deliveries.add('stream' if session.streaming else 'listed')
+    record._store_states.add(_store_state())
     if regions_per_pass is not None:
         record._region_plans.add(regions_per_pass)
+    if provenance is not None:
+        entry = {**deepcopy(dict(provenance)), 'activation_store': _store_state()}
+        record._provenance[json.dumps(entry, sort_keys=True, default=str)] = entry
 
 
 def execution_attrs(record: MeasureRecord) -> dict:
@@ -161,6 +176,23 @@ def execution_attrs(record: MeasureRecord) -> dict:
             'regions_per_pass': one(record._region_plans, None)}
 
 
+NOT_STATED = 'not stated'
+
+
+def provenance_attrs(record: Optional[MeasureRecord], subject_identifier) -> Tuple[dict, ...]:
+    """``attrs['provenance']`` of a score: the run's entries, or one entry of facts not stated.
+
+    A subject that noted no entry (an old model through an adapter, a custom
+    subject) gets ``{'subject': ..., 'parts': 'not stated', 'activation_store': ...}``;
+    the store state is the run's (``'not stated'`` when no session answered).
+    """
+    if record is not None and record._provenance:
+        return record.provenance
+    states = sorted(record._store_states) if record is not None else []
+    store = NOT_STATED if not states else states[0] if len(states) == 1 else tuple(states)
+    return ({'subject': subject_identifier, 'parts': NOT_STATED, 'activation_store': store},)
+
+
 def note_response(event, request=None) -> None:
     """Note a response event a session accepts: a response record, or a perturbation handle.
 
@@ -169,7 +201,6 @@ def note_response(event, request=None) -> None:
     else the request; the response is an undo when the request or the meta says
     ``kind == 'reset'``.
     """
-    _note_provenance(event)
     channel = getattr(event, 'channel', None)
     if is_behavior_channel(channel):
         _note_record(event.payload)

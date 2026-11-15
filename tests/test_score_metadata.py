@@ -514,60 +514,87 @@ def test_reading_versions_does_not_import_torch():
     assert out == 'False'
 
 
-# Provenance of the run's responses (rule 6.3)
+# Provenance of a session, noted once (rule 6.3)
 
-def _answer_with(session, payload_provenance=None, meta_provenance=None):
-    """Answer each input on the one requested output, with provenance on the payload or the meta."""
-    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
-    while (event := session.next_input()) is not None:
-        payload = NeuroidAssembly(
-            np.ones((1, 1)), dims=['presentation', 'neuroid'],
-            coords={'stimulus_id': ('presentation', ['s0']), 'neuroid_id': ('neuroid', ['n0'])})
-        if payload_provenance is not None:
-            payload.attrs['provenance'] = payload_provenance
-        meta = {'provenance': meta_provenance} if meta_provenance is not None else {}
-        session.respond(StreamEvent(session.outputs[0], payload, event.t_ms, meta))
-
-
-def _provenance_score(*answers):
+def _noted(entries, monkeypatch, disable='1', answer_with=None):
+    """One answered session per entry; each entry is noted with note_session."""
+    from brainscore_core._evaluation.measures import note_session
     from brainscore_core.streaming import Session
+    monkeypatch.setenv('RESULTCACHING_DISABLE', disable)
     with record_measures() as measures:
-        for payload_provenance, meta_provenance in answers:
-            _answer_with(Session(_events(), ['neural:IT']), payload_provenance, meta_provenance)
+        for entry in entries:
+            session = Session(_events(), ['neural:IT'])
+            note_session(session, provenance=entry)
+            _answer_session(session)
     return stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
                                 harness_id='test', measures=measures)
 
 
-def test_the_provenance_of_a_payload_and_of_a_meta_reach_the_score():
-    extraction = {'extractor': 'pkg.Wrapper', 'extraction': 'v2-a', 'activation_store': False}
-    model = {'dtype': 'torch.bfloat16', 'weights_sha256': {'shard': 'x'}}
-    score = _provenance_score((extraction, None), (None, model))
-    assert score.attrs['provenance'] == (extraction, model)   # sorted by their JSON
+def test_a_noted_entry_reaches_the_score_with_the_store_state(monkeypatch):
+    entry = {'subject': 'subject', 'parts': [{'serves': 'neural:IT', 'kind': 'pkg.Wrapper'}]}
+    score = _noted([entry], monkeypatch)
+    assert score.attrs['provenance'] == ({**entry, 'activation_store': 'off'},)
     assert float(score) == 0.5
 
 
-def test_the_same_provenance_on_meta_and_payload_is_kept_once():
-    model = {'dtype': 'torch.float32'}
-    score = _provenance_score((model, model), (model, None))
-    assert score.attrs['provenance'] == (model,)
+@pytest.mark.parametrize('disable,state', [('1', 'off'), ('0', 'on'), ('', 'on'),
+                                           ('pkg.Wrapper', 'off for: pkg.Wrapper')])
+def test_the_store_state_follows_the_switch(monkeypatch, disable, state):
+    score = _noted([{'subject': 'subject'}], monkeypatch, disable=disable)
+    assert score.attrs['provenance'] == ({'subject': 'subject', 'activation_store': state},)
 
 
-def test_a_run_without_provenance_stamps_an_empty_tuple():
-    assert _provenance_score((None, None)).attrs['provenance'] == ()
+def test_the_same_entry_is_kept_once_and_two_entries_both(monkeypatch):
+    one, two = {'subject': 'subject', 'parts': []}, {'subject': 'subject', 'registration': {'dtype': 'bf16'}}
+    score = _noted([one, one, two], monkeypatch)
+    assert score.attrs['provenance'] == ({**one, 'activation_store': 'off'},
+                                         {**two, 'activation_store': 'off'})
+
+
+def test_a_subject_that_notes_nothing_gets_facts_not_stated(monkeypatch):
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    score = _stamped(_events(), monkeypatch)
+    assert score.attrs['provenance'] == (
+        {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},)
+
+
+def test_a_stamp_without_a_run_states_no_store():
     score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels=set(), harness_id='test')
-    assert score.attrs['provenance'] == ()
+    assert score.attrs['provenance'] == (
+        {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'not stated'},)
 
 
-def test_the_score_keeps_a_copy_of_the_provenance():
-    model = {'weights_sha256': {'shard': 'x'}}
-    score = _provenance_score((model, None))
-    model['weights_sha256']['shard'] = 'edited'
-    assert score.attrs['provenance'] == ({'weights_sha256': {'shard': 'x'}},)
+def test_the_score_keeps_a_copy_of_the_entry(monkeypatch):
+    entry = {'subject': 'subject', 'registration': {'shard': 'x'}}
+    score = _noted([entry], monkeypatch)
+    entry['registration']['shard'] = 'edited'
+    assert score.attrs['provenance'][0]['registration'] == {'shard': 'x'}
 
 
-def test_an_inner_score_passes_its_provenance_to_the_outer_record():
+def test_an_inner_score_passes_its_entries_to_the_outer_record(monkeypatch):
+    from brainscore_core._evaluation.measures import note_session
     from brainscore_core.streaming import Session
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
     with record_measures() as outer:
         with record_measures():
-            _answer_with(Session(_events(), ['neural:IT']), {'extraction': 'v2-inner'})
-    assert outer.provenance == ({'extraction': 'v2-inner'},)
+            note_session(Session(_events(), ['neural:IT']), provenance={'subject': 'inner'})
+    assert outer.provenance == ({'subject': 'inner', 'activation_store': 'off'},)
+
+
+def test_responses_and_their_attrs_are_not_read_for_provenance(monkeypatch):
+    """A payload or meta mapping named provenance is the subject's data; the score ignores it."""
+    from brainscore_core.streaming import Session
+    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    with record_measures() as measures:
+        session = Session(_events(), ['neural:IT'])
+        while (event := session.next_input()) is not None:
+            payload = NeuroidAssembly(np.ones((1, 1)), dims=['presentation', 'neuroid'], coords={
+                'stimulus_id': ('presentation', ['s0']), 'neuroid_id': ('neuroid', ['n0'])})
+            payload.attrs['provenance'] = {'dtype': 'x'}
+            session.respond(StreamEvent('neural:IT', payload, event.t_ms, {'provenance': {'dtype': 'y'}}))
+    score = stamp_score_metadata(Score(0.5), _Subject(), requested_channels={'neural:IT'},
+                                 harness_id='test', measures=measures)
+    assert score.attrs['provenance'] == (
+        {'subject': 'subject', 'parts': 'not stated', 'activation_store': 'off'},)
+    assert session.emitted[0].payload.attrs == {'provenance': {'dtype': 'x'}}
