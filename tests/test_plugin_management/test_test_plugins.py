@@ -51,7 +51,9 @@ class TestPluginTestRunner:
         with pytest.raises(Exception):
             plugin_test_runner.validate_plugin()
 
+    @pytest.mark.slow
     def test_run_tests(self):
+        """Creates a conda environment, installs from the network, and purges the pip and conda caches."""
         dummy_plugin_path = self.library_path / 'brainscore_dummy' / 'plugintype' / 'dummy_plugin'
         plugin_test_runner = PluginTestRunner(dummy_plugin_path, {})
         plugin_test_runner.run_tests()

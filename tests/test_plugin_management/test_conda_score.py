@@ -108,7 +108,9 @@ class TestCondaScoreInEnv:
         sys.path.remove(str(self.dummy_container_dirpath))
 
     @pytest.mark.memory_intense
+    @pytest.mark.slow
     def test_score_in_env(self):
+        """Creates a conda environment on this machine and installs packages from the network."""
         # Use the library directory as the library path
         library_path = self.library_dir / '__init__.py'
         print(f"Using library path: {library_path}")
