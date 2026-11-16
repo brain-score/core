@@ -1,4 +1,5 @@
 """Environment preflight, episode boundaries, clocks and execution receipts."""
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
@@ -160,6 +161,21 @@ def test_truncated_ends_complete_and_failure_does_not():
         session.respond(motor(9))
     assert session.next_input().meta['reason'] == 'failure'
     assert session.next_input() is None and not session.complete
+
+
+@pytest.mark.parametrize('ending, action, reason', [
+    ('terminal', 1, 'terminal'), ('truncated', 1, 'truncated'), ('terminal', 9, 'failure')])
+def test_the_session_tells_why_the_episode_ended(ending, action, reason):
+    class Ending(Environment):
+        def step(self, outputs):
+            return self.observation(), ending
+    session, _ = make(Ending())
+    advance(session)
+    assert session.source.end_reason is None
+    with pytest.raises(ValueError) if reason == 'failure' else nullcontext():
+        session.respond(motor(action))      # 9 fails the action specification
+    advance(session)
+    assert session.source.end_reason == reason
 
 
 def test_unrequested_outputs_are_refused_and_do_not_advance_the_environment():
