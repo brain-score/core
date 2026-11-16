@@ -750,14 +750,23 @@ def _row(values, coords, record) -> dict:
     row as a table, which refuses it as before; the table is not kept."""
     if not all(_plain_scalar(value) for column in coords.values() for value in column):
         _assembly(values, dict(coords), record)
-    row = {'stimulus_id': coords['stimulus_id'][0], 'values': values[0]}
+    # A number of a rating or a reaction time is kept as a Python float, and a plain
+    # coordinate value as its Python scalar, so that a row reads back from a record as
+    # it was kept.
+    value = values[0] if values.ndim == 2 or values.dtype == object else float(values[0])
+    row = {'stimulus_id': _python(coords['stimulus_id'][0]), 'values': value}
     if 'choice' in coords:
         row['choice'] = list(coords['choice'])
     for name, column in coords.items():
         if name not in row:
-            row[name] = column[0]
+            row[name] = _python(column[0])
     row['response'] = record
     return row
+
+
+def _python(value):
+    """A plain NumPy scalar as its Python scalar; any other value as it is."""
+    return value.item() if type(value) in (np.str_, np.bool_, np.int64, np.float64) else value
 
 
 def _row_table(channel, row):
