@@ -13,9 +13,12 @@ validates it; the benchmark scores it (Response Format Standard, section 0).
   in ``attrs['response']``. Scores copy the records of their answers.
 - **Storage**: the ``behavior`` catalog entry's validator checks a response
   on an addressed ``behavior:<format>`` channel against the session's task and
-  the trials it names, and the session stores the checked answer in the schema
-  of its format. The bare ``behavior`` channel is not checked or stored here
-  (legacy handling).
+  the trials it names. The session stores a cell as its checked row (a dict with
+  the trial's ``stimulus_id``, ``values``, the ``choice`` axis of a choice or
+  probabilities answer, the trial coordinates below and the ``response`` record)
+  and an assembly as an assembly in the schema of its format; ``collect`` gives
+  the answer of a channel as one assembly in that schema. The bare ``behavior``
+  channel is not checked or stored here (legacy handling).
 
 What an addressed response can be: a cell for one trial (``behavior:text``
 and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
@@ -29,7 +32,7 @@ come from ``event.meta['units']``). A derived answer is an assembly
 (one row is fine) with its record and its source evidence in ``raw_answer``.
 A malformed response raises ``ValueError`` and is never stored.
 
-The stored answer keeps its rows in the order they arrived. Each row has
+The collected answer keeps its rows in the order they arrived. Each row has
 ``raw_answer``, ``response_state`` (``valid``, ``invalid``, ``missing``) and
 ``response_reason``; the attrs hold the record, except for an answer whose
 trials were all missing (nothing answered, so no record). An answer is
@@ -377,6 +380,8 @@ def _axis(session, options) -> Optional[list]:
 
 
 def _presentation_coords(payload) -> Dict[str, list]:
+    if isinstance(payload, _RowView):
+        return dict(payload.coords)
     names = []
     index = payload.indexes.get('presentation') if hasattr(payload, 'indexes') else None
     for name in getattr(index, 'names', None) or ():
@@ -689,7 +694,10 @@ def _validate(payload, event=None, session=None) -> List[str]:
 
 
 def _store(channel, payload, event, session):
-    """The stored answer of a checked response; the table's expected occurrences are counted."""
+    """The stored answer of a checked response; the table's expected occurrences are counted.
+
+    A cell is stored as its checked row (``_row``); an answer given as an assembly is
+    stored as an assembly in the schema of its format."""
     ledger = _ledger(session)
     pending = ledger.pending if ledger is not None else None
     if pending is not None and pending[0] is event and pending[1] is payload:
@@ -701,7 +709,95 @@ def _store(channel, payload, event, session):
         if ledger.counts is not None:   # occurrences matter only for a table's trials
             ledger.answered.setdefault(channel, Counter()).update(rows[1]['stimulus_id'])
     values, coords, record, attrs = rows
-    return _assembly(values, coords, record, attrs)
+    if hasattr(payload, 'dims') and hasattr(payload, 'attrs'):
+        return _assembly(values, coords, record, attrs)
+    return _row(values, coords, record)
+
+
+def _plain_scalar(value) -> bool:
+    """A value that a table keeps (in its own scalar type) and never refuses: a str,
+    bool, int (int64 range), float or None, or the NumPy str, bool, int64 or float64
+    scalar. A row of such values joins into the same table as the base's one-row tables."""
+    kind = type(value)
+    if kind in (str, np.str_, bool, np.bool_, float, np.float64, type(None)):
+        return True
+    return kind in (int, np.int64) and -2 ** 63 <= value < 2 ** 63
+
+
+def _row(values, coords, record) -> dict:
+    """The checked row of a cell: the values, choice axis, trial coordinates and record
+    of its one trial, under the names its format's table uses, as the subject gave them.
+
+    A stimulus id or an option that is not a plain scalar is checked now by packaging the
+    row as a table, which refuses it as before; the table is not kept."""
+    if not all(_plain_scalar(value) for column in coords.values() for value in column):
+        _assembly(values, dict(coords), record)
+    row = {'stimulus_id': coords['stimulus_id'][0], 'values': values[0]}
+    if 'choice' in coords:
+        row['choice'] = list(coords['choice'])
+    for name, column in coords.items():
+        if name not in row:
+            row[name] = column[0]
+    row['response'] = record
+    return row
+
+
+def _row_table(channel, row):
+    """The one-row table of a stored row: the stored answer as a table."""
+    value = row['values']
+    if 'choice' in row:
+        values = np.asarray(value)[None, :]
+    elif _format(channel) == 'text':
+        values = np.array([value], dtype=object)
+    else:
+        values = np.array([value], dtype=np.float64)
+    coords = {name: [value] for name, value in row.items() if name not in ('values', 'choice', 'response')}
+    if 'choice' in row:
+        coords['choice'] = list(row['choice'])
+    return _assembly(values, coords, row.get('response'))
+
+
+class _RowView:
+    """A stored row as ``collect`` reads its one-row table: values, presentation
+    coordinates, choice axis and attrs."""
+
+    def __init__(self, channel, row):
+        names = [name for name in row if name not in ('values', 'choice', 'response')]
+        axis = row.get('choice')
+        if not all(_plain_scalar(row[name]) for name in names) or not all(
+                _plain_scalar(option) for option in axis or ()):
+            table = _row_table(channel, row)            # a value whose form only the table knows
+            self.values, self.coords = np.asarray(table.values), _presentation_coords(table)
+            self.axis = list(table['choice'].values) if 'choice' in table.dims else None
+            self.attrs = table.attrs
+        else:
+            value = row['values']
+            if axis is not None:
+                self.values = np.asarray(value)[None, :]
+            elif _format(channel) == 'text':
+                self.values = np.array([value], dtype=object)
+            else:
+                self.values = np.array([value], dtype=np.float64)
+            self.coords = {name: [row[name]] for name in names}
+            self.axis = list(axis) if axis is not None else None
+            self.attrs = {} if row.get('response') is None else {'response': row['response']}
+        self.dims = ('presentation', 'choice') if self.axis is not None else ('presentation',)
+        self.sizes = {'presentation': 1, **({'choice': len(self.axis)} if self.axis is not None else {})}
+
+    def __getitem__(self, name):
+        if name != 'choice' or self.axis is None:
+            raise KeyError(name)
+        return _Axis(self.axis)
+
+
+class _Axis:
+    def __init__(self, axis):
+        self.values = np.asarray(axis)
+
+
+def _answer_of(channel, answer):
+    """A stored answer as ``collect`` reads it: a row through its one-row table's view."""
+    return _RowView(channel, answer) if isinstance(answer, dict) else answer
 
 
 def _missing(channel, session, stimulus_ids: list, reason: str, template=None,
@@ -747,6 +843,7 @@ def _table_missing(channel, session, template=None):
     so the missing rows are the later occurrences, in table order. The session
     calls it only once a driver has read the source to its end.
     """
+    template = _answer_of(channel, template) if template is not None else None
     ledger = _ledger(session)
     if ledger is None or ledger.ids is None:
         return None
@@ -810,7 +907,8 @@ def _collect(channel, answers: list):
     can hold one record. The attrs are those of the first answer that has a record.
     """
     if len(answers) == 1:
-        return answers[0]
+        return _row_table(channel, answers[0]) if isinstance(answers[0], dict) else answers[0]
+    answers = [_answer_of(channel, answer) for answer in answers]
     _check_one_record(channel, answers)
     parts = [(np.asarray(a.values), _presentation_coords(a)) for a in answers]
     axis = next((list(a['choice'].values) for a in answers if 'choice' in a.dims), None)

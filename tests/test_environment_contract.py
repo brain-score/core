@@ -211,7 +211,7 @@ def test_a_source_over_another_output_channel_needs_no_motor():
     advance(session)
     session.respond(StreamEvent('behavior:text', 'hello', None))
     assert env.actions == ['hello']
-    assert [e.payload for e in session.emitted] == ['hello']
+    assert [e.payload['values'] for e in session.emitted] == ['hello']    # the answer's row
 
 
 def _typed_subject(process):

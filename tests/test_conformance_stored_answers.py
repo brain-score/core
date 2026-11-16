@@ -295,10 +295,10 @@ def test_each_occurrence_is_checked_against_its_own_options():
     _drain(session)
     session.respond(StreamEvent('behavior:choice', 'cat', None, {'stimulus_id': 'a'}))
     session.respond(StreamEvent('behavior:choice', 'blue', None, {'stimulus_id': 'a'}))
-    first, second = (event.payload for event in session.emitted)
-    np.testing.assert_array_equal(first.values, [[1, 0]])
-    np.testing.assert_array_equal(second.values, [[0, 0, 1]])
-    assert list(first['response_state'].values) == list(second['response_state'].values) == ['valid']
+    first, second = (event.payload for event in session.emitted)   # each answer's checked row
+    np.testing.assert_array_equal(first['values'], [1, 0])
+    np.testing.assert_array_equal(second['values'], [0, 0, 1])
+    assert first['response_state'] == second['response_state'] == 'valid'
     # Rows of different widths cannot be one assembly: collect says so, each stays in emitted.
     with pytest.raises(ValueError, match='different choice axes .* session.emitted'):
         session.collect('behavior:choice')

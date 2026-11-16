@@ -132,8 +132,11 @@ def _note_record(payload) -> None:
     record = _active.get()
     if record is None:
         return
-    attrs = getattr(payload, 'attrs', None)
-    response = attrs.get('response') if isinstance(attrs, dict) else None
+    if isinstance(payload, dict):                  # a stored cell: its checked row
+        response = payload.get('response')
+    else:
+        attrs = getattr(payload, 'attrs', None)
+        response = attrs.get('response') if isinstance(attrs, dict) else None
     if isinstance(response, dict) and 'format' in response:
         record._records[json.dumps(response, sort_keys=True, default=str)] = response
 
