@@ -747,21 +747,33 @@ def _row(values, coords, record) -> dict:
     of its one trial, under the names its format's table uses, as the subject gave them.
 
     A stimulus id or an option that is not a plain scalar is checked now by packaging the
-    row as a table, which refuses it as before; the table is not kept."""
+    row as a table, which refuses it as before. The row then keeps what that table holds
+    for the id and the options (its typed arrays), never the subject's own objects."""
+    table = None
     if not all(_plain_scalar(value) for column in coords.values() for value in column):
-        _assembly(values, dict(coords), record)
+        table = _assembly(values, dict(coords), record)
     # A number of a rating or a reaction time is kept as a Python float, and a plain
     # coordinate value as its Python scalar, so that a row reads back from a record as
     # it was kept.
     value = values[0] if values.ndim == 2 or values.dtype == object else float(values[0])
-    row = {'stimulus_id': _python(coords['stimulus_id'][0]), 'values': value}
+    row = {'stimulus_id': _python(coords['stimulus_id'][0]) if table is None
+           else _held(table, 'stimulus_id'), 'values': value}
     if 'choice' in coords:
-        row['choice'] = list(coords['choice'])
+        row['choice'] = list(coords['choice']) if table is None else table['choice'].values
     for name, column in coords.items():
         if name not in row:
             row[name] = _python(column[0])
     row['response'] = record
     return row
+
+
+def _held(table, name):
+    """What a one-row table holds for a presentation coordinate: its coordinate array, or
+    the index level's own timestamps when that level keeps a time zone the array drops."""
+    level = table.indexes['presentation'].get_level_values(name)
+    if getattr(level.dtype, 'tz', None) is not None:
+        return np.asarray(level.astype(object))
+    return table[name].values
 
 
 def _python(value):
@@ -779,6 +791,16 @@ def _row_table(channel, row):
     else:
         values = np.array([value], dtype=np.float64)
     coords = {name: [value] for name, value in row.items() if name not in ('values', 'choice', 'response')}
+    if isinstance(row['stimulus_id'], np.ndarray):          # what the check's table held
+        from .supported_data_standards.brainio.assemblies import BehavioralAssembly
+        built = {name: ('presentation', row[name] if name == 'stimulus_id' else column)
+                 for name, column in coords.items()}
+        dims = ['presentation']
+        if 'choice' in row:
+            built['choice'] = row['choice']
+            dims.append('choice')
+        attrs = {} if row.get('response') is None else {'response': row['response']}
+        return BehavioralAssembly(values, coords=built, dims=dims, attrs=attrs)
     if 'choice' in row:
         coords['choice'] = list(row['choice'])
     return _assembly(values, coords, row.get('response'))
@@ -789,25 +811,26 @@ class _RowView:
     coordinates, choice axis and attrs."""
 
     def __init__(self, channel, row):
-        names = [name for name in row if name not in ('values', 'choice', 'response')]
-        axis = row.get('choice')
-        if not all(_plain_scalar(row[name]) for name in names) or not all(
-                _plain_scalar(option) for option in axis or ()):
-            table = _row_table(channel, row)            # a value whose form only the table knows
+        if isinstance(row['stimulus_id'], np.ndarray):      # what the check's table held
+            table = _row_table(channel, row)
             self.values, self.coords = np.asarray(table.values), _presentation_coords(table)
             self.axis = list(table['choice'].values) if 'choice' in table.dims else None
             self.attrs = table.attrs
+            self.dims = tuple(table.dims)
+            self.sizes = dict(table.sizes)
+            return
+        names = [name for name in row if name not in ('values', 'choice', 'response')]
+        axis = row.get('choice')
+        value = row['values']
+        if axis is not None:
+            self.values = np.asarray(value)[None, :]
+        elif _format(channel) == 'text':
+            self.values = np.array([value], dtype=object)
         else:
-            value = row['values']
-            if axis is not None:
-                self.values = np.asarray(value)[None, :]
-            elif _format(channel) == 'text':
-                self.values = np.array([value], dtype=object)
-            else:
-                self.values = np.array([value], dtype=np.float64)
-            self.coords = {name: [_in_table(row[name])] for name in names}
-            self.axis = list(axis) if axis is not None else None
-            self.attrs = {} if row.get('response') is None else {'response': row['response']}
+            self.values = np.array([value], dtype=np.float64)
+        self.coords = {name: [_in_table(row[name])] for name in names}
+        self.axis = list(axis) if axis is not None else None
+        self.attrs = {} if row.get('response') is None else {'response': row['response']}
         self.dims = ('presentation', 'choice') if self.axis is not None else ('presentation',)
         self.sizes = {'presentation': 1, **({'choice': len(self.axis)} if self.axis is not None else {})}
 

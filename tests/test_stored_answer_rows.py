@@ -84,3 +84,29 @@ def _text_answers(stimulus_ids, as_assemblies):
 def test_cells_collect_as_the_same_answers_given_as_one_row_assemblies(stimulus_ids):
     """Ids of mixed types join into the same table, or the same refusal, either way."""
     assert _text_answers(stimulus_ids, False) == _text_answers(stimulus_ids, True)
+
+
+class _Changing(float):
+    """A float id or option whose value, as a table reads it, the subject can change."""
+
+    def __new__(cls, value):
+        number = super().__new__(cls, value)
+        number.current = value
+        return number
+
+    def __float__(self):
+        return float(self.current)
+
+
+def test_an_answer_is_kept_as_given_when_the_subjects_objects_change_later():
+    stimulus_id = _Changing(1)
+    session = Session([], ['behavior:text'], TaskContext(response=Text()))
+    session.respond(StreamEvent('behavior:text', 'hello', None, {'stimulus_id': stimulus_id}))
+    stimulus_id.current = 2
+    assert session.collect('behavior:text')['stimulus_id'].values.tolist() == [1.0]
+
+    option = _Changing(1)
+    session = Session([], ['behavior:probabilities'], TaskContext(response=Choice([option, 3.0])))
+    session.respond(StreamEvent('behavior:probabilities', np.array([0.2, 0.8]), None, {'stimulus_id': 's'}))
+    option.current = 2
+    assert session.collect('behavior:probabilities')['choice'].values.tolist() == [1.0, 3.0]
