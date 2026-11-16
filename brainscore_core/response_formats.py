@@ -22,7 +22,8 @@ validates it; the benchmark scores it (Response Format Standard, section 0).
 
 What an addressed response can be: a cell for one trial (``behavior:text``
 and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
-with one value per option; ``behavior:rating`` and
+with one value per option, stored as float64 when the subject gives float64
+and as float32 otherwise; ``behavior:rating`` and
 ``behavior:rt``: a number), or an assembly of rows over ``presentation``
 with a ``stimulus_id`` coordinate and a response record;
 ``behavior:log_probabilities`` takes an assembly only (model-derived and
@@ -501,7 +502,8 @@ def _cell_rows(fmt, channel, payload, event, session, ledger):
             raise ValueError('a cell is a 1-D numeric array')
         if options is not None and len(array) != len(options):
             raise ValueError(f'{len(array)} values for {len(options)} options')
-        values = array.astype(np.float32)[None, :]
+        # The digits the subject gave: float64 stays float64; any other number type is float32.
+        values = array.astype(np.float64 if array.dtype == np.float64 else np.float32)[None, :]
     else:
         if isinstance(payload, np.ndarray) and payload.ndim == 0:
             payload = payload.item()
@@ -531,7 +533,8 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
     values = np.asarray(payload.values)
     dtype = {'choice': np.float32, 'probabilities': np.float32,
              'text': object}.get(fmt, np.float64)   # log_probabilities: float64
-    if values.dtype != np.dtype(dtype):
+    kept = fmt == 'probabilities' and values.dtype == np.float64   # the digits the subject gave
+    if values.dtype != np.dtype(dtype) and not kept:
         raise ValueError(f'the values are {values.dtype}, not {np.dtype(dtype)}')
     coords = _presentation_coords(payload)
     if 'stimulus_id' not in coords:
