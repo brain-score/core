@@ -89,3 +89,16 @@ def test_a_float64_in_either_byte_order_keeps_its_digits_as_a_cell_and_as_an_ass
         answer = session.collect(CHANNEL)
         assert answer.values.dtype == np.float64
         assert answer.values.tolist() == ROWS
+
+
+@pytest.mark.parametrize('row, state', [
+    ([0.5, 0.50009999], 'valid'),      # the kept sum is inside the tolerance
+    ([0.5, 0.499899999], 'invalid'),   # the kept sum is below the tolerance
+    ([-1e-50, 1.0], 'invalid'),        # the kept value is negative
+])
+def test_a_float64_cell_is_judged_on_the_digits_that_are_kept(row, state):
+    session = _session()
+    session.respond(StreamEvent(CHANNEL, np.array(row, dtype=np.float64), None, {'stimulus_id': 's0'}))
+    session.respond(StreamEvent(CHANNEL, np.array([0.5, 0.5]), None, {'stimulus_id': 's1'}))
+    states = session.collect(CHANNEL)['response_state'].values
+    assert list(states) == [state, 'valid']
