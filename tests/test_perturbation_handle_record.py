@@ -119,3 +119,20 @@ def test_a_handle_name_used_again_after_its_undo_is_counted_and_checked():
         apply_state_change(subject, _lesion())
         apply_state_change(subject, StateChange(kind='reset', handle_id='h1'))
     clean.check_released('bench', 'typed')          # returns normally
+
+
+def test_a_change_sent_by_apply_state_change_has_no_time():
+    """Rule 4.2: apply_state_change sends the change outside any timed stream, so its
+    event carries no time, not an invented 0.0."""
+    times = []
+
+    class Timed(_TypedSubject):
+        def participate(self, session):
+            event = session.next_input()
+            times.append(event.t_ms)
+            session.respond(StreamEvent(
+                channel='perturbation', t_ms=event.t_ms,
+                payload=PerturbationApplied('h1', event.payload.target, event.payload.perturbation)))
+
+    apply_state_change(Timed(), _lesion())
+    assert times == [None]
