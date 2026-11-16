@@ -49,7 +49,9 @@ def stamp_score_metadata(
     or None when no session answered) and ``attrs['regions_per_pass']``
     (the plan the subject used, or None for a subject that does not read it).
     ``attrs['software']`` gives the versions of python, the libraries that can
-    change numbers and the four Brain-Score packages; ``attrs['code_commits']``
+    change numbers, the four Brain-Score packages, ``environment_fingerprint``,
+    ``accelerator`` and ``math_threads`` (the threads of the math libraries);
+    ``attrs['code_commits']``
     the commit of each imported Brain-Score package's checkout.
     ``attrs['provenance']`` copies the provenance entries the run's sessions
     noted (``note_session(..., provenance=)``; rule 6.3), sorted by content; a

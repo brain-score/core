@@ -273,8 +273,8 @@ def environment_fingerprint() -> str:
     Metadata that cannot be read gives ``'unavailable: <reason>'``, never a partial
     digest and never an exception: a finished score and the doctor keep running.
     Two scores are compared bit for bit only when their fingerprints are equal and
-    not unavailable, their ``accelerator`` values are equal, and every code commit
-    is known and equal.
+    not unavailable, their ``accelerator`` values are equal, their ``math_threads``
+    records are equal and stated, and every code commit is known and equal.
     """
     try:
         own = {_normalized(distribution) for _module, distribution in _BRAINSCORE_PACKAGES}
@@ -305,6 +305,50 @@ def _accelerator() -> str:
     except Exception:
         return "not stated"
     return "cpu"
+
+
+def _math_threads() -> str:
+    """The threads of the math libraries of this process, as a sorted string such as ``'openblas=16,openmp=8,torch=8'``.
+
+    One ``<library>=<count>`` entry for the torch intra-op threads (read only when
+    torch is already imported; ``torch=absent`` otherwise, as core never imports it)
+    and one for each BLAS or OpenMP pool that ``threadpoolctl`` reports (``pools=not stated``
+    when it cannot be imported or fails). A string, like every other value of
+    ``software``: it compares with ``==``, sorts, and a score file stores it. The count
+    follows the CPU count unless ``OMP_NUM_THREADS`` and the like are set, and it
+    changes the last digits of a score, so the comparison rule needs it. Never raises.
+    """
+    parts = []
+    torch = sys.modules.get("torch")
+    try:
+        parts.append(f"torch={torch.get_num_threads()}" if torch is not None else "torch=absent")
+    except Exception:
+        parts.append("torch=not stated")
+    try:
+        from threadpoolctl import threadpool_info
+        pools = [f"{pool['internal_api']}={pool['num_threads']}" for pool in threadpool_info()]
+    except Exception:
+        pools = ["pools=not stated"]
+    return ",".join(sorted(parts + pools))
+
+
+def bit_for_bit_comparable(first: dict, second: dict) -> bool:
+    """Whether two score ``attrs`` mappings may be compared bit for bit (the rule of ``environment_fingerprint``).
+
+    True only when the fingerprints are equal and stated, ``accelerator`` and
+    ``math_threads`` are equal and stated (a record missing or with a ``not stated`` part
+    never counts), and every code commit is known and equal.
+    """
+    def stated(value):
+        return isinstance(value, str) and "not stated" not in value and not value.startswith(UNAVAILABLE)
+    software = [attrs.get("software") or {} for attrs in (first, second)]
+    for key in ("environment_fingerprint", "accelerator", "math_threads"):
+        a, b = (entry.get(key) for entry in software)
+        if not (stated(a) and a == b):
+            return False
+    commits = [attrs.get("code_commits") or {} for attrs in (first, second)]
+    return (commits[0] == commits[1] and bool(commits[0])
+            and all(commit is not None for commit in commits[0].values()))
 
 
 def _installed(distribution: str) -> Optional[str]:
@@ -376,7 +420,8 @@ def _score_environment() -> Dict[str, Dict[str, Optional[str]]]:
     files are in (None outside a git checkout); the installed version of an
     editable package does not say which checkout runs. ``software`` also has
     ``environment_fingerprint`` (every installed package and version) and
-    ``accelerator`` (the accelerator torch can use).
+    ``accelerator`` (the accelerator torch can use) and ``math_threads`` (the threads of
+    the math libraries).
     """
     software = {"python": platform.python_version()}
     software.update({name: _installed(name) for name in _SCORE_LIBRARIES})
@@ -384,6 +429,7 @@ def _score_environment() -> Dict[str, Dict[str, Optional[str]]]:
                      for _module, distribution in _BRAINSCORE_PACKAGES})
     software["environment_fingerprint"] = environment_fingerprint()
     software["accelerator"] = _accelerator()
+    software["math_threads"] = _math_threads()
     commits = {}
     for module_name, _distribution in _BRAINSCORE_PACKAGES:
         module = sys.modules.get(module_name)
