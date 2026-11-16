@@ -71,9 +71,10 @@ class TaskContext:
 
     ``readout_fit`` says which network a readout is fitted on while a change
     (a lesion, a stimulation) is active: ``'current'`` (default) fits on the
-    changed network; ``'intact'`` fits on the network with every change undone,
-    then tests the changed network with that readout, as an animal trained
-    before a lesion is tested after it.
+    changed network; ``'intact'`` fits on the network with every change of the
+    subject undone, then tests the changed network with that readout, as an
+    animal trained before a lesion is tested after it. A change made outside the
+    subject (a tool that hooks its network) is not undone for the fit.
     """
     task_type: Optional[str] = None
     label_set: Optional[List[str]] = None

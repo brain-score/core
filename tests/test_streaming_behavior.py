@@ -139,3 +139,15 @@ def test_each_streamed_answer_keeps_the_time_of_its_trial():
     assert session.emitted
     for event in session.emitted:      # trials stream in table order
         assert event.t_ms == stimuli['t_ms'].iloc[event.meta['trial_index']]
+
+
+@pytest.mark.unit
+def test_the_answer_for_a_whole_table_has_no_time():
+    """Rule 4.2: one answer for every trial has no single time, not an invented 0.0."""
+    from brainscore_core.streaming_helpers import stimulus_session
+    stimuli = _stimuli(3)
+    stimuli['t_ms'] = [0.0, 400.0, 800.0]
+    session = stimulus_session(stimuli, ['behavior'], _context(stimuli))
+    drive_behavior_session(_Subject(), session)
+    (answer,) = session.emitted
+    assert answer.t_ms is None

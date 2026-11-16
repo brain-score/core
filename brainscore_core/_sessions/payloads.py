@@ -291,7 +291,7 @@ def _state_change_event(state_change: StateChange) -> StreamEvent:
     return StreamEvent(
         channel=channel,
         payload=state_change,
-        t_ms=0.0,
+        t_ms=None,          # a change sent outside a timed stream has no time (rule 4.2)
         meta=meta,
     )
 
