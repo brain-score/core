@@ -467,7 +467,8 @@ _SEED = [
                  materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
-                 "harness-defined continuous action / control vector",
+                 "one action per step, in the form the environment defines (its action_spec(), "
+                 "when it has one): a control vector, a discrete choice or a mapping of named fields",
                  "the model's policy, decoded by the environment harness",
                  meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
