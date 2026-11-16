@@ -131,9 +131,9 @@ class LegacyBenchmarkFacade:
             'require_variance': require_variance,
         })
         if channel == 'behavior:choice':
-            return _labels_from_choice(self._resolve(measured[channel]))
+            return _labels_from_choice(self._resolve(measured[channel]), stimuli)
         if channel == 'behavior':
-            return self._resolve(measured[channel])
+            return _with_stimulus_columns(self._resolve(measured[channel]), stimuli)
         return measured[channel]
 
     # --- language: ArtificialSubject ------------------------------------
@@ -242,26 +242,103 @@ def _label_list(task, fitting_stimuli):
 _STORED_ONLY = ('raw_answer', 'response_state', 'response_reason', 'answer_valid', 'parse_error')
 
 
-def _labels_from_choice(answer):
+def _presentation_columns(answer) -> dict:
+    """Every presentation coordinate of ``answer`` in its order: name to list of values."""
+    index = answer.indexes.get('presentation')
+    names = [name for name in (getattr(index, 'names', None) or ()) if name and name != 'presentation']
+    names += [name for name, coord in answer.coords.items()
+              if coord.dims == ('presentation',) and name != 'presentation' and name not in names]
+    return {name: list(answer[name].values) for name in names}
+
+
+def _hashes(values) -> bool:
+    try:
+        for value in values:
+            hash(value)
+    except TypeError:
+        return False
+    return True
+
+
+def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
+    """The stimulus-set columns an answer lacks, one value for each answer row.
+
+    An old behavior answer carries every column of the stimulus set in its presentation
+    index, and old metrics read them (``source['animal']``, ``sortby('stimulus_id')``).
+    A subject answers by ``stimulus_id`` only; the facade, which speaks the old benchmark's
+    language, adds the other columns. Rows keep the answer's order. Several answer rows
+    of one stimulus that is unique in the table all take its row; a stimulus that the
+    answer names and the table holds more than once gets no column and a warning (the
+    facade cannot tell which row the answer belongs to, and it does not guess; the answer
+    goes on as the subject gave it). Nothing is added when the answer names a
+    ``stimulus_id`` that the table lacks. A column is left out when its name is in
+    ``reserved`` (a dimension or a coordinate of the outgoing answer) or when a value
+    cannot be hashed (an index level needs hashable values).
+    """
+    table_columns = getattr(stimuli, 'columns', None)
+    if table_columns is None or 'stimulus_id' not in table_columns or 'stimulus_id' not in columns:
+        return {}
+    # First decide which columns the answer lacks; with none, there is nothing to attach
+    # and the table is not read for identifiers (a duplicate in it does not matter).
+    lacking = [name for name in table_columns
+               if name not in columns and name != 'presentation' and name not in reserved]
+    lacking = [name for name in lacking if _hashes(stimuli[name].values)]
+    if not lacking:
+        return {}
+    positions: Dict[Any, List[int]] = {}
+    for position, stimulus_id in enumerate(stimuli['stimulus_id']):
+        positions.setdefault(stimulus_id, []).append(position)
+    named = list(columns['stimulus_id'])
+    if any(stimulus_id not in positions for stimulus_id in named):
+        return {}
+    duplicated = [stimulus_id for stimulus_id in dict.fromkeys(named) if len(positions[stimulus_id]) > 1]
+    if duplicated:
+        import warnings
+        warnings.warn(
+            f"{len(duplicated)} stimulus_id(s) of the answer occur more than once in the presented "
+            f"table (for example {duplicated[:3]}); the facade cannot tell which row an answer "
+            "belongs to, so the answer reaches the old benchmark without the stimulus columns it lacks.")
+        return {}
+    picked = [positions[stimulus_id][0] for stimulus_id in named]
+    added = {name: [stimuli[name].values[position] for position in picked] for name in lacking}
+    return added
+
+
+def _with_stimulus_columns(answer, stimuli):
+    """``answer`` with the stimulus-set columns it lacks; the same object when none is lacking."""
+    if 'presentation' not in getattr(answer, 'dims', ()):
+        return answer
+    columns = _presentation_columns(answer)
+    reserved = set(answer.dims) | {name for name, coord in answer.coords.items()
+                                   if 'presentation' not in coord.dims}
+    added = _stimulus_columns(columns, stimuli, reserved)
+    if not added:
+        return answer
+    coords = {name: ('presentation', values) for name, values in {**columns, **added}.items()}
+    coords.update({name: (coord.dims, coord.values) for name, coord in answer.coords.items()
+                   if 'presentation' not in coord.dims})
+    return type(answer)(answer.values, coords=coords, dims=answer.dims, attrs=dict(answer.attrs))
+
+
+def _labels_from_choice(answer, stimuli=None):
     """A stored ``behavior:choice`` answer as the legacy label answer.
 
     One label per stimulus, dims ``('choice', 'presentation')``, with every
     presentation coordinate of the stored answer in its order, except the ones core
     adds to a stored answer (``_STORED_ONLY``), and every attribute except the
     format's response record (``n_invalid_answers`` stays). Each row is one-hot (an invalid row
-    was made a valid label by ``resolve_invalid_answers`` before).
+    was made a valid label by ``resolve_invalid_answers`` before). A column of ``stimuli``
+    that the answer lacks is added (``_stimulus_columns``).
     """
     import numpy as np
     from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
     labels = [str(label) for label in answer['choice'].values]
     rows = np.asarray(answer.transpose('presentation', 'choice').values)
     chosen = [labels[int(np.argmax(row))] for row in rows]
-    index = answer.indexes.get('presentation')
-    names = [name for name in (getattr(index, 'names', None) or ()) if name and name != 'presentation']
-    names += [name for name, coord in answer.coords.items()
-              if coord.dims == ('presentation',) and name != 'presentation' and name not in names]
-    coords = {name: ('presentation', list(answer[name].values))
-              for name in names if name not in _STORED_ONLY}
+    columns = {name: values for name, values in _presentation_columns(answer).items()
+               if name not in _STORED_ONLY}
+    columns.update(_stimulus_columns(columns, stimuli, reserved=('choice',)))
+    coords = {name: ('presentation', values) for name, values in columns.items()}
     # Every attribute that is not the format's own response record stays, among them
     # the count of invalid answers that resolve_invalid_answers set.
     attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}

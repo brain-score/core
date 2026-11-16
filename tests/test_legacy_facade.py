@@ -387,3 +387,125 @@ def test_the_facade_counts_replaced_answers_for_the_score():
     plain = Score(1.0)
     record_replaced_answers(plain, _Recorder())         # a plain subject: nothing written
     assert 'n_invalid' not in plain.attrs
+
+
+# --- the answer of an old benchmark carries the stimulus columns -----------------------
+
+def _table(ids=('a', 'b', 'c', 'd')):
+    table = StimulusSet(pd.DataFrame({
+        'stimulus_id': list(ids), 'animal': ['cat', 'dog', 'cat', 'dog'][:len(ids)],
+        'image_type': ['w', 'w', 'f', 'f'][:len(ids)]}))
+    table.identifier = f'columns-{len(ids)}'
+    return table
+
+
+class _IdOnlyChoice(_Recorder):
+    """The chance pattern: answers behavior:choice with the stimulus_id of each row, no other column."""
+    out_channels = {'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        rows = np.tile(np.float32([1.0, 0.0]), (len(ids), 1))
+        session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids), 'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'],
+            attrs={'response': response_record('behavior:choice', 'test')}), None))
+
+
+def _baker_like_metric(source):
+    """Reads a stimulus column other than the id, as the Baker metric reads 'animal'."""
+    scores = []
+    for category in sorted(set(source['animal'].values)):
+        this = source.sel(animal=category, image_type='w')
+        scores.append(float((this.values == category).mean()))
+    return scores
+
+
+def _bmd_like_metric(source):
+    """Sorts by stimulus_id, as the BMD metric does."""
+    return list(source.sortby('stimulus_id')['stimulus_id'].values)
+
+
+def test_a_subject_that_answers_by_stimulus_id_reaches_an_old_metric_with_the_columns():
+    facade = LegacyBenchmarkFacade(_IdOnlyChoice(), visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    answer = facade.look_at(_table())
+    assert list(answer.indexes['presentation'].names) == ['stimulus_id', 'animal', 'image_type']
+    assert _baker_like_metric(answer) == [1.0, 0.0]
+    assert _bmd_like_metric(answer) == ['a', 'b', 'c', 'd']
+
+
+def test_the_columns_are_added_once_and_in_the_order_of_the_answer_rows():
+    from brainscore_core.legacy_facade import _stimulus_columns
+    table = _table()
+    added = _stimulus_columns({'stimulus_id': ['c', 'a', 'a'], 'animal': ['x', 'y', 'z']}, table)
+    assert list(added) == ['image_type']                 # a column the answer has is not replaced
+    assert added['image_type'] == ['f', 'w', 'w']
+    assert _stimulus_columns({'stimulus_id': ['zzz']}, table) == {}      # an id the table lacks: nothing
+    assert _stimulus_columns({'animal': ['x']}, table) == {}             # no stimulus_id: nothing
+
+
+def test_an_answer_that_has_every_column_is_returned_unchanged():
+    from brainscore_core.legacy_facade import _with_stimulus_columns
+    table = _table()
+    answer = BehavioralAssembly(
+        np.full((4, 2), 0.5), dims=['presentation', 'choice'],
+        coords={'stimulus_id': ('presentation', list(table['stimulus_id'])),
+                'animal': ('presentation', list(table['animal'])),
+                'image_type': ('presentation', list(table['image_type'])), 'choice': ['cat', 'dog']})
+    assert _with_stimulus_columns(answer, table) is answer
+
+
+def test_an_identifier_that_occurs_twice_in_the_table_gets_no_column_and_a_warning_not_a_guess():
+    from brainscore_core.legacy_facade import _stimulus_columns
+    table = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'a', 'b', 'b', 'c', 'c', 'd', 'd'],
+                                      'animal': list('wxyzwxyz')}))
+    with pytest.warns(UserWarning, match='cannot tell which row') as caught:
+        assert _stimulus_columns({'stimulus_id': ['a', 'b', 'c', 'd']}, table) == {}
+    message = str(caught[0].message)
+    assert "['a', 'b', 'c']" in message and "'d'" not in message                     # up to three names
+    # An identifier the answer does not name does not matter; one that is unique takes its row for all answer rows.
+    unique = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b', 'b'], 'animal': ['x', 'y', 'z']}))
+    assert _stimulus_columns({'stimulus_id': ['a', 'a']}, unique) == {'animal': ['x', 'x']}
+
+
+def test_a_table_column_named_like_a_dimension_of_the_answer_is_not_attached():
+    facade = LegacyBenchmarkFacade(_IdOnlyChoice(), visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    table = _table()
+    table['choice'] = ['u', 'v', 'u', 'v']
+    answer = facade.look_at(table)
+    assert 'choice' not in answer.indexes['presentation'].names
+    assert 'animal' in answer.indexes['presentation'].names
+    from brainscore_core.legacy_facade import _with_stimulus_columns
+    bare = BehavioralAssembly(np.full((4, 2), 0.5), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', list(table['stimulus_id'])), 'position': ('presentation', [0, 1, 2, 3]),
+        'choice': ['cat', 'dog']})
+    assert 'choice' not in _with_stimulus_columns(bare, table).indexes['presentation'].names
+
+
+def test_a_table_column_whose_value_cannot_be_hashed_is_skipped():
+    from brainscore_core.legacy_facade import _stimulus_columns
+    table = _table()
+    table['nested'] = [([1],), ([2],), ([3],), ([4],)]     # a tuple holding a list: Hashable by type, not by hash()
+    table['listed'] = [[1], [2], [3], [4]]
+    added = _stimulus_columns({'stimulus_id': ['a', 'b']}, table)
+    assert set(added) == {'animal', 'image_type'}
+
+
+def test_an_answer_with_every_column_is_returned_as_is_even_when_the_table_has_a_duplicate_identifier():
+    from brainscore_core.legacy_facade import _stimulus_columns, _with_stimulus_columns
+    table = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'a', 'b'], 'animal': ['x', 'y', 'z']}))
+    full = BehavioralAssembly(np.full((2, 2), 0.5), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', ['a', 'b']), 'animal': ('presentation', ['x', 'z']),
+        'choice': ['cat', 'dog']})
+    assert _with_stimulus_columns(full, table) is full
+    lacking = BehavioralAssembly(np.full((2, 2), 0.5), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', ['a', 'b']), 'position': ('presentation', [0, 1]),
+        'choice': ['cat', 'dog']})
+    with pytest.warns(UserWarning, match='cannot tell which row'):
+        assert _with_stimulus_columns(lacking, table) is lacking      # no guess: the answer goes on as it is
