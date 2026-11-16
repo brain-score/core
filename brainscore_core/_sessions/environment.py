@@ -44,6 +44,9 @@ class EnvironmentSource(Source):
     refuses once an applied action has been dropped.
 
     ``complete`` is False until an episode ends as ``terminal`` or ``truncated``.
+    ``end_reason`` is the reason the episode ended (``'terminal'``, ``'truncated'``
+    or ``'failure'``), or None while it runs; a session gives it as
+    ``session.source.end_reason``.
     """
 
     def __init__(self, environment, *, action_channel: str = 'motor', action_validator=None,
@@ -77,6 +80,7 @@ class EnvironmentSource(Source):
         self._queue: deque = deque()
         self._started = self._done = self._closed = self._awaiting = self._failed = False
         self._complete = False
+        self._end_reason: Optional[str] = None
         self._pending = None
         self._step_num = 0
         self._timing: dict = {}
@@ -86,6 +90,10 @@ class EnvironmentSource(Source):
     @property
     def complete(self) -> bool:
         return self._complete
+
+    @property
+    def end_reason(self) -> Optional[str]:
+        return self._end_reason
 
     def _specification(self, name, required):
         method = getattr(self.environment, name, None)
@@ -161,6 +169,7 @@ class EnvironmentSource(Source):
         self._done = True
         self._awaiting = False
         self._complete = False
+        self._end_reason = 'failure'
 
     def next_input(self) -> Optional[StreamEvent]:
         event = self._next_event()
@@ -229,6 +238,7 @@ class EnvironmentSource(Source):
             self._done = True
             self._awaiting = False
             self._complete = reason != 'failure'
+            self._end_reason = reason
 
     def respond(self, event: StreamEvent) -> Optional[StreamEvent]:
         if event.channel != self.action_channel:
@@ -298,6 +308,9 @@ def run_environment(subject, environment, *, outputs=None, action_channel: str =
     ``action_channel``, as the environment accepted them (an ``action_validator``
     can change them); a choice stays its option string. The session keeps an
     addressed behavior answer in the stored form.
+
+    The reason the episode ended is ``session.source.end_reason`` on a session from
+    ``environment_session``; ``run_environment`` raises unless the episode completed.
 
     Reset rule: the caller owns ``subject.reset()`` between episodes (or uses
     Experiment with SessionProtocol, which resets before and after each trial).
