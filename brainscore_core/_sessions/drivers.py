@@ -463,7 +463,7 @@ def drive_behavior_session(
     session.respond(StreamEvent(
         channel="behavior",
         payload=output,
-        t_ms=0.0,
+        t_ms=None,          # one answer for every trial: no single time (rule 4.2)
         meta={"driver": driver, "task_type": task.task_type},
     ))
 
