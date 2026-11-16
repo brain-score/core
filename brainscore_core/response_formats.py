@@ -7,7 +7,7 @@ validates it; the benchmark scores it (Response Format Standard, section 0).
   (continuation log-probabilities to probabilities) and ``softmax_argmax``
   (both in turn). Each returns the validity of every row with its result: a
   non-finite source row, or a row that is not a valid probability row for
-  ``argmax``, gives an invalid result. Stage 1 exception: a finite positive
+  ``argmax``, gives an invalid result. Exception: a finite positive
   log value passes through ``softmax`` as valid.
 - **The response record** (``response_record``): the dict an answer carries
   in ``attrs['response']``. Scores copy the records of their answers.
@@ -90,7 +90,7 @@ def argmax(probabilities) -> Tuple[np.ndarray, np.ndarray]:
 
     Ties go to the first maximum in the given column order (numpy ``argmax``);
     the column order is the caller's, and its record says which order it is.
-    Stage 1 exception: a readout passes its own column order (``option_order``
+    Exception: a readout passes its own column order (``option_order``
     ``'readout'``), not the trial's.
     A row that is not a valid probability row (a non-finite or negative value,
     or a sum that differs from 1 by more than 1e-4) has no choice: its index
@@ -113,8 +113,8 @@ def softmax(log_probabilities, units: str = 'nats') -> Tuple[np.ndarray, np.ndar
     ln 2 first). The row's offset is lost: two rows that differ by a constant
     give the same probabilities, a distribution over the listed continuations
     only. A source row with a non-finite value (NaN, +inf or -inf) is invalid,
-    and so is its result; its values are computed as for any row. Stage 1
-    exception: a finite positive log value passes as valid.
+    and so is its result; its values are computed as for any row.
+    Exception: a finite positive log value passes as valid.
     """
     if units not in _UNITS:
         raise ValueError(f'units is one of {_UNITS}, not {units!r}')

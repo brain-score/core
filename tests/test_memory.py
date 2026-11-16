@@ -397,7 +397,7 @@ class TestCheckMemory:
             check_memory(model, bench, feature_dim=-1)
 
     def test_probe_records_one_region_not_all_and_recovers_from_bad_region(self):
-        # Finding 2: the probe must record a SINGLE region (not sum every region's
+        # The probe must record a SINGLE region (not sum every region's
         # layers) and must skip a region whose modality it can't serve. Model has
         # {'A1','IT'}: A1 (audio) raises, IT works. Correct behaviour -> width is
         # ONE region (50000), not summed (100000), proving both properties.
@@ -411,7 +411,7 @@ class TestCheckMemory:
         assert "100000" not in str(exc.value)  # NOT the summed 2-region width
 
     def test_expected_n_presentations_drives_extraction(self):
-        # Finding 1a: a row-expanding benchmark declares the true count; extraction
+        # A row-expanding benchmark declares the true count; extraction
         # uses it. Raw len=10 would pass; declared 500K forces a raise.
         model = FakeModel(n_features=2000)
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
@@ -422,7 +422,7 @@ class TestCheckMemory:
                 check_memory(model, bench)
 
     def test_expected_n_presentations_sizes_the_metric_too(self):
-        # Finding 1 (the real bug): the METRIC term must fit over the declared
+        # The METRIC term must fit over the declared
         # count, not raw len. RSA metric is S^2, features are irrelevant (=1), so
         # extraction is tiny; only a metric that uses the declared 500K raises.
         model = FakeModel(n_features=1)
@@ -437,7 +437,7 @@ class TestCheckMemory:
                 check_memory(model, bench)
 
     def test_non_integer_declarations_rejected(self):
-        # Finding 5: floats truncate silently and zero/negative slip through
+        # Floats truncate silently and zero/negative slip through
         # truthiness — reject them explicitly.
         model = FakeModel()
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10)
@@ -453,7 +453,7 @@ class TestCheckMemory:
             check_memory(model, benchneg)
 
     def test_undeclared_pass_is_flagged_approximate(self, caplog):
-        # Finding 1/3/4: a fit for an un-declared benchmark must NOT read as an
+        # A fit for an un-declared benchmark must NOT read as an
         # all-clear — it is logged as APPROXIMATE (plan not modelled).
         import logging
         model = FakeModel(n_features=1000)
@@ -465,10 +465,10 @@ class TestCheckMemory:
         assert any('APPROXIMATE' in r.getMessage() for r in caplog.records)
 
     def test_declared_plan_is_still_flagged_approximate(self, caplog):
-        # Finding 3 regression guard: even when BOTH cardinality and feature width
+        # Regression guard: even when BOTH cardinality and feature width
         # are declared, temporal multiplicity / metric-observation count / GPU stay
-        # unmodelled, so APPROXIMATE must still appear. Fails against the parent,
-        # where declaring both suppressed the flag.
+        # unmodelled, so APPROXIMATE must still appear. It fails against code where
+        # declaring both suppressed the flag.
         import logging
         model = FakeModel(n_features=1000)
         bench = FakeBenchmark(identifier='test-ridge', n_stimuli=10,
