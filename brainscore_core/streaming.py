@@ -478,11 +478,12 @@ class Session(Source):
         also when no outputs were requested (``None``); otherwise it raises
         ``ValueError`` and nothing is kept. The source gets the response as the
         subject sent it. The observers get what the source accepted: its receipt
-        when it returns one, else the response as sent. ``emitted`` and ``collect``
-        hold the stored form: an answer on an addressed ``behavior`` channel is
-        packaged in the schema of its format, with each trial's state
-        (``response_formats``). A missing row the session adds also reaches the
-        observers and ``emitted`` (``meta['missing']``).
+        when it returns one, else the response as sent. ``emitted`` holds the stored
+        form: on an addressed ``behavior`` channel a cell is stored as its checked
+        row (a dict with the trial's values, coordinates, state and record) and an
+        assembly in the schema of its format; ``collect`` gives the channel's answers
+        as one assembly in that schema (``response_formats``). A missing row the
+        session adds also reaches the observers and ``emitted`` (``meta['missing']``).
 
         A subject that answers one trial with one cell (a str, a 1-D array or
         one number on ``behavior:<format>``) names two keys in ``event.meta``:
@@ -517,8 +518,8 @@ class Session(Source):
             from .response_formats import _store
             payload = _store(event.channel, kept.payload, kept, self)
             stored = StreamEvent(event.channel, payload, kept.t_ms, kept.meta)
-            self._signal_answers[event.channel] = (self._signal_answers.get(event.channel, 0)
-                                                   + payload.sizes['presentation'])
+            rows = 1 if isinstance(payload, dict) else payload.sizes['presentation']   # a cell's row
+            self._signal_answers[event.channel] = self._signal_answers.get(event.channel, 0) + rows
         self._keep(stored, kept, request)
 
     def _keep(self, stored: StreamEvent, observed: StreamEvent, request: Any = None) -> None:
