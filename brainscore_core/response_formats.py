@@ -724,6 +724,24 @@ def _plain_scalar(value) -> bool:
     return kind in (int, np.int64) and -2 ** 63 <= value < 2 ** 63
 
 
+def _in_table(value):
+    """A plain value as the presentation coordinate of a one-row table gives it back.
+
+    A table's coordinate turns a str into a str, a bool into a NumPy bool, an int into a
+    NumPy int64, a float into a NumPy float64, and None or NaN into a Python NaN. Rows
+    joined in these forms give the table that one-row tables joined give."""
+    kind = type(value)
+    if kind in (str, np.str_):
+        return str(value)
+    if kind in (bool, np.bool_):
+        return np.bool_(value)
+    if kind in (int, np.int64):
+        return np.int64(value)
+    if value is None or value != value:
+        return float('nan')
+    return np.float64(value)
+
+
 def _row(values, coords, record) -> dict:
     """The checked row of a cell: the values, choice axis, trial coordinates and record
     of its one trial, under the names its format's table uses, as the subject gave them.
@@ -778,7 +796,7 @@ class _RowView:
                 self.values = np.array([value], dtype=object)
             else:
                 self.values = np.array([value], dtype=np.float64)
-            self.coords = {name: [row[name]] for name in names}
+            self.coords = {name: [_in_table(row[name])] for name in names}
             self.axis = list(axis) if axis is not None else None
             self.attrs = {} if row.get('response') is None else {'response': row['response']}
         self.dims = ('presentation', 'choice') if self.axis is not None else ('presentation',)

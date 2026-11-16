@@ -3,6 +3,9 @@
 An answer given as an assembly stays an assembly on its event. A bad answer is refused
 when it is given: nothing is stored and no observer sees it.
 """
+from decimal import Decimal
+from fractions import Fraction
+
 import numpy as np
 import pytest
 
@@ -58,3 +61,26 @@ def test_a_stimulus_id_the_table_refuses_is_refused_when_given(stimulus_id, erro
         with pytest.raises(error):
             session.respond(StreamEvent('behavior:text', 'hello', None, {'stimulus_id': stimulus_id}))
     assert session.emitted == [] and observed == []
+
+
+def _text_answers(stimulus_ids, as_assemblies):
+    session = Session([], ['behavior:text'], TaskContext(response=Text()))
+    for stimulus_id in stimulus_ids:
+        payload = 'hello'
+        if as_assemblies:
+            payload = BehavioralAssembly(np.array(['hello'], dtype=object), dims=['presentation'],
+                                         coords={'stimulus_id': ('presentation', [stimulus_id])},
+                                         attrs={'response': response_record('behavior:text', 'external')})
+        session.respond(StreamEvent('behavior:text', payload, None, {'stimulus_id': stimulus_id}))
+    try:
+        ids = session.collect('behavior:text')['stimulus_id'].values
+    except (TypeError, ValueError) as error:
+        return type(error)
+    return [(type(value), value) if value == value else (type(value), 'nan') for value in ids]
+
+
+@pytest.mark.parametrize('stimulus_ids', [[1, Decimal('0.1')], [None, np.str_('s')],
+                                          [2 ** 63 - 1, Fraction(1, 3)], [True, 's'], ['s', 2.5]])
+def test_cells_collect_as_the_same_answers_given_as_one_row_assemblies(stimulus_ids):
+    """Ids of mixed types join into the same table, or the same refusal, either way."""
+    assert _text_answers(stimulus_ids, False) == _text_answers(stimulus_ids, True)
