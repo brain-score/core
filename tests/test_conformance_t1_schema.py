@@ -147,8 +147,8 @@ MALFORMED = [
                                                            dtype=np.float32)),
     ('behavior:probabilities', 'a label', lambda: 'cat'),
     ('behavior:probabilities', 'a 2-D array', lambda: np.zeros((2, 2))),
-    ('behavior:probabilities', 'float64 values without the raw-score record',
-     lambda: _rows('behavior:probabilities', [[0.5, 0.5], [0.5, 0.5]], dtype=np.float64)),
+    ('behavior:probabilities', 'float16 values',
+     lambda: _rows('behavior:probabilities', [[0.5, 0.5], [0.5, 0.5]], dtype=np.float16)),
     ('behavior:rating', 'two axes', lambda: _rows('behavior:rating', [[1.0, 2.0], [3.0, 4.0]])),
     ('behavior:rating', 'a label', lambda: 'seven'),
     ('behavior:rating', 'float32 values', lambda: _rows('behavior:rating', [1.0, 2.0],
@@ -241,19 +241,15 @@ def test_probability_rows_off_by_less_than_one_in_ten_thousand_are_valid():
     assert list(answer['response_state'].values) == ['valid', 'valid']
 
 
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
 @pytest.mark.parametrize('parameters', [{'scale': 'log'}, {}], ids=['old raw-score record', 'plain'])
-def test_log_values_on_the_probabilities_format_are_refused(parameters):
-    # The temporary raw-score path is gone: probabilities are float32 rows, and log
-    # probabilities travel on behavior:log_probabilities.
+def test_log_values_on_the_probabilities_format_are_invalid_rows(parameters, dtype):
+    # The raw-score path is gone: log probabilities travel on behavior:log_probabilities,
+    # and log values sent as probabilities are negative, so each row is invalid.
     record = response_record('behavior:probabilities', 'likelihood', category='model-derived',
                              parameters=parameters)
-    session = stimulus_session(_stimuli(), ['behavior:probabilities'],
-                               TASKS['behavior:probabilities'])
-    with pytest.raises(ValueError, match='float64, not float32'):
-        _Stub('behavior:probabilities', _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]],
-                                              dtype=np.float64, record=record)).participate(session)
-    float32 = _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]], record=record)
-    answer = _participate('behavior:probabilities', float32).collect('behavior:probabilities')
+    payload = _rows('behavior:probabilities', [[-0.5, -2.0], [0.5, -1.0]], dtype=dtype, record=record)
+    answer = _participate('behavior:probabilities', payload).collect('behavior:probabilities')
     assert list(answer['response_state'].values) == ['invalid', 'invalid']   # negative values
 
 
