@@ -44,6 +44,19 @@ class LegacyBenchmarkFacade:
         self._time_bins: Any = None
         self._recording_type: Optional[str] = None
         self._task: Optional[TaskContext] = None
+        # The count of answers resolve_invalid_answers replaced, summed over every
+        # look_at of this facade; None until one numeric behavior answer was checked.
+        # The facade is built per score call, so the count never crosses two scores.
+        self.n_invalid_answers: Optional[int] = None
+
+    def _resolve(self, answer):
+        import numpy as np
+        resolved = resolve_invalid_answers(answer)
+        if 'choice' in answer.dims and answer.ndim == 2 and \
+                np.asarray(answer.values).dtype.kind not in ('U', 'S', 'O'):  # the check ran
+            replaced = resolved.attrs.get('n_invalid_answers', 0) if resolved is not answer else 0
+            self.n_invalid_answers = (self.n_invalid_answers or 0) + int(replaced)
+        return resolved
 
     @property
     def identifier(self) -> str:
@@ -118,9 +131,9 @@ class LegacyBenchmarkFacade:
             'require_variance': require_variance,
         })
         if channel == 'behavior:choice':
-            return _labels_from_choice(resolve_invalid_answers(measured[channel]))
+            return _labels_from_choice(self._resolve(measured[channel]))
         if channel == 'behavior':
-            return resolve_invalid_answers(measured[channel])
+            return self._resolve(measured[channel])
         return measured[channel]
 
     # --- language: ArtificialSubject ------------------------------------
@@ -274,6 +287,25 @@ def subject_for_benchmark(subject, benchmark, *, visual_degrees: Optional[float]
     if getattr(benchmark, 'subject_api', None) != LEGACY_API:
         return subject
     return LegacyBenchmarkFacade(subject, visual_degrees=visual_degrees)
+
+
+REPLACED_ANSWER_POLICY = ('an invalid answer is replaced by a random label (seed 0) '
+                          'before the legacy metric')
+
+
+def record_replaced_answers(score, received) -> None:
+    """Write the facade's count of replaced answers on the score of a legacy benchmark.
+
+    ``received`` is what the benchmark was given. The attributes are written only when it
+    is a facade that checked a numeric behavior answer (a zero is then a true zero); a
+    neural run, a text-label answer or a plain subject checks no answer, so the score stays
+    as it was. The names are those of the answer counts of unified scores: ``n_invalid``
+    and ``answer_policy``.
+    """
+    count = getattr(received, 'n_invalid_answers', None)
+    if isinstance(received, LegacyBenchmarkFacade) and count is not None:
+        score.attrs['n_invalid'] = count
+        score.attrs['answer_policy'] = REPLACED_ANSWER_POLICY
 
 
 def declared_visual_degrees(subject) -> Optional[float]:

@@ -363,3 +363,27 @@ def test_only_text_answers_pass_resolve_invalid_answers_unchanged():
                                      coords={**ids, 'choice': ['x', 'y']}, dims=['presentation', 'choice'])
     with pytest.raises(ValueError, match='above the 10% limit'):
         resolve_invalid_answers(complex_nan)
+
+
+def test_the_facade_counts_replaced_answers_for_the_score():
+    """The count is summed over look_at calls, starts at None, and reaches a score only
+    when a numeric behavior answer was checked."""
+    from brainscore_core.legacy_facade import record_replaced_answers
+    from brainscore_core.metrics import Score
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': [f's{i}' for i in range(20)]}))
+    stimuli.identifier = 'facade-count-sum'
+    facade = LegacyBenchmarkFacade(_RowsWithOneInvalid(), visual_degrees=8)
+    assert facade.n_invalid_answers is None
+    untouched = Score(1.0)
+    record_replaced_answers(untouched, facade)
+    assert 'n_invalid' not in untouched.attrs          # no answer checked: no claim
+    facade.start_task('label', ['cat', 'dog'])
+    with pytest.warns(UserWarning):
+        facade.look_at(stimuli)
+        facade.look_at(stimuli)
+    score = Score(1.0)
+    record_replaced_answers(score, facade)
+    assert score.attrs['n_invalid'] == 2 and 'random label' in score.attrs['answer_policy']
+    plain = Score(1.0)
+    record_replaced_answers(plain, _Recorder())         # a plain subject: nothing written
+    assert 'n_invalid' not in plain.attrs
