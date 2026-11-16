@@ -126,3 +126,16 @@ def test_missing_task_fails_fast():
 
     with pytest.raises(ValueError, match="session.task"):
         drive_behavior_session_streaming(_Subject(), _NoContext())
+
+
+@pytest.mark.unit
+def test_each_streamed_answer_keeps_the_time_of_its_trial():
+    """Rule 4.2: an answer carries the time of its input; the trial index stays in meta."""
+    from brainscore_core.streaming_helpers import stimulus_session
+    stimuli = _stimuli(3)
+    stimuli['t_ms'] = [0.0, 400.0, 800.0]
+    session = stimulus_session(stimuli, ['behavior'], _context(stimuli), streaming=True)
+    drive_behavior_session_streaming(_Subject(), session)
+    assert session.emitted
+    for event in session.emitted:      # trials stream in table order
+        assert event.t_ms == stimuli['t_ms'].iloc[event.meta['trial_index']]

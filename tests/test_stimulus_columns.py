@@ -129,3 +129,29 @@ def test_prompt_part_columns_are_the_columns_of_the_part_channel():
     assert part_columns('image')[:3] == ('image_file_name', 'image_path', 'filename')
     assert part_columns('video')[:2] == ('video_path', 'video_file_name')
     assert part_columns('audio')[:3] == ('audio_path', 'audio_file_name', 'audio_file')
+
+
+class _Reader(Subject):
+    """Answers each word with its length, at the time of the word."""
+    identifier = 'reader'
+    in_channels = frozenset({'text'})
+    out_channels = frozenset({'behavior:rt'})
+
+    def participate(self, session):
+        while (event := session.next_input()) is not None:
+            if event.channel == 'text':
+                session.respond(StreamEvent('behavior:rt', float(len(event.payload)), event.t_ms,
+                                            {'stimulus_id': event.meta['stimulus_id'], 'units': 'ms'}))
+
+
+@pytest.mark.parametrize('times', [None, [0.0, 250.0]])
+def test_a_table_event_has_the_time_of_its_row_or_none(times):
+    """Rule 4.2: a row without a time gives no time, not an invented 0.0."""
+    table = pd.DataFrame({'stimulus_id': ['a', 'b'], 'sentence': ['cat', 'horse']})
+    if times is not None:
+        table['t_ms'] = times
+    session = stimulus_session(StimulusSet(table), ['behavior:rt'])
+    seen = []
+    with session.observe(on_input=lambda event: seen.append(event.t_ms) if event.channel == 'text' else None):
+        _Reader().participate(session)
+    assert seen == (times or [None, None])

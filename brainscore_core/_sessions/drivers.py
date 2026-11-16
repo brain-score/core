@@ -296,15 +296,17 @@ def _stream_rows(session, on_begin: Optional[Callable[[], None]] = None,
 
 
 def stream_trials(session, task):
-    """One single-row stimulus set per trial, read from the session one at a time.
+    """``(stimuli, t_ms)`` per trial: a single-row stimulus set and the time of its input.
 
-    The next trial is read only after the caller has answered this one. A session
-    that sends no input events presents its table, or the task's own stimuli.
+    The next trial is read only after the caller has answered this one. ``t_ms`` is
+    the time of the trial's input events, or None when they have none. A session
+    that sends no input events presents its table, or the task's own stimuli,
+    with no time.
     """
     count = 0
-    for stimuli, _t_ms in _stream_rows(session, skip_channels=("instruction",)):
+    for stimuli, t_ms in _stream_rows(session, skip_channels=("instruction",)):
         count += 1
-        yield stimuli
+        yield stimuli, t_ms
     if not count:
         stimuli = behavior_stimuli_from_session(session, task)
         if stimuli is None:
@@ -312,7 +314,7 @@ def stream_trials(session, task):
                 "A behavior session requires stimuli to elicit a response. Build it with "
                 "stimulus_session(stimuli, ['behavior'], task), or set task.fitting_stimuli.")
         for index in range(len(stimuli)):
-            yield preserve_stimulus_set_type(stimuli, stimuli.iloc[[index]])
+            yield preserve_stimulus_set_type(stimuli, stimuli.iloc[[index]]), None
 
 
 def drive_typed_session(subject, session) -> None:
@@ -487,7 +489,7 @@ def drive_behavior_session_streaming(
         )
     refuse_variance(subject, session)
     subject.start_task(task)              # once, before any trial
-    for trial_index, trial in enumerate(stream_trials(session, task)):
+    for trial_index, (trial, t_ms) in enumerate(stream_trials(session, task)):
         if on_begin is not None and (trial_index == 0
                                      or task.trial_memory == 'none'):
             on_begin()
@@ -495,7 +497,7 @@ def drive_behavior_session_streaming(
         session.respond(StreamEvent(
             channel="behavior",
             payload=output,
-            t_ms=float(trial_index),
+            t_ms=t_ms,
             meta={"driver": driver, "task_type": task.task_type,
                   "trial_index": trial_index, "streaming": True},
         ))
