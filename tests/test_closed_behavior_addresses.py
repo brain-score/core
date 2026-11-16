@@ -18,8 +18,12 @@ ADDRESSES = ('behavior', 'behavior:choice', 'behavior:probabilities',
 
 
 def test_the_closed_list_is_the_formats_that_exist():
+    # A closed list: core alone defines the behavior formats, so a new format edits this test.
     assert io_catalog.CHANNEL_FORMS['behavior'] == (
-        None, 'choice', 'probabilities', 'log_probabilities', 'rating', 'rt', 'text')
+        None, 'choice', 'probabilities', 'log_probabilities', 'rating', 'rt', 'text'), (
+        'the behavior formats changed. A new behavior format is added to CHANNEL_FORMS in '
+        'brainscore_core/io_catalog.py, with its record schema in '
+        'brainscore_core/response_formats.py and a line in this list.')
     for channel in ADDRESSES:
         assert io_catalog.form_problem(channel) is None
 

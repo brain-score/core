@@ -1,3 +1,4 @@
+import os
 import shutil
 import sys
 import tempfile
@@ -11,6 +12,14 @@ from numpy.random import RandomState
 from brainscore_core.supported_data_standards.brainio.assemblies import DataAssembly
 from brainscore_core.metrics import Score
 from brainscore_core.plugin_management.conda_score import CondaScore
+
+# The conda test creates an environment and installs packages from the network. It runs unless
+# the suite was started with BS_INSTALL_DEPENDENCIES=no (unset means 'yes' for the installer),
+# as the installing tests of test_import_plugin.py do.
+_INSTALLS = pytest.mark.skipif(
+    os.getenv('BS_INSTALL_DEPENDENCIES') == 'no',
+    reason="creates a conda environment and installs packages from the network; "
+           "the suite was started with BS_INSTALL_DEPENDENCIES=no")
 
 
 def find_project_root() -> Path:
@@ -109,6 +118,7 @@ class TestCondaScoreInEnv:
 
     @pytest.mark.memory_intense
     @pytest.mark.slow
+    @_INSTALLS
     def test_score_in_env(self):
         """Creates a conda environment on this machine and installs packages from the network."""
         # Use the library directory as the library path

@@ -89,10 +89,10 @@ def test_types_keep_public_pickle_references(module_name, type_name):
 
 
 def test_the_score_metadata_module_lists_its_public_names():
-    """note_session is public (a subject that owns its plan calls it); __all__ names it."""
+    """note_session is public (a subject that owns its plan calls it); __all__ names it.
+    A name may be added; a listed name must stay."""
     from brainscore_core import score_metadata
-    assert set(score_metadata.__all__) == {
-        'MeasureRecord', 'note_session', 'record_measures',
-        'requested_output_channels_for_score', 'stamp_score_metadata'}
+    assert {'MeasureRecord', 'note_session', 'record_measures',
+            'requested_output_channels_for_score', 'stamp_score_metadata'} <= set(score_metadata.__all__)
     assert all(callable(getattr(score_metadata, name)) for name in score_metadata.__all__)
 
