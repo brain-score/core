@@ -184,7 +184,7 @@ def test_domain_loaders_mark_legacy_benchmarks_and_scoring_wraps_them():
     assert subject_for_benchmark(subject, unmarked) is subject
 
 
-# --- setup once, measure many times (review findings 1 to 4) ---------------
+# --- setup once, measure many times ---------------------------------------
 
 
 def _labelled_images(n=4, with_text=False):
