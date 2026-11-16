@@ -194,7 +194,9 @@ def _table_row_events(input_columns, position: int, row_index,
     4.5). Rows of a one-column table are one event each and stay unchanged.
     """
     stimulus_id = _row_value(row, "stimulus_id", default=row_index)
-    t_ms = float(_row_value(row, "t_ms", default=0.0))
+    # A row without a time has none (rule 4.2): no invented 0.0.
+    t_ms = _row_value(row, "t_ms")
+    t_ms = None if t_ms is None or _is_null(t_ms) else float(t_ms)
     events = []
     for column, channel in input_columns:
         meta = {"stimulus_id": stimulus_id, "stimulus_index": row_index,
