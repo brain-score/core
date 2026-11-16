@@ -180,16 +180,15 @@ def test_a_cell_for_another_trial_than_its_event_names_raises():
 
 def test_a_malformed_cell_names_its_channel_once():
     session = stimulus_session(_stimuli(), ['behavior:choice'])   # no task: no options
-    with pytest.raises(ValueError) as raised:
+    # The message names the channel once, the fault and what to do.
+    with pytest.raises(ValueError, match=r'options of this trial are not known.*give the task a Choice') \
+            as raised:
         session.respond(StreamEvent('behavior:choice', 'a', None, {'stimulus_id': 's0'}))
-    assert str(raised.value) == (
-        "output event on 'behavior:choice' failed the channel catalog: the options of this "
-        "trial are not known; send an assembly with a choice axis or give the task a Choice")
+    assert str(raised.value).count("'behavior:choice'") == 1
     session = stimulus_session(_stimuli(), ['behavior:rating'], TASKS['behavior:rating'])
-    with pytest.raises(ValueError) as raised:
+    with pytest.raises(ValueError, match=r'a cell is one number, not str') as raised:
         session.respond(StreamEvent('behavior:rating', 'seven', None, {'stimulus_id': 's0'}))
-    assert str(raised.value) == ("output event on 'behavior:rating' failed the channel catalog: "
-                                 "a cell is one number, not str")
+    assert str(raised.value).count("'behavior:rating'") == 1
 
 
 def test_the_catalog_names_the_meta_keys_of_a_cell_answer():

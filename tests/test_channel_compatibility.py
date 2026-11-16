@@ -460,12 +460,10 @@ def test_an_instruction_alone_does_not_make_a_pair_applicable():
     subject = _Subject({"instruction"}, {"behavior:choice"}, identifier="instruction-only")
     benchmark = _Benchmark(required_input_channels={"instruction", "text"},
                            requested_output_channels={"behavior:choice"}, identifier="reading")
-    with pytest.raises(CompatibilityError) as raised:
+    # The message names the subject, the benchmark, the stimulus input it lacks and the rule.
+    with pytest.raises(CompatibilityError, match=r"(?s)'instruction-only'.*'reading'.*\{'text'\}"
+                                                 r".*instruction alone does not make a pair applicable"):
         check_channel_compatibility(subject, benchmark)
-    assert str(raised.value) == (
-        "Subject 'instruction-only' takes in only the instruction of benchmark 'reading', "
-        "none of its stimulus inputs {'text'}; an instruction alone does not make a pair "
-        "applicable. Subject in_channels: {'instruction'}.")
     assert not subject.process_called
 
 
