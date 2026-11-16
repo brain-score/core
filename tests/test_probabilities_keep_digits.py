@@ -75,3 +75,17 @@ def test_a_float_type_other_than_float32_or_float64_is_refused():
     session = _session()
     with pytest.raises(ValueError, match='float16'):
         session.respond(StreamEvent(CHANNEL, _assembly(np.array(ROWS, dtype=np.float16)), None, {}))
+
+
+@pytest.mark.parametrize('byte_order', ['<f8', '>f8'])
+def test_a_float64_in_either_byte_order_keeps_its_digits_as_a_cell_and_as_an_assembly(byte_order):
+    given = np.array(ROWS, dtype=byte_order)
+    cells = _session()
+    for stimulus_id, row in zip(['s0', 's1'], given):
+        cells.respond(StreamEvent(CHANNEL, row, None, {'stimulus_id': stimulus_id}))
+    whole = _session()
+    whole.respond(StreamEvent(CHANNEL, _assembly(given), None, {}))
+    for session in (cells, whole):
+        answer = session.collect(CHANNEL)
+        assert answer.values.dtype == np.float64
+        assert answer.values.tolist() == ROWS
