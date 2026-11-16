@@ -53,7 +53,7 @@ def drive_neural_session(
     refuse_variance(subject, session)
     input_events = drain_session_inputs(session)
     stimuli = session_stimuli(session, input_events)
-    output_t_ms = input_events[-1].t_ms if input_events else 0.0
+    output_t_ms = input_events[-1].t_ms if input_events else None
     use_multi_modality = allow_multi_modality and _spans_several_inputs(input_events)
     time_bins = getattr(session, "time_bins", None)
 

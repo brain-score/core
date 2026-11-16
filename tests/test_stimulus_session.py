@@ -80,6 +80,12 @@ def test_neural_outputs_keep_the_table_and_answer_in_one_call():
     assert subject.calls == [('start_recording', 'IT', [(70, 170)]), ('process', 3)]
 
 
+def test_a_neural_response_without_an_input_event_carries_no_time():
+    # Contract Rules 4.2: an event time is a physical time or None, never a stand-in.
+    session = stimulus_session(_table(), ['neural:IT']).declare_inputs({'audio'})
+    drive_neural_session(_Typed(), session)
+    assert session.emitted and all(event.t_ms is None for event in session.emitted)
+
 def test_behavior_with_a_task_carries_the_task_and_presents_only_the_table():
     stimuli = _table()
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'],
