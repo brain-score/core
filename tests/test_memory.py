@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from typing import Dict, Set
 from unittest.mock import patch, MagicMock
@@ -344,11 +346,15 @@ class TestCheckMemory:
         assert messages[0].exc_info is None
         assert not getattr(model, 'calls', [])
 
-    def test_graceful_when_probe_fails(self):
+    def test_graceful_when_probe_fails(self, caplog):
+        # The guard is off for this run; the user is told so.
         model = FailingModel()
         bench = FakeBenchmark(n_stimuli=10)
         with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000):
-            check_memory(model, bench)  # should not raise
+            with caplog.at_level(logging.WARNING, logger='brainscore_core.memory'):
+                check_memory(model, bench)  # does not raise
+        assert any('could NOT run' in r.getMessage() and 'guard is OFF' in r.getMessage()
+                   for r in caplog.records if r.name == 'brainscore_core.memory')
 
     def test_probe_failure_warns_loudly(self, caplog):
         # If no region yields a readable feature dim, the check is skipped — but
@@ -720,16 +726,20 @@ class TestCheckMemory:
                 check_memory(model, bench)  # no raise; skipped
         assert any('could NOT run' in r.getMessage() for r in caplog.records)
 
-    def test_graceful_when_no_stimulus_set(self):
+    def test_graceful_when_no_stimulus_set(self, caplog):
         model = FakeModel()
         bench = MagicMock(spec=['identifier'])
         bench.identifier = 'no-stimuli-bench'
-        check_memory(model, bench)  # should not raise
+        with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+            check_memory(model, bench)  # does not raise
+        assert any('Memory check not applicable' in r.getMessage() for r in caplog.records)
 
-    def test_graceful_when_empty_stimulus_set(self):
+    def test_graceful_when_empty_stimulus_set(self, caplog):
         model = FakeModel()
         bench = FakeBenchmark(n_stimuli=0)
-        check_memory(model, bench)  # should not raise
+        with caplog.at_level(logging.INFO, logger='brainscore_core.memory'):
+            check_memory(model, bench)  # does not raise
+        assert any('Memory check not applicable' in r.getMessage() for r in caplog.records)
 
     def test_error_message_includes_identifiers(self):
         # Ridge plan, F=20K, S=1000 (same as the raise test): ~997MB > 800MB. Fail.
@@ -857,7 +867,9 @@ class TestProbeCacheIsolation:
         import pandas as pd
         from brainscore_core.memory import _isolate_probe_identifier
         plain = pd.DataFrame({'stimulus_id': ['a', 'b']})
-        assert _isolate_probe_identifier(plain.iloc[:1], plain) is not None
+        probe = plain.iloc[:1]
+        assert _isolate_probe_identifier(probe, plain) is probe
+        assert 'identifier' not in vars(probe)
 
     def test_unsliceable_stimulus_set_is_not_renamed(self):
         """When the probe *is* the full set, renaming it would rename the run."""
