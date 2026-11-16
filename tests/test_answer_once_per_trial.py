@@ -60,6 +60,26 @@ def test_delayed_answers_attributed_by_row_identity():
     assert _answers(session) == ['a0', 'a1', 'a2']
 
 
+def test_answers_out_of_row_order_keep_the_value_of_their_stimulus():
+    """Answers for rows 2, 0, 1: each collected answer keeps the value of its own stimulus
+    (the pair of id and value is checked, not the position), and a second answer for a
+    row that has one is refused."""
+    session = _session(('behavior', 'neural:IT'))
+    events = [_read_trial(session) for _ in range(3)]
+    for row in (2, 0, 1):
+        meta = {'stimulus_index': events[row].meta['stimulus_index'],
+                'stimulus_id': events[row].meta['stimulus_id']}
+        _answer(session, value=row, **meta)
+        _answer(session, 'neural:IT', value=row, **meta)
+    behavior, neural = session.collect('behavior'), session.collect('neural:IT')
+    assert dict(zip(behavior['stimulus_id'].values, _answers(session))) == {'s0': 'a0', 's1': 'a1', 's2': 'a2'}
+    assert dict(zip(neural['stimulus_id'].values, _answers(session, 'neural:IT'))) == \
+        {'s0': 0.0, 's1': 1.0, 's2': 2.0}
+    with pytest.raises(ValueError, match="twice"):
+        _answer(session, value=0, stimulus_index=events[0].meta['stimulus_index'],
+                stimulus_id=events[0].meta['stimulus_id'])
+
+
 def test_delayed_duplicate_for_one_row_is_an_error():
     session = _session()
     events = [_read_trial(session) for _ in range(3)]
