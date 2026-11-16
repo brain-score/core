@@ -384,7 +384,11 @@ def test_the_facade_counts_replaced_answers_for_the_score():
         facade.look_at(stimuli)
     score = Score(1.0)
     record_replaced_answers(score, facade)
-    assert score.attrs['n_invalid'] == 2 and 'random label' in score.attrs['answer_policy']
+    from brainscore_core.legacy_facade import REPLACED_ANSWER_POLICY
+    # One kind of answer: exactly the one sentence, as before the facade kept several.
+    assert score.attrs['n_invalid'] == 2 and score.attrs['answer_policy'] == REPLACED_ANSWER_POLICY
+    assert REPLACED_ANSWER_POLICY == ('an invalid answer is replaced by a random label (seed 0) '
+                                      'before the legacy metric')
     plain = Score(1.0)
     record_replaced_answers(plain, _Recorder())         # a plain subject: nothing written
     assert 'n_invalid' not in plain.attrs
@@ -457,21 +461,6 @@ def test_the_stated_rule_the_response_record_states_the_origin_of_an_answer():
     labels = stated.look_at(_twenty('stated-rule-legacy'))
     assert list(labels.values[0][:3]) == ['bird', 'fish', 'bird']
     assert stated.n_invalid_answers == 3 and stated.answer_policy == OLD_LABEL_POLICY
-
-
-def test_one_facade_refuses_a_second_kind_of_answer():
-    """One score states one answer policy, so a facade that checked an old model's labels
-    refuses an answer that it would resolve, and the other way round."""
-    for first, second in ((_OldLabelRows(), _RowsWithOneInvalid()),
-                          (_RowsWithOneInvalid(), _OldLabelRows())):
-        facade = LegacyBenchmarkFacade(first, visual_degrees=8)
-        facade.start_task('label', ['cat', 'dog'])
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            facade.look_at(_twenty('one-kind-first'))
-            facade._subject = second            # a second kind of answer to the same facade
-            with pytest.raises(ValueError, match='second kind'):
-                facade.look_at(_twenty('one-kind-second'))
 
 
 # --- the answer of an old benchmark carries the stimulus columns -----------------------

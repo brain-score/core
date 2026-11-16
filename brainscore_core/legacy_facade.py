@@ -46,10 +46,11 @@ class LegacyBenchmarkFacade:
         self._task: Optional[TaskContext] = None
         # The count of invalid answers, summed over every look_at of this facade; None
         # until one numeric behavior answer was checked. The facade is built per score
-        # call, so the count never crosses two scores. One score call has one kind of
-        # subject; a facade that meets a second kind of answer refuses it (_check_policy).
+        # call, so the count never crosses two scores. One old benchmark can ask for labels
+        # and then for probabilities, so the facade keeps every policy it applied, in the
+        # order of first use (answer_policy).
         self.n_invalid_answers: Optional[int] = None
-        self.answer_policy: Optional[str] = None
+        self._policies: List[str] = []
 
     def _resolve(self, answer):
         import numpy as np
@@ -57,7 +58,7 @@ class LegacyBenchmarkFacade:
         if 'choice' in answer.dims and answer.ndim == 2 and \
                 np.asarray(answer.values).dtype.kind not in ('U', 'S', 'O'):  # the check ran
             replaced = resolved.attrs.get('n_invalid_answers', 0) if resolved is not answer else 0
-            self._check_policy(REPLACED_ANSWER_POLICY)
+            self._applied(REPLACED_ANSWER_POLICY)
             self.n_invalid_answers = (self.n_invalid_answers or 0) + int(replaced)
         return resolved
 
@@ -67,7 +68,7 @@ class LegacyBenchmarkFacade:
         (``_labels_from_choice`` with ``own_values``). A missing row (a stimulus the old model
         gave no label for) is left out, as the old model left it out."""
         import numpy as np
-        self._check_policy(OLD_LABEL_POLICY)
+        self._applied(OLD_LABEL_POLICY)
         states = _presentation_columns(answer).get('response_state')
         if states is not None:
             answer = answer.isel(presentation=np.asarray(states) != 'missing')
@@ -75,14 +76,15 @@ class LegacyBenchmarkFacade:
         self.n_invalid_answers = (self.n_invalid_answers or 0) + int(outside.sum())
         return answer
 
-    def _check_policy(self, policy: str) -> None:
-        """One facade checks one kind of answer, so the one policy sentence on the score is true."""
-        if self.answer_policy is not None and self.answer_policy != policy:
-            raise ValueError(
-                f"Subject {self.identifier!r} gave an answer of a second kind to one legacy "
-                f"benchmark: before, {self.answer_policy!r}; now, {policy!r}. One score states "
-                "one answer policy.")
-        self.answer_policy = policy
+    def _applied(self, policy: str) -> None:
+        if policy not in self._policies:
+            self._policies.append(policy)
+
+    @property
+    def answer_policy(self) -> Optional[str]:
+        """Every policy this facade applied, in the order of first use, joined by '; ';
+        ``None`` before one answer was checked."""
+        return '; '.join(self._policies) or None
 
     @property
     def identifier(self) -> str:
@@ -418,7 +420,8 @@ def record_replaced_answers(score, received) -> None:
     """Write the facade's count of invalid answers on the score of a legacy benchmark.
 
     The count is of the answers that were not valid choices: replaced by a random label for a
-    new subject, passed unchanged for an old model's labels; ``answer_policy`` says which.
+    new subject, passed unchanged for an old model's labels; ``answer_policy`` says which
+    (both sentences, in the order of first use, when one benchmark met both kinds).
 
     ``received`` is what the benchmark was given. The attributes are written only when it
     is a facade that checked a numeric behavior answer (a zero is then a true zero); a
