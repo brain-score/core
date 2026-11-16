@@ -622,7 +622,7 @@ def _assembly(values, coords, record, attrs=None):
         built[name] = ('presentation', column)
     dims = ['presentation']
     if axis is not None:
-        built['choice'] = list(axis)
+        built['choice'] = axis if isinstance(axis, np.ndarray) else list(axis)   # a row's typed axis
         dims.append('choice')
     attrs = dict(attrs or {})
     if record is not None:
@@ -759,7 +759,8 @@ def _row(values, coords, record) -> dict:
     row = {'stimulus_id': _python(coords['stimulus_id'][0]) if table is None
            else _held(table, 'stimulus_id'), 'values': value}
     if 'choice' in coords:
-        row['choice'] = list(coords['choice']) if table is None else table['choice'].values
+        # The options as the table holds them: a typed array (which a record keeps).
+        row['choice'] = np.asarray(coords['choice']) if table is None else table['choice'].values
     for name, column in coords.items():
         if name not in row:
             row[name] = _python(column[0])
@@ -802,7 +803,7 @@ def _row_table(channel, row):
         attrs = {} if row.get('response') is None else {'response': row['response']}
         return BehavioralAssembly(values, coords=built, dims=dims, attrs=attrs)
     if 'choice' in row:
-        coords['choice'] = list(row['choice'])
+        coords['choice'] = row['choice']
     return _assembly(values, coords, row.get('response'))
 
 

@@ -26,7 +26,7 @@ def test_a_cell_answer_event_carries_its_checked_row():
     session = _choice_session()
     session.respond(StreamEvent(CHOICE, 'dog', None, {'stimulus_id': 's1'}))
     row = session.emitted[0].payload
-    assert row['stimulus_id'] == 's1' and row['choice'] == ['cat', 'dog']
+    assert row['stimulus_id'] == 's1' and list(row['choice']) == ['cat', 'dog']
     np.testing.assert_array_equal(row['values'], [0, 1])
     assert (row['raw_answer'], row['response_state'], row['response']['format']) == ('dog', 'valid', CHOICE)
 
