@@ -485,7 +485,7 @@ def test_software_keys_are_installed_distribution_names():
     assert set(_score_environment()["software"]) == {
         "python", "numpy", "torch", "transformers", "scikit-learn", "xarray",
         "brainscore-core", "brainscore", "brainscore_vision", "brainscore_language",
-        "environment_fingerprint", "accelerator"}
+        "environment_fingerprint", "accelerator", "math_threads"}
 
 
 def test_nested_score_records_merge_their_deliveries():

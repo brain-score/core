@@ -327,3 +327,82 @@ def test_the_doctor_a_score_and_another_process_give_one_value():
     value = environment_fingerprint()
     assert _score_environment()['software']['environment_fingerprint'] == value
     assert _fresh_value(None, before='import sys, json, xml.dom.minidom; sys.path.append("/nonexistent/vendor")') == value
+
+
+# ---- the math threads of a score ----
+
+def _fake_threadpoolctl(monkeypatch, info=None, error=None):
+    import types
+    module = types.ModuleType('threadpoolctl')
+    def threadpool_info():
+        if error:
+            raise error
+        return info
+    module.threadpool_info = threadpool_info
+    monkeypatch.setitem(sys.modules, 'threadpoolctl', module)
+
+
+def test_the_score_software_carries_the_math_threads():
+    from brainscore_core.environment_check import _math_threads
+    record = _score_environment()['software']['math_threads']
+    assert isinstance(record, str) and record == _math_threads()      # stable in one process
+    assert record == ','.join(sorted(record.split(',')))
+
+
+def test_the_record_names_the_torch_and_each_pool(monkeypatch):
+    import types
+    from brainscore_core.environment_check import _math_threads
+    torch = types.SimpleNamespace(get_num_threads=lambda: 8)
+    monkeypatch.setitem(sys.modules, 'torch', torch)
+    _fake_threadpoolctl(monkeypatch, [{'internal_api': 'openmp', 'num_threads': 8},
+                                      {'internal_api': 'openblas', 'num_threads': 16}])
+    assert _math_threads() == 'openblas=16,openmp=8,torch=8'
+    monkeypatch.delitem(sys.modules, 'torch')
+    assert _math_threads() == 'openblas=16,openmp=8,torch=absent'
+
+
+def test_a_threadpoolctl_failure_gives_not_stated_and_the_score_environment_runs(monkeypatch):
+    from brainscore_core.environment_check import _math_threads
+    _fake_threadpoolctl(monkeypatch, error=RuntimeError('broken'))
+    assert 'pools=not stated' in _math_threads()
+    monkeypatch.setitem(sys.modules, 'threadpoolctl', None)           # an import that fails
+    assert 'pools=not stated' in _math_threads()
+    assert 'not stated' in _score_environment()['software']['math_threads']
+
+
+def test_a_torch_that_fails_gives_not_stated(monkeypatch):
+    import types
+    from brainscore_core.environment_check import _math_threads
+    def boom():
+        raise RuntimeError('x')
+    monkeypatch.setitem(sys.modules, 'torch', types.SimpleNamespace(get_num_threads=boom))
+    assert 'torch=not stated' in _math_threads()
+
+
+def _attrs(threads='openblas=4,torch=4', **changes):
+    software = {'environment_fingerprint': 'f' * 64, 'accelerator': 'cpu', 'math_threads': threads}
+    software.update(changes)
+    return {'software': software, 'code_commits': {'brainscore_core': 'a' * 40}}
+
+
+def test_bit_for_bit_needs_equal_and_stated_thread_records():
+    from brainscore_core.environment_check import bit_for_bit_comparable
+    assert bit_for_bit_comparable(_attrs(), _attrs())
+    assert not bit_for_bit_comparable(_attrs(), _attrs('openblas=16,torch=8'))
+    missing = _attrs()
+    del missing['software']['math_threads']
+    assert not bit_for_bit_comparable(missing, missing)
+    assert not bit_for_bit_comparable(_attrs(), missing)
+    unstated = _attrs('pools=not stated,torch=4')
+    assert not bit_for_bit_comparable(unstated, unstated)
+
+
+def test_bit_for_bit_keeps_the_other_conditions():
+    from brainscore_core.environment_check import bit_for_bit_comparable
+    assert not bit_for_bit_comparable(_attrs(), _attrs(accelerator='mps'))
+    assert not bit_for_bit_comparable(_attrs(), _attrs(environment_fingerprint='0' * 64))
+    gone = _attrs(environment_fingerprint='unavailable: x')
+    assert not bit_for_bit_comparable(gone, gone)
+    unknown = _attrs()
+    unknown['code_commits']['brainscore_core'] = None
+    assert not bit_for_bit_comparable(unknown, unknown)
