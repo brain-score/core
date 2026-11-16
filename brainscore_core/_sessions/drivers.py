@@ -358,7 +358,12 @@ def drive_state_change_session(
     subject, session: Session, state_change: StateChange = None,
     driver: str = "interact"
 ) -> None:
-    """Drive a perturbation session through existing StateChange dispatch."""
+    """Drive a perturbation session through existing StateChange dispatch.
+
+    The answer carries the time of the change's input event, or None when the
+    change is given as an argument (rule 4.2).
+    """
+    t_ms = None
     if state_change is None:
         event = session.next_input()
         while event is not None and event.channel == CONTROL_CHANNEL:
@@ -375,6 +380,7 @@ def drive_state_change_session(
                     f"{type(event.payload).__name__}."
                 )
             state_change = event.payload
+            t_ms = event.t_ms
     if state_change is None:
         raise ValueError(
             "perturbation participate requires a StateChange input event. A subject "
@@ -387,7 +393,7 @@ def drive_state_change_session(
     session.respond(StreamEvent(
         channel="perturbation",
         payload=result,
-        t_ms=0.0,
+        t_ms=t_ms,
         meta={
             "driver": driver,
             "kind": state_change.kind,

@@ -136,3 +136,19 @@ def test_a_change_sent_by_apply_state_change_has_no_time():
 
     apply_state_change(Timed(), _lesion())
     assert times == [None]
+
+
+def test_the_perturbation_answer_carries_the_time_of_its_change():
+    """Rule 4.2: the typed driver answers at the time of the change it received."""
+    from brainscore_core.streaming import Session
+    from brainscore_core.streaming_helpers import drive_state_change_session
+
+    class Interventions:
+        def process(self, change):
+            return PerturbationApplied('h1', change.target, change.perturbation)
+
+    for t_ms in (None, 250.0):
+        session = Session([StreamEvent('lesion', _lesion(), t_ms)], ('perturbation',))
+        drive_state_change_session(Interventions(), session)
+        (answer,) = session.emitted
+        assert answer.t_ms == t_ms
