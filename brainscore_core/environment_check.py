@@ -307,7 +307,7 @@ def _accelerator() -> str:
     return "cpu"
 
 
-def _math_threads() -> str:
+def math_threads() -> str:
     """The threads of the math libraries of this process, as a sorted string such as ``'openblas=16,openmp=8,torch=8'``.
 
     One ``<library>=<count>`` entry for the torch intra-op threads (read only when
@@ -429,7 +429,7 @@ def _score_environment() -> Dict[str, Dict[str, Optional[str]]]:
                      for _module, distribution in _BRAINSCORE_PACKAGES})
     software["environment_fingerprint"] = environment_fingerprint()
     software["accelerator"] = _accelerator()
-    software["math_threads"] = _math_threads()
+    software["math_threads"] = math_threads()
     commits = {}
     for module_name, _distribution in _BRAINSCORE_PACKAGES:
         module = sys.modules.get(module_name)
