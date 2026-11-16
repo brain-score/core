@@ -458,3 +458,39 @@ def test_an_answer_that_has_every_column_is_returned_unchanged():
                 'animal': ('presentation', list(table['animal'])),
                 'image_type': ('presentation', list(table['image_type'])), 'choice': ['cat', 'dog']})
     assert _with_stimulus_columns(answer, table) is answer
+
+
+def test_an_identifier_that_occurs_twice_in_the_table_is_an_error_not_a_guess():
+    from brainscore_core.legacy_facade import _stimulus_columns
+    table = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'a', 'b', 'b', 'c', 'c', 'd', 'd'],
+                                      'animal': list('wxyzwxyz')}))
+    with pytest.raises(ValueError, match='cannot tell which row') as error:
+        _stimulus_columns({'stimulus_id': ['a', 'b', 'c', 'd']}, table)
+    assert "['a', 'b', 'c']" in str(error.value) and "'d'" not in str(error.value)   # up to three names
+    # An identifier the answer does not name does not matter; one that is unique takes its row for all answer rows.
+    unique = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b', 'b'], 'animal': ['x', 'y', 'z']}))
+    assert _stimulus_columns({'stimulus_id': ['a', 'a']}, unique) == {'animal': ['x', 'x']}
+
+
+def test_a_table_column_named_like_a_dimension_of_the_answer_is_not_attached():
+    facade = LegacyBenchmarkFacade(_IdOnlyChoice(), visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    table = _table()
+    table['choice'] = ['u', 'v', 'u', 'v']
+    answer = facade.look_at(table)
+    assert 'choice' not in answer.indexes['presentation'].names
+    assert 'animal' in answer.indexes['presentation'].names
+    from brainscore_core.legacy_facade import _with_stimulus_columns
+    bare = BehavioralAssembly(np.full((4, 2), 0.5), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', list(table['stimulus_id'])), 'position': ('presentation', [0, 1, 2, 3]),
+        'choice': ['cat', 'dog']})
+    assert 'choice' not in _with_stimulus_columns(bare, table).indexes['presentation'].names
+
+
+def test_a_table_column_whose_value_cannot_be_hashed_is_skipped():
+    from brainscore_core.legacy_facade import _stimulus_columns
+    table = _table()
+    table['nested'] = [([1],), ([2],), ([3],), ([4],)]     # a tuple holding a list: Hashable by type, not by hash()
+    table['listed'] = [[1], [2], [3], [4]]
+    added = _stimulus_columns({'stimulus_id': ['a', 'b']}, table)
+    assert set(added) == {'animal', 'image_type'}

@@ -251,40 +251,47 @@ def _presentation_columns(answer) -> dict:
     return {name: list(answer[name].values) for name in names}
 
 
-def _stimulus_columns(columns: dict, stimuli) -> dict:
+def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
     """The stimulus-set columns an answer lacks, one value for each answer row.
 
     An old behavior answer carries every column of the stimulus set in its presentation
     index, and old metrics read them (``source['animal']``, ``sortby('stimulus_id')``).
     A subject answers by ``stimulus_id`` only; the facade, which speaks the old benchmark's
-    language, adds the other columns. Rows keep the answer's order; a stimulus answered
-    twice takes its table rows in order. Nothing is added when the answer names no
-    ``stimulus_id`` that the table holds, and a column that cannot be an index level
-    (a value that is not hashable) is left out.
+    language, adds the other columns. Rows keep the answer's order. Several answer rows
+    of one stimulus that is unique in the table all take its row; a stimulus that the
+    answer names and the table holds more than once is an error (the facade cannot tell
+    which row the answer belongs to). Nothing is added when the answer names a
+    ``stimulus_id`` that the table lacks. A column is left out when its name is in
+    ``reserved`` (a dimension or a coordinate of the outgoing answer) or when a value
+    cannot be hashed (an index level needs hashable values).
     """
-    from collections import Counter
-    from collections.abc import Hashable
     table_columns = getattr(stimuli, 'columns', None)
     if table_columns is None or 'stimulus_id' not in table_columns or 'stimulus_id' not in columns:
         return {}
     positions: Dict[Any, List[int]] = {}
     for position, stimulus_id in enumerate(stimuli['stimulus_id']):
         positions.setdefault(stimulus_id, []).append(position)
-    seen: Counter = Counter()
-    picked = []
-    for stimulus_id in columns['stimulus_id']:
-        rows = positions.get(stimulus_id)
-        if not rows:
-            return {}
-        picked.append(rows[min(seen[stimulus_id], len(rows) - 1)])
-        seen[stimulus_id] += 1
+    named = list(columns['stimulus_id'])
+    if any(stimulus_id not in positions for stimulus_id in named):
+        return {}
+    duplicated = [stimulus_id for stimulus_id in dict.fromkeys(named) if len(positions[stimulus_id]) > 1]
+    if duplicated:
+        raise ValueError(
+            f"{len(duplicated)} stimulus_id(s) of the answer occur more than once in the presented "
+            f"table (for example {duplicated[:3]}); the facade cannot tell which row an answer "
+            "belongs to, so it cannot give the old benchmark the stimulus columns.")
+    picked = [positions[stimulus_id][0] for stimulus_id in named]
     added = {}
     for name in table_columns:
-        if name in columns or name == 'presentation':
+        if name in columns or name == 'presentation' or name in reserved:
             continue
         values = [stimuli[name].values[position] for position in picked]
-        if all(isinstance(value, Hashable) for value in values):
-            added[name] = values
+        try:
+            for value in values:
+                hash(value)
+        except TypeError:
+            continue
+        added[name] = values
     return added
 
 
@@ -293,7 +300,9 @@ def _with_stimulus_columns(answer, stimuli):
     if 'presentation' not in getattr(answer, 'dims', ()):
         return answer
     columns = _presentation_columns(answer)
-    added = _stimulus_columns(columns, stimuli)
+    reserved = set(answer.dims) | {name for name, coord in answer.coords.items()
+                                   if 'presentation' not in coord.dims}
+    added = _stimulus_columns(columns, stimuli, reserved)
     if not added:
         return answer
     coords = {name: ('presentation', values) for name, values in {**columns, **added}.items()}
@@ -319,7 +328,7 @@ def _labels_from_choice(answer, stimuli=None):
     chosen = [labels[int(np.argmax(row))] for row in rows]
     columns = {name: values for name, values in _presentation_columns(answer).items()
                if name not in _STORED_ONLY}
-    columns.update(_stimulus_columns(columns, stimuli))
+    columns.update(_stimulus_columns(columns, stimuli, reserved=('choice',)))
     coords = {name: ('presentation', values) for name, values in columns.items()}
     # Every attribute that is not the format's own response record stays, among them
     # the count of invalid answers that resolve_invalid_answers set.
