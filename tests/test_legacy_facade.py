@@ -494,3 +494,17 @@ def test_a_table_column_whose_value_cannot_be_hashed_is_skipped():
     table['listed'] = [[1], [2], [3], [4]]
     added = _stimulus_columns({'stimulus_id': ['a', 'b']}, table)
     assert set(added) == {'animal', 'image_type'}
+
+
+def test_an_answer_with_every_column_is_returned_as_is_even_when_the_table_has_a_duplicate_identifier():
+    from brainscore_core.legacy_facade import _stimulus_columns, _with_stimulus_columns
+    table = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'a', 'b'], 'animal': ['x', 'y', 'z']}))
+    full = BehavioralAssembly(np.full((2, 2), 0.5), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', ['a', 'b']), 'animal': ('presentation', ['x', 'z']),
+        'choice': ['cat', 'dog']})
+    assert _with_stimulus_columns(full, table) is full
+    lacking = BehavioralAssembly(np.full((2, 2), 0.5), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', ['a', 'b']), 'position': ('presentation', [0, 1]),
+        'choice': ['cat', 'dog']})
+    with pytest.raises(ValueError, match='cannot tell which row'):
+        _with_stimulus_columns(lacking, table)

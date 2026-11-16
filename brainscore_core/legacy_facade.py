@@ -251,6 +251,15 @@ def _presentation_columns(answer) -> dict:
     return {name: list(answer[name].values) for name in names}
 
 
+def _hashes(values) -> bool:
+    try:
+        for value in values:
+            hash(value)
+    except TypeError:
+        return False
+    return True
+
+
 def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
     """The stimulus-set columns an answer lacks, one value for each answer row.
 
@@ -268,6 +277,13 @@ def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
     table_columns = getattr(stimuli, 'columns', None)
     if table_columns is None or 'stimulus_id' not in table_columns or 'stimulus_id' not in columns:
         return {}
+    # First decide which columns the answer lacks; with none, there is nothing to attach
+    # and the table is not read for identifiers (a duplicate in it does not matter).
+    lacking = [name for name in table_columns
+               if name not in columns and name != 'presentation' and name not in reserved]
+    lacking = [name for name in lacking if _hashes(stimuli[name].values)]
+    if not lacking:
+        return {}
     positions: Dict[Any, List[int]] = {}
     for position, stimulus_id in enumerate(stimuli['stimulus_id']):
         positions.setdefault(stimulus_id, []).append(position)
@@ -281,17 +297,7 @@ def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
             f"table (for example {duplicated[:3]}); the facade cannot tell which row an answer "
             "belongs to, so it cannot give the old benchmark the stimulus columns.")
     picked = [positions[stimulus_id][0] for stimulus_id in named]
-    added = {}
-    for name in table_columns:
-        if name in columns or name == 'presentation' or name in reserved:
-            continue
-        values = [stimuli[name].values[position] for position in picked]
-        try:
-            for value in values:
-                hash(value)
-        except TypeError:
-            continue
-        added[name] = values
+    added = {name: [stimuli[name].values[position] for position in picked] for name in lacking}
     return added
 
 
