@@ -387,3 +387,74 @@ def test_the_facade_counts_replaced_answers_for_the_score():
     plain = Score(1.0)
     record_replaced_answers(plain, _Recorder())         # a plain subject: nothing written
     assert 'n_invalid' not in plain.attrs
+
+
+# --- the answer of an old benchmark carries the stimulus columns -----------------------
+
+def _table(ids=('a', 'b', 'c', 'd')):
+    table = StimulusSet(pd.DataFrame({
+        'stimulus_id': list(ids), 'animal': ['cat', 'dog', 'cat', 'dog'][:len(ids)],
+        'image_type': ['w', 'w', 'f', 'f'][:len(ids)]}))
+    table.identifier = f'columns-{len(ids)}'
+    return table
+
+
+class _IdOnlyChoice(_Recorder):
+    """The chance pattern: answers behavior:choice with the stimulus_id of each row, no other column."""
+    out_channels = {'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])
+        rows = np.tile(np.float32([1.0, 0.0]), (len(ids), 1))
+        session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids), 'choice': ['cat', 'dog']},
+            dims=['presentation', 'choice'],
+            attrs={'response': response_record('behavior:choice', 'test')}), None))
+
+
+def _baker_like_metric(source):
+    """Reads a stimulus column other than the id, as the Baker metric reads 'animal'."""
+    scores = []
+    for category in sorted(set(source['animal'].values)):
+        this = source.sel(animal=category, image_type='w')
+        scores.append(float((this.values == category).mean()))
+    return scores
+
+
+def _bmd_like_metric(source):
+    """Sorts by stimulus_id, as the BMD metric does."""
+    return list(source.sortby('stimulus_id')['stimulus_id'].values)
+
+
+def test_a_subject_that_answers_by_stimulus_id_reaches_an_old_metric_with_the_columns():
+    facade = LegacyBenchmarkFacade(_IdOnlyChoice(), visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    answer = facade.look_at(_table())
+    assert list(answer.indexes['presentation'].names) == ['stimulus_id', 'animal', 'image_type']
+    assert _baker_like_metric(answer) == [1.0, 0.0]
+    assert _bmd_like_metric(answer) == ['a', 'b', 'c', 'd']
+
+
+def test_the_columns_are_added_once_and_in_the_order_of_the_answer_rows():
+    from brainscore_core.legacy_facade import _stimulus_columns
+    table = _table()
+    added = _stimulus_columns({'stimulus_id': ['c', 'a', 'a'], 'animal': ['x', 'y', 'z']}, table)
+    assert list(added) == ['image_type']                 # a column the answer has is not replaced
+    assert added['image_type'] == ['f', 'w', 'w']
+    assert _stimulus_columns({'stimulus_id': ['zzz']}, table) == {}      # an id the table lacks: nothing
+    assert _stimulus_columns({'animal': ['x']}, table) == {}             # no stimulus_id: nothing
+
+
+def test_an_answer_that_has_every_column_is_returned_unchanged():
+    from brainscore_core.legacy_facade import _with_stimulus_columns
+    table = _table()
+    answer = BehavioralAssembly(
+        np.full((4, 2), 0.5), dims=['presentation', 'choice'],
+        coords={'stimulus_id': ('presentation', list(table['stimulus_id'])),
+                'animal': ('presentation', list(table['animal'])),
+                'image_type': ('presentation', list(table['image_type'])), 'choice': ['cat', 'dog']})
+    assert _with_stimulus_columns(answer, table) is answer
