@@ -389,6 +389,47 @@ def test_the_facade_counts_replaced_answers_for_the_score():
     assert 'n_invalid' not in plain.attrs
 
 
+class _OldLabelRows(_Recorder):
+    """Answers as the vision adapter's label route does for an old model: a 'legacy' record,
+    the old label in raw_answer, a NaN row for a label outside the list. Rows 0 to 2 are
+    outside (15 percent of 20); the last stimulus gets no answer (a missing row)."""
+    out_channels = {'behavior:choice'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        while session.next_input() is not None:
+            pass
+        ids = list(session.stimuli['stimulus_id'])[:-1]
+        raw = ['bird', 'fish', 'bird'] + ['cat'] * (len(ids) - 3)
+        rows = np.array([[1.0, 0.0] if label == 'cat' else [np.nan, np.nan] for label in raw],
+                        dtype=np.float32)
+        session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
+            rows, coords={'stimulus_id': ('presentation', ids), 'choice': ['cat', 'dog'],
+                          'raw_answer': ('presentation', raw)}, dims=['presentation', 'choice'],
+            attrs={'response': response_record('behavior:choice', 'legacy')}), None))
+
+
+def test_an_old_models_label_outside_the_list_passes_unchanged_and_is_counted():
+    """Owner decision 2026-11-16: no random label and no stop for an old model's labels; the
+    count and the policy reach the score; a missing row is left out."""
+    import warnings
+    from brainscore_core.legacy_facade import OLD_LABEL_POLICY, record_replaced_answers
+    from brainscore_core.metrics import Score
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': [f's{i}' for i in range(20)],
+                                        'image_label': ['cat'] * 20}))
+    stimuli.identifier = 'facade-old-labels'
+    facade = LegacyBenchmarkFacade(_OldLabelRows(), visual_degrees=8)
+    facade.start_task('label', ['cat', 'dog'])
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')       # no replacement warning
+        labels = facade.look_at(stimuli)
+    assert list(labels.values[0]) == ['bird', 'fish', 'bird'] + ['cat'] * 16
+    assert list(labels['stimulus_id'].values) == [f's{i}' for i in range(19)]
+    score = Score(0.5)
+    record_replaced_answers(score, facade)
+    assert score.attrs['n_invalid'] == 3 and score.attrs['answer_policy'] == OLD_LABEL_POLICY
+
+
 # --- the answer of an old benchmark carries the stimulus columns -----------------------
 
 def _table(ids=('a', 'b', 'c', 'd')):
