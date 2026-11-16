@@ -268,8 +268,9 @@ def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
     A subject answers by ``stimulus_id`` only; the facade, which speaks the old benchmark's
     language, adds the other columns. Rows keep the answer's order. Several answer rows
     of one stimulus that is unique in the table all take its row; a stimulus that the
-    answer names and the table holds more than once is an error (the facade cannot tell
-    which row the answer belongs to). Nothing is added when the answer names a
+    answer names and the table holds more than once gets no column and a warning (the
+    facade cannot tell which row the answer belongs to, and it does not guess; the answer
+    goes on as the subject gave it). Nothing is added when the answer names a
     ``stimulus_id`` that the table lacks. A column is left out when its name is in
     ``reserved`` (a dimension or a coordinate of the outgoing answer) or when a value
     cannot be hashed (an index level needs hashable values).
@@ -292,10 +293,12 @@ def _stimulus_columns(columns: dict, stimuli, reserved=()) -> dict:
         return {}
     duplicated = [stimulus_id for stimulus_id in dict.fromkeys(named) if len(positions[stimulus_id]) > 1]
     if duplicated:
-        raise ValueError(
+        import warnings
+        warnings.warn(
             f"{len(duplicated)} stimulus_id(s) of the answer occur more than once in the presented "
             f"table (for example {duplicated[:3]}); the facade cannot tell which row an answer "
-            "belongs to, so it cannot give the old benchmark the stimulus columns.")
+            "belongs to, so the answer reaches the old benchmark without the stimulus columns it lacks.")
+        return {}
     picked = [positions[stimulus_id][0] for stimulus_id in named]
     added = {name: [stimuli[name].values[position] for position in picked] for name in lacking}
     return added

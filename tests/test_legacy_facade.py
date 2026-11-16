@@ -460,13 +460,14 @@ def test_an_answer_that_has_every_column_is_returned_unchanged():
     assert _with_stimulus_columns(answer, table) is answer
 
 
-def test_an_identifier_that_occurs_twice_in_the_table_is_an_error_not_a_guess():
+def test_an_identifier_that_occurs_twice_in_the_table_gets_no_column_and_a_warning_not_a_guess():
     from brainscore_core.legacy_facade import _stimulus_columns
     table = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'a', 'b', 'b', 'c', 'c', 'd', 'd'],
                                       'animal': list('wxyzwxyz')}))
-    with pytest.raises(ValueError, match='cannot tell which row') as error:
-        _stimulus_columns({'stimulus_id': ['a', 'b', 'c', 'd']}, table)
-    assert "['a', 'b', 'c']" in str(error.value) and "'d'" not in str(error.value)   # up to three names
+    with pytest.warns(UserWarning, match='cannot tell which row') as caught:
+        assert _stimulus_columns({'stimulus_id': ['a', 'b', 'c', 'd']}, table) == {}
+    message = str(caught[0].message)
+    assert "['a', 'b', 'c']" in message and "'d'" not in message                     # up to three names
     # An identifier the answer does not name does not matter; one that is unique takes its row for all answer rows.
     unique = StimulusSet(pd.DataFrame({'stimulus_id': ['a', 'b', 'b'], 'animal': ['x', 'y', 'z']}))
     assert _stimulus_columns({'stimulus_id': ['a', 'a']}, unique) == {'animal': ['x', 'x']}
@@ -506,5 +507,5 @@ def test_an_answer_with_every_column_is_returned_as_is_even_when_the_table_has_a
     lacking = BehavioralAssembly(np.full((2, 2), 0.5), dims=['presentation', 'choice'], coords={
         'stimulus_id': ('presentation', ['a', 'b']), 'position': ('presentation', [0, 1]),
         'choice': ['cat', 'dog']})
-    with pytest.raises(ValueError, match='cannot tell which row'):
-        _with_stimulus_columns(lacking, table)
+    with pytest.warns(UserWarning, match='cannot tell which row'):
+        assert _with_stimulus_columns(lacking, table) is lacking      # no guess: the answer goes on as it is
