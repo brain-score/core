@@ -163,7 +163,11 @@ def response_record(format: str, method: str, *, conversion: Optional[str] = Non
     conversion or is a link (``method='link'``); a derived answer names its
     ``source_format``. A conversion's ``parameters`` default to its stated
     ones. ``parsed_by`` is ``'model'`` when the model side parsed generated
-    text, ``'library'`` when an external library parses it.
+    text, ``'library'`` when an external library parses it. The method ``legacy`` is the
+    statement of an old model's adapter that the answer is the old model's own. The legacy
+    facade passes the labels of a ``behavior:choice`` answer that carries it, with no
+    conversion, to the old benchmark unchanged, counts the labels outside the list and does
+    not stop the run; a subject that writes it for another answer states something false.
     """
     if parameters is None:
         parameters = dict(_DEFAULT_PARAMETERS.get(conversion, {}))

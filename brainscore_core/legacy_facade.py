@@ -47,7 +47,7 @@ class LegacyBenchmarkFacade:
         # The count of invalid answers, summed over every look_at of this facade; None
         # until one numeric behavior answer was checked. The facade is built per score
         # call, so the count never crosses two scores. One score call has one kind of
-        # subject, so the policy of the last checked answer is the policy of the score.
+        # subject; a facade that meets a second kind of answer refuses it (_check_policy).
         self.n_invalid_answers: Optional[int] = None
         self.answer_policy: Optional[str] = None
 
@@ -57,22 +57,32 @@ class LegacyBenchmarkFacade:
         if 'choice' in answer.dims and answer.ndim == 2 and \
                 np.asarray(answer.values).dtype.kind not in ('U', 'S', 'O'):  # the check ran
             replaced = resolved.attrs.get('n_invalid_answers', 0) if resolved is not answer else 0
+            self._check_policy(REPLACED_ANSWER_POLICY)
             self.n_invalid_answers = (self.n_invalid_answers or 0) + int(replaced)
-            self.answer_policy = REPLACED_ANSWER_POLICY
         return resolved
 
     def _old_labels(self, answer):
         """An old model's label rows as they are: a row outside the list (NaN) is counted, not
-        replaced, and keeps the old model's own label (``_labels_from_choice``). A missing row
-        (a stimulus the old model gave no label for) is left out, as the old model left it out."""
+        replaced, and nothing stops the run. The old model's own values reach the old metric
+        (``_labels_from_choice`` with ``own_values``). A missing row (a stimulus the old model
+        gave no label for) is left out, as the old model left it out."""
         import numpy as np
+        self._check_policy(OLD_LABEL_POLICY)
         states = _presentation_columns(answer).get('response_state')
         if states is not None:
             answer = answer.isel(presentation=np.asarray(states) != 'missing')
         outside = np.isnan(np.asarray(answer.values, dtype=float)).all(axis=answer.dims.index('choice'))
         self.n_invalid_answers = (self.n_invalid_answers or 0) + int(outside.sum())
-        self.answer_policy = OLD_LABEL_POLICY
         return answer
+
+    def _check_policy(self, policy: str) -> None:
+        """One facade checks one kind of answer, so the one policy sentence on the score is true."""
+        if self.answer_policy is not None and self.answer_policy != policy:
+            raise ValueError(
+                f"Subject {self.identifier!r} gave an answer of a second kind to one legacy "
+                f"benchmark: before, {self.answer_policy!r}; now, {policy!r}. One score states "
+                "one answer policy.")
+        self.answer_policy = policy
 
     @property
     def identifier(self) -> str:
@@ -148,12 +158,16 @@ class LegacyBenchmarkFacade:
         })
         if channel == 'behavior:choice':
             answer = measured[channel]
-            # The record names the origin: the old model's own labels (the vision adapter's
-            # label route) reach the old metric as they are; any other answer is resolved.
+            # The stated rule: the response record states the origin of an answer. The method
+            # 'legacy' with no conversion is an old model adapter's statement that the labels
+            # are the old model's own; they reach the old metric unchanged, the labels outside
+            # the list are counted, and nothing stops the run. Any other answer is resolved
+            # (a random label for a row that is not a valid choice; a stop above 10 percent).
             record = answer.attrs.get('response') or {}
             from_old_labels = record.get('method') == 'legacy' and record.get('origin') == 'native'
-            answer = self._old_labels(answer) if from_old_labels else self._resolve(answer)
-            return _labels_from_choice(answer, stimuli)
+            if from_old_labels:
+                return _labels_from_choice(self._old_labels(answer), stimuli, own_values=True)
+            return _labels_from_choice(self._resolve(answer), stimuli)
         if channel == 'behavior':
             return _with_stimulus_columns(self._resolve(measured[channel]), stimuli)
         return measured[channel]
@@ -342,15 +356,19 @@ def _with_stimulus_columns(answer, stimuli):
     return type(answer)(answer.values, coords=coords, dims=answer.dims, attrs=dict(answer.attrs))
 
 
-def _labels_from_choice(answer, stimuli=None):
+def _labels_from_choice(answer, stimuli=None, own_values: bool = False):
     """A stored ``behavior:choice`` answer as the legacy label answer.
 
     One label per stimulus, dims ``('choice', 'presentation')``, with every
     presentation coordinate of the stored answer in its order, except the ones core
     adds to a stored answer (``_STORED_ONLY``), and every attribute except the
-    format's response record (``n_invalid_answers`` stays). A one-hot row gives its label; a
-    row with no choice (NaN: an old model's label outside the list) gives its ``raw_answer``,
-    the old model's own label. A column of ``stimuli`` that the answer lacks is added
+    format's response record (``n_invalid_answers`` stays). Each row gives the label of its
+    one-hot choice (an invalid row was made a valid label by ``resolve_invalid_answers``
+    before). With ``own_values`` (an old model's label answer) every row gives its
+    ``raw_answer``, the old model's own value, inside the list or not, and the array takes
+    the numpy type those values have. The width of a fixed-width text array and an object
+    array are not kept (a padded ``'<U10'`` comes back as the width of its longest label):
+    the presentation index keeps the scalar values only. A column of ``stimuli`` that the answer lacks is added
     (``_stimulus_columns``).
     """
     import numpy as np
@@ -358,9 +376,8 @@ def _labels_from_choice(answer, stimuli=None):
     labels = [str(label) for label in answer['choice'].values]
     rows = np.asarray(answer.transpose('presentation', 'choice').values, dtype=float)
     stored = _presentation_columns(answer)
-    raw = stored.get('raw_answer', [None] * len(rows))
-    chosen = [raw[i] if np.isnan(row).all() else labels[int(np.argmax(row))]
-              for i, row in enumerate(rows)]
+    chosen = (np.asarray(stored['raw_answer']) if own_values
+              else [labels[int(np.argmax(row))] for row in rows])
     columns = {name: values for name, values in stored.items() if name not in _STORED_ONLY}
     columns.update(_stimulus_columns(columns, stimuli, reserved=('choice',)))
     coords = {name: ('presentation', values) for name, values in columns.items()}
@@ -398,7 +415,10 @@ OLD_LABEL_POLICY = ("an old model's label outside the list reaches the legacy me
 
 
 def record_replaced_answers(score, received) -> None:
-    """Write the facade's count of replaced answers on the score of a legacy benchmark.
+    """Write the facade's count of invalid answers on the score of a legacy benchmark.
+
+    The count is of the answers that were not valid choices: replaced by a random label for a
+    new subject, passed unchanged for an old model's labels; ``answer_policy`` says which.
 
     ``received`` is what the benchmark was given. The attributes are written only when it
     is a facade that checked a numeric behavior answer (a zero is then a true zero); a

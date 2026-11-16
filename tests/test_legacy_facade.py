@@ -3,6 +3,7 @@
 Each legacy method a vision or language benchmark calls on a candidate is
 checked against the legacy behavior it stands in for.
 """
+import warnings
 import numpy as np
 import pandas as pd
 import pytest
@@ -392,8 +393,13 @@ def test_the_facade_counts_replaced_answers_for_the_score():
 class _OldLabelRows(_Recorder):
     """Answers as the vision adapter's label route does for an old model: a 'legacy' record,
     the old label in raw_answer, a NaN row for a label outside the list. Rows 0 to 2 are
-    outside (15 percent of 20); the last stimulus gets no answer (a missing row)."""
+    outside (15 percent of 20); the last stimulus gets no answer (a missing row). ``method``
+    names the record's method (a custom subject can write any)."""
     out_channels = {'behavior:choice'}
+
+    def __init__(self, method='legacy'):
+        super().__init__()
+        self.method = method
 
     def participate(self, session):
         from brainscore_core.response_formats import response_record
@@ -406,7 +412,7 @@ class _OldLabelRows(_Recorder):
         session.respond(StreamEvent('behavior:choice', BehavioralAssembly(
             rows, coords={'stimulus_id': ('presentation', ids), 'choice': ['cat', 'dog'],
                           'raw_answer': ('presentation', raw)}, dims=['presentation', 'choice'],
-            attrs={'response': response_record('behavior:choice', 'legacy')}), None))
+            attrs={'response': response_record('behavior:choice', self.method)}), None))
 
 
 def test_an_old_models_label_outside_the_list_passes_unchanged_and_is_counted():
@@ -428,6 +434,44 @@ def test_an_old_models_label_outside_the_list_passes_unchanged_and_is_counted():
     score = Score(0.5)
     record_replaced_answers(score, facade)
     assert score.attrs['n_invalid'] == 3 and score.attrs['answer_policy'] == OLD_LABEL_POLICY
+
+
+def _twenty(identifier):
+    stimuli = StimulusSet(pd.DataFrame({'stimulus_id': [f's{i}' for i in range(20)],
+                                        'image_label': ['cat'] * 20}))
+    stimuli.identifier = identifier
+    return stimuli
+
+
+def test_the_stated_rule_the_response_record_states_the_origin_of_an_answer():
+    """The stated rule (decision of 2026-11-16, not a guard): the facade believes the record.
+    A custom subject with another method stops above 10 percent; the same rows with the
+    method 'legacy' state that they are an old model's own labels, which pass and are counted."""
+    from brainscore_core.legacy_facade import OLD_LABEL_POLICY
+    other = LegacyBenchmarkFacade(_OldLabelRows(method='custom'), visual_degrees=8)
+    other.start_task('label', ['cat', 'dog'])
+    with pytest.raises(ValueError, match='above the 10% limit'):
+        other.look_at(_twenty('stated-rule-other'))
+    stated = LegacyBenchmarkFacade(_OldLabelRows(method='legacy'), visual_degrees=8)
+    stated.start_task('label', ['cat', 'dog'])
+    labels = stated.look_at(_twenty('stated-rule-legacy'))
+    assert list(labels.values[0][:3]) == ['bird', 'fish', 'bird']
+    assert stated.n_invalid_answers == 3 and stated.answer_policy == OLD_LABEL_POLICY
+
+
+def test_one_facade_refuses_a_second_kind_of_answer():
+    """One score states one answer policy, so a facade that checked an old model's labels
+    refuses an answer that it would resolve, and the other way round."""
+    for first, second in ((_OldLabelRows(), _RowsWithOneInvalid()),
+                          (_RowsWithOneInvalid(), _OldLabelRows())):
+        facade = LegacyBenchmarkFacade(first, visual_degrees=8)
+        facade.start_task('label', ['cat', 'dog'])
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            facade.look_at(_twenty('one-kind-first'))
+            facade._subject = second            # a second kind of answer to the same facade
+            with pytest.raises(ValueError, match='second kind'):
+                facade.look_at(_twenty('one-kind-second'))
 
 
 # --- the answer of an old benchmark carries the stimulus columns -----------------------
