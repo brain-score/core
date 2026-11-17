@@ -200,8 +200,8 @@ def test_a_subject_without_brainscore_model_gets_its_record_on_the_score():
 def test_legacy_facade_behavioral_benchmark_gets_the_record():
     subject = _Answerer(REPLY)
 
-    def benchmark(candidate):          # a legacy behavioral benchmark
-        candidate.start_task('probabilities', fitting_stimuli=_stimuli())
+    def benchmark(candidate):          # a legacy behavioral benchmark on bare behavior
+        candidate.start_task('odd_one_out')
         candidate.look_at(_stimuli())
         return Score(0.5)
 
