@@ -175,10 +175,10 @@ class LegacyBenchmarkFacade:
                     f"'behavior:choice' output.", channels={channel}, task_type='label')
         else:
             channel = 'behavior' if self._behavior_requested() else self._neural_channel('look_at')
-        measured = self._measure(stimuli, [channel], {
-            'number_of_trials': number_of_trials,
-            'require_variance': require_variance,
-        })
+        settings = {'number_of_trials': number_of_trials, 'require_variance': require_variance}
+        if channel == 'behavior:probabilities':
+            settings['legacy_answer'] = True     # an old model's adapter adds its old answer object
+        measured, emitted = self._measure(stimuli, [channel], settings)
         if channel == 'behavior:choice':
             answer = measured[channel]
             # The stated rule: the response record states the origin of an answer. The method
@@ -192,66 +192,42 @@ class LegacyBenchmarkFacade:
                 return _labels_from_choice(self._old_labels(answer), stimuli, own_values=True)
             return _labels_from_choice(self._resolve(answer), stimuli)
         if channel == 'behavior:probabilities':
-            return _with_stimulus_columns(self._resolve(self._old_probabilities(measured[channel])), stimuli)
+            # An old model's adapter gives its old model's own answer object with the format's
+            # answer (meta 'legacy_answer'): that very object reaches the old benchmark, as on
+            # the bare channel. Any other subject's answer is rebuilt from the stored table.
+            old = [event.meta['legacy_answer'] for event in emitted
+                   if event.channel == channel and 'legacy_answer' in (event.meta or {})]
+            answer = old[-1] if old else self._old_probabilities(measured[channel])
+            return _with_stimulus_columns(self._resolve(answer), stimuli)
         if channel == 'behavior':
             return _with_stimulus_columns(self._resolve(measured[channel]), stimuli)
         return measured[channel]
 
     def _old_probabilities(self, answer):
-        """A stored ``behavior:probabilities`` answer as the legacy probabilities answer.
+        """A stored ``behavior:probabilities`` answer of a subject that is not an old model,
+        as the legacy probabilities answer.
 
         Dims ``('presentation', 'choice')``, the old column order with the labels as the fitting
         stimuli give them, the stored values in their float type, every presentation coordinate
         of the stored answer in its order except the ones core adds (``_STORED_ONLY``), and the
-        attributes. The format's record is left out for an old model's answer (method
-        ``legacy``: the old model gave none) and named on the bare channel ``behavior`` for any
-        other subject, as its answer on that channel carried it. A row with no answer (state
-        ``missing``) is left out, as an old answer has no row for it. A float coordinate whose
-        NaN the stored answer keeps as None gets its NaN back.
-
-        What the format does not keep of an old answer arrives in ``attrs['legacy_metadata']``
-        (the vision adapter sets it): the old attributes, which replace the stored ones, the old
-        coordinates on other dimensions and the old presentation coordinates whose names core
-        uses for its own columns (``raw_answer``, the trial states), each back in its place in
-        the old order of the coordinates.
+        attributes, with the format's record named on the bare channel ``behavior``, as the
+        subject's answer on that channel carried it (an old model's answer carries none). A row
+        with no answer (state ``missing``) is left out, as an old answer has no row for it. A
+        float coordinate whose NaN the stored answer keeps as None gets its NaN back.
         """
         import numpy as np
         from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
-        carried = answer.attrs.get(_LEGACY_METADATA) or {}
         states = _presentation_columns(answer).get('response_state')
-        kept = None if states is None else np.asarray(states) != 'missing'
-        if kept is not None:
-            answer = answer.isel(presentation=kept)
+        if states is not None:
+            answer = answer.isel(presentation=np.asarray(states) != 'missing')
         columns = {name: _without_none(values) for name, values in _presentation_columns(answer).items()
                    if name not in _STORED_ONLY}
-        old = carried.get('coords', {})
-        restored = {}
-        for name, (dims, values) in old.items():
-            if tuple(dims) == ('presentation',):
-                values = np.asarray(values) if kept is None else np.asarray(values)[kept]
-            restored[name] = (dims, values)
-        presentation = carried.get('presentation') or list(columns)
-        presentation += [name for name in columns if name not in presentation]
-        parts = {name: (restored[name] if name in restored else ('presentation', columns[name]))
-                 for name in presentation if name in restored or name in columns}
-        parts['choice'] = list(self._probability_labels)
-        parts.update({name: value for name, value in restored.items() if name not in parts})
-        order = carried.get('order')
-        coords = {}
-        for name in (order or []):
-            if name == 'presentation':
-                coords.update({key: value for key, value in parts.items()
-                               if value[0] in ('presentation', ('presentation',)) and key in presentation})
-            elif name in parts:
-                coords[name] = parts[name]
-        coords.update({name: value for name, value in parts.items() if name not in coords})
-        if carried:
-            attrs = dict(carried.get('attrs', {}))
-        else:
-            attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
-            record = answer.attrs.get('response')
-            if record is not None and record.get('method') != 'legacy':
-                attrs['response'] = {**record, 'format': 'behavior'}
+        coords = {name: ('presentation', values) for name, values in columns.items()}
+        coords['choice'] = list(self._probability_labels)
+        attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
+        record = answer.attrs.get('response')
+        if record is not None and record.get('method') != 'legacy':
+            attrs['response'] = {**record, 'format': 'behavior'}
         return BehavioralAssembly(np.asarray(answer.transpose('presentation', 'choice').values),
                                   coords=coords, dims=['presentation', 'choice'], attrs=attrs)
 
@@ -291,7 +267,7 @@ class LegacyBenchmarkFacade:
             raise ValueError('Call start_neural_recording or start_behavioral_task '
                              'before digest_text')
         settings = {} if stimuli is text else {'legacy_text': text}
-        measured = self._measure(stimuli, list(channels.values()), settings)
+        measured, _ = self._measure(stimuli, list(channels.values()), settings)
         return {name: measured[channel] for name, channel in channels.items()}
 
     def reset(self) -> None:
@@ -332,13 +308,15 @@ class LegacyBenchmarkFacade:
         return f'neural:{self._record}'
 
     def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
-        """One session: the recorded task object, the time bins and the measurement settings."""
+        """One session: the recorded task object, the time bins and the measurement settings.
+
+        Returns the collected answer of each channel and the events the subject sent."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
         session = stimulus_session(stimuli, channels, self._session_task(),
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
-        return {channel: session.collect(channel) for channel in channels}
+        return {channel: session.collect(channel) for channel in channels}, list(session.emitted)
 
 
 def _fitted_labels(task, fitting_stimuli):
@@ -383,8 +361,6 @@ def _label_list(task, fitting_stimuli):
     return labels
 
 
-# The attribute in which an old model's adapter carries what the stored format does not keep.
-_LEGACY_METADATA = 'legacy_metadata'
 # Coordinates core adds to a stored answer; the legacy label answer has none of them.
 _STORED_ONLY = ('raw_answer', 'response_state', 'response_reason', 'answer_valid', 'parse_error')
 
