@@ -12,6 +12,7 @@ from brainscore_core import Subject
 from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 
+# Subject: answers each text with the text itself
 class EchoSubject(Subject):
     identifier = "echo"
     in_channels = {"text"}
@@ -20,6 +21,7 @@ class EchoSubject(Subject):
 
     def participate(self, session):
         while (event := session.next_input()) is not None:
+            # One answer row, labelled with the input's stimulus_id
             answer = BehavioralAssembly(
                 [event.payload],
                 coords={"stimulus_id": ("presentation", [event.meta["stimulus_id"]]),
@@ -29,6 +31,7 @@ class EchoSubject(Subject):
                 channel="behavior", payload=answer,
                 t_ms=event.t_ms, meta=dict(event.meta)))
 
+# One input on 'text'; check the stored answer
 subject = EchoSubject()
 session = Session(
     [StreamEvent(channel="text", payload="hello", t_ms=0.0,
@@ -64,8 +67,9 @@ benchmark applies its metric to those responses. `apply_state_change` and
 To build a session yourself, use one of two builders with the same shape:
 
 ```python
-session = stimulus_session(stimuli, ['neural:IT'], task, time_bins=[(70, 170)])
-session = stimulus_session(stimuli, ['behavior', 'neural:IT'], task, streaming=True)
+# Arguments: stimuli or environment, requested outputs, task
+session = stimulus_session(stimuli, ['neural:IT'], task, time_bins=[(70, 170)])   # IT, 70-170 ms
+session = stimulus_session(stimuli, ['behavior', 'neural:IT'], task, streaming=True)   # one row at a time
 session = environment_session(environment, ['motor'], task, seed=0)
 ```
 
