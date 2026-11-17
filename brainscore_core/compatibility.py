@@ -467,12 +467,10 @@ def check_compatibility(model: Subject, benchmark) -> CompatibilityMatch:
         if bench_available - bench_required:
             warnings.warn(
                 f"Benchmark '{_benchmark_identifier(benchmark)}' sets "
-                f"`available_modalities={bench_available}` — this field is "
-                f"deprecated as of the April 30, 2026 design decision. "
-                f"Benchmarks now declare exactly one input format via "
-                f"`required_modalities`. Multiple input formats should be "
-                f"registered as separate benchmark variants. See "
-                f"meeting-unified-interface-2026-04-30 for context.",
+                f"`available_modalities={bench_available}`, which is deprecated. "
+                f"Declare the benchmark's inputs in `required_input_channels` (or keep "
+                f"its stimuli as `stimulus_set`), and register each other input form "
+                f"as a separate benchmark variant.",
                 DeprecationWarning,
                 stacklevel=2,
             )

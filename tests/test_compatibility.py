@@ -202,7 +202,7 @@ class TestVisualFormsAreSeparateChannels:
 # ── Deprecated benchmark.available_modalities ────────────────────────
 
 class TestDeprecatedBenchmarkAvailableModalities:
-    """Post-April 30, 2026: benchmark-side available_modalities is deprecated.
+    """Benchmark-side available_modalities is deprecated.
     Setting it emits a DeprecationWarning and otherwise no longer affects
     compatibility (the benchmark's *required* set is now its full input
     format declaration)."""
@@ -213,7 +213,7 @@ class TestDeprecatedBenchmarkAvailableModalities:
             required_modalities={'vision'},
             available_modalities={'audio'},
         )
-        with pytest.warns(DeprecationWarning, match="deprecated as of the April 30"):
+        with pytest.warns(DeprecationWarning, match="available_modalities.*deprecated"):
             check_compatibility(model, bench)
 
     def test_redundant_available_no_warning(self):
@@ -231,7 +231,7 @@ class TestDeprecatedBenchmarkAvailableModalities:
     def test_warning_fires_before_the_compatibility_error(self):
         """An incompatible pair still shows the maintainer the deprecation."""
         bench = FakeBenchmark(required_modalities={'vision'}, available_modalities={'audio'})
-        with pytest.warns(DeprecationWarning, match="deprecated as of the April 30"):
+        with pytest.warns(DeprecationWarning, match="available_modalities.*deprecated"):
             with pytest.raises(CompatibilityError):
                 check_compatibility(FakeModel(in_channels={'text'}), bench)
 
