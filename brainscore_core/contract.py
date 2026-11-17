@@ -35,13 +35,13 @@ class TaskContext:
 
     Benchmarks populate all relevant fields. Models consume whichever
     fields match their paradigm:
-    - Feature models use fitting_stimuli + label_set to train a readout
-      (``BrainScoreModel(behavioral_readout_layer=...)``)
-    - Instruction-following models use instruction + label_set with their
-      ``answer`` function (``BrainScoreModel(answer=...)``)
-    - Which part answers is a property of the model, not of the task: a
-      model built with both answers through its answering part when the
-      task gives an instruction; a model built without it uses its readout
+    - A readout is fitted on ``fitting_stimuli`` with the labels of the
+      response (``BrainScoreModel(behavioral_readout_layer=...)``)
+    - An ``answer``, ``reply`` or ``likelihood`` part reads the instruction
+      and the response's options
+    - Which part answers each format is a property of the model, not of the
+      task: the one part that gives the format, or the part that the
+      registration states
 
     ``BrainScoreModel`` answers a task with a ``response`` or ``task_type='passive'``.
     Put the stimuli to answer (for example a held-out test set) to
