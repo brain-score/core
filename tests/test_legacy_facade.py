@@ -655,3 +655,28 @@ def test_an_old_models_own_answer_object_reaches_the_old_benchmark_unchanged():
     facade.start_task('probabilities', fitting_stimuli=_labelled_images())
     answer = facade.look_at(_images())
     assert answer is subject.own
+
+
+class _NewSubjectWithThatMeta(_ProbabilityAnswerer):
+    """A subject that is not an old model and writes the same meta key with another assembly."""
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids, labels = list(session.stimuli['stimulus_id']), list(session.task.response.labels)
+        rows = np.tile([0.25, 0.75], (len(ids), 1))
+        answer = BehavioralAssembly(rows, dims=['presentation', 'choice'],
+                                    coords={'stimulus_id': ('presentation', ids), 'choice': labels},
+                                    attrs={'response': response_record('behavior:probabilities', 'external')})
+        other = answer.copy(deep=True)
+        other.values[:] = [0.9, 0.1]
+        session.respond(StreamEvent('behavior:probabilities', answer, None, {'legacy_answer': other}))
+
+
+def test_the_old_benchmark_receives_a_new_subjects_checked_answer_whatever_its_meta():
+    facade = LegacyBenchmarkFacade(_NewSubjectWithThatMeta())
+    facade.start_task('probabilities', fitting_stimuli=_labelled_images())
+    answer = facade.look_at(_images())
+    assert answer.values.tolist() == [[0.25, 0.75]] * 2

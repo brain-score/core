@@ -194,7 +194,7 @@ class LegacyBenchmarkFacade:
             # answer (meta 'legacy_answer'): that very object reaches the old benchmark, as on
             # the bare channel. Any other subject's answer is rebuilt from the stored table.
             old = [event.meta['legacy_answer'] for event in emitted
-                   if event.channel == channel and 'legacy_answer' in (event.meta or {})]
+                   if event.channel == channel and _old_models_answer(event)]
             answer = old[-1] if old else self._old_probabilities(measured[channel])
             return _with_stimulus_columns(self._resolve(answer), stimuli)
         if channel == 'behavior':
@@ -315,6 +315,19 @@ class LegacyBenchmarkFacade:
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}, list(session.emitted)
+
+
+def _old_models_answer(event) -> bool:
+    """Whether an answer event carries an old model's own answer object: its response record
+    states an old model's own answer (method ``legacy``, origin ``native``; the test of the
+    label path) and ``meta['legacy_answer']`` is an assembly. Any other subject's meta of that
+    name is not read: its checked answer reaches the old benchmark."""
+    import xarray as xr
+    payload = event.payload
+    record = payload.get('response') if isinstance(payload, dict) else getattr(payload, 'attrs', {}).get('response')
+    record = record or {}
+    return (record.get('method') == 'legacy' and record.get('origin') == 'native'
+            and isinstance((event.meta or {}).get('legacy_answer'), xr.DataArray))
 
 
 def _fitted_labels(task, fitting_stimuli):
