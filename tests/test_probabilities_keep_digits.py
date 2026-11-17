@@ -102,3 +102,15 @@ def test_a_float64_cell_is_judged_on_the_digits_that_are_kept(row, state):
     session.respond(StreamEvent(CHANNEL, np.array([0.5, 0.5]), None, {'stimulus_id': 's1'}))
     states = session.collect(CHANNEL)['response_state'].values
     assert list(states) == [state, 'valid']
+
+
+def test_a_missing_trial_keeps_the_reason_its_producer_gives():
+    session = _session()
+    answer = BehavioralAssembly(np.full((2, 2), np.nan), dims=['presentation', 'choice'], coords={
+        'stimulus_id': ('presentation', ['s0', 's1']), 'raw_answer': ('presentation', [None, None]),
+        'response_reason': ('presentation', ['the old answer names no trial', '']), 'choice': ['cat', 'dog']},
+        attrs={'response': response_record(CHANNEL, 'readout')})
+    session.respond(StreamEvent(CHANNEL, answer, None, {}))
+    stored = session.collect(CHANNEL)
+    assert list(stored['response_state'].values) == ['missing', 'missing']
+    assert list(stored['response_reason'].values) == ['the old answer names no trial', 'no answer']

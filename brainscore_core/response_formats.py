@@ -35,7 +35,7 @@ A malformed response raises ``ValueError`` and is never stored.
 
 The collected answer keeps its rows in the order they arrived. Each row has
 ``raw_answer``, ``response_state`` (``valid``, ``invalid``, ``missing``) and
-``response_reason``; the attrs hold the record, except for an answer whose
+``response_reason`` (for a missing trial, the reason the producer gives, if any); the attrs hold the record, except for an answer whose
 trials were all missing (nothing answered, so no record). An answer is
 expected for each row of a session's table (by occurrence: the k-th answer
 row with stimulus id X answers the k-th table row with id X) and, in a
@@ -678,7 +678,12 @@ def _rows(channel, payload, event, session):
     if supplied is not None and list(supplied) != states:
         raise ValueError(f'the supplied states {list(supplied)} contradict the '
                          f'values, which give {states}')
-    coords.pop('response_reason', None)
+    # A missing trial keeps the reason its producer gives (why there is no answer); every
+    # other reason is the format's own.
+    given = coords.pop('response_reason', None)
+    if given is not None:
+        why = [str(given[i]) if state == 'missing' and not _null(given[i]) and given[i] else reason
+               for i, (state, reason) in enumerate(zip(states, why))]
     coords['response_state'], coords['response_reason'] = states, why
     return values, coords, record, attrs
 
