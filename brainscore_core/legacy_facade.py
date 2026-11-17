@@ -208,20 +208,50 @@ class LegacyBenchmarkFacade:
         other subject, as its answer on that channel carried it. A row with no answer (state
         ``missing``) is left out, as an old answer has no row for it. A float coordinate whose
         NaN the stored answer keeps as None gets its NaN back.
+
+        What the format does not keep of an old answer arrives in ``attrs['legacy_metadata']``
+        (the vision adapter sets it): the old attributes, which replace the stored ones, the old
+        coordinates on other dimensions and the old presentation coordinates whose names core
+        uses for its own columns (``raw_answer``, the trial states), each back in its place in
+        the old order of the coordinates.
         """
         import numpy as np
         from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+        carried = answer.attrs.get(_LEGACY_METADATA) or {}
         states = _presentation_columns(answer).get('response_state')
-        if states is not None:
-            answer = answer.isel(presentation=np.asarray(states) != 'missing')
+        kept = None if states is None else np.asarray(states) != 'missing'
+        if kept is not None:
+            answer = answer.isel(presentation=kept)
         columns = {name: _without_none(values) for name, values in _presentation_columns(answer).items()
                    if name not in _STORED_ONLY}
-        coords = {name: ('presentation', values) for name, values in columns.items()}
-        coords['choice'] = list(self._probability_labels)
-        attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
-        record = answer.attrs.get('response')
-        if record is not None and record.get('method') != 'legacy':
-            attrs['response'] = {**record, 'format': 'behavior'}
+        old = carried.get('coords', {})
+        restored = {}
+        for name, (dims, values) in old.items():
+            if tuple(dims) == ('presentation',):
+                values = np.asarray(values) if kept is None else np.asarray(values)[kept]
+            restored[name] = (dims, values)
+        presentation = carried.get('presentation') or list(columns)
+        presentation += [name for name in columns if name not in presentation]
+        parts = {name: (restored[name] if name in restored else ('presentation', columns[name]))
+                 for name in presentation if name in restored or name in columns}
+        parts['choice'] = list(self._probability_labels)
+        parts.update({name: value for name, value in restored.items() if name not in parts})
+        order = carried.get('order')
+        coords = {}
+        for name in (order or []):
+            if name == 'presentation':
+                coords.update({key: value for key, value in parts.items()
+                               if value[0] in ('presentation', ('presentation',)) and key in presentation})
+            elif name in parts:
+                coords[name] = parts[name]
+        coords.update({name: value for name, value in parts.items() if name not in coords})
+        if carried:
+            attrs = dict(carried.get('attrs', {}))
+        else:
+            attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
+            record = answer.attrs.get('response')
+            if record is not None and record.get('method') != 'legacy':
+                attrs['response'] = {**record, 'format': 'behavior'}
         return BehavioralAssembly(np.asarray(answer.transpose('presentation', 'choice').values),
                                   coords=coords, dims=['presentation', 'choice'], attrs=attrs)
 
@@ -353,6 +383,8 @@ def _label_list(task, fitting_stimuli):
     return labels
 
 
+# The attribute in which an old model's adapter carries what the stored format does not keep.
+_LEGACY_METADATA = 'legacy_metadata'
 # Coordinates core adds to a stored answer; the legacy label answer has none of them.
 _STORED_ONLY = ('raw_answer', 'response_state', 'response_reason', 'answer_valid', 'parse_error')
 

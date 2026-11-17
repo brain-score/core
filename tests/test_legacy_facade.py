@@ -232,7 +232,8 @@ def test_an_old_probabilities_task_is_a_choice_among_the_fitted_labels_in_their_
     assert answer.dims == ('presentation', 'choice')
     assert list(answer['choice'].values) == ['dog', 'cat', 'bird']
     assert answer.values.dtype == np.float64                      # the digits the subject gave
-    assert 'response_state' not in answer.coords                   # the old answer has no stored columns
+    levels = set(answer.indexes['presentation'].names) | set(answer.coords)
+    assert not levels & {'response_state', 'response_reason', 'raw_answer'}   # no stored columns
 
 
 def test_an_old_probabilities_task_is_refused_before_compute_without_the_format():
