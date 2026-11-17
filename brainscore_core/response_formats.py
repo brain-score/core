@@ -561,6 +561,9 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
     if isinstance(_response_of(session), Segments) and not segment:
         raise ValueError('a Segments task is answered in the segment layout, not '
                          f"{record['parameters'].get('layout')!r}")
+    if isinstance(_response_of(session), Segments) and record['parameters'].get('aggregation') != 'sum':
+        raise ValueError('a Segments task asks for the summed log probability of each part, not '
+                         f"the aggregation {record['parameters'].get('aggregation')!r}")
     if segment:
         # A segment answer's axis is the positions 1 to R of the trial's segments (standard 2.3).
         axis = list(payload['choice'].values)

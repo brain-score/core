@@ -320,13 +320,13 @@ def _row_choice(response: 'Choice', stimulus_row) -> 'Choice':
 def _row_segments(response: 'Segments', stimulus_row, texts) -> 'Segments':
     """``response`` with the row's own parts; the row's text must be their join."""
     from .text import prepare_context
-    if not isinstance(response.segments, str):
-        return response
-    parts = _cell(stimulus_row, response.segments)
-    if parts is None or isinstance(parts, str):
-        raise ValueError(f'Column {response.segments!r} must hold a sequence of str in every '
-                         f'row; got {parts!r}')
-    resolved = Segments(tuple(parts))
+    resolved = response
+    if isinstance(response.segments, str):
+        parts = _cell(stimulus_row, response.segments)
+        if parts is None or isinstance(parts, str):
+            raise ValueError(f'Column {response.segments!r} must hold a sequence of str in every '
+                             f'row; got {parts!r}')
+        resolved = Segments(tuple(parts))
     if texts != [prepare_context(resolved.segments)]:
         raise ValueError(f'The text of a Segments row is the join of its parts '
                          f'({prepare_context(resolved.segments)!r}); got {texts!r}')
