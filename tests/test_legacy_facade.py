@@ -632,8 +632,8 @@ def test_an_answer_with_every_column_is_returned_as_is_even_when_the_table_has_a
 
 
 class _OldModelAdapter(_ProbabilityAnswerer):
-    """Answers the format and, when the facade asks (setting legacy_answer), adds its old
-    model's own answer object to the answer event, as an old model's adapter does."""
+    """Answers the format and records its old model's own answer object in the meta of the
+    answer event, as an old model's adapter does."""
 
     def participate(self, session):
         from brainscore_core.response_formats import response_record
@@ -646,8 +646,7 @@ class _OldModelAdapter(_ProbabilityAnswerer):
                                       attrs={'calibration': 'old'})
         stored = self.own.copy()
         stored.attrs = {'response': response_record('behavior:probabilities', 'legacy')}
-        meta = {'legacy_answer': self.own} if (session.settings or {}).get('legacy_answer') else {}
-        session.respond(StreamEvent('behavior:probabilities', stored, None, meta))
+        session.respond(StreamEvent('behavior:probabilities', stored, None, {'legacy_answer': self.own}))
 
 
 def test_an_old_models_own_answer_object_reaches_the_old_benchmark_unchanged():

@@ -176,8 +176,6 @@ class LegacyBenchmarkFacade:
         else:
             channel = 'behavior' if self._behavior_requested() else self._neural_channel('look_at')
         settings = {'number_of_trials': number_of_trials, 'require_variance': require_variance}
-        if channel == 'behavior:probabilities':
-            settings['legacy_answer'] = True     # an old model's adapter adds its old answer object
         measured, emitted = self._measure(stimuli, [channel], settings)
         if channel == 'behavior:choice':
             answer = measured[channel]
