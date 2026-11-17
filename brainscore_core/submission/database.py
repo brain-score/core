@@ -12,6 +12,7 @@ from brainscore_core.submission.database_models import (database_proxy, \
     Submission, Model, User, BenchmarkType, BenchmarkInstance, Reference, Score, ModelMeta, PeeweeBase)
 from brainscore_core.submission.utils import get_secret
 from brainscore_core.submission.eligibility import require_leaderboard_eligible
+from brainscore_core.score_status import STATUS_NA
 from brainscore_core.plugin_management.metadata_utils import (get_existing_meta_ids, process_stimuli_metadata,
                                                               process_data_metadata, process_metric_metadata,
                                                               update_benchmark_instances, BenchmarkMetaResult)
@@ -389,6 +390,11 @@ def reference_from_bibtex(bibtex_string: str) -> Union[Reference, None]:
         return None
 
 
+# The comment prefix of a stored N/A result. It is reserved: the run endpoint
+# writes it, and a stored result with it is not run again.
+_NA_COMMENT = f'{STATUS_NA}: '
+
+
 def update_score(score: ScoreObject, entry: Score):
     # Check before mutating an existing entry, including already published scores.
     require_leaderboard_eligible(score.attrs.get('leaderboard_eligible', True))
@@ -401,7 +407,11 @@ def update_score(score: ScoreObject, entry: Score):
         entry.score_ceiled = retrieve_score_center(score)
     entry.error = retrieve_score_error(score)
     if 'comment' in score.attrs:
-        entry.comment = score.attrs['comment']
+        comment = score.attrs['comment']
+        # An ordinary comment must not read as a stored N/A result.
+        if isinstance(comment, str) and comment.startswith(_NA_COMMENT):
+            comment = f'Comment: {comment}'
+        entry.comment = comment
     logger.debug(f"updating raw score: {entry.score_raw}, ceiled score: {entry.score_ceiled}, error: {entry.error}, "
                  f"comment: {entry.comment}")
     entry.save()

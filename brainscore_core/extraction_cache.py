@@ -1,6 +1,6 @@
 """Deterministic provenance for activation extraction (no framework imports).
 
-Wrappers declare their extraction settings; custom stateful providers can expose
+Wrappers declare their extraction settings; custom stateful objects can expose
 ``cache_config()`` returning immutable configuration, excluding counters and lazy
 memoization. Unsupported or cyclic state bypasses caching, never falls back to a
 name-only key. File contents are checked at each lookup. Tensor hashes can be
@@ -13,7 +13,9 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import sys
+import threading
 import types
 import weakref
 from collections.abc import Mapping
@@ -35,13 +37,53 @@ def weight_fingerprint_scope():
 
     Normal tensor edits and storage replacement invalidate entries. Writes via
     .data aliases or NumPy bypass version counters and must occur between runs.
-    Outside this scope every lookup reads the full tensor contents.
+    Outside this scope every lookup reads the full tensor contents. A scope
+    opened inside an active one reuses it, so a session in a scored run shares
+    the run's hashes.
     """
+    if _weight_hashes.get() is not None:
+        yield
+        return
     token = _weight_hashes.set({})
     try:
         yield
     finally:
         _weight_hashes.reset(token)
+
+
+# The process-wide activation cache switch while a subject's intervention is
+# active. Known gap (Contract Rule 4.4): the legacy vision store reads only the
+# RESULTCACHING_DISABLE variable, so the switch is that variable.
+_cache_disable_depth = 0
+_cache_disable_prev = None
+_cache_disable_lock = threading.Lock()
+
+
+@contextmanager
+def activation_cache_disabled():
+    """Bypass result_caching for the duration. Used when an intervention makes the
+    cached (unchanged) activations invalid but the cache key cannot see it.
+
+    Reentrancy- and thread-safe via a lock-guarded depth counter: nested,
+    interleaved, or concurrent contexts only restore the original
+    ``RESULTCACHING_DISABLE`` when the outermost/last one exits (a plain
+    save/restore would clear the flag early; an unlocked counter would race)."""
+    global _cache_disable_depth, _cache_disable_prev
+    with _cache_disable_lock:
+        if _cache_disable_depth == 0:
+            _cache_disable_prev = os.environ.get('RESULTCACHING_DISABLE')
+            os.environ['RESULTCACHING_DISABLE'] = '1'
+        _cache_disable_depth += 1
+    try:
+        yield
+    finally:
+        with _cache_disable_lock:
+            _cache_disable_depth -= 1
+            if _cache_disable_depth == 0:
+                if _cache_disable_prev is None:
+                    os.environ.pop('RESULTCACHING_DISABLE', None)
+                else:
+                    os.environ['RESULTCACHING_DISABLE'] = _cache_disable_prev
 
 
 class UncacheableConfiguration(ValueError):
@@ -132,7 +174,7 @@ def _version(value):
 
 def _canonical(value, active):
     if len(active) > 64:
-        raise UncacheableConfiguration('provider state is too deeply nested; define cache_config()')
+        raise UncacheableConfiguration('the state is too deeply nested; define cache_config()')
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
     if isinstance(value, np.generic):
@@ -230,22 +272,35 @@ def _canonical(value, active):
     raise UncacheableConfiguration(f'unsupported {_name(value)}; define cache_config()')
 
 
-def fingerprint(configuration):
-    """Return a stable, versioned key; never use repr() or object addresses."""
-    payload = json.dumps(_canonical(configuration, set()), sort_keys=True,
-                         separators=(',', ':'), ensure_ascii=True)
+def _digest(canonical):
+    payload = json.dumps(canonical, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     return 'v2-' + hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
-def extraction_fingerprint(configuration, *, cache_identifier=None):
-    """Fail closed for opaque third-party providers, leaving extraction runnable."""
+def fingerprint(configuration):
+    """Return a stable, versioned key; never use repr() or object addresses."""
+    return _digest(_canonical(configuration, set()))
+
+
+def extraction_fingerprint(configuration, *, cache_identifier=None, part=None):
+    """Fail closed for opaque third-party objects, leaving extraction runnable.
+
+    With ``part`` (a key of the ``configuration`` mapping), returns a pair: the
+    fingerprint of the whole configuration and the fingerprint of that part,
+    both from one traversal, so no tensor is read twice. The part's value equals
+    ``fingerprint(configuration[part])``. ``(None, None)`` where the whole is None.
+    """
     if cache_identifier is not None and not is_enabled(cache_identifier):
-        return None
+        return None if part is None else (None, None)
     try:
-        return fingerprint(configuration)
+        if part is None:
+            return fingerprint(configuration)
+        canonical = _canonical(configuration, set())
+        value = next(item for key, item in canonical['mapping'] if key == part)
+        return _digest(canonical), _digest(value)
     except UncacheableConfiguration as error:
         logger.warning('Activation cache bypassed: %s', error)
-        return None
+        return None if part is None else (None, None)
 
 
 def model_config(model):
@@ -320,26 +375,3 @@ class store_xarray(_store_xarray):
                 logger.info('Activation cache miss: %s; unversioned entries are retained but cannot be reused',
                             identifier)
         return identifier
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    weight_fingerprint_scope,
-    UncacheableConfiguration,
-    FileContent,
-    file_inputs,
-    _tensor_chunks,
-    _hash_tensor,
-    _tensor_content,
-    _name,
-    _version,
-    _canonical,
-    fingerprint,
-    extraction_fingerprint,
-    model_config,
-    wrapper_config,
-    implementation_config,
-    store_xarray,
-):
-    _definition.__module__ = 'brainscore_core.extraction_cache'
-del _definition

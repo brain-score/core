@@ -236,3 +236,18 @@ def test_failed_plugin_install_stops_before_import(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, 'run', fail)
     with pytest.raises(PluginDependencyError, match='dummy'):
         installer.install_requirements()
+
+
+def test_conda_score_passes_a_path_with_a_space_as_one_argument(tmp_path, monkeypatch):
+    from brainscore_core.plugin_management.conda_score import CondaScore
+    monkeypatch.setattr(EnvironmentManager, 'get_conda_base', lambda _: str(tmp_path / 'conda base'))
+    library = tmp_path / "checkout space's $literal" / 'brainscore_dummy'
+    calls = []
+    monkeypatch.setattr(EnvironmentManager, 'run_in_env',
+                        lambda self, command: calls.append(command) or subprocess.CompletedProcess(command, 0))
+    CondaScore(library / '__init__.py', 'dummy-model', 'dummy-benchmark').score_in_env()
+    command, = calls
+    assert isinstance(command, list)
+    assert command[1].endswith('conda_score.sh') and Path(command[1]).is_file()
+    assert command[2:] == [str(library.parent), 'brainscore_dummy', 'dummy-model', 'dummy-benchmark',
+                           'dummy-model_dummy-benchmark', str(tmp_path / 'conda base' / 'envs')]

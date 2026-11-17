@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Tuple, Union
 import requests
 from requests.auth import HTTPBasicAuth
 from brainscore_core import Benchmark, Score
+from brainscore_core.score_status import STATUS_NA
 from brainscore_core.submission import database_models
 
 # User management imports
@@ -38,7 +39,7 @@ from brainscore_core.submission.database import (
     public_benchmark_identifiers)
 
 # Scoring imports
-from brainscore_core.submission.database import update_score
+from brainscore_core.submission.database import _NA_COMMENT, update_score
 from brainscore_core.submission.eligibility import require_leaderboard_eligible
 
 logger = logging.getLogger(__name__)
@@ -293,8 +294,12 @@ class RunScoringEndpoint:
         start_timestamp = datetime.now()
         score_entry, created = database_models.Score.get_or_create(benchmark=benchmark_entry, model=model_entry,
                                                                    defaults={'start_timestamp': start_timestamp, })
-        if not created and score_entry.score_raw is not None:
-            logger.warning(f'A score for model {model_identifier} and benchmark {benchmark_identifier} already exists')
+        # A stored score, or a stored N/A (NaN with an 'N/A: ' comment), is a result:
+        # the pair is not run again. A database without NaN (SQLite) stores it as NULL,
+        # so the comment marks it too. A failed run stores neither and is retried.
+        if not created and (score_entry.score_raw is not None
+                            or (score_entry.comment or '').startswith(_NA_COMMENT)):
+            logger.warning(f'A result for model {model_identifier} and benchmark {benchmark_identifier} already exists')
             return
 
         if not created:  # previous score entry exists, but no score was stored
@@ -308,6 +313,18 @@ class RunScoringEndpoint:
             score_result = self.domain_plugins.score(
                 model_identifier=model_identifier, benchmark_identifier=benchmark_identifier)
             score_entry.end_timestamp = datetime.now()
+            if score_result.attrs.get('status') == STATUS_NA:
+                # Not applicable (from the declarations): NaN is the stored result and
+                # the comment gives the reason. No score file is uploaded.
+                logger.info(f'{model_identifier} on {benchmark_identifier} is N/A: '
+                            f'{score_result.attrs["reason"]}')
+                score_entry.score_raw = float('nan')
+                score_entry.score_ceiled = float('nan')
+                score_entry.comment = shorten_text(
+                    f'{_NA_COMMENT}{score_result.attrs["reason"]}',
+                    max_length=database_models.Score.comment.max_length)
+                score_entry.save()
+                return
             # store in database
             logger.info(f'Score from running {model_identifier} on {benchmark_identifier}: {score_result}')
             update_score(score_result, score_entry)

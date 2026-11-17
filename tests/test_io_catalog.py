@@ -22,15 +22,15 @@ class TestSeedCatalog:
         assert expected <= names
 
     def test_inputs_and_outputs_partition(self):
-        inputs = {e.name for e in io_catalog.inputs()}
-        outputs = {e.name for e in io_catalog.outputs()}
+        inputs = {e.name for e in io_catalog.all_entries() if e.direction == INPUT}
+        outputs = {e.name for e in io_catalog.all_entries() if e.direction == OUTPUT}
         assert "vision" in inputs and "lesion" in inputs
         assert {"neural", "behavior", "motor"} <= outputs
         assert inputs.isdisjoint(outputs)
 
     def test_every_entry_is_documented(self):
         for e in io_catalog.all_entries():
-            assert e.kind in (INPUT, OUTPUT)
+            assert e.direction in (INPUT, OUTPUT)
             assert e.payload_contract, f"{e.name} has no payload contract"
             assert e.handled_by, f"{e.name} has no handler"
 
@@ -66,10 +66,6 @@ class TestLookup:
         with pytest.raises(KeyError):
             io_catalog.get("telepathy")
 
-    def test_describe_returns_text(self):
-        text = io_catalog.describe("neural:IT")
-        assert "neural" in text and "carried by" in text
-
 
 class TestCheckPayload:
     def test_valid_vision_payload_has_no_warnings(self):
@@ -99,11 +95,11 @@ class TestRegister:
     def test_register_and_get_roundtrip(self, monkeypatch):
         monkeypatch.setattr(io_catalog, "_CATALOG", dict(io_catalog._CATALOG))
         entry = CatalogEntry(
-            name="pupil", kind=OUTPUT, carried_by="start_recording('pupil')",
+            name="pupil", direction=OUTPUT, carried_by="start_recording('pupil')",
             payload_contract="(time,) float diameter in mm",
             handled_by="an eye-tracker harness",
         )
-        io_catalog.register(entry, replace=True)  # 'pupil' is a seeded family
+        io_catalog.register_channel(entry, replace=True)  # 'pupil' is a seeded family
         assert io_catalog.get("pupil") is entry
         assert io_catalog.get("pupil:left").name == "pupil"
 
@@ -111,13 +107,13 @@ class TestRegister:
         monkeypatch.setattr(io_catalog, "_CATALOG", dict(io_catalog._CATALOG))
         original = io_catalog.get("pupil")
         clash = CatalogEntry(
-            name="pupil", kind=OUTPUT, carried_by="x", payload_contract="x",
+            name="pupil", direction=OUTPUT, carried_by="x", payload_contract="x",
             handled_by="another harness",
         )
         with pytest.raises(ValueError, match="already registered"):
-            io_catalog.register(clash)
+            io_catalog.register_channel(clash)
         assert io_catalog.get("pupil") is original
-        io_catalog.register(original)  # same object: allowed, no change
+        io_catalog.register_channel(original)  # same object: allowed, no change
 
 
 class TestPayloadTypes:

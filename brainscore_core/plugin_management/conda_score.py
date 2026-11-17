@@ -19,7 +19,7 @@ class CondaScore(EnvironmentManager):
         self.model = model_identifier
         self.benchmark = benchmark_identifier
         self.env_name = f'{self.model}_{self.benchmark}'
-        self.script_path = f'{Path(__file__).parent}/conda_score.sh'
+        self.script_path = Path(__file__).parent / 'conda_score.sh'
 
     def __call__(self):
         self.result = self.score_in_env()
@@ -29,9 +29,10 @@ class CondaScore(EnvironmentManager):
         """
         calls bash script to create conda environment, then hands execution back to score()
         """
-        run_command = f"bash {self.script_path} \
-                {self.library_path.parent} {self.library_path.name} \
-                {self.model} {self.benchmark} {self.env_name} {self.envs_dir}"
+        # An argument list, not a shell string: a path can contain a space.
+        run_command = ['bash', str(self.script_path), str(self.library_path.parent),
+                       self.library_path.name, self.model, self.benchmark, self.env_name,
+                       str(self.envs_dir)]
 
         completed_process = self.run_in_env(run_command)
         completed_process.check_returncode()

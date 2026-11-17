@@ -6,7 +6,7 @@ from brainscore_core.extensions import StreamEvent
 @pytest.fixture(autouse=True)
 def registries(monkeypatch):
     monkeypatch.setattr(io_catalog, '_CATALOG', dict(io_catalog._CATALOG))
-    monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', {})
+    monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', dict(io_catalog._STIMULUS_COLUMNS))
 
 
 def test_environment_action_validation_precedes_step():

@@ -15,6 +15,13 @@ tells us is the recording layer's feature width — which is *stimulus-invariant
 so a single-stimulus probe (or an explicit ``feature_dim`` / ``expected_feature_dim``
 declaration) suffices, and everything else is arithmetic.
 
+What it reads from a benchmark (listed for authors in the unified benchmark guide):
+``stimulus_set``, ``train_assembly``, ``test_assembly``, ``expected_n_presentations``,
+``n_targets``, ``alpha_coord``, ``expected_feature_dim``, ``region``, ``timebins``,
+``requested_output_channels``, ``execution_plan`` and ``identifier``. Stated exception
+(rule 2.2): Brain-Score 2.0 benchmarks keep their sizes in the private ``_assembly`` and
+``_similarity_metric``, which cannot be edited, so those two are read as well.
+
 Cross-platform: CUDA (torch.cuda), MPS (psutil), CPU (psutil).
 brainscore_core stays free of heavy dependencies -- torch is optional.
 """
@@ -25,7 +32,7 @@ import sys
 import warnings
 from typing import Optional
 
-from brainscore_core._evaluation.execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
+from brainscore_core.execution_plan import ExecutionPlan, _positive_int as _validate_positive_int
 from brainscore_core.contract import Subject
 
 logger = logging.getLogger('brainscore_core.memory')
@@ -374,7 +381,7 @@ def _probe_regions(model, benchmark):
     would sum several layers and inflate the feature width, and would request a
     modality a single-tower wrapper can't serve). A model's ``region_layer_map``
     order is kept when it has one. ``[None]`` means no neural output is declared
-    (e.g. a behavioral candidate) — nothing to probe.
+    (e.g. a behavioral subject) — nothing to probe.
 
     A subject that declares ``probe_safe_regions`` (the regions it can record
     without first running work the benchmark may never ask for, e.g. a legacy
@@ -453,21 +460,29 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
         except Exception:
             one = stimulus_set
         one = _isolate_probe_identifier(one, stimulus_set)
-    from brainscore_core._sessions.helpers import neural_response
+    from brainscore_core.streaming_helpers import neural_response
     time_bins = getattr(benchmark, 'timebins', None)
     regions = ([recording_target] if recording_target is not None
                else _probe_regions(model, benchmark))
+    if regions == [None]:
+        # No neural region to record for this probe (for example a behavior benchmark with no
+        # region and no declared width): the width cannot be measured here. Not a failure of a
+        # probe, so one line and no traceback; the run still holds whatever features it uses.
+        undeclared = getattr(benchmark, 'requested_output_channels', None) is None
+        logger.warning(
+            "Memory estimate not made: no neural region (neural:<region>) is available for the "
+            "feature-width probe of benchmark %r%s, so memory is not guarded for this run. To "
+            "estimate anyway, declare the width: check_memory(model, benchmark, feature_dim=...), "
+            "or expected_feature_dim on the benchmark or feature_dim on the model.",
+            getattr(benchmark, 'identifier', type(benchmark).__name__),
+            ' (the subject declares no probe_safe_regions)' if undeclared else '')
+        return None, None
     last_error = None
     for region in regions:
         # One session through participate, the same way every subject is
         # evaluated; no probing of the subject's methods or class.
         try:
-            if region is None:
-                raise ValueError('Feature-width probe requires a neural output '
-                                 'channel (neural:<region>); for a benchmark that names '
-                                 'none, only the subject\'s probe_safe_regions are '
-                                 'probed when it declares them')
-            result = neural_response(model, one, record=region, time_bins=time_bins)
+            result = neural_response(model, one, [f'neural:{region}'], time_bins=time_bins)
         except Exception as e:
             last_error = e
             continue
@@ -479,8 +494,8 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
     logger.warning(
         "Memory pre-flight could NOT run: no region yielded a readable feature "
         "width (last error: %s), so no estimate was made and the OOM guard is OFF "
-        "for this run. Pass feature_dim=... to estimate anyway, or check_mem=False "
-        "to silence.",
+        "for this run. To estimate anyway, call check_memory(model, benchmark, "
+        "feature_dim=...); to silence this, pass check_mem=False to score().",
         last_error,
         exc_info=last_error if isinstance(last_error, BaseException) else None,
     )
@@ -553,7 +568,7 @@ def check_memory(
     ``n_features`` to a probe / ``expected_feature_dim`` / ``model.feature_dim``.
     Every result on this path is flagged APPROXIMATE.
 
-    Skips (loudly) when no feature width can be resolved — e.g. a candidate that
+    Skips (loudly) when no feature width can be resolved — e.g. a subject that
     only configures recording inside the benchmark's ``__call__`` and the plan
     supplies no ``probe_stimuli`` (the guard is OFF for that run, not "safe").
 
@@ -664,7 +679,10 @@ def check_memory(
             f"{' [declared]' if cardinality_declared else ' [approx]'}). "
             f"Available host RAM: {total_system / 1e9:.1f} GB. This {grounding} "
             f"estimate uses heuristic workspace factors and may over-count — if it "
-            f"is a false rejection, set check_mem=False."
+            f"is a false rejection, set check_mem=False. To lower the extraction peak "
+            f"of a session that records several regions, set the environment variable "
+            f"BRAINSCORE_REGIONS_PER_PASS=one: each region then gets its own model pass "
+            f"(more passes, same scores); the default, all, records every region in one pass."
         )
 
     utilization = total_estimated / total_system if total_system > 0 else 0
@@ -694,30 +712,3 @@ def check_memory(
             f"{available / 1e9:.1f} GB). OOM risk is elevated.",
             ResourceWarning,
         )
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    MemoryError,
-    get_available_memory,
-    get_host_available_memory,
-    get_peak_memory,
-    reset_peak_memory,
-    _get_peak_rss,
-    _detect_metric_category,
-    _get_n_targets,
-    _get_n_stimuli,
-    _get_n_alphas,
-    estimate_metric_memory,
-    _safe_getattr,
-    _get_benchmark_stimulus_set,
-    _get_execution_plan,
-    _probe_regions,
-    _isolate_probe_identifier,
-    _probe_feature_dim,
-    _resolve_feature_dim,
-    _get_n_presentations,
-    check_memory,
-):
-    _definition.__module__ = 'brainscore_core.memory'
-del _definition

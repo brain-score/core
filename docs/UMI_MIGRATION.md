@@ -12,6 +12,7 @@ from brainscore_core import Subject
 from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
 
+# Subject: answers each text with the text itself
 class EchoSubject(Subject):
     identifier = "echo"
     in_channels = {"text"}
@@ -20,6 +21,7 @@ class EchoSubject(Subject):
 
     def participate(self, session):
         while (event := session.next_input()) is not None:
+            # One answer row, labelled with the input's stimulus_id
             answer = BehavioralAssembly(
                 [event.payload],
                 coords={"stimulus_id": ("presentation", [event.meta["stimulus_id"]]),
@@ -29,11 +31,12 @@ class EchoSubject(Subject):
                 channel="behavior", payload=answer,
                 t_ms=event.t_ms, meta=dict(event.meta)))
 
+# One input on 'text'; check the stored answer
 subject = EchoSubject()
 session = Session(
     [StreamEvent(channel="text", payload="hello", t_ms=0.0,
                  meta={"stimulus_id": "s1"})],
-    requested_output_channels=["behavior"])
+    outputs=["behavior"])
 subject.participate(session=session)
 response = session.emitted[0].payload
 assert response["stimulus_id"].values.tolist() == ["s1"]
@@ -64,8 +67,9 @@ benchmark applies its metric to those responses. `apply_state_change` and
 To build a session yourself, use one of two builders with the same shape:
 
 ```python
-session = stimulus_session(stimuli, ['neural:IT'], task, time_bins=[(70, 170)])
-session = stimulus_session(stimuli, ['behavior', 'neural:IT'], task, streaming=True)
+# Arguments: stimuli or environment, requested outputs, task
+session = stimulus_session(stimuli, ['neural:IT'], task, time_bins=[(70, 170)])   # IT, 70-170 ms
+session = stimulus_session(stimuli, ['behavior', 'neural:IT'], task, streaming=True)   # one row at a time
 session = environment_session(environment, ['motor'], task, seed=0)
 ```
 
@@ -79,18 +83,16 @@ subject needs the trait `memory:trial_history`).
 
 ## Choose helpers for your subject
 
-`UnifiedModel` is a `Subject` base with task, recording, and `process()` methods.
-It requires `identifier`, `region_layer_map`, and `supported_modalities`, and
-derives channel declarations from the modalities. Use `BrainScoreModel` from the
+Every subject inherits `Subject`; core has no other base class (`UnifiedModel` was
+deleted). Use `BrainScoreModel` from the
 unified `brainscore` package (`from brainscore import BrainScoreModel`) for a
 configurable implementation with extraction helpers. Core no longer contains
 it: `brainscore_core.BrainScoreModel`, the unit selectors and
 `brainscore_core.capabilities` moved to `brainscore`, `brainscore.selection`
-and `brainscore.capabilities`.
-
-`UnifiedModel` is a subclass of `Subject`, not an alias. `BrainScoreModel` and
-the vision and language adapters inherit this compatibility base, so they
-remain subjects and keep their existing computation paths.
+and `brainscore.capabilities`. `BrainScoreModel` and the vision and language
+adapters inherit `Subject` and keep their existing computation paths; a subject
+with `process` and `start_task` / `start_recording` methods can run a session
+through them with `brainscore_core.streaming_helpers.drive_typed_session`.
 
 Implement `Subject` directly when you want to own session handling. Benchmarks
 reach any subject the same way:

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from brainscore_core._evaluation.compatibility import check_channel_compatibility
-from brainscore_core._evaluation.compatibility import CompatibilityError
+from brainscore_core.compatibility import check_channel_compatibility
+from brainscore_core.compatibility import CompatibilityError
 from brainscore_core.streaming import Session, StreamEvent
 
 POOL = ['vision:image', 'vision:video', 'text', 'audio']
@@ -27,7 +27,7 @@ def test_consumed_inputs_equal_delivered_inputs():
         declared = set(rng.sample(POOL, rng.randint(1, len(POOL))))
         inputs = set(rng.sample(POOL, rng.randint(1, len(POOL))))
         subject = SimpleNamespace(identifier='s', in_channels=declared, out_channels={'neural:IT'},
-                                  required_channels=set(), traits=set())
+                                  required_channels=set(), traits=set(), output_inputs={})
         benchmark = SimpleNamespace(identifier='b', required_input_channels=inputs,
                                     requested_output_channels={'neural:IT'})
         delivered = _delivered(inputs, declared)

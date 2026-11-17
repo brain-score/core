@@ -1,22 +1,29 @@
-"""The Input/Output Catalog: documented, queryable contracts for the allowable
-inputs and outputs of a Brain-Score subject.
+"""The channel catalog: the one list of channel families a session accepts.
 
-v1.5 keeps the typed events (``StimulusSet``, ``StateChange``) and the lightweight methods (``process``,
-``start_recording``, ``start_task``). The catalog is documentation layered over
-them, not a dispatch mechanism. It records, for every allowable input and
-output: what carries it, what its payload contains, which harness interprets it,
-and what metadata it recognizes.
+A channel is a name for one kind of input or output of a subject. The name has
+a family and an optional address (``family:address``), for example
+``'neural:IT'`` or ``'vision:image'``. Every family has one entry here with its
+direction, its payload contract and, when it has one, a payload type and a
+validator (Contract Rules 3.2 and 5).
 
-The channel-style names (e.g. ``'neural:IT'``, ``'motor'``) are labels for
-readability and alignment with how the field talks. They are NOT a dispatch
-contract: dispatch is still by typed event and measurement method. A name with a
-colon has a family and an address (``family:address``); the family carries the
-payload contract and the address is interpreted by the relevant harness.
+The catalog is part of the contract. Pre-flight refuses a channel that is not
+registered. A session checks every event against the entry of its family and
+raises an error for a payload that does not match. A family with a ``CHANNEL_FORMS``
+entry (``vision``) has no bare channel: each channel names a form.
 
-The catalog also offers an optional, best-effort ``check_payload`` for a
-documentation-backed pre-flight check. It is deliberately loose (duck-typed on
-``.ndim`` / ``.dtype``) so ``core`` stays free of heavy dependencies; it never
-replaces the type system, it only flags obvious payload mismatches early.
+The catalog also holds the one table that says which channel a stimulus-table
+column feeds (``stimulus_columns``, ``column_channel``). A table session sends
+each such column on its channel; pre-flight, the subject's projection of a table
+and ``BrainScoreModel`` read the same table.
+
+``check_payload`` is a loose check on ``.ndim`` and ``.dtype``, so that core needs
+no heavy dependency. ``validate`` runs every check for one event. The validator of
+a family only core defines (``behavior``) also receives the event and the
+session, so it can check a response against the task and the trials.
+
+``register_channel`` adds a family and, for an input family, the columns that
+feed it. Code outside core imports it from ``brainscore_core.extensions``. The
+``behavior`` family is closed: only core defines it and its addresses.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -25,19 +32,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
-from .streaming import parse_channel
-
-# Preserve the column ownership used by model construction and registration.
-BUILTIN_STIMULUS_COLUMNS: Mapping[str, str] = MappingProxyType({
-    'image_file_name': 'vision', 'image_path': 'vision', 'filename': 'vision',
-    'sentence': 'text', 'text': 'text', 'video_path': 'vision',
-    'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio',
-})
+from .streaming import StreamEvent, parse_channel
 
 INPUT = "input"
 OUTPUT = "output"
 BOTH = "both"
-REGISTRY_VERSION = "2.0"
 # ``video`` is a modality name that folds into ``vision`` for lookups
 # (``canonical_modality``). A visual input channel names its form instead:
 # ``vision:image`` or ``vision:video`` (see ``MODALITY_TO_INPUT_CHANNEL``).
@@ -65,31 +64,33 @@ ShapeValidator = Callable[[Any], object]
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    """One allowable input or output and its payload contract."""
-    name: str                          # channel-style label, e.g. 'text', 'neural:IT'
-    kind: str                          # INPUT, OUTPUT, or BOTH
-    carried_by: str                    # the typed envelope or method that carries it
+    """One channel family and its payload contract.
+
+    ``name``, ``direction``, ``payload_contract``, ``meta_keys``, ``addressing``,
+    ``expected_ndim``, ``expected_dtype``, ``shape_validator`` and ``payload_type``
+    are read by pre-flight and by sessions. ``shape_validator(payload)`` returns
+    the problems of a payload; the validator of a family only core defines
+    (``behavior``) is called as ``shape_validator(payload, event, session)``.
+    ``carried_by``, ``handled_by``, ``owner`` and ``materializers`` are notes for
+    readers; no code reads them.
+    """
+    name: str                          # channel family, e.g. 'text', 'neural'
+    direction: str                     # INPUT, OUTPUT, or BOTH
+    carried_by: str                    # note: what carries it (a table column, a task, a policy)
     payload_contract: str              # human-readable dtype / shape / units
-    handled_by: str                    # which harness or wrapper interprets the payload
+    handled_by: str                    # note: which extractor or harness interprets the payload
     meta_keys: Tuple[str, ...] = ()     # recognized metadata keys
     addressing: Optional[str] = None    # how the ':address' suffix is interpreted, if any
     expected_ndim: Tuple[int, ...] = ()  # allowed array ndims; empty means unchecked
     expected_dtype: Optional[str] = None  # e.g. 'uint8'; None means unchecked
-    direction: Optional[str] = None     # v2 registry alias for kind
     shape_validator: Optional[ShapeValidator] = None
-    owner: str = "core"
-    materializers: Tuple[str, ...] = ()
+    owner: str = "core"                # note: who defines the family
+    materializers: Tuple[str, ...] = ()  # note: the objects that produce it
     payload_type: Any = None            # type or tuple of types a payload must be; None means unchecked
 
     def __post_init__(self):
-        if self.kind not in _DIRECTIONS:
-            raise ValueError(f"CatalogEntry.kind must be one of {_DIRECTIONS}")
-        direction = self.kind if self.direction is None else self.direction
-        if direction not in _DIRECTIONS:
+        if self.direction not in _DIRECTIONS:
             raise ValueError(f"CatalogEntry.direction must be one of {_DIRECTIONS}")
-        if direction != self.kind:
-            raise ValueError("CatalogEntry.direction must match kind")
-        object.__setattr__(self, "direction", direction)
         object.__setattr__(self, "meta_keys", tuple(self.meta_keys))
         object.__setattr__(self, "expected_ndim", tuple(self.expected_ndim))
         object.__setattr__(self, "materializers", tuple(self.materializers))
@@ -97,20 +98,75 @@ class CatalogEntry:
 
 _CATALOG: Dict[str, CatalogEntry] = {}
 
+# Which channel each stimulus-table column feeds: the one answer for sessions,
+# pre-flight, subjects and documents. ``register_channel`` adds columns. Within
+# one channel the order is the order a prompt looks for a part's column.
+_STIMULUS_COLUMNS: Dict[str, str] = {
+    'image_file_name': 'vision:image', 'image_path': 'vision:image',
+    'filename': 'vision:image', 'image': 'vision:image', 'vision': 'vision:image',
+    'video_path': 'vision:video', 'video_file_name': 'vision:video', 'video': 'vision:video',
+    'sentence': 'text', 'text': 'text',
+    'audio_path': 'audio', 'audio_file_name': 'audio', 'audio_file': 'audio', 'audio': 'audio',
+}
 
-def register(entry: CatalogEntry, *, replace: bool = False) -> None:
-    """Add a catalog entry, keyed by its family name.
 
-    Registering a family that already exists is an error unless
-    ``replace=True`` (Contract Rules v3, rule 3.5). Re-registering the same
-    entry object is a no-op.
+def stimulus_columns() -> Dict[str, str]:
+    """Every stimulus column and the channel it feeds, as a copy."""
+    return dict(_STIMULUS_COLUMNS)
+
+
+def column_channel(column: str) -> Optional[str]:
+    """The channel a stimulus-table column feeds, or None for a metadata column."""
+    return _STIMULUS_COLUMNS.get(column)
+
+
+def register_channel(entry: CatalogEntry, *, columns: Iterable[str] = (),
+                     replace: bool = False) -> CatalogEntry:
+    """Add a channel family to the catalog and bind stimulus columns to it.
+
+    Each column in ``columns`` then feeds the channel ``entry.name``: a table
+    session sends it on that channel, pre-flight and the subject's projection
+    of a table see it. Only an input family takes columns, and a family that
+    names its form (``vision``) does not: give a new family.
+
+    Registering a family or a column that already exists is an error unless
+    ``replace=True`` (Contract Rules 3.5). Re-registering the same entry
+    object is a no-op.
     """
+    if _family(entry.name) in _CLOSED_FAMILIES:
+        raise ValueError(f"The {entry.name!r} family is defined by core and cannot be "
+                         "registered or replaced (Response Format Standard)")
+    return _register(entry, columns=columns, replace=replace)
+
+
+def _register(entry: CatalogEntry, *, columns: Iterable[str] = (),
+              replace: bool = False) -> CatalogEntry:
+    _, address = parse_channel(entry.name)
+    if address is not None:
+        raise ValueError("Register a channel family, not an addressed instance")
+    if isinstance(columns, str):
+        raise TypeError(f"columns is a sequence of column names, not the string {columns!r}")
+    columns = tuple(columns)
     existing = _CATALOG.get(entry.name)
     if existing is not None and existing is not entry and not replace:
         raise ValueError(
             f"Channel family {entry.name!r} is already registered "
             f"(owner {existing.owner!r}); pass replace=True to replace it.")
+    if columns:
+        if entry.direction not in (INPUT, BOTH):
+            raise ValueError('Only input channels can own stimulus columns')
+        problem = form_problem(entry.name)
+        if problem:
+            raise ValueError(f"Columns cannot feed {problem}")
+    for column in columns:
+        if not isinstance(column, str) or not column:
+            raise ValueError('Stimulus columns must be nonempty strings')
+        owner = _STIMULUS_COLUMNS.get(column)
+        if owner is not None and owner != entry.name and not replace:
+            raise ValueError(f'Column {column!r} already belongs to {owner!r}')
     _CATALOG[entry.name] = entry
+    _STIMULUS_COLUMNS.update({column: entry.name for column in columns})
+    return entry
 
 
 def _family(label: str) -> str:
@@ -126,17 +182,27 @@ def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
     return entry.direction in (direction, BOTH)
 
 
-# A family listed here has no bare channel: each channel names one of these forms.
-CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({"vision": ("image", "video")})
+# The closed address list of a family: each channel of the family is one of
+# these addresses. ``None`` admits the bare family name. ``vision`` has no bare
+# channel: each channel names its form. ``behavior`` lists the response formats
+# that exist; the bare ``behavior`` channel stays for legacy tasks.
+CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({
+    "vision": ("image", "video"),
+    "behavior": (None, "choice", "probabilities", "log_probabilities", "rating", "rt", "text"),
+})
+# Families only core defines: ``register_channel`` refuses them outside the seed.
+_CLOSED_FAMILIES = ("behavior",)
 
 
 def form_problem(channel: str) -> Optional[str]:
-    """Why ``channel`` does not name a form its family needs, or None."""
+    """Why ``channel`` is not an address its family lists, or None."""
     family, address = parse_channel(channel)
     forms = CHANNEL_FORMS.get(family)
     if forms is None or address in forms:
         return None
-    names = " or ".join(f"'{family}:{form}'" for form in forms)
+    names = " or ".join(f"'{family}:{form}'" if form else f"'{family}'" for form in forms)
+    if None in forms:
+        return f"{channel}: not in the closed list of '{family}' channels; use {names}"
     return f"{channel}: a '{family}' channel names its form; use {names}"
 
 
@@ -174,44 +240,6 @@ def has(label: str) -> bool:
 def all_entries() -> List[CatalogEntry]:
     """Every catalog entry, sorted by name."""
     return [_CATALOG[k] for k in sorted(_CATALOG)]
-
-
-def by_direction(direction: str) -> List[CatalogEntry]:
-    """Every registry entry usable in the requested direction."""
-    _check_direction(direction)
-    return [e for e in all_entries() if _matches_direction(e, direction)]
-
-
-def channels(direction: Optional[str] = None) -> List[str]:
-    """Registered channel family names, optionally filtered by direction."""
-    entries = all_entries() if direction is None else by_direction(direction)
-    return [e.name for e in entries]
-
-
-def inputs() -> List[CatalogEntry]:
-    """Every input entry."""
-    return by_direction(INPUT)
-
-
-def outputs() -> List[CatalogEntry]:
-    """Every output entry."""
-    return by_direction(OUTPUT)
-
-
-def describe(label: str) -> str:
-    """A human-readable one-block description of a catalog entry."""
-    e = get(label)
-    lines = [
-        f"{e.name} ({e.kind})",
-        f"  carried by:  {e.carried_by}",
-        f"  payload:     {e.payload_contract}",
-        f"  handled by:  {e.handled_by}",
-    ]
-    if e.addressing:
-        lines.append(f"  addressing:  {e.addressing}")
-    if e.meta_keys:
-        lines.append(f"  meta keys:   {', '.join(e.meta_keys)}")
-    return "\n".join(lines)
 
 
 def check_payload(label: str, payload) -> List[str]:
@@ -259,6 +287,9 @@ def validate(
     channel: str,
     payload,
     direction: Optional[str] = None,
+    *,
+    event=None,
+    session=None,
 ) -> List[str]:
     """Validate a channel payload against the runtime-queryable registry.
 
@@ -297,7 +328,10 @@ def validate(
     if entry.shape_validator is not None:
         warnings.extend(
             _normalise_shape_validator_result(
-                channel, entry.shape_validator(payload)
+                channel, entry.shape_validator(
+                    payload, event if event is not None else StreamEvent(channel, payload, None),
+                    session)
+                if family in _CLOSED_FAMILIES else entry.shape_validator(payload)
             )
         )
 
@@ -311,9 +345,10 @@ def validate(
 # pinning a device schema in core.
 # ----------------------------------------------------------------------------
 
-# A policy that answers in words keeps what it said and whether it was understood,
-# with the same names as a response trace. fallback_action is the action applied
-# when the answer could not be parsed.
+# A policy that answers in words keeps, in the extra data of its motor event, what
+# it said (answer), whether it was understood (valid, parse_error) and where it
+# came from (provenance). fallback_action is the action applied when the answer
+# could not be parsed.
 RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "provenance")
 
 # A stimulus table sends one event per input column of each row. Every such
@@ -332,13 +367,18 @@ RESPONSE_META_KEYS = ("answer", "valid", "parse_error", "fallback_action", "prov
 # presented alone. Rows of a one-column table carry no table_row.
 TABLE_ROW_META_KEYS = ("stimulus_id", "stimulus_index", "column", "table_row")
 
+def _check_behavior(payload, event=None, session=None) -> List[str]:
+    from .response_formats import _validate
+    return _validate(payload, event, session)
+
+
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
     # `vision` is a channel family with no bare channel: `vision:image` takes
     # (H, W, 3) payloads and `vision:video` takes (T, H, W, 3) payloads.
     CatalogEntry("vision", INPUT, "StimulusSet column",
                  "(H, W, 3) uint8 image or (T, H, W, 3) uint8 clip, a table of frames, or a path to one",
-                 "image/video preprocessor + a vision model harness (wrapper)",
+                 "image/video preprocessor + a vision extractor (wrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, expected_ndim=(3, 4), expected_dtype="uint8",
                  addressing=("address is the form a subject takes natively: 'image' "
                              "(images) or 'video' (video); a subject declares each form it "
@@ -346,11 +386,11 @@ _SEED = [
                  materializers=("StimulusSet",)),
     CatalogEntry("text", INPUT, "StimulusSet column",
                  "a Python str",
-                 "tokenizer + a text model harness (TextWrapper)",
+                 "tokenizer + a text extractor (TextWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS, materializers=("StimulusSet",)),
     CatalogEntry("audio", INPUT, "StimulusSet column",
                  "(samples,) float32 waveform, or a path; sample rate read from the file header",
-                 "an audio model harness (AudioWrapper)",
+                 "an audio extractor (AudioWrapper)",
                  meta_keys=TABLE_ROW_META_KEYS + ("sample_rate_hz",), expected_ndim=(1,),
                  materializers=("StimulusSet",)),
     CatalogEntry("instruction", INPUT, "TaskContext.instruction or a closed-loop row entry",
@@ -402,24 +442,33 @@ _SEED = [
                  meta_keys=("discount",), payload_type=(int, float),
                  owner="environment harness",
                  materializers=("EnvironmentSource",)),
-    # --- outputs: neural measurement (carried by start_recording + process) ---
-    CatalogEntry("neural", OUTPUT, "start_recording(target) + process(stimuli)",
+    # --- outputs: neural measurement (a subject answer on neural:<region>) ---
+    CatalogEntry("neural", OUTPUT, "a subject answer on neural:<region>",
                  "(units,) or (units, time) activations packaged into a NeuroidAssembly",
                  "the wrapper at region_layer_map[region]",
                  meta_keys=("signal_type", "layer"), expected_ndim=(1, 2),
                  addressing="address is a brain region present in region_layer_map",
-                 materializers=("start_recording", "NeuroidAssembly")),
-    # --- outputs: behavior (carried by start_task + process) ---
-    CatalogEntry("behavior", OUTPUT, "start_task(task_context) + process(stimuli)",
-                 "a label, a probability vector, or generated text",
+                 materializers=("NeuroidAssembly",)),
+    # --- outputs: behavior (a subject answer on behavior:<kind>) ---
+    CatalogEntry("behavior", OUTPUT, "a subject answer on behavior:<kind>, as the task asks",
+                 "one trial's cell (a str, a 1-D numeric array, one number) or an assembly "
+                 "of rows over presentation (behavior:log_probabilities: an assembly only); "
+                 "the bare channel takes a label, a probability vector or text; a cell "
+                 "names its trial in meta['stimulus_id'] (in a table session) and a "
+                 "reaction-time cell its unit in meta['units'] ('ms' or 'monotone')",
                  "a fitted readout or the model's generation path",
-                 meta_keys=("label_set",),
-                 addressing=("address is the kind of answer a TaskContext response asks for: "
-                             "choice, probabilities, confidence, rating, rt or text"),
-                 materializers=("start_task", "BehavioralAssembly")),
+                 meta_keys=("stimulus_id", "units", "label_set"),
+                 shape_validator=_check_behavior,
+                 addressing=("address is the response format a TaskContext response asks for, "
+                             "from the closed list CHANNEL_FORMS['behavior']: choice, "
+                             "probabilities, log_probabilities, rating, rt or text; "
+                             "the validator checks each format against the task and the "
+                             "trials"),
+                 materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
-                 "harness-defined continuous action / control vector",
+                 "one action per step, in the form the environment defines (its action_spec(), "
+                 "when it has one): a control vector, a discrete choice or a mapping of named fields",
                  "the model's policy, decoded by the environment harness",
                  meta_keys=RESPONSE_META_KEYS,
                  owner="environment harness",
@@ -430,21 +479,21 @@ _SEED = [
                  "the model's intervention (state_change_fn)",
                  owner="core",
                  materializers=("PerturbationApplied",)),
-    # --- outputs: physiological readouts (reserved for human harnesses) ---
-    CatalogEntry("pupil", OUTPUT, "human harness recording",
+    # --- outputs: physiological readouts (reserved for human subjects) ---
+    CatalogEntry("pupil", OUTPUT, "human subject recording",
                  "(t,) float pupil diameter time series, or scalar diameter",
-                 "the human harness (eye tracker)",
+                 "the human subject (eye tracker)",
                  meta_keys=("signal_type",),
-                 owner="human harness"),
-    CatalogEntry("skin_conductance", OUTPUT, "human harness recording",
+                 owner="human subject"),
+    CatalogEntry("skin_conductance", OUTPUT, "human subject recording",
                  "(t,) float skin conductance time series, or scalar value",
-                 "the human harness (physiological sensor)",
+                 "the human subject (physiological sensor)",
                  meta_keys=("signal_type",),
-                 owner="human harness"),
+                 owner="human subject"),
 ]
 
 for _entry in _SEED:
-    register(_entry)
+    _register(_entry)
 
 
 def payload_type_notes(label: str, payload) -> List[str]:
@@ -480,19 +529,13 @@ def _declare_payload_types() -> None:
         'text': str, 'instruction': str,
         'lesion': StateChange, 'stimulation': StateChange, 'pharmacological': StateChange,
         'neural': (DataAssembly, np.ndarray),
-        'behavior': (DataAssembly, str, np.ndarray),
+        # A number is one trial's cell on a rating or reaction-time
+        # channel; the behavior validator refuses it on the bare channel.
+        'behavior': (DataAssembly, str, np.ndarray, int, float, np.number),
         'perturbation': (PerturbationApplied, type(None)),
     }
     for family, payload_type in payload_types.items():
-        register(_replace(get(family), payload_type=payload_type), replace=True)
+        _register(_replace(get(family), payload_type=payload_type), replace=True)
 
 
 _declare_payload_types()
-
-
-_STIMULUS_COLUMNS: Dict[str, str] = {}
-
-
-def stimulus_columns() -> Dict[str, str]:
-    """External stimulus-column bindings, returned as a copy."""
-    return dict(_STIMULUS_COLUMNS)

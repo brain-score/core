@@ -1,0 +1,1002 @@
+"""Behavioral response formats in core: conversions, the response record, storage.
+
+The benchmark specifies the response; the model side produces it; core
+validates it; the benchmark scores it (Response Format Standard, section 0).
+
+- **Conversions**: ``argmax`` (probabilities to a choice), ``softmax``
+  (continuation log-probabilities to probabilities) and ``softmax_argmax``
+  (both in turn). Each returns the validity of every row with its result: a
+  non-finite source row, or a row that is not a valid probability row for
+  ``argmax``, gives an invalid result. Exception: a finite positive
+  log value passes through ``softmax`` as valid.
+- **The response record** (``response_record``): the dict an answer carries
+  in ``attrs['response']``. Scores copy the records of their answers.
+- **Storage**: the ``behavior`` catalog entry's validator checks a response
+  on an addressed ``behavior:<format>`` channel against the session's task and
+  the trials it names. The session stores a cell as its checked row (a dict with
+  the trial's ``stimulus_id``, ``values``, the ``choice`` axis of a choice or
+  probabilities answer, the trial coordinates below and the ``response`` record)
+  and an assembly as an assembly in the schema of its format; ``collect`` gives
+  the answer of a channel as one assembly in that schema. The bare ``behavior``
+  channel is not checked or stored here (legacy handling).
+
+What an addressed response can be: a cell for one trial (``behavior:text``
+and ``behavior:choice``: a ``str``; ``behavior:probabilities``: a 1-D array
+with one value per option, stored as float64 when the subject gives float64
+(in either byte order) and as float32 otherwise; ``behavior:rating`` and
+``behavior:rt``: a number), or an assembly of rows over ``presentation``
+with a ``stimulus_id`` coordinate and a response record;
+``behavior:log_probabilities`` takes an assembly only (model-derived and
+native, its schema in the record's parameters). A cell is always native: core
+gives it a record with ``method='external'`` (for ``behavior:rt`` the units
+come from ``event.meta['units']``). A derived answer is an assembly
+(one row is fine) with its record and its source evidence in ``raw_answer``.
+A malformed response raises ``ValueError`` and is never stored.
+
+The collected answer keeps its rows in the order they arrived. Each row has
+``raw_answer``, ``response_state`` (``valid``, ``invalid``, ``missing``) and
+``response_reason`` (for a missing trial, the reason the producer gives, if any); the attrs hold the record, except for an answer whose
+trials were all missing (nothing answered, so no record). An answer is
+expected for each row of a session's table (by occurrence: the k-th answer
+row with stimulus id X answers the k-th table row with id X) and, in a
+session without a table, for each ``respond`` signal of the source. A
+requested trial with no answer is stored as a missing row once the session is
+complete; a session with no table and no ``respond`` signal requests no trial,
+so nothing is missing there.
+"""
+import json
+import math
+from collections import Counter
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+_TOLERANCE = 1e-4          # absolute, on the sum of a probability row
+_LOG_TOLERANCE = 1e-6      # nats: a log probability up to this far above 0 is a rounded 0
+_CONVERSIONS = ('argmax', 'softmax', 'softmax_argmax')
+_CATEGORIES = ('behavioral', 'model-derived')
+_ORIGINS = ('native', 'derived')
+_PARSERS = ('model', 'library')
+_UNITS = ('nats', 'bits')
+_RT_UNITS = ('ms', 'monotone')
+_FIELDS = frozenset(('format', 'category', 'origin', 'method', 'conversion', 'source_format',
+                     'parameters', 'parsed_by'))
+_FORMATS = ('choice', 'probabilities', 'log_probabilities', 'rating', 'rt', 'text')
+_AXIS_FORMATS = ('choice', 'probabilities', 'log_probabilities')   # rows over a choice axis
+# The schema of behavior:log_probabilities, in its record's parameters (standard 2.3).
+_LOG_PROBABILITY_SCHEMA = {
+    'layout': ('continuation', 'segment'),
+    'context': ('shared', 'prefix'),
+    'aggregation': ('sum', 'mean'),
+    'units': _UNITS,
+}
+_CONTEXTS = {'continuation': 'shared', 'segment': 'prefix'}
+_TOKENIZATION = {'special_tokens': ('none', 'tokenizer_default'), 'template': ('none', 'chat')}
+# The format each conversion reads.
+_SOURCES = {'argmax': 'behavior:probabilities', 'softmax': 'behavior:log_probabilities',
+            'softmax_argmax': 'behavior:log_probabilities'}
+
+
+# --------------------------------------------------------------------------
+# Conversions
+# --------------------------------------------------------------------------
+
+def _valid_probability_rows(values: np.ndarray) -> np.ndarray:
+    finite = np.isfinite(values).all(axis=1)
+    with np.errstate(invalid='ignore'):
+        positive = (values >= 0).all(axis=1)
+        summed = np.abs(values.sum(axis=1) - 1.0) <= _TOLERANCE
+    return finite & positive & summed
+
+
+def argmax(probabilities) -> Tuple[np.ndarray, np.ndarray]:
+    """The most probable option of each row: ``(indices, valid)``.
+
+    Ties go to the first maximum in the given column order (numpy ``argmax``);
+    the column order is the caller's, and its record says which order it is.
+    Exception: a readout passes its own column order (``option_order``
+    ``'readout'``), not the trial's.
+    A row that is not a valid probability row (a non-finite or negative value,
+    or a sum that differs from 1 by more than 1e-4) has no choice: its index
+    is -1 and ``valid`` is False. The result is the most probable option under
+    the model's distribution, not a sampled choice.
+    """
+    values = np.asarray(probabilities)
+    if values.ndim != 2:
+        raise ValueError(f'argmax takes a (trials, options) array; got shape {values.shape}')
+    valid = _valid_probability_rows(values)
+    indices = np.where(valid, values.argmax(axis=1), -1)
+    return indices, valid
+
+
+def softmax(log_probabilities, units: str = 'nats') -> Tuple[np.ndarray, np.ndarray]:
+    """Each row of log-probabilities as probabilities over the row's options: ``(p, valid)``.
+
+    Temperature 1, in the given column order. ``units`` is the unit of the
+    source, ``'nats'`` (natural log) or ``'bits'`` (log base 2; multiplied by
+    ln 2 first). The row's offset is lost: two rows that differ by a constant
+    give the same probabilities, a distribution over the listed continuations
+    only. A source row with a non-finite value (NaN, +inf or -inf) is invalid,
+    and so is its result; its values are computed as for any row.
+    Exception: a finite positive log value passes as valid.
+    """
+    if units not in _UNITS:
+        raise ValueError(f'units is one of {_UNITS}, not {units!r}')
+    logp = np.asarray(log_probabilities)
+    if logp.ndim != 2:
+        raise ValueError(f'softmax takes a (trials, options) array; got shape {logp.shape}')
+    valid = np.isfinite(logp).all(axis=1)
+    if units == 'bits':
+        logp = logp * math.log(2)
+    logp = logp - logp.max(axis=1, keepdims=True)
+    p = np.exp(logp)
+    return p / p.sum(axis=1, keepdims=True), valid
+
+
+def softmax_argmax(log_probabilities, units: str = 'nats') -> Tuple[np.ndarray, np.ndarray]:
+    """``argmax`` of ``softmax``: the most likely listed continuation, ``(indices, valid)``.
+
+    A row is valid only when its source row is valid and its softmax row is.
+    """
+    probabilities, source_valid = softmax(log_probabilities, units)
+    indices, valid = argmax(probabilities)
+    valid = valid & source_valid
+    return np.where(valid, indices, -1), valid
+
+
+_DEFAULT_PARAMETERS = {
+    'argmax': {'tie': 'first', 'option_order': 'trial'},
+    'softmax': {'temperature': 1, 'option_order': 'trial', 'units': 'nats'},
+    'softmax_argmax': {'temperature': 1, 'tie': 'first', 'option_order': 'trial', 'units': 'nats'},
+}
+
+
+# --------------------------------------------------------------------------
+# The response record
+# --------------------------------------------------------------------------
+
+def response_record(format: str, method: str, *, conversion: Optional[str] = None,
+                    source_format: Optional[str] = None, parameters: Optional[Dict] = None,
+                    parsed_by: Optional[str] = None,
+                    category: str = 'behavioral') -> Dict[str, Any]:
+    """The record of one answer: put it in the answer's ``attrs['response']``.
+
+    ``method`` says how the model side gave the answer (``generation``,
+    ``likelihood``, ``readout``, ``link``, ``external``; a subject that is not
+    a ``BrainScoreModel`` names its own). An answer is ``derived`` when it has a
+    conversion or is a link (``method='link'``); a derived answer names its
+    ``source_format``. A conversion's ``parameters`` default to its stated
+    ones. ``parsed_by`` is ``'model'`` when the model side parsed generated
+    text, ``'library'`` when an external library parses it. The method ``legacy`` is the
+    statement of an old model's adapter that the answer is the old model's own. The legacy
+    facade passes the labels of a ``behavior:choice`` answer that carries it, with no
+    conversion, to the old benchmark unchanged, counts the labels outside the list and does
+    not stop the run; a subject that writes it for another answer states something false.
+    """
+    if parameters is None:
+        parameters = dict(_DEFAULT_PARAMETERS.get(conversion, {}))
+    derived = conversion is not None or method == 'link'
+    record = {'format': format, 'category': category, 'origin': 'derived' if derived else 'native',
+              'method': method, 'conversion': conversion, 'source_format': source_format,
+              'parameters': dict(parameters), 'parsed_by': parsed_by}
+    problems = _record_problems(record, format)
+    if problems:
+        raise ValueError('; '.join(problems))
+    return record
+
+
+def _plain(value) -> bool:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_plain(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _plain(item) for key, item in value.items())
+    return False
+
+
+def _record_problems(record, channel: str) -> List[str]:
+    """Why ``record`` is not a well-formed response record for ``channel``; empty when it is."""
+    if not isinstance(record, dict):
+        return [f'the response record is {type(record).__name__}, not a dict']
+    if set(record) != _FIELDS:
+        return [f'the response record has fields {sorted(record)}, not {sorted(_FIELDS)}']
+    problems = []
+    if record['format'] != channel:
+        problems.append(f"the response record names format {record['format']!r}, "
+                        f'but the answer is on {channel!r}')
+    if record['category'] not in _CATEGORIES:
+        problems.append(f"the record's category {record['category']!r} is not one of {_CATEGORIES}")
+    if not isinstance(record['method'], str) or not record['method']:
+        problems.append(f"the record's method {record['method']!r} is not a nonempty string")
+    if record['conversion'] not in (None, *_CONVERSIONS):
+        problems.append(f"the record's conversion {record['conversion']!r} is not one of {_CONVERSIONS}")
+    if record['parsed_by'] not in (None, *_PARSERS):
+        problems.append(f"the record's parsed_by {record['parsed_by']!r} is not one of {_PARSERS}")
+    derived = record['conversion'] is not None or record['method'] == 'link'
+    if record['origin'] != ('derived' if derived else 'native'):
+        problems.append(f"the record's origin {record['origin']!r} does not match its conversion "
+                        f"{record['conversion']!r} and method {record['method']!r}")
+    if derived != bool(record['source_format']):
+        problems.append('a derived answer, and only a derived answer, names its source_format')
+    elif derived:
+        expected = _SOURCES.get(record['conversion'])
+        if expected is not None and record['source_format'] != expected:
+            problems.append(f"the {record['conversion']} conversion reads {expected!r}, not "
+                            f"{record['source_format']!r}")
+        elif expected is None and _format(record['source_format']) is None:
+            problems.append(f"a link names the behavior format it was computed from, not "
+                            f"{record['source_format']!r}")
+    if not isinstance(record['parameters'], dict) or not _plain(record['parameters']):
+        problems.append("the record's parameters are not a dict of plain values")
+    else:
+        try:
+            json.dumps(record['parameters'], allow_nan=False)
+        except ValueError:
+            problems.append("the record's parameters are not serializable")
+        if channel == 'behavior:log_probabilities':
+            problems += _log_probability_problems(record)
+    return problems
+
+
+def _log_probability_problems(record) -> List[str]:
+    """Why a ``behavior:log_probabilities`` record breaks the format's schema; empty when it does not.
+
+    The answer is model-derived and native (never converted, never a link). Its
+    parameters are exactly ``layout``, ``context`` (``'shared'`` for the
+    continuation layout, ``'prefix'`` for the segment layout), ``tokenization``
+    (``join``: a nonempty str; ``special_tokens``: ``'none'`` or
+    ``'tokenizer_default'``; ``template``: ``'none'`` or ``'chat'``;
+    ``truncation``: ``'none'`` or the model's window as a positive int),
+    ``aggregation`` (``'sum'``, ``'mean'``) and ``units`` (``'nats'``, ``'bits'``).
+    """
+    problems = []
+    if record['category'] != 'model-derived':
+        problems.append(f"a behavior:log_probabilities answer is model-derived, not "
+                        f"{record['category']!r}")
+    if record['origin'] != 'native':
+        problems.append('a behavior:log_probabilities answer is native: it has no conversion '
+                        'and is not a link')
+    parameters = record['parameters']
+    fields = set(_LOG_PROBABILITY_SCHEMA) | {'tokenization'}
+    if set(parameters) != fields:
+        return problems + [f"the record's parameters are {sorted(parameters)}, not the "
+                           f'behavior:log_probabilities schema {sorted(fields)}']
+    for name, allowed in _LOG_PROBABILITY_SCHEMA.items():
+        if parameters[name] not in allowed:
+            problems.append(f'the schema field {name} is {parameters[name]!r}, not one of {allowed}')
+    layout = parameters['layout']
+    expected = _CONTEXTS.get(layout) if isinstance(layout, str) else None
+    context = parameters['context']
+    if expected and context in _CONTEXTS.values() and context != expected:
+        problems.append(f"the {parameters['layout']} layout has context {expected!r}, not "
+                        f"{parameters['context']!r}")
+    tokenization = parameters['tokenization']
+    keys = {'join', 'truncation', *_TOKENIZATION}
+    if not isinstance(tokenization, dict) or set(tokenization) != keys:
+        return problems + [f'the schema field tokenization is a dict with keys {sorted(keys)}']
+    for name, allowed in _TOKENIZATION.items():
+        if tokenization[name] not in allowed:
+            problems.append(f'tokenization {name} is {tokenization[name]!r}, not one of {allowed}')
+    if not isinstance(tokenization['join'], str) or not tokenization['join']:
+        problems.append(f"tokenization join is a nonempty str, not {tokenization['join']!r}")
+    truncation = tokenization['truncation']
+    if truncation != 'none' and not (isinstance(truncation, int) and not isinstance(truncation, bool)
+                                     and truncation > 0):
+        problems.append(f"tokenization truncation is 'none' or the model's window (a positive "
+                        f'int), not {truncation!r}')
+    return problems
+
+
+# --------------------------------------------------------------------------
+# Storage: the checks of a session, and the stored schema
+# --------------------------------------------------------------------------
+
+def _format(channel) -> Optional[str]:
+    """The format of an addressed behavior channel, or None."""
+    if isinstance(channel, str) and channel.startswith('behavior:'):
+        address = channel.split(':', 1)[1]
+        return address if address in _FORMATS else None
+    return None
+
+
+def _eight_byte_float(array) -> bool:
+    """A float64 array in either byte order."""
+    return array.dtype.kind == 'f' and array.dtype.itemsize == 8
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool)
+
+
+def _response_of(session):
+    return getattr(getattr(session, 'task', None), 'response', None)
+
+
+def _table(session):
+    table = getattr(session, 'stimuli', None)
+    return table if table is not None and 'stimulus_id' in getattr(table, 'columns', ()) else None
+
+
+class _Ledger:
+    """What a session's table expects and what each channel has answered.
+
+    Built once per session, for a session with a table only: the occurrence
+    count and the table positions of each stimulus id, the per-row options, and
+    for each channel the occurrences answered so far. A session without a table
+    keeps no per-id state, so nothing grows with the length of a stream.
+    ``pending`` keeps the rows the validator built for the event the session is
+    accepting, so each response is checked and packaged in one pass.
+    """
+
+    def __init__(self, session):
+        table = _table(session)
+        self.ids = None if table is None else list(table['stimulus_id'])
+        self.counts = None if table is None else Counter(self.ids)
+        self.positions: Dict[Any, list] = {}
+        for position, stimulus_id in enumerate(self.ids or ()):
+            self.positions.setdefault(stimulus_id, []).append(position)
+        self.answered: Dict[str, Counter] = {}
+        self.pending = None
+        self._session = session
+        self._column = None
+
+    def options(self, stimulus_id, occurrence: int = 0) -> Optional[list]:
+        """The options of the ``occurrence``-th trial (from 0) with this stimulus id.
+
+        The k-th answer for an id answers the k-th table row with that id, so
+        per-row options are read from that row, not from the first one.
+        """
+        from .responses import Choice
+        response = _response_of(self._session)
+        if isinstance(response, Choice):
+            if not isinstance(response.labels, str):
+                return list(response.labels)
+            positions = self.positions.get(stimulus_id, ())
+            if occurrence >= len(positions):
+                return None
+            if self._column is None:
+                self._column = _table(self._session)[response.labels].tolist()
+            return list(self._column[positions[occurrence]])
+        label_set = getattr(getattr(self._session, 'task', None), 'label_set', None)
+        return list(label_set) if label_set else None
+
+    def occurrence(self, channel, stimulus_id) -> int:
+        """How many rows of ``channel`` already answer this stimulus id."""
+        return self.answered.get(channel, Counter())[stimulus_id]
+
+
+def _ledger(session) -> Optional[_Ledger]:
+    if session is None:
+        return None
+    ledger = session.__dict__.get('_formats_ledger')
+    if ledger is None:
+        ledger = session.__dict__['_formats_ledger'] = _Ledger(session)
+    return ledger
+
+
+def _axis(session, options) -> Optional[list]:
+    """The choice axis: the shared labels, or positions when options differ by row."""
+    from .responses import Choice
+    if options is None:
+        return None
+    if isinstance(_response_of(session), Choice) and isinstance(_response_of(session).labels, str):
+        return list(range(len(options)))
+    return list(options)
+
+
+def _presentation_coords(payload) -> Dict[str, list]:
+    if isinstance(payload, _RowView):
+        return dict(payload.coords)
+    names = []
+    index = payload.indexes.get('presentation') if hasattr(payload, 'indexes') else None
+    for name in getattr(index, 'names', None) or ():
+        if name and name != 'presentation':
+            names.append(name)
+    for name, coord in payload.coords.items():
+        if coord.dims == ('presentation',) and name != 'presentation' and name not in names:
+            names.append(name)
+    coords = {name: list(payload[name].values) for name in names}
+    if not coords and index is not None and not getattr(index, 'nlevels', 1) > 1:
+        # An assembly with one presentation coordinate keeps it as the index of
+        # the dimension: that coordinate is stimulus_id.
+        coords['stimulus_id'] = list(index)
+    return coords
+
+
+def _null(value) -> bool:
+    return value is None or (isinstance(value, float) and value != value)
+
+
+def _answer_text(value) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, np.ndarray):
+        return str([float(v) for v in value.ravel()])
+    return str(value)
+
+
+def _value_reasons(fmt, values, record, response) -> List[Optional[str]]:
+    """Why each trial's value is not a usable answer (None when it is)."""
+    reasons: List[Optional[str]] = []
+    if fmt == 'choice':
+        for row in values:
+            if np.isnan(row).all():
+                reasons.append('no option chosen')
+            else:
+                reasons.append(None if (row == 1).sum() == 1 else 'not exactly one option chosen')
+    elif fmt == 'probabilities':
+        for row in values:
+            row = row.astype(np.float64)
+            if not np.isfinite(row).all():
+                reasons.append('a value is not finite')
+            elif (row < 0).any():
+                reasons.append('a probability is negative')
+            elif abs(float(row.sum()) - 1.0) > _TOLERANCE:
+                reasons.append(f'the probabilities sum to {float(row.sum())!r}, not 1')
+            else:
+                reasons.append(None)
+    elif fmt == 'log_probabilities':
+        # The tolerance is in nats: a value in bits is converted to nats first,
+        # so the largest valid value is 1e-6 nats, 1e-6 / ln 2 bits.
+        to_nats = math.log(2) if record['parameters']['units'] == 'bits' else 1.0
+        for row in values:
+            if not np.isfinite(row).all():
+                reasons.append('a value is not finite')
+            elif (row * to_nats > _LOG_TOLERANCE).any():
+                reasons.append('a log probability is above 0')
+            else:
+                reasons.append(None)
+    elif fmt == 'rating':
+        scale = response
+        low, high = getattr(scale, 'low', None), getattr(scale, 'high', None)
+        step = getattr(scale, 'step', None)
+        # Bounds are inclusive and exact; the step is checked by the one rule of
+        # responses._on_step (the decimal grid of the scale).
+        from .responses import _on_step
+        for value in values:
+            value = float(value)
+            if not np.isfinite(value):
+                reasons.append('no number')
+            elif low is not None and not low <= value <= high:
+                reasons.append(f'{value} is outside {low} to {high}')
+            elif step is not None and not _on_step(value, low, step):
+                reasons.append(f'{value} is not on the scale step {step}')
+            else:
+                reasons.append(None)
+    elif fmt == 'rt':
+        for value in values:
+            value = float(value)
+            reasons.append('not finite' if not np.isfinite(value)
+                           else 'negative' if value < 0 else None)
+    else:   # text: a str, or None for no reply (missing)
+        reasons = [None] * len(values)
+    return reasons
+
+
+def _cell_rows(fmt, channel, payload, event, session, ledger):
+    """A cell as ``(values, coords, record)`` of a one-row stored answer."""
+    if fmt == 'log_probabilities':
+        raise ValueError('an answer is an assembly with its response record')
+    meta = getattr(event, 'meta', None) or {}
+    stimulus_id = meta.get('stimulus_id')
+    options = (ledger.options(stimulus_id, ledger.occurrence(channel, stimulus_id))
+               if ledger is not None and fmt in ('choice', 'probabilities') else None)
+    coords = {'stimulus_id': [stimulus_id], 'answer_valid': [True], 'parse_error': ['']}
+    parameters = {}
+    if fmt in ('text', 'choice'):
+        if not isinstance(payload, str):
+            raise ValueError(f'a cell is a str, not {type(payload).__name__}')
+    if fmt == 'text':
+        values = np.array([payload], dtype=object)
+    elif fmt == 'choice':
+        if options is None:
+            raise ValueError('the options of this trial are not known; send an '
+                             'assembly with a choice axis or give the task a Choice')
+        row = np.zeros(len(options), dtype=np.float32)
+        if payload in options:
+            row[options.index(payload)] = 1.0
+        else:
+            row[:] = np.nan
+            coords['answer_valid'], coords['parse_error'] = (
+                [False], [f'{payload!r} is not one of the options {options}'])
+        values = row[None, :]
+    elif fmt == 'probabilities':
+        array = np.asarray(payload) if isinstance(payload, np.ndarray) else None
+        if array is None or array.ndim != 1 or array.dtype.kind not in 'fiu':
+            raise ValueError('a cell is a 1-D numeric array')
+        if options is not None and len(array) != len(options):
+            raise ValueError(f'{len(array)} values for {len(options)} options')
+        # The digits the subject gave: an eight-byte float (either byte order) stays float64;
+        # any other number type is float32.
+        values = array.astype(np.float64 if _eight_byte_float(array) else np.float32)[None, :]
+    else:
+        if isinstance(payload, np.ndarray) and payload.ndim == 0:
+            payload = payload.item()
+        if not _number(payload):
+            raise ValueError(f'a cell is one number, not {type(payload).__name__}')
+        values = np.array([float(payload)], dtype=np.float64)
+        if fmt == 'rt':
+            parameters['units'] = meta.get('units')
+    coords['raw_answer'] = [_answer_text(payload)]
+    record = response_record(channel, 'external', parameters=parameters)
+    if fmt in ('choice', 'probabilities'):
+        coords['choice'] = _axis(session, options) or list(range(values.shape[1]))
+    return values, coords, record
+
+
+def _assembly_rows(fmt, channel, payload, event, session, ledger):
+    """An assembly as ``(values, coords, record)``, after the malformed checks."""
+    dims = ('presentation', 'choice') if fmt in _AXIS_FORMATS else ('presentation',)
+    if tuple(payload.dims) != dims:
+        raise ValueError(f'the payload dims are {tuple(payload.dims)}, not {dims}')
+    record = payload.attrs.get('response')
+    if record is None:
+        raise ValueError('an assembly carries its response record in attrs["response"]')
+    problems = _record_problems(record, channel)
+    if problems:
+        raise ValueError('; '.join(problems))
+    values = np.asarray(payload.values)
+    dtype = {'choice': np.float32, 'probabilities': np.float32,
+             'text': object}.get(fmt, np.float64)   # log_probabilities: float64
+    kept = fmt == 'probabilities' and _eight_byte_float(values)   # the digits the subject gave
+    if values.dtype != np.dtype(dtype) and not kept:
+        raise ValueError(f'the values are {values.dtype}, not {np.dtype(dtype)}')
+    if kept:
+        values = values.astype(np.float64)   # the native byte order; the same values
+    coords = _presentation_coords(payload)
+    if 'stimulus_id' not in coords:
+        raise ValueError('an assembly has a stimulus_id coordinate')
+    ids = coords['stimulus_id']
+    named = (getattr(event, 'meta', None) or {}).get('stimulus_id')
+    if named is not None:
+        named = list(named) if isinstance(named, (list, tuple)) else [named]
+        if ids != named:
+            raise ValueError(f'the event answers stimuli {named}, but its rows are {ids}')
+    segment = fmt == 'log_probabilities' and record['parameters'].get('layout') == 'segment'
+    if segment:
+        # A segment answer's axis is the positions 1 to R of the trial's segments (standard 2.3).
+        axis = list(payload['choice'].values)
+        if [str(a) for a in axis] != [str(i) for i in range(1, len(axis) + 1)]:
+            raise ValueError(f'the choice axis of a segment answer is the positions 1 to '
+                             f'{len(axis)}, not {axis}')
+    elif fmt in _AXIS_FORMATS:
+        axis = list(payload['choice'].values)
+        if ledger is not None:
+            seen = Counter()
+            expected_axes = []
+            for stimulus_id in ids:   # each row by occurrence, also inside one event
+                occurrence = ledger.occurrence(channel, stimulus_id) + seen[stimulus_id]
+                seen[stimulus_id] += 1
+                expected_axes.append((stimulus_id, _axis(session, ledger.options(stimulus_id,
+                                                                                  occurrence))))
+            widths = {len(expected) for _, expected in expected_axes if expected is not None}
+            if len(widths) > 1:
+                raise ValueError('the rows of this answer need different numbers of '
+                                 f'options {sorted(widths)}, so they cannot be one assembly; '
+                                 'answer such trials one row at a time (a cell or a one-row '
+                                 'assembly each)')
+            for stimulus_id, expected in expected_axes:
+                if expected is not None and [str(a) for a in axis] != [str(e) for e in expected]:
+                    raise ValueError(f'the choice axis is {axis}, not the options '
+                                     f'{expected} of stimulus {stimulus_id!r}')
+    if fmt == 'choice':
+        known = np.isnan(values) | (values == 0) | (values == 1)
+        if not known.all():
+            raise ValueError('the values are 0, 1 or NaN (one option, or none)')
+        empty = np.isnan(values).all(axis=1)
+        if (np.isnan(values).any(axis=1) & ~empty).any():
+            raise ValueError('a row is all NaN (no choice) or has no NaN')
+        supplied = coords.get('response_state')
+        if supplied is not None and any(state == 'invalid' and not row_empty
+                                        for state, row_empty in zip(supplied, empty)):
+            raise ValueError('a row supplied as invalid is all NaN')
+    if fmt == 'text':
+        if any(not (isinstance(v, str) or v is None) for v in values):
+            raise ValueError('the values are str (or None for no reply)')
+    if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
+        raise ValueError(f"the record's parameters name units {_RT_UNITS}")
+    if 'raw_answer' not in coords:
+        if record['origin'] == 'derived':
+            raise ValueError('a derived assembly keeps its source evidence in '
+                             'raw_answer; core does not make it from the derived values')
+        coords['raw_answer'] = [_answer_text(value) for value in values]
+    return values, coords, record
+
+
+def _states(fmt, values, coords, record, response) -> Tuple[List[str], List[str]]:
+    n = len(values)
+    reasons = _value_reasons(fmt, values, record, response)
+    marked = coords.get('answer_valid', [True] * n)
+    errors = coords.get('parse_error', [''] * n)
+    states, why = [], []
+    for i in range(n):
+        if _null(coords['raw_answer'][i]) or (fmt == 'text' and values[i] is None):
+            states.append('missing'); why.append('no answer')
+        elif not marked[i] or reasons[i] is not None:
+            states.append('invalid')
+            why.append(str(errors[i]) if errors[i] else reasons[i] or 'marked invalid by the model side')
+        else:
+            states.append('valid'); why.append('')
+    return states, why
+
+
+def _assembly(values, coords, record, attrs=None):
+    from .supported_data_standards.brainio.assemblies import BehavioralAssembly
+    axis = coords.pop('choice', None)
+    built = {}
+    for name, column in coords.items():
+        column = list(column)
+        if any(_null(value) for value in column):
+            # Keep a null as a null: a list of text and None would become the text 'nan'.
+            column = np.array([None if _null(v) else v for v in column], dtype=object)
+        built[name] = ('presentation', column)
+    dims = ['presentation']
+    if axis is not None:
+        built['choice'] = axis if isinstance(axis, np.ndarray) else list(axis)   # a row's typed axis
+        dims.append('choice')
+    attrs = dict(attrs or {})
+    if record is not None:
+        attrs['response'] = record
+    return BehavioralAssembly(values, coords=built, dims=dims, attrs=attrs)
+
+
+def _check_occurrences(channel, ids, ledger) -> None:
+    """Refuse a row that the table does not expect (unknown id, or one occurrence too many)."""
+    if ledger is None or ledger.counts is None:
+        return
+    answered = ledger.answered.get(channel, Counter())
+    for stimulus_id, count in Counter(ids).items():
+        if _null(stimulus_id):
+            raise ValueError('an answer row names no stimulus_id, so it cannot be '
+                             'matched to a trial of the table')
+        if stimulus_id not in ledger.counts:
+            raise ValueError(f'stimulus {stimulus_id!r} is not in this session')
+        if answered[stimulus_id] + count > ledger.counts[stimulus_id]:
+            raise ValueError(f'stimulus {stimulus_id!r} is answered more often than '
+                             f'the table has it ({ledger.counts[stimulus_id]})')
+
+
+def _rows(channel, payload, event, session):
+    """The stored ``(values, coords, record, attrs)`` of a response, or ValueError."""
+    fmt = _format(channel)
+    ledger = _ledger(session)
+    if hasattr(payload, 'dims') and hasattr(payload, 'attrs'):
+        values, coords, record = _assembly_rows(fmt, channel, payload, event, session, ledger)
+        if fmt in _AXIS_FORMATS:
+            coords['choice'] = list(payload['choice'].values)
+        attrs = {key: value for key, value in payload.attrs.items() if key != 'response'}
+    else:
+        values, coords, record = _cell_rows(fmt, channel, payload, event, session, ledger)
+        attrs = {}
+    if fmt == 'rt' and record['parameters'].get('units') not in _RT_UNITS:
+        raise ValueError(f"give the units of a reaction time ({_RT_UNITS}): the "
+                         "record's parameters['units'], or meta['units'] for one number")
+    _check_occurrences(channel, coords['stimulus_id'], ledger)
+    states, why = _states(fmt, values, coords, record, _response_of(session))
+    supplied = coords.pop('response_state', None)
+    if supplied is not None and list(supplied) != states:
+        raise ValueError(f'the supplied states {list(supplied)} contradict the '
+                         f'values, which give {states}')
+    # A missing trial keeps the reason its producer gives (why there is no answer); every
+    # other reason is the format's own.
+    given = coords.pop('response_reason', None)
+    if given is not None:
+        why = [str(given[i]) if state == 'missing' and not _null(given[i]) and given[i] else reason
+               for i, (state, reason) in enumerate(zip(states, why))]
+    coords['response_state'], coords['response_reason'] = states, why
+    return values, coords, record, attrs
+
+
+def _validate(payload, event=None, session=None) -> List[str]:
+    """The ``behavior`` catalog validator: why an addressed response is malformed.
+
+    The rows it builds are kept for the session, which stores them without a
+    second pass (``_store``).
+    """
+    channel = getattr(event, 'channel', None)
+    if _format(channel) is None:
+        if channel == 'behavior' and _number(payload):
+            return ['a number is not a payload of the bare behavior channel']
+        return []
+    try:
+        rows = _rows(channel, payload, event, session)
+    except ValueError as error:
+        return [str(error)]
+    ledger = _ledger(session)
+    if ledger is not None:
+        ledger.pending = (event, payload, rows)
+    return []
+
+
+def _store(channel, payload, event, session):
+    """The stored answer of a checked response; the table's expected occurrences are counted.
+
+    A cell is stored as its checked row (``_row``); an answer given as an assembly is
+    stored as an assembly in the schema of its format."""
+    ledger = _ledger(session)
+    pending = ledger.pending if ledger is not None else None
+    if pending is not None and pending[0] is event and pending[1] is payload:
+        rows = pending[2]
+    else:
+        rows = _rows(channel, payload, event, session)
+    if ledger is not None:
+        ledger.pending = None
+        if ledger.counts is not None:   # occurrences matter only for a table's trials
+            ledger.answered.setdefault(channel, Counter()).update(rows[1]['stimulus_id'])
+    values, coords, record, attrs = rows
+    if hasattr(payload, 'dims') and hasattr(payload, 'attrs'):
+        return _assembly(values, coords, record, attrs)
+    return _row(values, coords, record)
+
+
+def _plain_scalar(value) -> bool:
+    """A value that a table keeps (in its own scalar type) and never refuses: a str,
+    bool, int (int64 range), float or None, or the NumPy str, bool, int64 or float64
+    scalar. A row of such values joins into the same table as the base's one-row tables."""
+    kind = type(value)
+    if kind in (str, np.str_, bool, np.bool_, float, np.float64, type(None)):
+        return True
+    return kind in (int, np.int64) and -2 ** 63 <= value < 2 ** 63
+
+
+def _in_table(value):
+    """A plain value as the presentation coordinate of a one-row table gives it back.
+
+    A table's coordinate turns a str into a str, a bool into a NumPy bool, an int into a
+    NumPy int64, a float into a NumPy float64, and None or NaN into a Python NaN. Rows
+    joined in these forms give the table that one-row tables joined give."""
+    kind = type(value)
+    if kind in (str, np.str_):
+        return str(value)
+    if kind in (bool, np.bool_):
+        return np.bool_(value)
+    if kind in (int, np.int64):
+        return np.int64(value)
+    if value is None or value != value:
+        return float('nan')
+    return np.float64(value)
+
+
+def _row(values, coords, record) -> dict:
+    """The checked row of a cell: the values, choice axis, trial coordinates and record
+    of its one trial, under the names its format's table uses, as the subject gave them.
+
+    A stimulus id or an option that is not a plain scalar is checked now by packaging the
+    row as a table, which refuses it as before. The row then keeps what that table holds
+    for the id and the options (its typed arrays), never the subject's own objects."""
+    table = None
+    if not all(_plain_scalar(value) for column in coords.values() for value in column):
+        table = _assembly(values, dict(coords), record)
+    # A number of a rating or a reaction time is kept as a Python float, and a plain
+    # coordinate value as its Python scalar, so that a row reads back from a record as
+    # it was kept.
+    value = values[0] if values.ndim == 2 or values.dtype == object else float(values[0])
+    row = {'stimulus_id': _python(coords['stimulus_id'][0]) if table is None
+           else _held(table, 'stimulus_id'), 'values': value}
+    if 'choice' in coords:
+        # The options as the table holds them: a typed array (which a record keeps).
+        row['choice'] = np.asarray(coords['choice']) if table is None else table['choice'].values
+    for name, column in coords.items():
+        if name not in row:
+            row[name] = _python(column[0])
+    row['response'] = record
+    return row
+
+
+def _held(table, name):
+    """What a one-row table holds for a presentation coordinate: its coordinate array, or
+    the index level's own timestamps when that level keeps a time zone the array drops."""
+    level = table.indexes['presentation'].get_level_values(name)
+    if getattr(level.dtype, 'tz', None) is not None:
+        return np.asarray(level.astype(object))
+    return table[name].values
+
+
+def _python(value):
+    """A plain NumPy scalar as its Python scalar; any other value as it is."""
+    return value.item() if type(value) in (np.str_, np.bool_, np.int64, np.float64) else value
+
+
+def _row_table(channel, row):
+    """The one-row table of a stored row: the stored answer as a table."""
+    value = row['values']
+    if 'choice' in row:
+        values = np.asarray(value)[None, :]
+    elif _format(channel) == 'text':
+        values = np.array([value], dtype=object)
+    else:
+        values = np.array([value], dtype=np.float64)
+    coords = {name: [value] for name, value in row.items() if name not in ('values', 'choice', 'response')}
+    if isinstance(row['stimulus_id'], np.ndarray):          # what the check's table held
+        from .supported_data_standards.brainio.assemblies import BehavioralAssembly
+        built = {name: ('presentation', row[name] if name == 'stimulus_id' else column)
+                 for name, column in coords.items()}
+        dims = ['presentation']
+        if 'choice' in row:
+            built['choice'] = row['choice']
+            dims.append('choice')
+        attrs = {} if row.get('response') is None else {'response': row['response']}
+        return BehavioralAssembly(values, coords=built, dims=dims, attrs=attrs)
+    if 'choice' in row:
+        coords['choice'] = row['choice']
+    return _assembly(values, coords, row.get('response'))
+
+
+class _RowView:
+    """A stored row as ``collect`` reads its one-row table: values, presentation
+    coordinates, choice axis and attrs."""
+
+    def __init__(self, channel, row):
+        if isinstance(row['stimulus_id'], np.ndarray):      # what the check's table held
+            table = _row_table(channel, row)
+            self.values, self.coords = np.asarray(table.values), _presentation_coords(table)
+            self.axis = list(table['choice'].values) if 'choice' in table.dims else None
+            self.attrs = table.attrs
+            self.dims = tuple(table.dims)
+            self.sizes = dict(table.sizes)
+            return
+        names = [name for name in row if name not in ('values', 'choice', 'response')]
+        axis = row.get('choice')
+        value = row['values']
+        if axis is not None:
+            self.values = np.asarray(value)[None, :]
+        elif _format(channel) == 'text':
+            self.values = np.array([value], dtype=object)
+        else:
+            self.values = np.array([value], dtype=np.float64)
+        self.coords = {name: [_in_table(row[name])] for name in names}
+        self.axis = list(axis) if axis is not None else None
+        self.attrs = {} if row.get('response') is None else {'response': row['response']}
+        self.dims = ('presentation', 'choice') if self.axis is not None else ('presentation',)
+        self.sizes = {'presentation': 1, **({'choice': len(self.axis)} if self.axis is not None else {})}
+
+    def __getitem__(self, name):
+        if name != 'choice' or self.axis is None:
+            raise KeyError(name)
+        return _Axis(self.axis)
+
+
+class _Axis:
+    def __init__(self, axis):
+        self.values = np.asarray(axis)
+
+
+def _answer_of(channel, answer):
+    """A stored answer as ``collect`` reads it: a row through its one-row table's view."""
+    return _RowView(channel, answer) if isinstance(answer, dict) else answer
+
+
+def _missing(channel, session, stimulus_ids: list, reason: str, template=None,
+             occurrences=None):
+    """A stored answer for trials with no answer: NaN (or None) values, state ``missing``.
+
+    It has no record: nothing was answered. ``template`` (an answer of the same
+    channel) gives the choice axis and the dtype; ``occurrences`` give the
+    table occurrence of each id, for its options.
+    """
+    fmt = _format(channel)
+    n = len(stimulus_ids)
+    occurrences = occurrences or [0] * n
+    coords = {'stimulus_id': list(stimulus_ids), 'raw_answer': [None] * n,
+              'answer_valid': [False] * n, 'parse_error': [''] * n,
+              'response_state': ['missing'] * n, 'response_reason': [reason] * n}
+    if fmt in _AXIS_FORMATS:
+        if template is not None:
+            axis = list(template['choice'].values)
+        else:
+            ledger = _ledger(session)
+            options = (ledger.options(stimulus_ids[0], occurrences[0])
+                       if ledger is not None and n else None)
+            axis = _axis(session, options)
+        if axis is None:
+            raise ValueError(f'{channel}: trials {stimulus_ids[:5]} have no answer and their '
+                             'options are not known, so they cannot be stored as missing')
+        dtype = (template.values.dtype if template is not None
+                 else np.float64 if fmt == 'log_probabilities' else np.float32)
+        values = np.full((n, len(axis)), np.nan, dtype=dtype)
+        coords['choice'] = axis
+    elif fmt == 'text':
+        values = np.array([None] * n, dtype=object)
+    else:
+        values = np.full(n, np.nan, dtype=np.float64)
+    return values, coords
+
+
+def _table_missing(channel, session, template=None):
+    """The stored missing rows of the table trials of ``channel`` with no answer, or None.
+
+    The k-th answer row with stimulus id X answers the k-th table row with id X,
+    so the missing rows are the later occurrences, in table order. The session
+    calls it only once a driver has read the source to its end.
+    """
+    template = _answer_of(channel, template) if template is not None else None
+    ledger = _ledger(session)
+    if ledger is None or ledger.ids is None:
+        return None
+    answered = ledger.answered.get(channel, Counter())
+    seen = Counter()
+    positions, occurrences = [], []
+    for position, stimulus_id in enumerate(ledger.ids):
+        if seen[stimulus_id] >= answered[stimulus_id]:   # a later occurrence: no answer
+            positions.append(position)
+            occurrences.append(seen[stimulus_id])
+        seen[stimulus_id] += 1
+    if not positions:
+        return None
+    ids = [ledger.ids[position] for position in positions]
+    if _format(channel) in _AXIS_FORMATS:
+        # Unknown options (no task gives them) are unknown, not zero options: the
+        # missing rows then take the width of the answered rows' axis.
+        known = (ledger.options(i, k) for i, k in zip(ids, occurrences))
+        widths = {len(options) for options in known if options is not None}
+        if template is not None:
+            widths.add(template.sizes['choice'])
+        if len(widths) > 1:
+            raise ValueError(f'{channel}: the trials of this table need different numbers of '
+                             f'options {sorted(widths)}, so their answers cannot be one '
+                             'assembly; read each answer from session.emitted')
+    values, coords = _missing(channel, session, ids, 'no answer event', template, occurrences)
+    table = _table(session)
+    names = _presentation_coords(template) if template is not None else {}
+    for name in names:
+        if name not in coords and name in table.columns:
+            coords[name] = table[name].iloc[positions].tolist()
+    ledger.answered.setdefault(channel, Counter()).update(ids)   # stored once
+    return _assembly(values, coords, None)
+
+
+def _signal_missing(channel, session, count: int):
+    """``count`` stored missing rows for respond signals that got no answer.
+
+    Recorded limit: the rows are placed at the end of the episode and carry no
+    identity of the single signal they stand for.
+    """
+    values, coords = _missing(channel, session, [None] * count, 'no answer to the respond signal')
+    return _assembly(values, coords, None)
+
+
+def _check_one_record(channel, answers) -> None:
+    """Refuse answers that carry different response records: one assembly holds one record."""
+    records = [a.attrs['response'] for a in answers if 'response' in getattr(a, 'attrs', {})]
+    for record in records[1:]:
+        if record != records[0]:
+            raise ValueError(f'{channel}: the answers carry different response records '
+                             f'({records[0]!r} and {record!r}), so they cannot be one assembly; '
+                             'each stored answer is in session.emitted')
+
+
+def _collect(channel, answers: list):
+    """One stored answer from the stored answers of a channel, in the order they arrived.
+
+    The answers that carry a response record must carry the same one (one format, one
+    unit, one layout); answers with different records are refused, since one assembly
+    can hold one record. The attrs are those of the first answer that has a record.
+    """
+    if len(answers) == 1:
+        return _row_table(channel, answers[0]) if isinstance(answers[0], dict) else answers[0]
+    answers = [_answer_of(channel, answer) for answer in answers]
+    _check_one_record(channel, answers)
+    parts = [(np.asarray(a.values), _presentation_coords(a)) for a in answers]
+    axis = next((list(a['choice'].values) for a in answers if 'choice' in a.dims), None)
+    for answer in answers:
+        if axis is not None and list(answer['choice'].values) != axis:
+            raise ValueError(f'{channel}: the answers have different choice axes ({axis} and '
+                             f"{list(answer['choice'].values)}), so they cannot be one assembly; "
+                             'each stored answer is in session.emitted')
+    names = list(dict.fromkeys(name for _, coords in parts for name in coords))
+    merged = {}
+    for name in names:
+        column = []
+        for _, coords in parts:
+            n = len(coords['stimulus_id'])
+            column += (list(coords[name]) if name in coords else
+                       [True] * n if name == 'answer_valid' else
+                       [''] * n if name == 'parse_error' else [None] * n)
+        merged[name] = column
+    if axis is not None:
+        merged['choice'] = axis
+    first = next((a for a in answers if 'response' in a.attrs), answers[0])
+    attrs = {key: value for key, value in first.attrs.items() if key != 'response'}
+    return _assembly(np.concatenate([part[0] for part in parts]), merged,
+                     first.attrs.get('response'), attrs)

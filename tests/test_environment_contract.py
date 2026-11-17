@@ -1,4 +1,5 @@
 """Environment preflight, episode boundaries, clocks and execution receipts."""
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
@@ -7,7 +8,7 @@ import pytest
 from brainscore_core.environment import ActionSpec, ArraySpec, DiscreteSpec, MappingSpec, TextSpec
 from brainscore_core.streaming import Session, StreamEvent
 from brainscore_core.streaming_helpers import (
-    EnvironmentSource, _drive_environment_via_process, run_environment,
+    EnvironmentSource, drive_environment_session, run_environment,
 )
 
 
@@ -77,7 +78,7 @@ def test_terminal_observation_is_retained_without_a_policy_call():
     subject = SimpleNamespace(process=lambda row: calls.append(row) or {'motor': 1})
     session, source = make(env, seed=11, options={'task': 2}, require_specs=True)
     with session:
-        _drive_environment_via_process(subject, session)
+        drive_environment_session(subject, session, driver="process")
     assert len(calls) == len(env.actions) == len(session.emitted) == 1
     assert len(source.input_events) == 2
     assert env.reset_args == (11, {'task': 2}) and env.closed == 1
@@ -94,7 +95,7 @@ def test_reset_with_reason_ends_without_a_policy_call(reason, complete):
     subject = SimpleNamespace(process=lambda row: calls.append(row) or {'motor': 1})
     session, source = make(env)
     with session:
-        _drive_environment_via_process(subject, session)
+        drive_environment_session(subject, session, driver="process")
     assert calls == [] and env.actions == [] and env.closed == 1
     assert session.complete is complete and session.emitted == []
     assert [(e.channel, e.payload) for e in source.input_events] == [
@@ -162,6 +163,21 @@ def test_truncated_ends_complete_and_failure_does_not():
     assert session.next_input() is None and not session.complete
 
 
+@pytest.mark.parametrize('ending, action, reason', [
+    ('terminal', 1, 'terminal'), ('truncated', 1, 'truncated'), ('terminal', 9, 'failure')])
+def test_the_session_tells_why_the_episode_ended(ending, action, reason):
+    class Ending(Environment):
+        def step(self, outputs):
+            return self.observation(), ending
+    session, _ = make(Ending())
+    advance(session)
+    assert session.source.end_reason is None
+    with pytest.raises(ValueError) if reason == 'failure' else nullcontext():
+        session.respond(motor(action))      # 9 fails the action specification
+    advance(session)
+    assert session.source.end_reason == reason
+
+
 def test_unrequested_outputs_are_refused_and_do_not_advance_the_environment():
     env = Environment()
     session, _ = make(env)
@@ -195,7 +211,7 @@ def test_a_source_over_another_output_channel_needs_no_motor():
     advance(session)
     session.respond(StreamEvent('behavior:text', 'hello', None))
     assert env.actions == ['hello']
-    assert [e.payload for e in session.emitted] == ['hello']
+    assert [e.payload['values'] for e in session.emitted] == ['hello']    # the answer's row
 
 
 def _typed_subject(process):
@@ -401,7 +417,7 @@ def _run_long(history_limit, length=50, error=None):
     subject = SimpleNamespace(process=lambda row: seen.append(row) or {'motor': np.array([row['observation']['n']])})
     session, source = make(env, seed=3, history_limit=history_limit)
     with session, source.observe_actions(observed.append):
-        _drive_environment_via_process(subject, session)
+        drive_environment_session(subject, session, driver="process")
     return env, session, source, seen, observed
 
 
@@ -457,7 +473,7 @@ def test_history_limit_keeps_failure_receipts_observable(limit):
     session, source = make(env, history_limit=limit)
     with session, source.observe_actions(observed.append):
         with pytest.raises(RuntimeError, match='lost'):
-            _drive_environment_via_process(subject, session)
+            drive_environment_session(subject, session, driver="process")
     assert [e.meta['action_status'] for e in observed] == ['proposed', 'applied'] * 2 + [
         'proposed', 'execution_unknown']
     assert session.next_input().meta['reason'] == 'failure' and not session.complete and env.closed == 1
@@ -517,6 +533,6 @@ def test_run_environment_with_reset_reason_returns_no_actions(reason):
     calls = []
     inner = SimpleNamespace(process=lambda row: calls.append(row) or {'motor': 1})
     subject = SimpleNamespace(
-        participate=lambda session: _drive_environment_via_process(inner, session))
+        participate=lambda session: drive_environment_session(inner, session, driver="process"))
     assert run_environment(subject, env) == []
     assert calls == [] and env.actions == [] and env.closed == 1

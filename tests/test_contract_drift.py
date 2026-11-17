@@ -25,9 +25,9 @@ PINNED_SEED_CHANNELS = {
     "observation": (io_catalog.INPUT, "environment harness"),
     "pharmacological": (io_catalog.INPUT, "core"),
     "proprioception": (io_catalog.INPUT, "environment harness"),
-    "pupil": (io_catalog.OUTPUT, "human harness"),
+    "pupil": (io_catalog.OUTPUT, "human subject"),
     "reward": (io_catalog.INPUT, "environment harness"),
-    "skin_conductance": (io_catalog.OUTPUT, "human harness"),
+    "skin_conductance": (io_catalog.OUTPUT, "human subject"),
     "stimulation": (io_catalog.INPUT, "core"),
     "text": (io_catalog.INPUT, "core"),
     "vision": (io_catalog.INPUT, "core"),
@@ -53,19 +53,6 @@ def test_seed_channel_registry_matches_pinned_contract_surface():
 
 
 def test_registry_is_runtime_queryable_and_entries_are_well_formed():
-    assert io_catalog.REGISTRY_VERSION
-    assert set(io_catalog.channels()) == set(PINNED_SEED_CHANNELS)
-    assert set(io_catalog.channels(io_catalog.INPUT)) == {
-        name
-        for name, (direction, _owner) in PINNED_SEED_CHANNELS.items()
-        if direction == io_catalog.INPUT
-    }
-    assert set(io_catalog.channels(io_catalog.OUTPUT)) == {
-        name
-        for name, (direction, _owner) in PINNED_SEED_CHANNELS.items()
-        if direction == io_catalog.OUTPUT
-    }
-
     for entry in io_catalog.all_entries():
         assert entry.direction in {
             io_catalog.INPUT,
@@ -109,7 +96,6 @@ def test_subject_participate_and_reset_contract_are_pinned():
     assert subject.participate(session=None) is None
     assert not hasattr(subject, "process")
     assert not hasattr(subject, "region_layer_map")
-    assert not hasattr(subject, "supported_modalities")
     assert subject.reset() is None
 
 

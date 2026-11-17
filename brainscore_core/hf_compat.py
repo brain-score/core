@@ -46,12 +46,3 @@ def load_pinned_processor(processor_cls, model_id, use_fast=False,
     processor = processor_cls.from_pretrained(model_id, **kwargs)
     return pin_image_processor(processor, model_id, use_fast=use_fast,
                                **(image_processor_kwargs or {}))
-
-
-# Keep existing pickle references and public type names stable.
-for _definition in (
-    pin_image_processor,
-    load_pinned_processor,
-):
-    _definition.__module__ = 'brainscore_core.hf_compat'
-del _definition
