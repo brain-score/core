@@ -23,9 +23,9 @@ from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
 PASSIVE = 'passive'
-READING_TIMES = 'reading_times'
-LOG_PROBABILITIES = 'behavior:log_probabilities'
-SEGMENTS_COLUMN = 'segments'   # the column of a Segments trial that holds its parts
+_READING_TIMES = 'reading_times'
+_LOG_PROBABILITIES = 'behavior:log_probabilities'
+_SEGMENTS_COLUMN = 'segments'   # the column of a Segments trial that holds its parts
 
 LEGACY_API = 'legacy'     # calls look_at / digest_text and friends
 SESSION_API = 'session'   # declares channels and drives participate itself
@@ -248,14 +248,14 @@ class LegacyBenchmarkFacade:
         """
         name = getattr(task, 'value', task)
         declared = set(self._subject.out_channels)
-        if name == READING_TIMES and LOG_PROBABILITIES in declared:
+        if name == _READING_TIMES and _LOG_PROBABILITIES in declared:
             from brainscore_core.responses import Segments
-            self.start_task(TaskContext(response=Segments(SEGMENTS_COLUMN)))
+            self.start_task(TaskContext(response=Segments(_SEGMENTS_COLUMN)))
             return
         if 'behavior' not in declared:
             # A refusal when the run starts: an error of score().
-            also = (f" and no '{LOG_PROBABILITIES}' output (a model with a likelihood part "
-                    f"answers reading times there)" if name == READING_TIMES else '')
+            also = (f" and no '{_LOG_PROBABILITIES}' output (a model with a likelihood part "
+                    f"answers reading times there)" if name == _READING_TIMES else '')
             raise ExecutionNotFeasibleError(
                 f"Subject {self.identifier!r} refused the legacy language behavioral task "
                 f"{name!r}: it declares no 'behavior' output{also}. The pair passed the declared "
@@ -281,26 +281,29 @@ class LegacyBenchmarkFacade:
         if not channels and not segments:
             raise ValueError('Call start_neural_recording or start_behavioral_task '
                              'before digest_text')
-        result = {}
-        if channels:
-            settings = {} if stimuli is text else {'legacy_text': text}
-            # Beside a Segments trial, the rows are recorded under a passive task.
-            task = self._passive_task() if segments else None
-            measured, _ = self._measure(stimuli, list(channels.values()), settings, task=task)
-            result = {name: measured[channel] for name, channel in channels.items()}
         if segments:
-            result['behavior'] = self._reading_times(stimuli)
-        return result
+            if channels:
+                # A recording comes from the trial that is answered (rule 4.5); refused before any pass.
+                raise ExecutionNotFeasibleError(
+                    f"Subject {self.identifier!r}: reading times are asked as one Segments trial, "
+                    f"and a neural recording in the same digest_text call is not supported on this "
+                    f"route.", channels=set(channels.values()), task_type=_READING_TIMES)
+            return {'behavior': self._reading_times(stimuli)}
+        settings = {} if stimuli is text else {'legacy_text': text}
+        measured, _ = self._measure(stimuli, list(channels.values()), settings)
+        return {name: measured[channel] for name, channel in channels.items()}
 
     def _reading_times(self, stimuli):
         """The old reading-times answer from one ``Segments`` trial: for each part, minus its
         log probability in bits given the earlier parts (the surprisal), with the old
         coordinates ``stimulus``, ``context`` and ``part_number``.
 
-        Every position keeps its raw value; a non-finite one (a first part with no scored
-        token) reaches the old benchmark as it is, counted in ``n_invalid``, and the old
-        benchmark applies its own policy. The values are float32 when every part is finite,
-        else float64, as the old concatenation of float32 values and NaN gives them.
+        Every position keeps its raw value, and an invalid trial (for example a first part
+        with no scored token, NaN) is counted in ``n_invalid``, with its state and reason in
+        the attributes; the old benchmark applies its own policy. The values are float32
+        when every value is finite and float32 holds it exactly, else float64, as the old
+        concatenation of float32 values (and NaN) gives them. The source answer's record stays
+        in ``attrs['response']``; ``attrs['units']`` names the returned values: bits.
         """
         import math
         import numpy as np
@@ -310,34 +313,31 @@ class LegacyBenchmarkFacade:
         from brainscore_core.text import prepare_context, text_parts
         parts = text_parts(stimuli)
         row = StimulusSet(pd.DataFrame({'sentence': [prepare_context(parts)],
-                                        SEGMENTS_COLUMN: [tuple(parts)], 'stimulus_id': [0]}))
+                                        _SEGMENTS_COLUMN: [tuple(parts)], 'stimulus_id': [0]}))
         row.identifier = f'segments_{getattr(stimuli, "identifier", None)}'
-        measured, _ = self._measure(row, [LOG_PROBABILITIES], {})
-        answer = measured[LOG_PROBABILITIES]
+        measured, _ = self._measure(row, [_LOG_PROBABILITIES], {})
+        answer = measured[_LOG_PROBABILITIES]
+        # Core checked the layout and the sum of a Segments answer.
         record = answer.attrs.get('response') or {}
         parameters = record.get('parameters') or {}
-        if parameters.get('layout') != 'segment' or parameters.get('aggregation') != 'sum':
-            raise ValueError(f'Reading times are read from summed segment log probabilities; the '
-                             f'answer has layout {parameters.get("layout")!r} and aggregation '
-                             f'{parameters.get("aggregation")!r}')
         state = list(answer['response_state'].values)[0]
+        reason = list(answer['response_reason'].values)[0]
         if state == 'missing':
-            raise ValueError(f"Subject {self.identifier!r} gave no reading-times answer: "
-                             f"{list(answer['response_reason'].values)[0]}")
+            raise ValueError(f"Subject {self.identifier!r} gave no reading-times answer: {reason}")
         values = -np.asarray(answer.values[0], dtype=np.float64)
         if parameters.get('units') == 'nats':
             values = values / math.log(2)
-        finite = np.isfinite(values)
-        if finite.all():
-            values = values.astype(np.float32)
+        single = values.astype(np.float32)
+        if np.isfinite(values).all() and np.array_equal(single.astype(np.float64), values):
+            values = single
         self._applied(READING_TIME_POLICY)
-        self.n_invalid_answers = (self.n_invalid_answers or 0) + int((~finite).sum())
+        self.n_invalid_answers = (self.n_invalid_answers or 0) + int(state == 'invalid')
         coords = {'stimulus': ('presentation', list(parts)),
                   'context': ('presentation', [prepare_context(parts[:i + 1])
                                                for i in range(len(parts))]),
                   'part_number': ('presentation', list(range(len(parts))))}
-        return BehavioralAssembly(values, coords=coords, dims=['presentation'],
-                                  attrs={'response': {**record, 'format': 'behavior'}})
+        return BehavioralAssembly(values, coords=coords, dims=['presentation'], attrs={
+            'response': record, 'units': 'bits', 'response_state': state, 'response_reason': reason})
 
     def reset(self) -> None:
         try:
@@ -366,9 +366,6 @@ class LegacyBenchmarkFacade:
         """The task sent with each measurement: the recorded one, else one passive task."""
         if self._task is not None:
             return self._task
-        return self._passive_task()
-
-    def _passive_task(self) -> TaskContext:
         if self._passive is None:
             self._passive = TaskContext(task_type=PASSIVE)
         return self._passive
@@ -383,14 +380,13 @@ class LegacyBenchmarkFacade:
                 "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']).")
         return f'neural:{self._record}'
 
-    def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any], task=None):
-        """One session: the recorded task object (or ``task``), the time bins and the
-        measurement settings.
+    def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
+        """One session: the recorded task object, the time bins and the measurement settings.
 
         Returns the collected answer of each channel and the events the subject sent."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        session = stimulus_session(stimuli, channels, task or self._session_task(),
+        session = stimulus_session(stimuli, channels, self._session_task(),
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}, list(session.emitted)
@@ -589,8 +585,9 @@ REPLACED_ANSWER_POLICY = ('an invalid answer is replaced by a random label (seed
                           'before the legacy metric')
 READING_TIME_POLICY = ('reading times are the surprisal in bits of each part given the earlier '
                        'parts of the same call (minus its log probability), the predictor of '
-                       "human reading time; a part with no scored token is NaN, and the old "
-                       "benchmark's own policy applies")
+                       'human reading time; an invalid trial (a part with no scored token is NaN) '
+                       "is counted, its raw values reach the old benchmark, and the old benchmark's "
+                       'own policy applies')
 OLD_LABEL_POLICY = ("an old model's label outside the list reaches the legacy metric "
                     "unchanged, as the old model gave it")
 

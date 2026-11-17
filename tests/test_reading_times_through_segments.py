@@ -39,11 +39,12 @@ class _Segmenter(Subject):
     out_channels = {F6, 'neural:language_system'}
     required_channels = set()
 
-    def __init__(self, parameters=None, extra_positions=0, first_nan=True):
+    def __init__(self, parameters=None, extra_positions=0, first_nan=True, values=None):
         self.sessions = []
         self.parameters = parameters or _parameters()
         self.extra_positions = extra_positions
         self.first_nan = first_nan
+        self.values = values
 
     def participate(self, session):
         self.sessions.append(session)
@@ -58,7 +59,8 @@ class _Segmenter(Subject):
             row = session.stimuli.iloc[0]
             parts = trial_prompt(session.task, row).response.segments
             n = len(parts) + self.extra_positions
-            values = -np.arange(1, n + 1, dtype=np.float64) * 0.5
+            values = (np.array(self.values, dtype=np.float64) if self.values is not None
+                      else -np.arange(1, n + 1, dtype=np.float64) * 0.5)
             valid, error = True, ''
             if self.first_nan:
                 values[0] = np.nan
@@ -143,9 +145,26 @@ def test_all_finite_values_are_float32_and_nats_are_converted_to_bits():
     _, answer = _reading_times(_Segmenter(first_nan=False), ['a', 'b'])
     assert answer.values.dtype == np.float32
     np.testing.assert_array_equal(answer.values, [0.5, 1.0])
+    assert answer.attrs['units'] == 'bits'
     subject = _Segmenter(parameters=_parameters(units='nats'), first_nan=False)
     _, answer = _reading_times(subject, ['a', 'b'])
     np.testing.assert_allclose(answer.values, [0.5 / math.log(2), 1.0 / math.log(2)], rtol=1e-6)
+    assert answer.attrs['units'] == 'bits'
+    assert answer.attrs['response']['parameters']['units'] == 'nats'   # the source record
+
+
+def test_values_that_float32_cannot_hold_stay_float64():
+    _, answer = _reading_times(_Segmenter(first_nan=False, values=[-0.1, -0.2]), ['a', 'b'])
+    assert answer.values.dtype == np.float64
+    np.testing.assert_array_equal(answer.values, [0.1, 0.2])
+
+
+def test_an_invalid_trial_with_finite_values_is_counted_with_its_reason():
+    facade, answer = _reading_times(_Segmenter(first_nan=False, values=[0.25, 0.25]), ['a', 'b'])
+    np.testing.assert_array_equal(answer.values, [-0.25, -0.25])      # the raw values
+    assert facade.n_invalid_answers == 1
+    assert answer.attrs['response_state'] == 'invalid'
+    assert 'above 0' in answer.attrs['response_reason']
 
 
 def test_a_wrong_number_of_positions_is_malformed():
@@ -178,6 +197,9 @@ def test_a_row_whose_text_is_not_the_join_of_its_parts_is_refused():
         trial_prompt(task, {'sentence': 'other text', 'segments': ('a', 'b'), 'stimulus_id': 0})
     prompt = trial_prompt(task, {'sentence': 'a b.', 'segments': ['a', 'b.'], 'stimulus_id': 0})
     assert prompt.response.segments == ('a', 'b.')
+    given = TaskContext(response=Segments(('dogs',)))      # the parts given on the request
+    with pytest.raises(ValueError, match='join of its parts'):
+        trial_prompt(given, {'sentence': 'fish', 'stimulus_id': 0})
 
 
 def test_a_subject_with_only_bare_behavior_keeps_the_old_route():
@@ -197,13 +219,11 @@ def test_a_subject_with_neither_output_is_refused_before_any_session():
     assert subject.sessions == []
 
 
-def test_a_joint_call_records_the_rows_under_a_passive_task_beside_the_segments_trial():
+def test_a_joint_call_is_refused_before_any_session():
     subject = _Segmenter()
     facade = LegacyBenchmarkFacade(subject)
     facade.start_neural_recording('language_system')
     facade.start_behavioral_task('reading_times')
-    out = facade.digest_text(['a', 'b'])
-    assert set(out) == {'neural', 'behavior'}
-    neural, segments = subject.sessions
-    assert neural.task.task_type == 'passive' and neural.outputs == ('neural:language_system',)
-    assert isinstance(segments.task.response, Segments)
+    with pytest.raises(ExecutionNotFeasibleError, match='neural recording'):
+        facade.digest_text(['a', 'b'])
+    assert subject.sessions == []
