@@ -43,16 +43,16 @@ class TaskContext:
       model built with both answers through its answering part when the
       task gives an instruction; a model built without it uses its readout
 
-    ``BrainScoreModel`` accepts ``task_type`` ``'passive'`` or one of
-    ``'probabilities'``, ``'classification'``, ``'label'``. Put the stimuli to
-    answer (for example a held-out test set) to ``behavioral_response`` or
-    ``stimulus_session`` as ``stimuli``.
+    ``BrainScoreModel`` answers a task with a ``response`` or ``task_type='passive'``.
+    Put the stimuli to answer (for example a held-out test set) to
+    ``behavioral_response`` or ``stimulus_session`` as ``stimuli``.
 
     ``response`` is the form of the answer (``brainscore_core.responses``):
     ``Choice``, ``Scale`` or ``Text``; ``task_type='passive'`` means no answer.
     With a response, outputs are requested on ``behavior:<kind>`` channels.
-    The older ``task_type`` values ``'label'``, ``'classification'`` and
-    ``'probabilities'`` keep their meaning on the plain ``behavior`` channel.
+    The older ``task_type`` values (``'label'``, ``'probabilities'``, ``'odd_one_out'``) are
+    the calls of old benchmarks and old models; the legacy facade asks an old
+    probabilities task as a ``Choice`` on ``behavior:probabilities``.
 
     ``present`` gives the order of a trial's parts when a stimulus has several
     (e.g. ``('text', 'video')``: a sentence, then a clip). Name columns to show

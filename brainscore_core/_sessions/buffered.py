@@ -100,8 +100,7 @@ def behavioral_response(subject, stimuli, task) -> BehavioralAssembly:
     ``stimuli`` are the stimuli to answer; ``task.fitting_stimuli`` is only the
     training set for a readout::
 
-        task = TaskContext(task_type='probabilities', label_set=['real', 'pseudo'],
-                           fitting_stimuli=train)
+        task = TaskContext(response=Choice(['real', 'pseudo']), fitting_stimuli=train)
         behavior = behavioral_response(subject, test, task)
 
     The session presents only ``stimuli``. The instruction and the fitting
