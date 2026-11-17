@@ -23,6 +23,9 @@ from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
 PASSIVE = 'passive'
+READING_TIMES = 'reading_times'
+LOG_PROBABILITIES = 'behavior:log_probabilities'
+SEGMENTS_COLUMN = 'segments'   # the column of a Segments trial that holds its parts
 
 LEGACY_API = 'legacy'     # calls look_at / digest_text and friends
 SESSION_API = 'session'   # declares channels and drives participate itself
@@ -235,16 +238,29 @@ class LegacyBenchmarkFacade:
         self.start_recording(recording_target, recording_type=recording_type)
 
     def start_behavioral_task(self, task) -> None:
-        if 'behavior' not in set(self._subject.out_channels):
+        """Record a legacy language task.
+
+        ``reading_times``, for a subject that declares ``behavior:log_probabilities``, is
+        asked as one ``Segments`` trial for each ``digest_text`` call (ADR-0075): the
+        benchmark receives the surprisal in bits of each part given the earlier parts. Any
+        other subject keeps the bare ``behavior`` route, unchanged: an old model's own
+        reading times can be on another scale, so they are never relabelled.
+        """
+        name = getattr(task, 'value', task)
+        declared = set(self._subject.out_channels)
+        if name == READING_TIMES and LOG_PROBABILITIES in declared:
+            from brainscore_core.responses import Segments
+            self.start_task(TaskContext(response=Segments(SEGMENTS_COLUMN)))
+            return
+        if 'behavior' not in declared:
             # A refusal when the run starts: an error of score().
+            also = (f" and no '{LOG_PROBABILITIES}' output (a model with a likelihood part "
+                    f"answers reading times there)" if name == READING_TIMES else '')
             raise ExecutionNotFeasibleError(
                 f"Subject {self.identifier!r} refused the legacy language behavioral task "
-                f"{getattr(task, 'value', task)!r} (reading times / next-word prediction): "
-                f"it declares no 'behavior' output. The pair passed the declared "
+                f"{name!r}: it declares no 'behavior' output{also}. The pair passed the declared "
                 f"compatibility check because this legacy benchmark declares no requested "
-                f"output, so there is no result; the benchmark's declarations do not yet "
-                f"express that it needs 'behavior'.", channels={'behavior'},
-                task_type=getattr(task, 'value', task))
+                f"output, so there is no result.", channels={'behavior'}, task_type=name)
         self.start_task(task)
 
     def digest_text(self, text) -> Dict[str, Any]:
@@ -256,17 +272,72 @@ class LegacyBenchmarkFacade:
         task settings, so a legacy adapter can replay the exact original call.
         """
         stimuli = text_stimulus_set(text)
+        segments = self._segments_requested()
         channels: Dict[str, str] = {}
         if self._record is not None:
             channels['neural'] = self._neural_channel('digest_text')
-        if self._behavior_requested():
+        if self._behavior_requested() and not segments:
             channels['behavior'] = 'behavior'
-        if not channels:
+        if not channels and not segments:
             raise ValueError('Call start_neural_recording or start_behavioral_task '
                              'before digest_text')
-        settings = {} if stimuli is text else {'legacy_text': text}
-        measured, _ = self._measure(stimuli, list(channels.values()), settings)
-        return {name: measured[channel] for name, channel in channels.items()}
+        result = {}
+        if channels:
+            settings = {} if stimuli is text else {'legacy_text': text}
+            # Beside a Segments trial, the rows are recorded under a passive task.
+            task = self._passive_task() if segments else None
+            measured, _ = self._measure(stimuli, list(channels.values()), settings, task=task)
+            result = {name: measured[channel] for name, channel in channels.items()}
+        if segments:
+            result['behavior'] = self._reading_times(stimuli)
+        return result
+
+    def _reading_times(self, stimuli):
+        """The old reading-times answer from one ``Segments`` trial: for each part, minus its
+        log probability in bits given the earlier parts (the surprisal), with the old
+        coordinates ``stimulus``, ``context`` and ``part_number``.
+
+        Every position keeps its raw value; a non-finite one (a first part with no scored
+        token) reaches the old benchmark as it is, counted in ``n_invalid``, and the old
+        benchmark applies its own policy. The values are float32 when every part is finite,
+        else float64, as the old concatenation of float32 values and NaN gives them.
+        """
+        import math
+        import numpy as np
+        import pandas as pd
+        from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+        from brainscore_core.supported_data_standards.brainio.stimuli import StimulusSet
+        from brainscore_core.text import prepare_context, text_parts
+        parts = text_parts(stimuli)
+        row = StimulusSet(pd.DataFrame({'sentence': [prepare_context(parts)],
+                                        SEGMENTS_COLUMN: [tuple(parts)], 'stimulus_id': [0]}))
+        row.identifier = f'segments_{getattr(stimuli, "identifier", None)}'
+        measured, _ = self._measure(row, [LOG_PROBABILITIES], {})
+        answer = measured[LOG_PROBABILITIES]
+        record = answer.attrs.get('response') or {}
+        parameters = record.get('parameters') or {}
+        if parameters.get('layout') != 'segment' or parameters.get('aggregation') != 'sum':
+            raise ValueError(f'Reading times are read from summed segment log probabilities; the '
+                             f'answer has layout {parameters.get("layout")!r} and aggregation '
+                             f'{parameters.get("aggregation")!r}')
+        state = list(answer['response_state'].values)[0]
+        if state == 'missing':
+            raise ValueError(f"Subject {self.identifier!r} gave no reading-times answer: "
+                             f"{list(answer['response_reason'].values)[0]}")
+        values = -np.asarray(answer.values[0], dtype=np.float64)
+        if parameters.get('units') == 'nats':
+            values = values / math.log(2)
+        finite = np.isfinite(values)
+        if finite.all():
+            values = values.astype(np.float32)
+        self._applied(READING_TIME_POLICY)
+        self.n_invalid_answers = (self.n_invalid_answers or 0) + int((~finite).sum())
+        coords = {'stimulus': ('presentation', list(parts)),
+                  'context': ('presentation', [prepare_context(parts[:i + 1])
+                                               for i in range(len(parts))]),
+                  'part_number': ('presentation', list(range(len(parts))))}
+        return BehavioralAssembly(values, coords=coords, dims=['presentation'],
+                                  attrs={'response': {**record, 'format': 'behavior'}})
 
     def reset(self) -> None:
         try:
@@ -287,10 +358,17 @@ class LegacyBenchmarkFacade:
         from brainscore_core.responses import Choice
         return self._task is not None and isinstance(self._task.response, Choice)
 
+    def _segments_requested(self) -> bool:
+        from brainscore_core.responses import Segments
+        return self._task is not None and isinstance(self._task.response, Segments)
+
     def _session_task(self) -> TaskContext:
         """The task sent with each measurement: the recorded one, else one passive task."""
         if self._task is not None:
             return self._task
+        return self._passive_task()
+
+    def _passive_task(self) -> TaskContext:
         if self._passive is None:
             self._passive = TaskContext(task_type=PASSIVE)
         return self._passive
@@ -305,13 +383,14 @@ class LegacyBenchmarkFacade:
                 "for example stimulus_session(stimuli, ['neural:V4', 'neural:IT']).")
         return f'neural:{self._record}'
 
-    def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any]):
-        """One session: the recorded task object, the time bins and the measurement settings.
+    def _measure(self, stimuli, channels: List[str], settings: Dict[str, Any], task=None):
+        """One session: the recorded task object (or ``task``), the time bins and the
+        measurement settings.
 
         Returns the collected answer of each channel and the events the subject sent."""
         if self._recording_type is not None:
             settings['recording_type'] = self._recording_type
-        session = stimulus_session(stimuli, channels, self._session_task(),
+        session = stimulus_session(stimuli, channels, task or self._session_task(),
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}, list(session.emitted)
@@ -508,6 +587,10 @@ def subject_for_benchmark(subject, benchmark, *, visual_degrees: Optional[float]
 
 REPLACED_ANSWER_POLICY = ('an invalid answer is replaced by a random label (seed 0) '
                           'before the legacy metric')
+READING_TIME_POLICY = ('reading times are the surprisal in bits of each part given the earlier '
+                       'parts of the same call (minus its log probability), the predictor of '
+                       "human reading time; a part with no scored token is NaN, and the old "
+                       "benchmark's own policy applies")
 OLD_LABEL_POLICY = ("an old model's label outside the list reaches the legacy metric "
                     "unchanged, as the old model gave it")
 

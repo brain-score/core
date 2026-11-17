@@ -2,7 +2,7 @@
 
 A ``TaskContext`` says what the subject is asked to do; its ``response`` says
 what form the answer takes and which output channels it produces. ``Choice``,
-``Scale`` and ``Text`` are the core response classes; a task takes these classes
+``Scale``, ``Text`` and ``Segments`` are the core response classes; a task takes these classes
 only, not a subclass.
 
 ``directive`` and ``parse`` are the model side's tools; a benchmark gives the
@@ -183,6 +183,41 @@ class Text:
         return (reply, None) if isinstance(reply, str) else (None, 'the reply is not text')
 
 
+@dataclass(frozen=True)
+class Segments:
+    """The log probability of each consecutive part of one text, given the earlier parts.
+
+    ``segments`` is the name of a stimulus column whose cell holds the ordered
+    parts of that row (``trial_prompt`` resolves it to the row's parts, a tuple of
+    str). The row's text is the parts joined by ``brainscore_core.text.prepare_context``;
+    a row whose text differs from that join is refused. The answer is
+    ``behavior:log_probabilities`` in the segment layout: position i holds the
+    summed log probability of the new tokens of part i given parts 1 to i-1 of the
+    same row (Response Format Standard 2.3). Parts may repeat; an empty part (no text
+    other than white space) is refused: an empty part cannot be scored.
+    """
+    segments: Union[str, Tuple[str, ...]]
+
+    channels = ('behavior:log_probabilities',)
+
+    def __post_init__(self):
+        if isinstance(self.segments, str):
+            if not self.segments:
+                raise ValueError('segments names a column; it must not be empty')
+            return
+        parts = tuple(self.segments)
+        if not parts or not all(isinstance(part, str) for part in parts):
+            raise ValueError(f'segments is a column name or a nonempty sequence of str, '
+                             f'not {self.segments!r}')
+        empty = [i + 1 for i, part in enumerate(parts) if not part.strip()]
+        if empty:
+            raise ValueError(f'an empty part cannot be scored: positions {empty} have no text')
+        object.__setattr__(self, 'segments', parts)
+
+    def directive(self) -> str:
+        return ''
+
+
 # The channel that carries each kind of trial part.
 PART_CHANNELS = {'text': 'text', 'image': 'vision:image', 'video': 'vision:video', 'audio': 'audio'}
 
@@ -255,6 +290,9 @@ def trial_prompt(task, stimulus_row) -> Prompt:
     response = task.response
     if isinstance(response, Choice):
         response = _row_choice(response, stimulus_row)
+    elif isinstance(response, Segments):
+        response = _row_segments(response, stimulus_row, [content for kind, content in parts
+                                                          if kind == 'text'])
     directive = response.directive() if response is not None else ''
     if directive:
         parts.append(('text', directive)); names.append('directive')
@@ -277,6 +315,22 @@ def _row_choice(response: 'Choice', stimulus_row) -> 'Choice':
         raise ValueError(f'The options in column {column!r} must be distinct; '
                          f'got {options!r}')
     return replace(response, labels=options)
+
+
+def _row_segments(response: 'Segments', stimulus_row, texts) -> 'Segments':
+    """``response`` with the row's own parts; the row's text must be their join."""
+    from .text import prepare_context
+    if not isinstance(response.segments, str):
+        return response
+    parts = _cell(stimulus_row, response.segments)
+    if parts is None or isinstance(parts, str):
+        raise ValueError(f'Column {response.segments!r} must hold a sequence of str in every '
+                         f'row; got {parts!r}')
+    resolved = Segments(tuple(parts))
+    if texts != [prepare_context(resolved.segments)]:
+        raise ValueError(f'The text of a Segments row is the join of its parts '
+                         f'({prepare_context(resolved.segments)!r}); got {texts!r}')
+    return resolved
 
 
 def _cell(row, column):
