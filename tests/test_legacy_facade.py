@@ -258,8 +258,8 @@ def test_fitting_settings_stay_apart_from_measurement_settings():
     assert first.task.metadata['task_settings'] == {
         'number_of_trials': 2, 'require_variance': True}
     assert first.task.fitting_stimuli is fitting
-    assert first.settings == {'number_of_trials': 1, 'require_variance': False}
-    assert second.settings == {'number_of_trials': 3, 'require_variance': False}
+    assert {'number_of_trials': 1, 'require_variance': False}.items() <= first.settings.items()
+    assert {'number_of_trials': 3, 'require_variance': False}.items() <= second.settings.items()
 
 
 def test_text_identifiers_do_not_collide_on_the_delimiter():
@@ -629,3 +629,30 @@ def test_an_answer_with_every_column_is_returned_as_is_even_when_the_table_has_a
         'choice': ['cat', 'dog']})
     with pytest.warns(UserWarning, match='cannot tell which row'):
         assert _with_stimulus_columns(lacking, table) is lacking      # no guess: the answer goes on as it is
+
+
+class _OldModelAdapter(_ProbabilityAnswerer):
+    """Answers the format and, when the facade asks (setting legacy_answer), adds its old
+    model's own answer object to the answer event, as an old model's adapter does."""
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        ids, labels = list(session.stimuli['stimulus_id']), list(session.task.response.labels)
+        self.own = BehavioralAssembly(np.full((len(ids), len(labels)), 1 / len(labels)), dims=['presentation', 'choice'],
+                                      coords={'stimulus_id': ('presentation', ids), 'choice': labels},
+                                      attrs={'calibration': 'old'})
+        stored = self.own.copy()
+        stored.attrs = {'response': response_record('behavior:probabilities', 'legacy')}
+        meta = {'legacy_answer': self.own} if (session.settings or {}).get('legacy_answer') else {}
+        session.respond(StreamEvent('behavior:probabilities', stored, None, meta))
+
+
+def test_an_old_models_own_answer_object_reaches_the_old_benchmark_unchanged():
+    subject = _OldModelAdapter()
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_task('probabilities', fitting_stimuli=_labelled_images())
+    answer = facade.look_at(_images())
+    assert answer is subject.own
