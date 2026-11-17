@@ -36,6 +36,7 @@ def test_text_stimulus_set_keys_cache_by_content():
 
 # --- the facade runs any subject through participate ------------------------
 
+from brainscore_core.compatibility import ExecutionNotFeasibleError
 from brainscore_core.contract import Subject
 from brainscore_core.streaming import StreamEvent
 from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
@@ -199,8 +200,52 @@ def _labelled_images(n=4, with_text=False):
     return stimuli
 
 
-def test_fitting_settings_stay_apart_from_measurement_settings():
+class _ProbabilityAnswerer(_Recorder):
+    """Answers behavior:probabilities with fixed float64 rows over the task's labels."""
+    out_channels = {'neural:IT', 'behavior', 'behavior:probabilities'}
+
+    def participate(self, session):
+        from brainscore_core.response_formats import response_record
+        self.sessions.append(session)
+        while session.next_input() is not None:
+            pass
+        labels = list(session.task.response.labels)
+        ids = list(session.stimuli['stimulus_id'])
+        rows = np.tile(np.linspace(1, 2, len(labels)) / np.linspace(1, 2, len(labels)).sum(), (len(ids), 1))
+        session.respond(StreamEvent('behavior:probabilities', BehavioralAssembly(
+            rows, dims=['presentation', 'choice'],
+            coords={'stimulus_id': ('presentation', ids), 'choice': labels},
+            attrs={'response': response_record('behavior:probabilities', 'external')}), None))
+
+
+def test_an_old_probabilities_task_is_a_choice_among_the_fitted_labels_in_their_first_order():
+    subject = _ProbabilityAnswerer()
+    facade = LegacyBenchmarkFacade(subject)
+    fitting = _labelled_images()
+    fitting['image_label'] = ['dog', 'cat', 'dog', 'bird']
+    facade.start_task('probabilities', fitting_stimuli=fitting)
+    answer = facade.look_at(_images())
+    (session,) = subject.sessions
+    assert list(session.outputs) == ['behavior:probabilities']
+    assert list(session.task.response.labels) == ['dog', 'cat', 'bird']
+    assert session.task.fitting_stimuli is fitting
+    assert answer.dims == ('presentation', 'choice')
+    assert list(answer['choice'].values) == ['dog', 'cat', 'bird']
+    assert answer.values.dtype == np.float64                      # the digits the subject gave
+    assert 'response_state' not in answer.coords                   # the old answer has no stored columns
+
+
+def test_an_old_probabilities_task_is_refused_before_compute_without_the_format():
     subject = _Recorder()
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_task('probabilities', fitting_stimuli=_labelled_images())
+    with pytest.raises(ExecutionNotFeasibleError, match='behavior:probabilities'):
+        facade.look_at(_images())
+    assert subject.sessions == []
+
+
+def test_fitting_settings_stay_apart_from_measurement_settings():
+    subject = _ProbabilityAnswerer()
     facade = LegacyBenchmarkFacade(subject)
     fitting = _labelled_images()
     facade.start_task('probabilities', fitting_stimuli=fitting,

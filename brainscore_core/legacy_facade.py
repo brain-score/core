@@ -51,6 +51,9 @@ class LegacyBenchmarkFacade:
         # order of first use (answer_policy).
         self.n_invalid_answers: Optional[int] = None
         self._policies: List[str] = []
+        # The labels of an old probabilities task in the old column order, as the fitting
+        # stimuli give them; None for any other task.
+        self._probability_labels: Optional[list] = None
 
     def _resolve(self, answer):
         import numpy as np
@@ -115,10 +118,21 @@ class LegacyBenchmarkFacade:
         The one TaskContext object is sent with every measurement, so a subject
         can tell a repeated task from a new one and keep its fitted state.
         """
+        self._probability_labels = None
         if isinstance(task, TaskContext):
             self._task = task
             return
         metadata = {'task_settings': dict(settings)} if settings else {}
+        labels = _fitted_labels(task, fitting_stimuli)
+        if labels is not None:
+            # The probabilities task is asked on behavior:probabilities: a Choice among the
+            # labels of the fitting stimuli, in the old column order (first appearance), fitted
+            # on those stimuli. The benchmark receives the old answer (``_old_probabilities``).
+            from brainscore_core.responses import Choice
+            self._task = TaskContext(response=Choice([str(label) for label in labels]),
+                                     fitting_stimuli=fitting_stimuli, metadata=metadata)
+            self._probability_labels = labels
+            return
         labels = _label_list(task, fitting_stimuli)
         if labels is not None:
             # The label task with a list of labels is a choice among them
@@ -145,7 +159,14 @@ class LegacyBenchmarkFacade:
         """
         if settings:
             raise TypeError(f'look_at got unsupported settings {sorted(settings)}')
-        if self._choice_requested():
+        if self._probability_labels is not None:
+            channel = 'behavior:probabilities'
+            if channel not in set(self._subject.out_channels):
+                raise ExecutionNotFeasibleError(
+                    f"Subject {self.identifier!r} refused the legacy probabilities task: it is asked "
+                    f"on 'behavior:probabilities', and the subject declares no such output.",
+                    channels={channel}, task_type='probabilities')
+        elif self._choice_requested():
             channel = 'behavior:choice'
             if channel not in set(self._subject.out_channels):
                 raise ExecutionNotFeasibleError(
@@ -170,9 +191,39 @@ class LegacyBenchmarkFacade:
             if from_old_labels:
                 return _labels_from_choice(self._old_labels(answer), stimuli, own_values=True)
             return _labels_from_choice(self._resolve(answer), stimuli)
+        if channel == 'behavior:probabilities':
+            return _with_stimulus_columns(self._resolve(self._old_probabilities(measured[channel])), stimuli)
         if channel == 'behavior':
             return _with_stimulus_columns(self._resolve(measured[channel]), stimuli)
         return measured[channel]
+
+    def _old_probabilities(self, answer):
+        """A stored ``behavior:probabilities`` answer as the legacy probabilities answer.
+
+        Dims ``('presentation', 'choice')``, the old column order with the labels as the fitting
+        stimuli give them, the stored values in their float type, every presentation coordinate
+        of the stored answer in its order except the ones core adds (``_STORED_ONLY``), and the
+        attributes. The format's record is left out for an old model's answer (method
+        ``legacy``: the old model gave none) and named on the bare channel ``behavior`` for any
+        other subject, as its answer on that channel carried it. A row with no answer (state
+        ``missing``) is left out, as an old answer has no row for it. A float coordinate whose
+        NaN the stored answer keeps as None gets its NaN back.
+        """
+        import numpy as np
+        from brainscore_core.supported_data_standards.brainio.assemblies import BehavioralAssembly
+        states = _presentation_columns(answer).get('response_state')
+        if states is not None:
+            answer = answer.isel(presentation=np.asarray(states) != 'missing')
+        columns = {name: _without_none(values) for name, values in _presentation_columns(answer).items()
+                   if name not in _STORED_ONLY}
+        coords = {name: ('presentation', values) for name, values in columns.items()}
+        coords['choice'] = list(self._probability_labels)
+        attrs = {key: value for key, value in answer.attrs.items() if key != 'response'}
+        record = answer.attrs.get('response')
+        if record is not None and record.get('method') != 'legacy':
+            attrs['response'] = {**record, 'format': 'behavior'}
+        return BehavioralAssembly(np.asarray(answer.transpose('presentation', 'choice').values),
+                                  coords=coords, dims=['presentation', 'choice'], attrs=attrs)
 
     # --- language: ArtificialSubject ------------------------------------
 
@@ -219,6 +270,7 @@ class LegacyBenchmarkFacade:
         finally:
             self._record = self._time_bins = self._recording_type = self._task = None
             self._passive = None
+            self._probability_labels = None
 
     # --- internals --------------------------------------------------------
 
@@ -257,6 +309,31 @@ class LegacyBenchmarkFacade:
                                    time_bins=self._time_bins, settings=dict(settings))
         self._subject.participate(session)
         return {channel: session.collect(channel) for channel in channels}
+
+
+def _fitted_labels(task, fitting_stimuli):
+    """The labels of a legacy probabilities task in the old column order, else ``None``.
+
+    ``start_task('probabilities', fitting_stimuli)`` fits on the labels of a table's
+    ``image_label`` column (else its ``label`` column); the old models give their columns
+    in the order the labels first appear there.
+    """
+    if task != 'probabilities' or getattr(fitting_stimuli, 'columns', None) is None:
+        return None
+    column = next((name for name in ('image_label', 'label') if name in fitting_stimuli.columns), None)
+    if column is None:
+        raise ValueError("A legacy probabilities task names its labels in the fitting stimuli's "
+                         "'image_label' (or 'label') column; these fitting stimuli have neither.")
+    return list(dict.fromkeys(fitting_stimuli[column].tolist()))
+
+
+def _without_none(values: list) -> list:
+    """A column of floats in which core kept a NaN as None, with its NaN back."""
+    if None not in values or not any(isinstance(value, float) for value in values):
+        return values
+    if all(value is None or isinstance(value, float) for value in values):
+        return [float('nan') if value is None else value for value in values]
+    return values
 
 
 def _label_list(task, fitting_stimuli):
