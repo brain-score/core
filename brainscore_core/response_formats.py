@@ -347,16 +347,19 @@ class _Ledger:
         The k-th answer for an id answers the k-th table row with that id, so
         per-row options are read from that row, not from the first one.
         """
-        from .responses import Choice
+        from .responses import Choice, Segments
         response = _response_of(self._session)
-        if isinstance(response, Choice):
-            if not isinstance(response.labels, str):
-                return list(response.labels)
+        # A column that holds each row's options (a Choice) or parts (Segments).
+        column = (response.labels if isinstance(response, Choice) else
+                  response.segments if isinstance(response, Segments) else None)
+        if isinstance(response, (Choice, Segments)):
+            if not isinstance(column, str):
+                return list(column)
             positions = self.positions.get(stimulus_id, ())
             if occurrence >= len(positions):
                 return None
             if self._column is None:
-                self._column = _table(self._session)[response.labels].tolist()
+                self._column = _table(self._session)[column].tolist()
             return list(self._column[positions[occurrence]])
         label_set = getattr(getattr(self._session, 'task', None), 'label_set', None)
         return list(label_set) if label_set else None
@@ -554,12 +557,29 @@ def _assembly_rows(fmt, channel, payload, event, session, ledger):
         if ids != named:
             raise ValueError(f'the event answers stimuli {named}, but its rows are {ids}')
     segment = fmt == 'log_probabilities' and record['parameters'].get('layout') == 'segment'
+    from .responses import Segments
+    if isinstance(_response_of(session), Segments) and not segment:
+        raise ValueError('a Segments task is answered in the segment layout, not '
+                         f"{record['parameters'].get('layout')!r}")
+    if isinstance(_response_of(session), Segments) and record['parameters'].get('aggregation') != 'sum':
+        raise ValueError('a Segments task asks for the summed log probability of each part, not '
+                         f"the aggregation {record['parameters'].get('aggregation')!r}")
     if segment:
         # A segment answer's axis is the positions 1 to R of the trial's segments (standard 2.3).
         axis = list(payload['choice'].values)
         if [str(a) for a in axis] != [str(i) for i in range(1, len(axis) + 1)]:
             raise ValueError(f'the choice axis of a segment answer is the positions 1 to '
                              f'{len(axis)}, not {axis}')
+        if ledger is not None and isinstance(_response_of(session), Segments):
+            # One position for each requested part, from the row's parts (repeats included).
+            seen = Counter()
+            for stimulus_id in ids:
+                parts = ledger.options(stimulus_id, ledger.occurrence(channel, stimulus_id)
+                                       + seen[stimulus_id])
+                seen[stimulus_id] += 1
+                if parts is not None and len(parts) != len(axis):
+                    raise ValueError(f'stimulus {stimulus_id!r} asks for {len(parts)} parts, but '
+                                     f'the answer has {len(axis)} positions')
     elif fmt in _AXIS_FORMATS:
         axis = list(payload['choice'].values)
         if ledger is not None:
