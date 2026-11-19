@@ -158,3 +158,5 @@ def test_many_rows_with_repeated_labels_are_answered_once_each():
     assert session._row_trials[7] == [8 + 50 * k for k in range(40)]
     with pytest.raises(ValueError, match="twice"):
         _answer(session, stimulus_index=7)
+
+# A comment for a check of the test job. This line is not merged.
