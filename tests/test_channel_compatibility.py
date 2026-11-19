@@ -480,8 +480,21 @@ def test_a_stimulus_input_with_the_instruction_makes_a_pair_applicable():
 
 
 def test_an_object_that_is_not_a_subject_is_refused_with_a_remedy():
+    # Every declaration is present, so only the contract type decides the refusal.
     duck = SimpleNamespace(identifier='duck', in_channels={'text'}, out_channels={'behavior'},
+                           required_channels=set(), output_inputs={},
                            participate=lambda session: None, reset=lambda: None)
+    benchmark = _Benchmark(required_input_channels={'text'}, requested_output_channels={'behavior'})
     with pytest.raises(TypeError, match='subclass Subject'):
-        check_channel_compatibility(duck, _Benchmark(required_input_channels={'text'},
-                                                     requested_output_channels={'behavior'}))
+        check_channel_compatibility(duck, benchmark)
+
+    class Registered:       # a virtual subclass: isinstance is true, the base never ran
+        identifier, in_channels, out_channels = 'registered', {'text'}, {'behavior'}
+        required_channels, output_inputs = set(), {}
+
+        def participate(self, session):
+            pass
+
+    Subject.register(Registered)
+    with pytest.raises(TypeError, match='subclass Subject'):
+        check_channel_compatibility(Registered(), benchmark)

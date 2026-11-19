@@ -151,7 +151,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     Every declared channel must be registered in the catalog with the right
     direction.
     """
-    if not isinstance(subject, Subject):
+    if Subject not in type(subject).__mro__:     # real inheritance, not Subject.register
         raise TypeError(
             f'{type(subject).__name__} is not a Subject. Every subject is an instance of '
             'brainscore_core.contract.Subject, whose base class runs the session duties around '
