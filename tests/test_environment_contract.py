@@ -218,7 +218,8 @@ def _typed_subject(process):
     """A minimal typed subject: process() plus the shared typed session driver."""
     from brainscore_core.streaming_helpers import drive_typed_session
     subject = SimpleNamespace(process=process)
-    subject.participate = lambda session: drive_typed_session(subject, session)
+    subject.participate = lambda session: drive_typed_session(
+        subject, session.declare_inputs(ENV_INPUTS))
     return subject
 
 
@@ -533,6 +534,7 @@ def test_run_environment_with_reset_reason_returns_no_actions(reason):
     calls = []
     inner = SimpleNamespace(process=lambda row: calls.append(row) or {'motor': 1})
     subject = SimpleNamespace(
-        participate=lambda session: drive_environment_session(inner, session, driver="process"))
+        participate=lambda session: drive_environment_session(
+            inner, session.declare_inputs(ENV_INPUTS), driver="process"))
     assert run_environment(subject, env) == []
     assert calls == [] and env.actions == [] and env.closed == 1

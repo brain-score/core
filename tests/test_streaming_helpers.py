@@ -93,7 +93,7 @@ class _SyntheticSubject(TypedSubject):
 
     @property
     def in_channels(self):
-        return {"vision:image"}
+        return {"vision:image", "text", "lesion"}
 
     def start_recording(self, recording_target, **kwargs):
         self.recording_target = recording_target
@@ -118,7 +118,7 @@ class _NonNativeEnvironmentSubject(TypedSubject):
 
     @property
     def in_channels(self):
-        return {"vision:image", "proprioception"}
+        return {"control", "vision:image", "proprioception", "instruction"}
 
     def process(self, input_event):
         self.processed_rows.append(input_event)
