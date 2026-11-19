@@ -129,18 +129,28 @@ _taking_part = threading.local()
 
 def _takes_part_once(participate):
     """Wrap a subclass's ``participate``: claim the session, declare the inputs, run the body."""
+    def body(self, session):
+        result = participate(self, session)
+        # A generator or coroutine body would run later, outside the claim.
+        if inspect.isgenerator(result) or inspect.iscoroutine(result) or inspect.isasyncgen(result):
+            getattr(result, 'close', lambda: None)()
+            raise TypeError(f'{type(self).__name__}.participate returned a {type(result).__name__}; '
+                            'participate runs the whole session before it returns: make it a plain '
+                            'method (no yield, no async def).')
+        return result
+
     @functools.wraps(participate)
     def wrapped(self, session):
         running = _taking_part.__dict__.setdefault('pairs', set())
         pair = (id(self), id(session))
         if pair in running:     # super().participate(session), or a delegation of the same session
-            return participate(self, session)
+            return body(self, session)
         from ._sessions.one_at_a_time import one_session_at_a_time
         with one_session_at_a_time(self):
             session.declare_inputs(self.in_channels)
             running.add(pair)   # a nested call passes only once the inputs are declared
             try:
-                return participate(self, session)
+                return body(self, session)
             finally:
                 running.discard(pair)
     wrapped._takes_part_once = wrapped      # by identity: a copied attribute is not a wrapper

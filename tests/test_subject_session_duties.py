@@ -185,3 +185,15 @@ def test_a_nested_call_while_the_inputs_are_declared_is_refused():
     with pytest.raises(RuntimeError):
         subject.participate(subject.session)
     assert 'reward' not in subject.seen
+
+
+def test_a_deferred_participate_is_refused_with_a_remedy():
+    class Deferred(_Reader):
+        def participate(self, session):
+            yield session.next_input()
+
+    subject = Deferred()
+    with pytest.raises(TypeError, match='plain method'):
+        subject.participate(_reward_then_text())
+    with pytest.raises(TypeError, match='plain method'):    # the claim was released
+        subject.participate(_session('text'))
