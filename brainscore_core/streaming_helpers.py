@@ -42,3 +42,5 @@ from brainscore_core._sessions.payloads import (
 )
 
 from brainscore_core._sessions.view import declared_only, task_input_channels
+
+from brainscore_core._sessions.one_at_a_time import one_session_at_a_time
