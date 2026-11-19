@@ -304,7 +304,7 @@ def extraction_fingerprint(configuration, *, cache_identifier=None, part=None):
 
 
 def model_config(model):
-    """Model metadata and state, including installed perturbation hooks.
+    """Model metadata and state, including installed hooks (``_hooks``).
 
     Tensor contents are hashed during fingerprinting, not while building this
     description. Runtime eval/train flags are omitted: extraction calls eval().
@@ -329,11 +329,44 @@ def model_config(model):
         'torch_version': getattr(torch, '__version__', None),
         'implementation_version': _version(model),
         'matmul_precision': torch.get_float32_matmul_precision() if torch is not None else None,
-        'hooks': [(name, list(getattr(module, kind, {}).values()))
-                  for name, module in modules
-                  for kind in ('_forward_pre_hooks', '_forward_hooks')
-                  if getattr(module, kind, {})],
+        'hooks': _hooks(modules, torch),
     }
+
+
+def _hooks(modules, torch):
+    """The forward hooks that run in a pass, in the order they run, and each forward replaced on an instance.
+
+    One entry per place: the global module hooks (``torch.nn.modules.module.register_module_forward_*``)
+    as module ``''``, then each module's pre-hooks and hooks apart, each hook with its flags
+    (``with_kwargs``, ``always_call``). A ``forward`` set on an instance is described as a
+    function; one that refers to the model is cyclic and turns the store off. A model with
+    none of these gives an empty list, the form of a key without hooks.
+
+    Known limit: a plain attribute set on a module after construction is not in the key
+    unless it is a parameter, a buffer or a part of the module's own description
+    (``extra_repr``, ``config``).
+    """
+    def described(kind, name, found, kwargs, always):
+        if found:
+            hooks.append((name, kind, [(hook, bool(kwargs.get(key)), bool(always.get(key)))
+                                       for key, hook in found.items()]))
+
+    hooks = []
+    registry = sys.modules.get('torch.nn.modules.module') if torch is not None else None
+    if registry is not None:
+        described('global pre-hook', '', registry._global_forward_pre_hooks, {}, {})
+        described('global hook', '', registry._global_forward_hooks,
+                  getattr(registry, '_global_forward_hooks_with_kwargs', {}),
+                  getattr(registry, '_global_forward_hooks_always_called', {}))
+    for name, module in modules:
+        described('pre-hook', name, getattr(module, '_forward_pre_hooks', {}),
+                  getattr(module, '_forward_pre_hooks_with_kwargs', {}), {})
+        described('hook', name, getattr(module, '_forward_hooks', {}),
+                  getattr(module, '_forward_hooks_with_kwargs', {}),
+                  getattr(module, '_forward_hooks_always_called', {}))
+        if 'forward' in vars(module):
+            hooks.append((name, 'forward on the instance', vars(module)['forward']))
+    return hooks
 
 
 def wrapper_config(wrapper, fields):

@@ -283,3 +283,98 @@ def test_a_part_of_a_disabled_or_opaque_configuration_is_none(monkeypatch):
     assert extraction_fingerprint({'configuration': 1}, cache_identifier='x', part='configuration') == (None, None)
     monkeypatch.delenv('RESULTCACHING_DISABLE')
     assert extraction_fingerprint({'configuration': object()}, part='configuration') == (None, None)
+
+
+def _zero(module, args, *output):
+    """One hook function for both places: it zeroes the output, but only when called after the module."""
+    if output:
+        return output[0] * 0
+
+
+def _model_key(build):
+    import torch
+    from brainscore_core.extraction_cache import model_config
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 2))
+    handles = build(model) or []
+    try:
+        return extraction_fingerprint(model_config(model))
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
+def test_a_hook_before_a_module_and_after_it_give_two_keys():
+    before = _model_key(lambda model: [model[0].register_forward_pre_hook(_zero)])
+    after = _model_key(lambda model: [model[0].register_forward_hook(_zero)])
+    assert None not in (before, after) and before != after
+
+
+def _first(module, args, *output):
+    return None
+
+
+def _second(module, args, *output):
+    return None
+
+
+def test_the_order_of_two_hooks_is_in_the_key():
+    forward = _model_key(lambda model: [model[0].register_forward_hook(_first),
+                                        model[0].register_forward_hook(_second)])
+    reverse = _model_key(lambda model: [model[0].register_forward_hook(_second),
+                                        model[0].register_forward_hook(_first)])
+    prepended = _model_key(lambda model: [model[0].register_forward_hook(_first),
+                                          model[0].register_forward_hook(_second, prepend=True)])
+    assert forward != reverse and reverse == prepended
+
+
+def _with_kwargs(module, args, *rest):
+    return None
+
+
+@pytest.mark.parametrize('flag', ['with_kwargs', 'always_call'])
+def test_a_hook_flag_is_in_the_key(flag):
+    plain = _model_key(lambda model: [model[1].register_forward_hook(_with_kwargs)])
+    flagged = _model_key(lambda model: [model[1].register_forward_hook(_with_kwargs, **{flag: True})])
+    assert plain != flagged
+
+
+def test_a_pre_hook_with_kwargs_is_in_the_key():
+    plain = _model_key(lambda model: [model[1].register_forward_pre_hook(_with_kwargs)])
+    flagged = _model_key(lambda model: [model[1].register_forward_pre_hook(_with_kwargs, with_kwargs=True)])
+    assert plain != flagged
+
+
+@pytest.mark.parametrize('register', ['register_module_forward_pre_hook', 'register_module_forward_hook'])
+def test_a_global_module_hook_is_in_the_key(register):
+    import torch.nn.modules.module as module
+    none = _model_key(lambda model: [])
+    handle = getattr(module, register)(_zero)
+    try:
+        hooked = _model_key(lambda model: [])
+    finally:
+        handle.remove()
+    assert none != hooked
+    assert _model_key(lambda model: []) == none
+
+
+def _halve(value):
+    return value / 2
+
+
+def test_a_forward_replaced_on_an_instance_is_in_the_key_or_turns_the_store_off():
+    plain = _model_key(lambda model: [])
+
+    def replace(model, forward):
+        model[0].forward = forward
+    described = _model_key(lambda model: replace(model, _halve))
+    assert described is not None and described != plain
+    assert _model_key(lambda model: replace(model, lambda value: model(value))) is None     # refers to the model
+
+
+def test_a_model_without_hooks_keeps_its_key_form():
+    """No hook and no replaced forward: the description of hooks stays an empty list (old keys hold)."""
+    import torch
+    from brainscore_core.extraction_cache import model_config
+    assert model_config(torch.nn.Linear(2, 2))['hooks'] == []
