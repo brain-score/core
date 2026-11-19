@@ -331,23 +331,28 @@ def test_a_subject_with_slots_or_a_fallback_getattr_keeps_both_duties():
     assert Forwards().layer == 'from __getattr__'
 
 
-def test_a_participate_from_the_getattr_fallback_gets_both_duties():
+def test_a_participate_that_only_a_getattr_fallback_supplies_is_refused_with_a_remedy():
+    calls = []
+
     class Fallback(_Reader):
-        __slots__ = ('participate',)        # never set: the lookup falls back to __getattr__
+        __slots__ = ('participate',)        # never set: the normal lookup finds no participate
 
         def __getattr__(self, name):
-            if name == 'participate':
+            calls.append(name)
+            if name == 'participate' and len(calls) % 2 == 0:   # absent on odd calls, a reader on even ones
                 return self._read
             raise AttributeError(name)
 
         def _read(self, session):
             while (event := session.next_input()) is not None:
                 self.seen.append(event.channel)
-            session.respond(StreamEvent('behavior:text', 'done', None, {}))
 
     subject = Fallback()
-    subject.participate(_reward_then_text())
-    assert subject.seen == ['text']
+    for _ in range(2):      # the fallback is never asked, so it cannot answer on a second call
+        with pytest.raises(TypeError) as refusal:
+            subject.participate(_reward_then_text())
+        assert 'def participate' in str(refusal.value)
+    assert subject.seen == [] and 'participate' not in calls
 
 
 def test_a_cooperative_mixin_keeps_its_own_attribute_lookup():

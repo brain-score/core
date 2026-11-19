@@ -218,11 +218,14 @@ class Subject(ABC):
             return super().__getattribute__(name)
         try:
             value = super().__getattribute__(name)
-        except AttributeError:          # Python would now ask __getattr__: ask it here, and guard its answer
-            fallback = getattr(type(self), '__getattr__', None)
-            if fallback is None:
-                raise
-            value = fallback(self, name)
+        except AttributeError:
+            # Python would now ask a fallback __getattr__, outside this method, and its answer
+            # would get no duties. A TypeError stops that: participate must be found by the
+            # normal lookup.
+            raise TypeError(
+                f'{type(self).__name__} has no participate that the normal lookup finds (an unset slot, '
+                'or a property that raises AttributeError); a fallback __getattr__ is not used for '
+                'participate. Define it as a method: def participate(self, session).') from None
         # Python's own lookup chose the body (class body, parent, mixin or an
         # assignment); the base adds the session duties around it.
         if not callable(value):
