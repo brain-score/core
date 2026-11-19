@@ -201,10 +201,10 @@ class Subject(ABC):
        events reach it only when it declares ``control``.
 
     A nested call with the same session on the same thread, after the inputs are
-    declared, passes straight to
-    the body: ``super().participate(session)``, or a subject that gives its
-    session to another subject (that subject claims itself and narrows the
-    inputs to its own declaration). The body does neither duty itself.
+    declared, passes straight to the body: ``super().participate(session)``, or
+    a subject that gives its session to another subject (that subject claims
+    itself and narrows the inputs further to its own declaration; it never
+    reopens an input). A ``participate`` that yields or is ``async`` is refused. The body does neither duty itself.
 
     Limit: a ``participate`` assigned to a class or an instance after the class
     statement is not wrapped and runs without both duties, unless it delegates to
