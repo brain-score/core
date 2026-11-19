@@ -217,3 +217,21 @@ def test_an_inner_subject_with_a_broader_declaration_does_not_reopen_an_input():
     inner = Wide()
     NarrowOuter(inner).participate(_session('reward', 'text', 'reward'))
     assert inner.seen == ['text']
+
+
+def test_a_failing_declaration_releases_the_subject():
+    class FailsOnce(_Reader):
+        fail = True
+
+        @property
+        def in_channels(self):
+            if self.fail:
+                raise KeyError('declaration')
+            return {'text'}
+
+    subject = FailsOnce()
+    with pytest.raises(KeyError):
+        subject.participate(_session('text'))
+    subject.fail = False
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text']
