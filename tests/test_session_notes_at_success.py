@@ -5,6 +5,8 @@ participant) and passes it to the score when the outermost participation of that
 returns. A failure drops all of it, apart from the intervention counts: a change that a
 failed session left active is still seen by the release check.
 """
+from contextvars import ContextVar
+
 import pytest
 
 from brainscore_core._evaluation.measures import note_session, record_measures
@@ -219,10 +221,12 @@ def _sweep(scenario):
     """Run ``scenario(arm, disarm)`` once per line that the measure record runs between
     ``arm()`` (the subject calls it as its body returns) and ``disarm()`` (the scenario calls
     it when the participation is over), with one interrupt at that line. Yields the line and
-    the result of each interrupted run (the line is where the interrupt was raised)."""
+    the result of each interrupted run (the line is where the interrupt was raised). The
+    trace function of the caller is kept and put back."""
+    import inspect
     import sys
     from brainscore_core._evaluation import measures as module
-    state = {'at': None, 'seen': 0, 'on': False}
+    state = {'at': None, 'seen': 0, 'on': False, 'previous': None}
 
     def line(frame, event, _):
         if state['on'] and event == 'line':
@@ -237,19 +241,23 @@ def _sweep(scenario):
         return line if frame.f_code.co_filename == module.__file__ else None
 
     def arm():
-        state.update(seen=0, on=True)
+        state.update(seen=0, on=True, previous=sys.gettrace())
         sys.settrace(tracer)
+        frame = inspect.currentframe()
+        while frame is not None:           # the record's frames that are already running too
+            if frame.f_code.co_filename == module.__file__:
+                frame.f_trace = line
+            frame = frame.f_back
 
     def disarm():
-        state['on'] = False
-        sys.settrace(None)
+        if state['on'] or sys.gettrace() is tracer:
+            state['on'] = False
+            sys.settrace(state['previous'])
     try:
         scenario(arm, disarm)
     finally:
         disarm()
-    total = state['seen']
-    assert total > 0
-    for at in range(1, total + 1):
+    for at in range(1, state['seen'] + 1):
         state['at'] = at
         state['where'] = None
         try:
@@ -297,27 +305,69 @@ def test_an_interrupt_anywhere_in_the_end_of_a_record_keeps_an_accepted_change_s
 
 @pytest.mark.parametrize('nested_score', [False, True], ids=['one score', 'inside a nested score'])
 def test_an_interrupt_anywhere_in_the_end_of_a_record_publishes_all_or_nothing(nested_score):
+    """A participation that raised (an interrupt before it returned) leaves nothing of its
+    session; one that returned leaves all of it. Rule 5.5, decision (iv)."""
     def run(arm, disarm):
         class _Armed(_Text):
             def participate(self, session):
                 super().participate(session)
                 arm()
+        returned = False
         with record_measures(subject='scored') as measures:
             try:
                 with _maybe_nested(nested_score):
                     try:
                         _Wrapper(_Armed(identifier='inner-of-late'), identifier='late').participate(_stream())
+                        returned = True
                     finally:
                         disarm()   # limit: the first step of a score record's own exit is not swept
             except KeyboardInterrupt:
                 pass
             _Wrapper(_Text(), identifier='good').participate(_session())
-        return _four(measures)
+        return returned, _four(measures)
 
-    complete = run(lambda: None, lambda: None)
-    allowed = (_good_only(), complete)
-    for at, four in _sweep(run):
-        assert four in allowed, f'an interrupt at {at} published part of a failed session'
+    returned, complete = run(lambda: None, lambda: None)
+    assert returned and 'late' in {entry['subject'] for entry in complete['provenance']}
+    for at, (returned, four) in _sweep(run):
+        assert four == (complete if returned else _good_only()), \
+            f'an interrupt at {at} published part of a session, or lost a session that returned'
+
+
+_OWN = ContextVar('own_state', default='intact')
+
+
+class _OwnState(Subject):
+    """Keeps its own change in a context variable of its own: set on a lesion, read on a
+    text trial, undone with its token on a reset."""
+    identifier = 'own-state'
+    in_channels, out_channels = {'lesion', 'text'}, {'perturbation', 'behavior:text'}
+
+    def participate(self, session):
+        while (event := session.next_input()) is not None:
+            if event.channel == 'text':
+                session.respond(StreamEvent('behavior:text', _OWN.get(), event.t_ms, {}))
+                continue
+            change = event.payload
+            if change.kind == 'reset':
+                _OWN.reset(self.token)
+            else:
+                self.token = _OWN.set('changed')
+            session.respond(StreamEvent('perturbation', PerturbationApplied(
+                'h1', change.target, change.perturbation), 0.0, {'kind': change.kind}))
+
+
+def test_a_subject_keeps_its_own_context_state_across_its_sessions():
+    """Rules 8.1 and 9.2: what a subject does to its own context variables in one session
+    is seen in its next sessions, as when no score is open."""
+    subject = _OwnState()
+    with record_measures(subject='scored') as measures:
+        subject.participate(_change('lesion'))
+        trial = Session([StreamEvent('text', 'a', 0.0)], ['behavior:text'])
+        subject.participate(trial)
+        subject.participate(_change('reset'))
+    assert [event.payload['values'] for event in trial.emitted] == ['changed']
+    assert _OWN.get() == 'intact'
+    measures.check_released('bench', 'scored')
 
 
 class _Handles(Subject):

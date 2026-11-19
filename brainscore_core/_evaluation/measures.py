@@ -28,9 +28,22 @@ No response, payload or event meta is read or changed for it.
 A session's notes are staged: the ``Subject`` base runs each participation, the claim of
 the subject and its release included, inside its own nested record (``stage_session``), so
 the notes reach the score only when the outermost participation of the session returns
-without an error, all at once. An intervention response is counted at once in every
-open record, with the subject that gave it: a failed session cannot hide a change it left
-active, and an undo cancels only a change of the same subject.
+without an error, all at once. The participation runs in the caller's own context: what a
+subject does to its own context variables is the same with and without a score. An
+intervention response is counted at once in every open record, with the subject that gave
+it: a failed session cannot hide a change it left active, and an undo cancels only a
+change of the same subject.
+
+Limits (stated, not repaired):
+
+- A score's own record (``record_measures``) publishes when its block ends, before the
+  score entry point runs its release check and stamps the score. An inner score that is
+  rejected there (for example in its own stamp) still leaves its facts in the outer record,
+  beside the outer responses. Its participations succeeded.
+- An interrupt at the one exit step of a score's record (the reset in ``record_measures``)
+  leaves that record open in the caller's context: the delivery and provenance of a later
+  good session in the same context reach only that record and are lost to the outer
+  score; its intervention counts still reach every enclosing record.
 
 ponytail: the record is a ``ContextVar``. A response made in a worker thread or
 process is not noted. No behavioral path in core, vision, language or unified
@@ -44,7 +57,7 @@ import os
 from copy import deepcopy
 from collections import Counter
 from contextlib import contextmanager
-from contextvars import ContextVar, copy_context
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, Iterator, Optional, Set, Tuple
 
 _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', default=None)
@@ -95,6 +108,7 @@ class MeasureRecord:
         self._facts = _Facts()               # what was noted while this record was the open one
         self._published: list = []           # the facts of nested records that succeeded
         self._changes: list = []             # (subject, handle, undo) of each intervention response
+        self._run = None                     # a staged record: the run that keeps it open
 
     def _all_facts(self) -> _Facts:
         facts = _Facts()
@@ -163,7 +177,7 @@ def record_measures(subject: Optional[str] = None) -> Iterator[MeasureRecord]:
     ends, every session no note named is bound to it, before the record passes
     to an outer one: a session belongs to the subject of the score that ran it.
     """
-    outer = _active.get()
+    outer = _open_record()
     record = MeasureRecord(outer)
     token = _active.set(record)
     try:
@@ -173,7 +187,7 @@ def record_measures(subject: Optional[str] = None) -> Iterator[MeasureRecord]:
         # this record open in the caller's context. Later notes there then reach only this
         # record (lost to the outer score, never published from a failed run); counts still
         # reach every enclosing record. Python has no context manager in C that resets a
-        # ContextVar; a participation avoids the step (stage_session runs in a copied context).
+        # ContextVar; a participation avoids the step (its staged record closes itself).
         try:
             _active.reset(token)
         finally:
@@ -185,34 +199,54 @@ def stage_session(session, participant, run: Callable[[], Any]) -> Any:
     """Return ``run()`` with what ``session`` notes meanwhile staged; name it on success.
 
     The ``Subject`` base runs every participation that claims a subject through this
-    call, the claim and its release included. The notes go to a nested record that is
-    open only in a copy of the context, so the outer record is open again however
-    ``run`` ends. When ``run`` returns, the session is named after ``participant`` (its
-    ``identifier``), last, and the notes reach the outer record at once: the outermost
-    subject that was given the session names it, so a wrapper names its sessions, not
-    the subject inside it. When ``run`` raises, only the intervention counts (made at
-    once in every record) remain. Without an open record (a session outside a score)
-    nothing is kept.
+    call, the claim and its release included. ``run`` runs in the caller's own context,
+    so what a subject does to its own context variables stays as without a score (rules
+    8.1, 9.2). The notes go to a nested record that is open only while ``run`` runs
+    (``_staged``). When ``run`` returns, the session is named after ``participant`` (its
+    ``identifier``) and the notes reach the outer record in one append, the last step of
+    the call: the outermost subject that was given the session names it, so a wrapper
+    names its sessions, not the subject inside it. When ``run`` raises, or an interrupt
+    comes before that append, only the intervention counts (made at once in every
+    record) remain. Without an open record (a session outside a score) nothing is kept.
     """
-    outer = _active.get()
+    outer = _open_record()
     if outer is None:
         return run()
     record = MeasureRecord(outer, participant)
-    result = copy_context().run(_open_and_run, record, run)
-    _publish(record, outer, participant.identifier, session)
-    return result
+    record._run = _staged(record, run)
+    try:
+        next(record._run)
+    except StopIteration as returned:
+        result = returned.value
+    return _publish(record, outer, participant.identifier, session, result)
 
 
-def _open_and_run(record: MeasureRecord, run: Callable[[], Any]) -> Any:
-    _active.set(record)
-    return run()
+def _staged(record: MeasureRecord, run: Callable[[], Any]):
+    """Run ``run()`` with ``record`` open; a generator, so that the record is open exactly
+    while it runs (``gi_running``, kept by the interpreter): an interrupt at the reset
+    below leaves ``record`` in the context, but closed, and notes pass it by."""
+    token = _active.set(record)
+    try:
+        return run()
+    finally:
+        _active.reset(token)
+    yield  # ponytail: makes this a generator; never reached
+
+
+def _open_record() -> Optional[MeasureRecord]:
+    """The record that takes notes now: the innermost one that is still open."""
+    record = _active.get()
+    while record is not None and record._run is not None and not record._run.gi_running:
+        record = record._outer
+    return record
 
 
 def _publish(record: MeasureRecord, outer: Optional[MeasureRecord], name: Optional[str],
-             session=None) -> None:
+             session=None, result=None) -> Any:
     """Pass the facts of ``record``, which succeeded, to ``outer`` in one append, after
-    ``name`` named ``session`` (or, without a session, every session no note named). An
-    interrupt before that append leaves ``outer`` as it was."""
+    ``name`` named ``session`` (or, without a session, every session no note named), and
+    return ``result``. The append is the last step: an interrupt before it leaves
+    ``outer`` as it was."""
     facts = record._all_facts()
     if name is not None:
         keys = [_session_key(session)] if session is not None else [
@@ -220,13 +254,13 @@ def _publish(record: MeasureRecord, outer: Optional[MeasureRecord], name: Option
         facts.sessions.update(dict.fromkeys(keys, name))
     if outer is None:
         record._facts, record._published = facts, []
-    else:
-        outer._published.append(facts)
+        return result
+    return outer._published.append(facts) or result
 
 
 def _note_record(payload) -> None:
     """Add ``payload.attrs['response']`` to the open record, if any."""
-    record = _active.get()
+    record = _open_record()
     if record is None:
         return
     if isinstance(payload, dict):                  # a stored cell: its checked row
@@ -267,7 +301,7 @@ def note_session(session, regions_per_pass: Optional[str] = None,
     that took part and
     stated no parts gets an entry with its facts ``'not stated'`` (``provenance_attrs``).
     """
-    record = _active.get()
+    record = _open_record()
     if record is None:
         return
     record._facts.deliveries.add('stream' if session.streaming else 'listed')
@@ -354,7 +388,7 @@ def note_response(event, request=None, session=None) -> None:
     else the request; the response is an undo when the request or the meta says
     ``kind == 'reset'``.
     """
-    record = _active.get()
+    record = _open_record()
     if session is not None and record is not None and _session_key(session) not in record._facts.answered:
         record._facts.answered.add(_session_key(session))
         note_session(session)
@@ -363,7 +397,7 @@ def note_response(event, request=None, session=None) -> None:
         _note_record(event.payload)
     elif channel == 'perturbation':
         from ..events import PerturbationApplied
-        record, meta = _active.get(), event.meta
+        record, meta = _open_record(), event.meta
         if record is None:
             return
         handle = event.payload.handle_id if isinstance(event.payload, PerturbationApplied) else None
