@@ -8,6 +8,7 @@ reused within a scoring scope while tracked tensor state remains unchanged.
 """
 
 import dataclasses
+import enum
 import functools
 import hashlib
 import inspect
@@ -177,6 +178,8 @@ def _canonical(value, active):
         raise UncacheableConfiguration('the state is too deeply nested; define cache_config()')
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
+    if isinstance(value, enum.Enum):
+        return {'enum': _name(value), 'value': _canonical(value.value, active)}
     if isinstance(value, np.generic):
         return {'numpy_scalar': str(value.dtype), 'value': _canonical(value.item(), active)}
     if isinstance(value, Path):

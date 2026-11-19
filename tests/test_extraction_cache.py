@@ -378,3 +378,15 @@ def test_a_model_without_hooks_keeps_its_key_form():
     import torch
     from brainscore_core.extraction_cache import model_config
     assert model_config(torch.nn.Linear(2, 2))['hooks'] == []
+
+
+def test_an_enum_value_is_described_by_its_class_and_value():
+    """A setting such as an interpolation mode (an ``enum.Enum``) is described exactly, not refused."""
+    import enum
+
+    class Mode(enum.Enum):
+        NEAREST = 'nearest'
+        BILINEAR = 'bilinear'
+    assert extraction_fingerprint({'mode': Mode.NEAREST}) is not None
+    assert fingerprint({'mode': Mode.NEAREST}) != fingerprint({'mode': Mode.BILINEAR})
+    assert fingerprint({'mode': Mode.NEAREST}) != fingerprint({'mode': 'nearest'})
