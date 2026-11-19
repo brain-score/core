@@ -223,6 +223,26 @@ def test_the_behavior_helper_requests_the_format_of_the_response():
     assert list(behavior['response_state'].values) == ['missing', 'missing']
 
 
+def test_the_behavior_helper_asks_the_first_format_whatever_else_the_subject_declares():
+    subject = _Reader()
+    subject.out_channels = {'behavior:probabilities', 'behavior:choice', 'behavior'}
+    behavioral_response(subject, _table(), TaskContext(response=Choice(['a', 'b'])))
+    assert subject.outputs == ('behavior:choice',)
+
+
+@pytest.mark.parametrize('declared, remedy', [
+    ({'behavior:probabilities'}, "stimulus_session(stimuli, ['behavior:probabilities'], task)"),
+    ({'behavior'}, 'conversion'),
+])
+def test_the_behavior_helper_refuses_a_subject_without_the_first_format(declared, remedy):
+    subject = _Reader()
+    subject.out_channels = declared
+    with pytest.raises(ExecutionNotFeasibleError) as refusal:
+        behavioral_response(subject, _table(), TaskContext(response=Choice(['a', 'b'])))
+    assert 'behavior:choice' in str(refusal.value) and remedy in str(refusal.value)
+    assert not hasattr(subject, 'outputs')          # refused before participation
+
+
 def test_the_behavior_helper_keeps_bare_behavior_for_a_task_without_a_response():
     subject = _Reader()
     with pytest.raises(ValueError):
