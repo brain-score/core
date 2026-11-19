@@ -183,9 +183,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
         )
 
     # Both declarations are validated completely before any comparison, so a
-    # defect (ValueError) is never hidden behind an unrelated mismatch. A channel
-    # outside the catalog is not a defect of form; it is reported after them.
-    unknown = None
+    # defect (ValueError) is never hidden behind an unrelated mismatch.
     for channels, direction, owner in (
             (subject_in, io_catalog.INPUT, f"subject '{subject_id}' in_channels"),
             (subject_out, io_catalog.OUTPUT, f"subject '{subject_id}' out_channels"),
@@ -193,10 +191,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             (bench_inputs, io_catalog.INPUT, f"benchmark '{benchmark_id}' input channels"),
             (bench_requested, io_catalog.OUTPUT,
              f"benchmark '{benchmark_id}' requested_output_channels")):
-        try:
-            validate_channels(channels, direction, owner)
-        except CompatibilityError as error:
-            unknown = unknown or error
+        validate_channels(channels, direction, owner)
     undeclared_required = subject_required - subject_in
     if undeclared_required:
         raise ValueError(
@@ -211,8 +206,6 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"Add '{CONTROL_CHANNEL}' to in_channels.")
     required_traits = required_traits_for(getattr(benchmark, 'required_traits', None),
                                            getattr(benchmark, 'trial_memory', 'none'))
-    if unknown is not None:
-        raise unknown
 
     missing_outputs = bench_requested - subject_out
     if missing_outputs:
@@ -389,12 +382,10 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
     """Validate channel names and direction against the shared catalog.
 
     Exploratory experiments may allow unregistered families with a warning.
-    Benchmark scoring requires registration: an unknown channel raises
-    CompatibilityError. Invalid syntax, direction, form or address is a
-    malformed declaration and raises ValueError. Every channel is checked
-    first, so an unknown channel never hides a malformed one.
+    Benchmark scoring requires registration. An unknown family, invalid
+    syntax, direction, form or address is a malformed declaration and raises
+    ValueError.
     """
-    unknown = None
     for channel in sorted(channels, key=repr):
         try:
             family, address = parse_channel(channel)
@@ -413,11 +404,12 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
                     'a catalog channel or register_channel() registration.',
                     CompatibilityWarning, stacklevel=2)
                 continue
-            if unknown is None:
-                unknown = CompatibilityError(
-                    f"{owner} declares unknown channel '{channel}'.", channels={channel})
-                unknown.__cause__ = error
-            continue
+            known = sorted(entry.name for entry in io_catalog.all_entries())
+            raise ValueError(
+                f"{owner} declares unknown channel '{channel}': family '{family}' is not in "
+                f"the channel catalog; known families: {known}. Correct the name, or "
+                "register the family with register_channel()."
+            ) from error
 
         if entry.direction not in (direction, io_catalog.BOTH):
             raise ValueError(
@@ -434,8 +426,6 @@ def validate_channels(channels: Set[str], direction: str, owner: str, *,
                 f"{owner} declares addressed channel '{channel}', but family "
                 f"'{family}' is not addressable."
             )
-    if unknown is not None:
-        raise unknown
 
 
 def _format_channels(channels: Set[str]) -> str:

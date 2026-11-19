@@ -205,7 +205,7 @@ def test_unknown_channel_declaration_raises():
         requested_output_channels={"neural:IT"},
     )
 
-    with pytest.raises(CompatibilityError, match="telepathy"):
+    with pytest.raises(ValueError, match="telepathy"):
         check_channel_compatibility(subject, benchmark)
 
 
@@ -448,9 +448,9 @@ def test_an_unknown_channel_does_not_hide_a_malformed_one_in_the_same_collection
         check_channel_compatibility(subject, _mismatched_benchmark(**benchmark_fields))
 
 
-def test_an_unknown_channel_alone_is_not_applicable():
+def test_an_unknown_channel_alone_is_a_malformed_declaration():
     subject = type('Subject', (_DeclaredSubject,), {'in_channels': frozenset({'text', 'aardvark'})})()
-    with pytest.raises(CompatibilityError, match='aardvark'):
+    with pytest.raises(ValueError, match='aardvark'):
         check_channel_compatibility(subject, _mismatched_benchmark())
 
 

@@ -51,13 +51,17 @@ class TestIOCatalogPreflight:
             warnings.simplefilter("error", CompatibilityWarning)
             check_compatibility(m, b)  # vision is documented; must not warn
 
-    def test_undocumented_input_is_rejected(self):
-        # Contract v3 rule 3.2: every channel family is registered. An
-        # undocumented input is a compatibility error, not a warning.
-        m = _Model({"vision:image", "telepathy"})
-        b = _Bench({"telepathy"})
-        with pytest.raises(CompatibilityError, match="unknown channel 'telepathy'"):
-            check_compatibility(m, b)
+    @pytest.mark.parametrize('subject_in, bench_in', [
+        ({"vision:image", "telepathy"}, {"vision"}),
+        ({"vision:image"}, {"vision", "telepathy"}),
+    ], ids=['subject', 'benchmark'])
+    def test_an_unknown_family_is_a_malformed_declaration(self, subject_in, bench_in):
+        # Rule 3.2: every channel family is registered. A name outside the catalog
+        # is a defect of the declaration (ValueError), never an N/A pair.
+        with pytest.raises(ValueError, match="telepathy") as raised:
+            check_compatibility(_Model(subject_in), _Bench(bench_in))
+        assert not isinstance(raised.value, CompatibilityError)
+        assert "'vision'" in str(raised.value)      # the known families are named
 
     def test_neural_region_is_documented(self):
         m = _Model({"vision:image"}, region_map={"IT": "layer.10"})
