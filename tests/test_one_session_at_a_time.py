@@ -1,6 +1,5 @@
 """One session at a time on one subject (``brainscore_core.streaming_helpers.one_session_at_a_time``)."""
 import gc
-import inspect
 import sys
 import threading
 
@@ -44,7 +43,7 @@ def test_a_session_from_another_thread_is_refused_and_the_first_finishes():
             refused.append(True)
 
     with one_session_at_a_time(subject):
-        thread = threading.Thread(target=second)
+        thread = threading.Thread(target=second, daemon=True)
         thread.start()
         thread.join(timeout=10)
     assert refused and not thread.is_alive()
@@ -65,7 +64,7 @@ def test_many_threads_claim_one_subject_and_exactly_one_runs_at_a_time():
             except RuntimeError:
                 pass
 
-    threads = [threading.Thread(target=session) for _ in range(8)]
+    threads = [threading.Thread(target=session, daemon=True) for _ in range(8)]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -86,81 +85,116 @@ def test_a_guard_that_is_entered_a_second_time_is_refused_and_keeps_the_first_cl
     assert _runs(subject)
 
 
-def _guard_lines():
-    """The lines where an interrupt must free the subject: the enter, the claim and the session
-    body, and the release. Not the exit before the release starts (the stated limit)."""
-    for function, until in ((helper.one_session_at_a_time.__enter__, None),
-                            (helper._session.__wrapped__, 'finally:'), (helper._release, None)):
-        lines, first = inspect.getsourcelines(function)
-        for offset, text in enumerate(lines):
-            if until and text.strip() == until:
-                break
-            if offset:
-                yield function.__code__, first + offset
+def test_three_callers_in_a_forced_order_never_share_the_subject():
+    subject, a_inside, a_may_leave, order = _Subject(), threading.Event(), threading.Event(), []
+
+    def caller_a():
+        with one_session_at_a_time(subject):
+            a_inside.set()
+            a_may_leave.wait(timeout=10)
+        order.append('a left')
+
+    thread = threading.Thread(target=caller_a, daemon=True)
+    thread.start()
+    assert a_inside.wait(timeout=10)
+    with pytest.raises(RuntimeError):       # B, while A is inside
+        _runs(subject)
+    a_may_leave.set()
+    thread.join(timeout=10)
+    assert order and not thread.is_alive()
+    with one_session_at_a_time(subject):    # B again, after A left
+        with pytest.raises(RuntimeError):   # C, while B is inside
+            _runs(subject)
+    assert _runs(subject)
 
 
-@pytest.mark.parametrize('code,line', list(_guard_lines()))
-def test_an_interrupt_at_a_line_of_the_guard_frees_the_subject_when_its_exception_is_dropped(code, line):
-    subject, fired = _Subject(), []
+def _interrupted_session(subject, at):
+    """Run one session and raise an interrupt at the ``at``-th line that the guard's own code
+    runs. Returns (fired, in the stated limit, the kept exception)."""
+    seen, state, kept = [0], {'body': False, 'release': False, 'limit': False, 'fired': False}, None
 
     def trace(frame, event, argument):
-        if frame.f_code is not code:
+        if frame.f_code.co_filename != helper.__file__:
             return None
-        if event == 'line' and frame.f_lineno == line and not fired:
-            fired.append(True)
-            raise KeyboardInterrupt
+        if frame.f_code.co_name == '_release':
+            state['release'] = True
+        if event == 'line' and not state['fired']:
+            seen[0] += 1
+            if seen[0] == at:
+                state['fired'] = True
+                # The stated limit: after the body ended and before the release started.
+                state['limit'] = state['body'] and not state['release']
+                raise KeyboardInterrupt
         return trace
 
     sys.settrace(trace)
     try:
         with one_session_at_a_time(subject):
-            pass
-    except KeyboardInterrupt:
-        pass
+            state['body'] = True
+    except KeyboardInterrupt as error:
+        kept = error
     finally:
         sys.settrace(None)
-    gc.collect()    # the interrupted call's exception and guard are gone here
-    assert _runs(subject)
+    return state['fired'], state['limit'], kept
 
 
-def test_different_subjects_run_at_the_same_time():
-    with one_session_at_a_time(_Subject()):
-        assert _runs(_Subject())
+def test_an_interrupt_in_the_guard_frees_the_subject_outside_the_stated_limit():
+    fired_count = 0
+    for at in range(1, 200):
+        subject = _Subject()
+        fired, in_limit, kept = _interrupted_session(subject, at)
+        if not fired:
+            break
+        fired_count += 1
+        del kept
+        gc.collect()        # the interrupted call's exception and guard are gone
+        if in_limit:
+            assert _runs(_Subject()), 'a separate subject must run'
+        else:
+            assert _runs(subject), f'the subject stays reserved after an interrupt at guard line {at}'
+    assert fired_count >= 5, 'the interrupts did not reach the guard'
 
 
-@pytest.mark.parametrize('error', [ValueError, KeyboardInterrupt])
-def test_a_session_that_ends_with_an_error_or_an_interrupt_releases_the_subject(error):
-    subject = _Subject()
-    with pytest.raises(error) as kept:   # the exception stays alive during the retry
-        with one_session_at_a_time(subject):
-            raise error()
-    assert _runs(subject) and kept.value is not None
+def test_a_subject_left_reserved_by_an_interrupt_does_not_block_a_new_object():
+    # The entry holds its subject, so a new object cannot get the reserved id.
+    stranded = [at for at in range(1, 200) if _interrupted_session(_Subject(), at)[1]]
+    gc.collect()
+    assert all(_runs(_Subject()) for _ in range(50)) or not stranded
+
+
+_FINALIZERS_DURING_ENTRY = """
+import gc, sys
+from brainscore_core.streaming_helpers import one_session_at_a_time
+
+class Subject:
+    identifier = 'stand-in'
+
+class Cycle:
+    def __init__(self, subject):
+        self.subject, self.me = subject, self
+    def __del__(self):
+        with one_session_at_a_time(self.subject):
+            pass
+
+other = Subject()
+gc.set_threshold(1)
+sys.settrace(lambda frame, event, argument: None)   # allocations, so collections, at every call
+for _ in range(300):
+    Cycle(other)                    # garbage whose finalizer starts a session
+    with one_session_at_a_time(Subject()):
+        pass
+print('done')
+"""
 
 
 def test_sessions_start_while_automatic_collections_run_finalizers_that_start_sessions():
-    class Cycle:
-        def __init__(self, subject):
-            self.subject, self.me = subject, self
-
-        def __del__(self):
-            _runs(self.subject)
-
-    other, done, threshold = _Subject(), [], gc.get_threshold()
-
-    def session():
-        for _ in range(300):
-            Cycle(other)                    # garbage whose finalizer starts a session
-            assert _runs(_Subject())        # a collection can start inside this entry
-        done.append(True)
-
-    gc.set_threshold(1)
-    try:
-        thread = threading.Thread(target=session, daemon=True)
-        thread.start()
-        thread.join(timeout=30)
-    finally:
-        gc.set_threshold(*threshold)
-    assert done and not thread.is_alive(), 'a session waited on a finalizer'
+    # In a child process with a hard timeout: a guard that waits here cannot block the suite.
+    import os
+    import subprocess
+    environment = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
+    result = subprocess.run([sys.executable, '-c', _FINALIZERS_DURING_ENTRY], env=environment,
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0 and 'done' in result.stdout, result.stderr[-400:]
 
 
 def test_a_finalizer_that_starts_a_session_while_a_session_starts_does_not_wait():

@@ -9,8 +9,8 @@ different subject objects run at the same time.
 import threading
 from contextlib import contextmanager
 
-# id(subject) -> the token of the session that subject takes part in now. The session's
-# frame holds its subject, so the id cannot go to another object while the entry exists.
+# id(subject) -> the token of the session that subject takes part in now. The token holds
+# its subject, so the id cannot go to another object while the entry exists.
 _active_sessions = {}
 _naming = threading.local()
 
@@ -24,11 +24,14 @@ class one_session_at_a_time:
     a subject runs inside it. So a claim cannot wait, and two sessions cannot both
     claim one subject. Only the session that claimed an entry removes it.
 
-    Interrupts: one in the session body, in the claim or inside the release frees the
-    subject. One in the guard's enter after the claim frees it when the interrupted
-    call's exception and this guard are dropped. Limit: one that arrives after the
-    session body ends and before the release starts leaves the subject reserved (there
-    is no step that can undo a claim for another caller); a separate subject works.
+    Interrupts (one interrupt, CPython 3.11): in the protected claim, in the session body
+    and in the protected release the subject is free at once. If the session's generator
+    stays suspended after the enter returns or before the exit resumes it, the subject is
+    free when the guard and the interrupted call's traceback lose their last references.
+    Limit: an interrupt at the generator's own yield or resume event, or after the body
+    ends and before the protected release, leaves the subject reserved for the life of the
+    process (no step can safely undo a claim for another caller). The reserved entry holds
+    that subject, so no other object is refused in its place: a separate subject runs.
     """
 
     def __init__(self, subject):
@@ -48,7 +51,7 @@ class one_session_at_a_time:
 
 @contextmanager
 def _session(subject):
-    key, token = id(subject), object()
+    key, token = id(subject), (subject,)
     try:    # the claim and the session body are in one try, so every way out releases
         if _active_sessions.setdefault(key, token) is not token:
             raise RuntimeError(
