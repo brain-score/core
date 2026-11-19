@@ -108,7 +108,7 @@ class MeasureRecord:
         self._facts = _Facts()               # what was noted while this record was the open one
         self._published: list = []           # the facts of nested records that succeeded
         self._changes: list = []             # (subject, handle, undo) of each intervention response
-        self._run = None                     # a staged record: the run that keeps it open
+        self._closed = False                 # a staged record, after its participation
 
     def _all_facts(self) -> _Facts:
         facts = _Facts()
@@ -199,44 +199,41 @@ def stage_session(session, participant, run: Callable[[], Any]) -> Any:
     """Return ``run()`` with what ``session`` notes meanwhile staged; name it on success.
 
     The ``Subject`` base runs every participation that claims a subject through this
-    call, the claim and its release included. ``run`` runs in the caller's own context,
-    so what a subject does to its own context variables stays as without a score (rules
-    8.1, 9.2). The notes go to a nested record that is open only while ``run`` runs
-    (``_staged``). When ``run`` returns, the session is named after ``participant`` (its
-    ``identifier``) and the notes reach the outer record in one append, the last step of
-    the call: the outermost subject that was given the session names it, so a wrapper
-    names its sessions, not the subject inside it. When ``run`` raises, or an interrupt
-    comes before that append, only the intervention counts (made at once in every
-    record) remain. Without an open record (a session outside a score) nothing is kept.
+    call, the claim and its release included, in the caller's own context (rules 8.1,
+    9.2). The notes go to a nested record that is open while ``run`` runs. When ``run``
+    raises, its exception passes on unchanged and only the intervention counts (made at
+    once in every record) remain. When ``run`` returns, the session is named after
+    ``participant`` (its ``identifier``: the outermost subject that was given the session,
+    so a wrapper names its sessions) and the notes reach the outer record in one append.
+    Without an open record (a session outside a score) nothing is kept.
+
+    Limit (stated, not repaired): one asynchronous interrupt (a signal) that arrives in the
+    few steps between the end of the body and the return of ``stage_session`` (the close,
+    the reset, the naming, the publishing append and its return) can have one of two
+    effects: the notes of a session that succeeded are not published, or they are
+    published although the call ends with the interrupt. In both cases the body itself had
+    ended with success, and the intervention counts are complete. Pure Python has no step
+    that publishes and returns at once.
     """
     outer = _open_record()
     if outer is None:
         return run()
     record = MeasureRecord(outer, participant)
-    record._run = _staged(record, run)
+    token = _active.set(record)
     try:
-        next(record._run)
-    except StopIteration as returned:
-        result = returned.value
+        try:
+            result = run()
+        finally:
+            record._closed = True   # a record an interrupt leaves in the context takes no notes
+    finally:
+        _active.reset(token)
     return _publish(record, outer, participant.identifier, session, result)
 
 
-def _staged(record: MeasureRecord, run: Callable[[], Any]):
-    """Run ``run()`` with ``record`` open; a generator, so that the record is open exactly
-    while it runs (``gi_running``, kept by the interpreter): an interrupt at the reset
-    below leaves ``record`` in the context, but closed, and notes pass it by."""
-    token = _active.set(record)
-    try:
-        return run()
-    finally:
-        _active.reset(token)
-    yield  # ponytail: makes this a generator; never reached
-
-
 def _open_record() -> Optional[MeasureRecord]:
-    """The record that takes notes now: the innermost one that is still open."""
+    """The record that takes notes now: the innermost one that is not closed."""
     record = _active.get()
-    while record is not None and record._run is not None and not record._run.gi_running:
+    while record is not None and record._closed:
         record = record._outer
     return record
 

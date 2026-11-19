@@ -9,7 +9,7 @@ from contextvars import ContextVar
 
 import pytest
 
-from brainscore_core._evaluation.measures import note_session, record_measures
+from brainscore_core.score_metadata import note_session, record_measures
 from brainscore_core.compatibility import ExecutionNotFeasibleError
 from brainscore_core.contract import Subject
 from brainscore_core.events import Perturbation, PerturbationApplied, Selection, StateChange
@@ -218,41 +218,44 @@ def test_an_interrupt_in_the_release_of_the_subject_leaves_nothing_of_the_sessio
 
 
 def _sweep(scenario):
-    """Run ``scenario(arm, disarm)`` once per line that the measure record runs between
-    ``arm()`` (the subject calls it as its body returns) and ``disarm()`` (the scenario calls
-    it when the participation is over), with one interrupt at that line. Yields the line and
-    the result of each interrupted run (the line is where the interrupt was raised). The
-    trace function of the caller is kept and put back."""
+    """Run ``scenario(arm, disarm)`` once per step (line or return event) that the measure
+    record runs between ``arm()`` (the subject calls it as its body returns) and ``disarm()``
+    (the scenario calls it when the participation is over), with one interrupt at that step.
+    Yields the step and the result of each interrupted run. The caller's trace function is
+    kept and put back in every way out."""
     import inspect
     import sys
-    from brainscore_core._evaluation import measures as module
-    state = {'at': None, 'seen': 0, 'on': False, 'previous': None}
+    code_file = note_session.__code__.co_filename      # the code under test, from a public object
+    state = {'at': None, 'seen': 0, 'on': False, 'armed': False, 'previous': None}
 
-    def line(frame, event, _):
-        if state['on'] and event == 'line':
+    def step(frame, event, _):
+        if state['on'] and event in ('line', 'return'):
             state['seen'] += 1
             if state['seen'] == state['at']:
                 state['on'] = False
-                state['where'] = frame.f_lineno
+                state['where'] = f'the {event} event of line {frame.f_lineno}'
                 raise KeyboardInterrupt()
-        return line
+        return step
 
     def tracer(frame, event, _):
-        return line if frame.f_code.co_filename == module.__file__ else None
+        return step if frame.f_code.co_filename == code_file else None
 
     def arm():
-        state.update(seen=0, on=True, previous=sys.gettrace())
+        state.update(seen=0, on=True, armed=True, previous=sys.gettrace())
         sys.settrace(tracer)
         frame = inspect.currentframe()
         while frame is not None:           # the record's frames that are already running too
-            if frame.f_code.co_filename == module.__file__:
-                frame.f_trace = line
+            if frame.f_code.co_filename == code_file:
+                frame.f_trace = step
             frame = frame.f_back
 
     def disarm():
-        if state['on'] or sys.gettrace() is tracer:
-            state['on'] = False
+        state['on'] = False
+        if state['armed']:                 # also when the raised interrupt cleared the trace
+            state['armed'] = False
             sys.settrace(state['previous'])
+
+    before = sys.gettrace()
     try:
         scenario(arm, disarm)
     finally:
@@ -264,7 +267,8 @@ def _sweep(scenario):
             result = scenario(arm, disarm)
         finally:
             disarm()
-        yield f"measures.py line {state['where']}", result
+        yield state['where'], result
+    assert sys.gettrace() is before, 'the sweep did not put back the trace function of its caller'
 
 
 def _maybe_nested(nested_score):
@@ -304,9 +308,11 @@ def test_an_interrupt_anywhere_in_the_end_of_a_record_keeps_an_accepted_change_s
 
 
 @pytest.mark.parametrize('nested_score', [False, True], ids=['one score', 'inside a nested score'])
-def test_an_interrupt_anywhere_in_the_end_of_a_record_publishes_all_or_nothing(nested_score):
-    """A participation that raised (an interrupt before it returned) leaves nothing of its
-    session; one that returned leaves all of it. Rule 5.5, decision (iv)."""
+def test_an_interrupt_in_the_end_of_a_participation_has_only_the_stated_outcomes(nested_score):
+    """The stated limit of ``stage_session``: one interrupt in the steps after the body
+    ended gives one of three outcomes: published and returned; not published and
+    interrupted; published and interrupted. Never part of a session, and never a record
+    that takes the notes of the later good session. Rule 5.5, decision (iv)."""
     def run(arm, disarm):
         class _Armed(_Text):
             def participate(self, session):
@@ -328,9 +334,35 @@ def test_an_interrupt_anywhere_in_the_end_of_a_record_publishes_all_or_nothing(n
 
     returned, complete = run(lambda: None, lambda: None)
     assert returned and 'late' in {entry['subject'] for entry in complete['provenance']}
+    good_only = _good_only()
     for at, (returned, four) in _sweep(run):
-        assert four == (complete if returned else _good_only()), \
-            f'an interrupt at {at} published part of a session, or lost a session that returned'
+        assert four in (complete, good_only), f'an interrupt at {at} published part of a session, or left a record that took the later notes'
+        assert four == complete or not returned, f'an interrupt at {at} lost a session that returned'
+
+
+class _Exhausted(_Text):
+    """Its body ends with an exception of its own, kept to compare identity."""
+    def __init__(self, error, identifier='exhausted'):
+        super().__init__(identifier)
+        self.error = error
+
+    def participate(self, session):
+        super().participate(session)
+        raise self.error
+
+
+@pytest.mark.parametrize('error', [StopIteration('no more'), ValueError('bad'), LookupError('none')],
+                         ids=lambda error: type(error).__name__)
+def test_an_exception_of_the_body_passes_unchanged_and_leaves_nothing(error):
+    """A benchmark that catches the subject's own exception and retries (for example
+    ``StopIteration`` from an exhausted iterator) sees that exception, not another one."""
+    with record_measures(subject='scored') as measures:
+        try:
+            _Wrapper(_Exhausted(error), identifier='failed').participate(_session())
+        except type(error) as caught:
+            assert caught is error and type(caught) is type(error)
+            _Wrapper(_Text(), identifier='good').participate(_session())
+    assert _four(measures) == _good_only()
 
 
 _OWN = ContextVar('own_state', default='intact')
