@@ -53,7 +53,6 @@ def drive_neural_session(
     refuse_variance(subject, session)
     input_events = drain_session_inputs(session)
     stimuli = session_stimuli(session, input_events)
-    output_t_ms = input_events[-1].t_ms if input_events else None
     use_multi_modality = allow_multi_modality and _spans_several_inputs(input_events)
     time_bins = getattr(session, "time_bins", None)
 
@@ -61,10 +60,10 @@ def drive_neural_session(
     for channel in session_outputs(session):
         family, region = parse_channel(channel)
         if family != "neural" or region is None:
-            raise NotImplementedError(
-                "neural participate currently supports requested "
-                f"neural:<region> output channels; got {channel!r}."
-            )
+            raise ExecutionNotFeasibleError(
+                "neural participate answers only neural:<region> output channels; got "
+                f"{channel!r}. Request the neural and the other outputs in separate sessions.",
+                channels=[channel])
         channel_regions.append((channel, region))
 
     if channel_runner is not None:
@@ -83,7 +82,7 @@ def drive_neural_session(
         session.respond(StreamEvent(
             channel=channel,
             payload=channel_output,
-            t_ms=output_t_ms,
+            t_ms=None,   # one answer for the whole table has no time (rule 4.2)
             meta={"driver": driver, "record": region},
         ))
 
@@ -195,15 +194,16 @@ def drive_neural_session_streaming(
     ``on_begin()`` runs at each ``begin`` control event, after the row before it
     was presented.
     """
+    refuse_variance(subject, session)
     channels = session_outputs(session)
     channel_regions = []
     for channel in channels:
         family, region = parse_channel(channel)
         if family != "neural" or region is None:
-            raise NotImplementedError(
-                "streaming neural participate supports requested neural:<region> "
-                f"output channels; got {channel!r}."
-            )
+            raise ExecutionNotFeasibleError(
+                "streaming neural participate answers only neural:<region> output channels; "
+                f"got {channel!r}. Request the neural and the other outputs in separate sessions.",
+                channels=[channel])
         channel_regions.append((channel, region))
 
     if on_begin is not None:
@@ -347,11 +347,11 @@ def drive_typed_session(subject, session) -> None:
         else:
             drive_neural_session(subject, session)
         return
-    raise NotImplementedError(
+    raise ExecutionNotFeasibleError(
         f"Subject {getattr(subject, 'identifier', type(subject).__name__)!r} "
         "runs sessions requesting neural:<region>, behavior, perturbation, or "
-        f"motor output channels; got {requested_channels!r}."
-    )
+        f"motor output channels; got {requested_channels!r}. Request one of those "
+        "combinations in each session.", channels=requested_channels)
 
 
 def drive_state_change_session(
