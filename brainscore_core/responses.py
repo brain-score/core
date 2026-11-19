@@ -36,6 +36,42 @@ def _on_step(value: float, low: float, step: float) -> bool:
         return abs(index - n) <= Decimal('1e-9') or float(low_d + n * step_d) == float(value)
 
 
+_NUMBER = re.compile(r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?')
+
+
+def _numbers(reply: str):
+    """Return the exact values of the numbers in ``reply``, or a reason it is invalid.
+
+    A run of word characters and number punctuation that contains a digit is one
+    token. A token is one signed decimal number (a leading point and an exponent are
+    allowed; a Unicode minus is a minus); a token with letters is a word, not a number
+    (``m2``). Any other token (``1,000``, ``3,5``, ``3.5.2``) is a notation this parser
+    does not support: it is refused, never read as another number. A hyphen after a
+    digit separates two numbers (``3-4``).
+    """
+    from decimal import Decimal, InvalidOperation
+    numbers = set()
+    for token in re.findall(r'[\w.,+\-\u2212]+', reply):
+        token = token.rstrip('.,').replace('\u2212', '-')
+        if not any(c.isdigit() for c in token):
+            continue
+        # A hyphen after a digit joins two numbers, as in a range: ``3-4``.
+        parts = re.split(r'(?<=\d)-', token)
+        try:
+            if all(_NUMBER.fullmatch(part) for part in parts):
+                numbers.update(Decimal(part) for part in parts)
+                continue
+        except InvalidOperation:    # an exponent that no decimal can hold
+            pass
+        # A plain word with a digit (``m2``, ``3rd``) is a word. Any other token is refused.
+        if not token.replace('_', 'a').isalnum():
+            return set(), (f'unsupported number notation {token!r}; reply with plain '
+                           'numbers such as 3, -2.5 or 1e3')
+        if _NUMBER.fullmatch(token):
+            return set(), f'the number {token!r} is too large or too small to read'
+    return numbers, None
+
+
 @dataclass(frozen=True)
 class Scale:
     """A number on a scale, such as a 1 to 7 rating. ``step=None`` allows any value."""
@@ -52,12 +88,21 @@ class Scale:
         return f'Answer with a number from {bounds}. Reply with only that number.'
 
     def parse(self, reply: str) -> Tuple[Optional[float], Optional[str]]:
-        found = re.search(r'-?\d+(?:\.\d+)?', reply or '')
-        if found is None:
+        # One number, also repeated, is the answer; several distinct numbers are invalid.
+        # Numbers are compared by their exact decimal value, before any float conversion.
+        numbers, reason = _numbers(reply or '')
+        if reason:
+            return None, reason
+        if not numbers:
             return None, 'no number in the reply'
-        value = float(found.group())
-        if not self.low <= value <= self.high:
-            return None, f'{value} is outside {self.low} to {self.high}'
+        if len(numbers) > 1:
+            return None, f'several numbers in the reply: {sorted(map(str, numbers))}'
+        from decimal import Decimal
+        exact, = numbers
+        # The bounds are checked on the exact value: a float can round a value onto a bound.
+        if not Decimal(str(self.low)) <= exact <= Decimal(str(self.high)):
+            return None, f'{exact} is outside {self.low} to {self.high}'
+        value = float(exact)
         if self.step is not None and not _on_step(value, self.low, self.step):
             return None, f'{value} is not on the scale step {self.step}'
         return value, None
@@ -130,6 +175,9 @@ class Choice:
         return f'Answer with exactly one of: {", ".join(self.labels)}.'
 
     def parse(self, reply: str) -> Tuple[Optional[str], Optional[str]]:
+        if isinstance(self.labels, str):
+            raise ValueError(f"labels is still the column name {self.labels!r}; parse with the "
+                             "row's options (trial_prompt resolves them per row).")
         first = (reply or '').strip().splitlines()[0].strip().lower() if (reply or '').strip() else ''
         for label in self.labels:
             if first == label.lower():

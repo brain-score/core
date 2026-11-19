@@ -1,6 +1,7 @@
 import numpy as np
 
 from brainscore_core import io_catalog
+from tests.unregistered import unregistered_family
 from brainscore_core.io_catalog import INPUT, OUTPUT, CatalogEntry
 
 
@@ -71,7 +72,7 @@ def test_validate_reports_a_visual_channel_without_a_form():
 
 
 def test_validate_reports_unknown_channel():
-    failures = io_catalog.validate("telepathy", object(), direction=INPUT)
+    failures = io_catalog.validate(unregistered_family(), object(), direction=INPUT)
 
     assert len(failures) == 1
     assert "No Input/Output Catalog entry" in failures[0]

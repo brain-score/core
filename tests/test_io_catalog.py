@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from brainscore_core import io_catalog
+from tests.unregistered import unregistered_family
 from brainscore_core.io_catalog import CatalogEntry, INPUT, OUTPUT
 
 
@@ -60,11 +61,11 @@ class TestLookup:
     def test_has(self):
         assert io_catalog.has("neural:IT")
         assert io_catalog.has("vision")
-        assert not io_catalog.has("telepathy")
+        assert not io_catalog.has(unregistered_family())
 
     def test_unknown_label_raises(self):
         with pytest.raises(KeyError):
-            io_catalog.get("telepathy")
+            io_catalog.get(unregistered_family())
 
 
 class TestCheckPayload:

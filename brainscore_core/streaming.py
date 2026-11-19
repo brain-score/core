@@ -70,6 +70,7 @@ def parse_channel(name: str) -> tuple[str, str | None]:
 # ``begin``, ``respond`` or ``end``. ``end`` carries ``meta['reason']``.
 CONTROL_CHANNEL = 'control'
 BEGIN, RESPOND, END = 'begin', 'respond', 'end'
+_END = object()   # the end of a fixed source, distinct from a None item
 END_REASONS = ('terminal', 'truncated', 'failure')
 
 
@@ -229,7 +230,11 @@ class FixedSource(Source):
         self._events: Iterator[Any] = iter(events)
 
     def next_input(self) -> Optional[StreamEvent]:
-        return next(self._events, None)
+        event = next(self._events, _END)
+        if event is None:
+            # A None item is not the end of the input: refuse it, never stop early.
+            _check_is_event(event)
+        return None if event is _END else event
 
 
 class Session(Source):
@@ -321,13 +326,12 @@ class Session(Source):
         return self
 
     def _request_control(self, driver: str) -> None:
-        """For a driver that needs the control signals: ask for them on a session
-        that was never given a declaration; refuse a declaration without them."""
-        if self._declared is None:
-            self._control = True
-        elif not self._control:
+        """For a driver that needs the control signals: refuse a session whose subject
+        did not declare ``control`` (rule 4.6), including one never given a declaration."""
+        if not self._control:
             raise ValueError(f"{driver} needs the 'control' input. Add 'control' to the "
-                             "subject's in_channels and answer on the respond signal.")
+                             "subject's in_channels, call session.declare_inputs(in_channels) "
+                             "and answer on the respond signal.")
 
     @contextmanager
     def observe(self, on_input: Optional[Callable] = None, on_output: Optional[Callable] = None,
@@ -362,12 +366,13 @@ class Session(Source):
 
     def next_input(self) -> Optional[StreamEvent]:
         while (event := self.source.next_input()) is not None:
-            if not self.source.checked and isinstance(event, StreamEvent):
+            _check_is_event(event)
+            # A listed source was checked when the session was built, but a list
+            # can change after that: a control signal is checked again here.
+            if not self.source.checked or event.channel == CONTROL_CHANNEL:
                 from . import io_catalog
                 check_event(event, io_catalog.INPUT)
             self._notify(0, event)
-            if not isinstance(event, StreamEvent):
-                return event
             if event.channel == CONTROL_CHANNEL:
                 # Read before the input filter: a subject that does not declare
                 # control still owes an answer to each respond signal.
@@ -669,12 +674,18 @@ def check_event(event: StreamEvent, direction: str, session: Any = None) -> None
     those checks nothing. An input control event skips the payload checks; its
     payload must be one of ``begin``, ``respond`` or ``end``. ``session`` is the
     session that accepts an output, for a validator that checks it against the
-    task and the trials.
+    task and the trials. An ``end`` event names its reason, one of ``END_REASONS``,
+    in ``meta['reason']``. An object that is not a ``StreamEvent`` is refused.
     """
     from . import io_catalog
+    _check_is_event(event)
     if direction == io_catalog.INPUT and event.channel == CONTROL_CHANNEL:
         problems = ([] if event.payload in (BEGIN, RESPOND, END) else
                     [f"control payload must be 'begin', 'respond' or 'end'; got {event.payload!r}"])
+        reason = (event.meta or {}).get('reason')
+        if event.payload == END and reason not in END_REASONS:
+            problems.append(f"an 'end' event needs meta['reason'] in {END_REASONS}; got "
+                            f"{reason!r}. Build it with end_event(reason)")
     else:
         problems = io_catalog.validate(event.channel, event.payload, direction=direction,
                                        event=event, session=session)
@@ -694,5 +705,11 @@ def _validate_inputs(inputs) -> None:
     """
     from . import io_catalog
     for event in inputs:
-        if isinstance(event, StreamEvent):
-            check_event(event, io_catalog.INPUT)
+        check_event(event, io_catalog.INPUT)
+
+
+def _check_is_event(event: Any) -> None:
+    """Refuse an object that is not a ``StreamEvent``: a session carries only events (rule 4.8)."""
+    if not isinstance(event, StreamEvent):
+        raise ValueError(f"A session carries only StreamEvent; got {type(event).__name__} "
+                         f"{event!r}. Wrap it as StreamEvent(channel, payload, t_ms).")

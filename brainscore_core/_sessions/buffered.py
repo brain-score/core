@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Iterator, Sequence
 from ..streaming import Session, StreamEvent, _with_trial_memory
+from ..compatibility import ExecutionNotFeasibleError
 from ..events import StateChange
 from ..supported_data_standards.brainio.assemblies import (
     BehavioralAssembly,
@@ -108,9 +109,28 @@ def behavioral_response(subject, stimuli, task) -> BehavioralAssembly:
     """
     if stimuli is None:
         raise ValueError("behavioral_response needs the stimuli to answer.")
-    session = stimulus_session(stimuli, ['behavior'], task)
+    # A task with a response is answered on the first format of that response, the
+    # same for every subject, so the session checks each trial and stores a missing
+    # one. An old task without a response stays on bare behavior.
+    response = getattr(task, 'response', None)
+    channel = response.channels[0] if response is not None else 'behavior'
+    declared = set(getattr(subject, 'out_channels', ()))
+    if response is not None and channel not in declared:
+        others = [c for c in response.channels if c in declared]
+        identifier = getattr(subject, 'identifier', type(subject).__name__)
+        remedy = (f"To measure {others[0]} instead, ask for it: session = "
+                  f"stimulus_session(stimuli, [{others[0]!r}], task); "
+                  f"subject.participate(session); session.collect({others[0]!r})."
+                  if others else
+                  f"Register a part that answers on {channel!r}, or one that states "
+                  f"the conversion to it (for example a readout's argmax).")
+        raise ExecutionNotFeasibleError(
+            f"behavioral_response asks {channel!r}, the first format of the task's "
+            f"{type(response).__name__}; subject {identifier!r} does not declare it. {remedy}",
+            channels=[channel])
+    session = stimulus_session(stimuli, [channel], task)
     subject.participate(session)
-    return session.collect("behavior")
+    return session.collect(channel)
 
 
 def apply_state_change(subject, state_change: StateChange):
