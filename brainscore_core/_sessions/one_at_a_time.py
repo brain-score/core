@@ -14,6 +14,7 @@ from contextlib import contextmanager
 # generator that holds that session. The lock guards only the decision.
 _active_sessions = {}
 _active_sessions_lock = threading.Lock()
+_naming = threading.local()
 
 
 def one_session_at_a_time(subject):
@@ -69,7 +70,14 @@ def _claim(key, mine):
 
 
 def _name(subject) -> str:
+    # A refusal met while the identifier is read (an identifier that starts a session
+    # on its own subject) names the type, so refusals nest one level, not without end.
+    if getattr(_naming, 'active', False):
+        return type(subject).__name__
+    _naming.active = True
     try:
         return subject.identifier
     except Exception:       # the identifier of a broken subject must not hide the refusal
         return type(subject).__name__
+    finally:
+        _naming.active = False

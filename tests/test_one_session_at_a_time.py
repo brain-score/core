@@ -228,3 +228,23 @@ def test_a_finalizer_that_starts_a_session_does_not_deadlock():
         pytest.fail('a finalizer deadlocked on the guard')
     assert run.returncode == 0, run.stderr
     assert 'done' in run.stdout
+
+
+def test_an_identifier_that_starts_a_session_on_its_own_subject_is_refused_once():
+    calls = []
+
+    class Reenters:
+        @property
+        def identifier(self):
+            calls.append(1)
+            with one_session_at_a_time(self):
+                return 'never'
+    subject = Reenters()
+    with one_session_at_a_time(subject):
+        with pytest.raises(RuntimeError, match=REFUSED) as refusal:
+            with one_session_at_a_time(subject):
+                pass
+    assert len(calls) == 1
+    assert 'Reenters' in str(refusal.value)
+    with one_session_at_a_time(subject):
+        pass
