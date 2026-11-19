@@ -137,9 +137,9 @@ def _takes_part_once(participate):
             return participate(self, session)
         from ._sessions.one_at_a_time import one_session_at_a_time
         with one_session_at_a_time(self):
-            running.add(pair)
+            session.declare_inputs(self.in_channels)
+            running.add(pair)   # a nested call passes only once the inputs are declared
             try:
-                session.declare_inputs(self.in_channels)
                 return participate(self, session)
             finally:
                 running.discard(pair)
@@ -190,7 +190,8 @@ class Subject(ABC):
        the subject does not declare never reaches the body, and ``control``
        events reach it only when it declares ``control``.
 
-    A nested call with the same session on the same thread passes straight to
+    A nested call with the same session on the same thread, after the inputs are
+    declared, passes straight to
     the body: ``super().participate(session)``, or a subject that gives its
     session to another subject (that subject claims itself and narrows the
     inputs to its own declaration). The body does neither duty itself.

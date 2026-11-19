@@ -171,3 +171,17 @@ def test_a_participate_that_is_not_a_plain_method_is_refused_with_a_remedy():
 
     with pytest.raises(TypeError, match='def participate'):
         type('Odd', (_Reader,), {'participate': Callable()})
+
+
+def test_a_nested_call_while_the_inputs_are_declared_is_refused():
+    class Reenters(_Reader):
+        @property
+        def in_channels(self):
+            self.participate(self.session)
+            return {'text'}
+
+    subject = Reenters()
+    subject.session = _reward_then_text()
+    with pytest.raises(RuntimeError):
+        subject.participate(subject.session)
+    assert 'reward' not in subject.seen
