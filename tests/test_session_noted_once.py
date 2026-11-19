@@ -12,10 +12,11 @@ def _answer_session(session):
             event.t_ms))
 
 def test_a_session_is_noted_once_not_once_per_response(monkeypatch):
-    from brainscore_core import streaming
+    from brainscore_core._evaluation import measures
     from brainscore_core.streaming import Session
     calls = []
-    monkeypatch.setattr(streaming, 'note_session', lambda session, *a: calls.append(session))
+    monkeypatch.setattr(measures, 'note_session', lambda session, *a: calls.append(session))
     session = Session([StreamEvent('text', 'a', 0.0), StreamEvent('text', 'b', 1.0)], ['neural:IT'])
-    _answer_session(session)
+    with measures.record_measures():
+        _answer_session(session)
     assert len(session.emitted) == 2 and len(calls) == 1
