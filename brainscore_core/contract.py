@@ -122,13 +122,15 @@ class TaskContext:
 
 
 def _take_part(subject, body, session):
-    """Run ``body(session)`` with the session duties: claim the subject, declare its inputs."""
+    """Run ``body(session)`` with the session duties: claim the subject, declare its inputs,
+    stage the session's notes until the participation returns."""
     from ._sessions import one_at_a_time
+    from ._evaluation.measures import stage_session
     # A nested call (super().participate, a wrapper that delegates the same session) passes
     # while this thread's own claim for this session is live and its inputs are declared.
     if one_at_a_time.declared(subject, session):
         return _run_now(subject, body, session)
-    with one_at_a_time.one_session_at_a_time(subject, session) as claim:
+    with one_at_a_time.one_session_at_a_time(subject, session) as claim, stage_session(session, subject):
         session.declare_inputs(subject.in_channels)
         claim[3] = True
         return _run_now(subject, body, session)
@@ -190,6 +192,12 @@ class Subject(ABC):
        ``participate`` that yields or is ``async`` is refused. A ``participate``
        that cannot be called (``participate = None``) is refused when it is read,
        so the compatibility check refuses it before any session.
+    4. keeps what the session notes for the score (its delivery, responses,
+       provenance) apart until the body returns: then it passes the notes on and
+       names the session after this subject. A wrapper that gives its session to
+       another subject names it last, so the score names the wrapper. If the body
+       raises, the score gets nothing of the session, apart from its intervention
+       counts: a change it left active still fails the release check.
 
     The body does neither duty itself. ``super().participate(session)`` inside a
     body reaches the parent's body directly: the outer call already holds the

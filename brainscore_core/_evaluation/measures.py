@@ -10,7 +10,7 @@ fixtures, copies) are not noted. The score metadata then copies the records
 to the score. Only returned data is read, never the subject's state.
 
 The same record keeps the execution configuration of the run's sessions, noted
-where a session accepts a response (``note_session``): the delivery form
+where a session accepts its first response (``note_session``): the delivery form
 (``'listed'``: one list known up front; ``'stream'``: one event at a time) and
 the regions-per-pass plan a subject says it used (``note_session(session,
 regions_per_pass)``). Core does not read the plan itself: only the subject that
@@ -25,6 +25,11 @@ a separate entry). Core adds the activation store state of the session (the
 ``RESULTCACHING_DISABLE`` value at that moment) and keeps the distinct entries.
 No response, payload or event meta is read or changed for it.
 
+A session's notes are staged: the ``Subject`` base runs each participation inside its own
+nested record (``stage_session``), so the notes reach the score only when the outermost
+participation of the session returns without an error. A failed session passes on only
+its intervention counts, so the release check still sees a change it left active.
+
 ponytail: the record is a ``ContextVar``. A response made in a worker thread or
 process is not noted. No behavioral path in core, vision, language or unified
 makes its response events there today (worker pools only extract features or
@@ -34,6 +39,7 @@ compute metrics); copy the context into the worker if one ever does.
 import itertools
 import json
 import os
+import threading
 from copy import deepcopy
 from collections import Counter
 from contextlib import contextmanager
@@ -41,6 +47,7 @@ from contextvars import ContextVar
 from typing import Dict, Iterator, Optional, Set, Tuple
 
 _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', default=None)
+_merging = threading.Lock()     # several subjects' sessions (one thread each) end into one record
 
 
 class MeasureRecord:
@@ -59,6 +66,7 @@ class MeasureRecord:
         self._store_states: Set[str] = set()
         self._sessions: Dict[int, Optional[str]] = {}   # session key -> the subject that took part, if named
         self._stated: Set[str] = set()                  # subjects that stated their parts
+        self._answered: Set[int] = set()                # sessions whose first response is noted
 
     @property
     def unreleased(self) -> Set[str]:
@@ -94,10 +102,12 @@ class MeasureRecord:
 def record_measures(subject: Optional[str] = None) -> Iterator[MeasureRecord]:
     """Collect the measure of each behavioral response until the block ends.
 
-    A record opened inside another one (a benchmark that calls ``score()``)
-    passes its measures to the outer record when it ends without an error, so
-    the outer score describes the responses its result came from. A failed
-    inner run passes nothing on: its result does not reach the outer score.
+    A record opened inside another one (a benchmark that calls ``score()``, or
+    the record of one session) passes its measures to the outer record when it
+    ends without an error, so the outer score describes the responses its result
+    came from. A failed inner run passes on only its intervention counts: its
+    result does not reach the outer score, but a change it left active does
+    reach the release check.
 
     ``subject`` is the identifier of the subject the score runs. When the block
     ends, every session no note named is bound to it, before the record passes
@@ -115,16 +125,38 @@ def record_measures(subject: Optional[str] = None) -> Iterator[MeasureRecord]:
         if subject is not None:
             record._sessions = {key: subject if named is None else named
                                 for key, named in record._sessions.items()}
-        if succeeded and outer is not None:
-            outer._records.update(record._records)
-            outer.applied += record.applied
-            outer.undone += record.undone
-            outer._deliveries |= record._deliveries
-            outer._region_plans |= record._region_plans
-            outer._provenance.update(record._provenance)
-            outer._store_states |= record._store_states
-            outer._sessions.update(record._sessions)
-            outer._stated |= record._stated
+        if outer is not None:
+            with _merging:
+                outer.applied += record.applied
+                outer.undone += record.undone
+                if succeeded:
+                    outer._records.update(record._records)
+                    outer._deliveries |= record._deliveries
+                    outer._region_plans |= record._region_plans
+                    outer._provenance.update(record._provenance)
+                    outer._store_states |= record._store_states
+                    outer._sessions.update(record._sessions)
+                    outer._stated |= record._stated
+                    outer._answered |= record._answered
+
+
+@contextmanager
+def stage_session(session, participant) -> Iterator[None]:
+    """Stage what ``session`` notes while ``participant`` takes part; name it on success.
+
+    The ``Subject`` base runs every participation that claims a subject inside this
+    block. The notes go to a nested record that passes them on only when the block ends
+    without an error (``record_measures``). On success the session is named after
+    ``participant`` (its ``identifier``), last, so the outermost subject that was given
+    the session names it: a wrapper names its sessions, not the subject inside it.
+    Without an open record (a session outside a score) nothing is kept.
+    """
+    if _active.get() is None:
+        yield
+        return
+    with record_measures() as record:
+        yield
+        record._sessions[_session_key(session)] = participant.identifier
 
 
 def _note_record(payload) -> None:
@@ -154,18 +186,18 @@ def _store_state() -> str:
 
 
 def note_session(session, regions_per_pass: Optional[str] = None,
-                 provenance: Optional[dict] = None, subject: Optional[str] = None) -> None:
-    """Note how ``session`` delivers its inputs and, when given, the plan the subject used,
-    the provenance of the session and the subject that takes part in it.
+                 provenance: Optional[dict] = None) -> None:
+    """Note how ``session`` delivers its inputs and, when given, the plan the subject used
+    and the provenance of the session.
 
     ``regions_per_pass`` comes from the subject that owns the setting and validated
     it (``BrainScoreModel``); a subject that does not read it passes none.
     ``provenance`` is one entry (a mapping of plain values with a ``subject``) from
     the subject that owns the parts; core adds ``activation_store`` (the store state
     of the session) and keeps a copy. An entry with ``parts`` says that its subject
-    stated its parts. ``subject`` names the subject that takes part in ``session``,
-    for a caller that runs several subjects (a conversation harness); a session that
-    no note names belongs to the scored subject. Each subject that took part and
+    stated its parts. The subject that takes part in ``session`` names it when its
+    participation succeeds (``stage_session``); a session that no subject names belongs
+    to the scored subject. Each subject that took part and
     stated no parts gets an entry with its facts ``'not stated'`` (``provenance_attrs``).
     """
     record = _active.get()
@@ -176,7 +208,7 @@ def note_session(session, regions_per_pass: Optional[str] = None,
     if regions_per_pass is not None:
         record._region_plans.add(regions_per_pass)
     key = _session_key(session)
-    named = subject if subject is not None else (provenance or {}).get('subject')
+    named = (provenance or {}).get('subject')
     if named is not None or key not in record._sessions:
         record._sessions[key] = named if named is not None else record._sessions.get(key)
     if provenance is not None:
@@ -241,14 +273,22 @@ def provenance_attrs(record: Optional[MeasureRecord], subject_identifier) -> Tup
     return tuple(sorted(entries, key=lambda entry: json.dumps(entry, sort_keys=True, default=str)))
 
 
-def note_response(event, request=None) -> None:
+def note_response(event, request=None, session=None) -> None:
     """Note a response event a session accepts: a response record, or a perturbation handle.
+
+    The first response of ``session`` that the open record sees also notes the session
+    (``note_session``): once for each session in each record, so a failed attempt that
+    was dropped does not hide the delivery of a later good one.
 
     ``request`` is the ``StateChange`` the session delivered, if any. The handle
     comes from a typed ``PerturbationApplied`` payload, else the response meta,
     else the request; the response is an undo when the request or the meta says
     ``kind == 'reset'``.
     """
+    record = _active.get()
+    if session is not None and record is not None and _session_key(session) not in record._answered:
+        record._answered.add(_session_key(session))
+        note_session(session)
     channel = getattr(event, 'channel', None)
     if is_behavior_channel(channel):
         _note_record(event.payload)

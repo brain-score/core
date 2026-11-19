@@ -609,6 +609,22 @@ def test_a_registration_entry_alone_does_not_state_parts(monkeypatch):
         {**registration, 'activation_store': 'off'})
 
 
+class _Taking(Subject):
+    """A subject that answers its session; the base names the session after it."""
+    in_channels = {'text'}
+    out_channels = {'neural:IT'}
+
+    def __init__(self, identifier):
+        self._identifier = identifier
+
+    @property
+    def identifier(self):
+        return self._identifier
+
+    def participate(self, session):
+        _answer_session(session)
+
+
 def _two_subjects(monkeypatch, nested=False):
     """A model that states its parts and a custom subject, each in its own session of one score."""
     from brainscore_core._evaluation.measures import note_session
@@ -619,9 +635,7 @@ def _two_subjects(monkeypatch, nested=False):
         model_session = Session(_events(), ['neural:IT'])
         _answer_session(model_session)
         note_session(model_session, provenance={'subject': 'model', 'parts': [{'serves': 'neural:IT'}]})
-        custom_session = Session(_events(), ['neural:IT'])
-        note_session(custom_session, subject='custom')        # the caller that runs it names it
-        _answer_session(custom_session)
+        _Taking('custom').participate(Session(_events(), ['neural:IT']))   # it names its session
     with record_measures() as measures:
         if nested:
             with record_measures():
@@ -662,7 +676,7 @@ def test_the_record_keeps_no_session_alive():
     from brainscore_core.streaming import Session
     with record_measures() as measures:
         session = Session(_events(), ['neural:IT'])
-        note_session(session, subject='custom')
+        note_session(session, provenance={'subject': 'custom'})
         reference = weakref.ref(session)
         del session
         gc.collect()
@@ -689,8 +703,6 @@ def test_a_named_session_keeps_its_name_when_the_record_binds_the_others(monkeyp
     from brainscore_core.streaming import Session
     monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
     with record_measures(subject='subject') as measures:
-        named = Session(_events(), ['neural:IT'])
-        note_session(named, subject='partner')
-        _answer_session(named)
+        _Taking('partner').participate(Session(_events(), ['neural:IT']))
         _answer_session(Session(_events(), ['neural:IT']))
     assert sorted(measures._sessions.values()) == ['partner', 'subject']
