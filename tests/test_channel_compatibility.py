@@ -396,13 +396,16 @@ def test_an_empty_listed_set_is_an_error_and_an_absent_entry_is_unrestricted():
 
 # ── A defect is reported before any mismatch of the pair ──────────────────────
 
-class _DeclaredSubject:
+class _DeclaredSubject(Subject):
     identifier = 'declared'
     in_channels = frozenset({'text'})
     out_channels = frozenset({'behavior'})       # no neural:IT: a mismatch with the benchmark
     required_channels = frozenset()
     output_inputs = {}
     traits = frozenset()
+
+    def participate(self, session):
+        pass
 
 
 def _mismatched_benchmark(**fields):
@@ -474,3 +477,11 @@ def test_a_stimulus_input_with_the_instruction_makes_a_pair_applicable():
     assert match.consumed_inputs == {"instruction", "text"}
     match = check_channel_compatibility(_Subject({"text"}, {"behavior:choice"}), benchmark)
     assert match.consumed_inputs == {"text"}
+
+
+def test_an_object_that_is_not_a_subject_is_refused_with_a_remedy():
+    duck = SimpleNamespace(identifier='duck', in_channels={'text'}, out_channels={'behavior'},
+                           participate=lambda session: None, reset=lambda: None)
+    with pytest.raises(TypeError, match='subclass Subject'):
+        check_channel_compatibility(duck, _Benchmark(required_input_channels={'text'},
+                                                     requested_output_channels={'behavior'}))
