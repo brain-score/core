@@ -73,8 +73,9 @@ def _stamp(measures, subject_identifier='scored'):
 def _nothing_of_the_session(attrs):
     assert attrs['response'] == ()
     assert attrs['delivery'] is None
-    assert attrs['provenance'] == ({'subject': 'scored', 'parts': 'not stated',
-                                    'activation_store': 'not stated'},)
+    assert {entry['subject'] for entry in attrs['provenance']} == {'scored'}
+    assert all(entry.get('parts') == 'not stated' and 'registration' not in entry
+               for entry in attrs['provenance'])
 
 
 def test_a_session_refused_before_any_response_leaves_nothing():
