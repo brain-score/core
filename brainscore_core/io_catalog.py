@@ -413,15 +413,15 @@ _SEED = [
     # benchmark can find it while it runs.
     CatalogEntry("stimulation", INPUT, "StateChange",
                  "a perturbation spec (kind, scale, replacement) applied to selected units",
-                 "the model's state_change_fn",
+                 "the model's intervention",
                  materializers=("StateChange",)),
     CatalogEntry("lesion", INPUT, "StateChange",
                  "an ablation spec applied to selected units",
-                 "the model's state_change_fn",
+                 "the model's intervention",
                  materializers=("StateChange",)),
     CatalogEntry("pharmacological", INPUT, "StateChange",
                  "a pharmacological perturbation spec applied to an agent or selected units",
-                 "the model's state_change_fn",
+                 "the model's intervention",
                  owner="core",
                  materializers=("StateChange",)),
     # --- inputs: closed-loop (carried by a row of an environment, harness-defined payload) ---
@@ -476,7 +476,7 @@ _SEED = [
     # --- outputs: perturbation record (carried by PerturbationApplied) ---
     CatalogEntry("perturbation", OUTPUT, "PerturbationApplied",
                  "PerturbationApplied record with a handle_id for undoing one change",
-                 "the model's intervention (state_change_fn)",
+                 "the model's intervention",
                  owner="core",
                  materializers=("PerturbationApplied",)),
     # --- outputs: physiological readouts (reserved for human subjects) ---

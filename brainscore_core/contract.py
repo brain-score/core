@@ -109,7 +109,7 @@ class TaskContext:
                 raise ValueError('A verbatim response shows the stimulus text exactly as given; '
                                  'remove the instruction or put it in the text.')
         elif self.task_type is None:
-            raise ValueError("Give a response (Choice, Scale, Text) or task_type='passive'.")
+            raise ValueError("Give a response or set task_type='passive'.")
         if self.present is not None:
             kinds = {'text', 'image', 'video', 'audio'}
             unknown = [entry for entry in self.present if entry.split(':', 1)[0] not in kinds]
