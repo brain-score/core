@@ -164,13 +164,15 @@ def test_a_decorated_participate_that_copies_the_parent_attributes_gets_both_dut
     assert subject.seen == ['text']
 
 
-def test_a_participate_that_is_not_a_plain_method_is_refused_with_a_remedy():
-    class Callable:
+def test_a_participate_that_is_a_callable_object_gets_both_duties():
+    class Reads:
         def __call__(self, session):
-            pass
+            self.seen = [event.channel for event in iter(session.next_input, None)]
 
-    with pytest.raises(TypeError, match='def participate'):
-        type('Odd', (_Reader,), {'participate': Callable()})
+    reads = Reads()
+    subject = type('Odd', (_Reader,), {'participate': reads})()
+    subject.participate(_reward_then_text())
+    assert reads.seen == ['text']
 
 
 def test_a_nested_call_while_the_inputs_are_declared_is_refused():
@@ -235,3 +237,95 @@ def test_a_failing_declaration_releases_the_subject():
     subject.fail = False
     subject.participate(_reward_then_text())
     assert subject.seen == ['text']
+
+
+def test_a_diamond_runs_the_body_that_python_selects():
+    class Root:
+        def participate(self, session):
+            self.body = 'root'
+
+    class Right(Root):
+        def participate(self, session):
+            self.body = 'right'
+            self.seen = [event.channel for event in iter(session.next_input, None)]
+
+    Left = type('Left', (Root, Subject), {})
+    Leaf = type('Leaf', (Left, Right), {'identifier': 'leaf', 'in_channels': {'text'},
+                                        'out_channels': {'behavior:text'}})
+    subject = Leaf()
+    subject.participate(_reward_then_text())
+    assert subject.body == 'right' and subject.seen == ['text']
+
+
+def test_a_participate_that_is_not_callable_is_refused_before_any_session():
+    from brainscore_core.compatibility import check_channel_compatibility
+    from types import SimpleNamespace
+
+    NoMethod = type('NoMethod', (_Reader,), {'participate': None})
+    benchmark = SimpleNamespace(identifier='b', required_input_channels={'text'},
+                                requested_output_channels={'behavior:text'})
+    with pytest.raises(TypeError, match='def participate'):
+        check_channel_compatibility(NoMethod(), benchmark)
+
+
+def test_a_mixin_whose_class_hook_does_not_call_super_cannot_suppress_the_duties():
+    class Quiet:
+        def __init_subclass__(cls, **kwargs):
+            pass                            # does not call super()
+
+        def participate(self, session):
+            self.seen = [event.channel for event in iter(session.next_input, None)]
+
+    Mixed = type('Mixed', (Quiet, Subject), {'identifier': 'quiet', 'in_channels': {'text'},
+                                             'out_channels': {'behavior:text'}})
+    subject = Mixed()
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text']
+
+
+def test_a_participate_assigned_after_the_class_statement_gets_both_duties():
+    class Late(_Reader):
+        pass
+
+    def late(self, session):
+        self.seen = [event.channel for event in iter(session.next_input, None)]
+
+    Late.participate = late
+    subject = Late()
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text']
+    on_instance = _Reader()
+    on_instance.participate = lambda session: setattr(
+        on_instance, 'seen', [event.channel for event in iter(session.next_input, None)])
+    on_instance.participate(_reward_then_text())
+    assert on_instance.seen == ['text']
+
+
+def test_a_copied_or_pickled_subject_keeps_both_duties():
+    import copy
+    import pickle
+
+    for other in (copy.copy(_Picklable()), copy.deepcopy(_Picklable()),
+                  pickle.loads(pickle.dumps(_Picklable()))):
+        other.participate(_reward_then_text())
+        assert other.seen == ['text'] and vars(other).keys() == {'seen', 'during'}
+
+
+class _Picklable(_Reader):
+    """A top-level subject, so pickle can find its class."""
+
+
+def test_a_subject_with_slots_or_a_fallback_getattr_keeps_both_duties():
+    class Slotted(_Reader):
+        __slots__ = ('extra',)
+
+    class Forwards(_Reader):            # as torch.nn.Module: __getattr__ for missing names only
+        def __getattr__(self, name):
+            if name == 'layer':
+                return 'from __getattr__'
+            raise AttributeError(name)
+
+    for subject in (Slotted(), Forwards()):
+        subject.participate(_reward_then_text())
+        assert subject.seen == ['text']
+    assert Forwards().layer == 'from __getattr__'

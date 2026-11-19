@@ -157,6 +157,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             'brainscore_core.contract.Subject, whose base class runs the session duties around '
             'participate; subclass Subject (an old vision or language model: load it with '
             'load_model, which wraps it in its adapter).')
+    subject.participate     # the read refuses a participate that cannot be called
     subject_in = set(subject.in_channels)
     subject_out = set(subject.out_channels)
     subject_required = set(subject.required_channels)

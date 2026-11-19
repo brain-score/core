@@ -127,34 +127,31 @@ class TaskContext:
 _taking_part = threading.local()
 
 
-def _takes_part_once(participate):
-    """Wrap a subclass's ``participate``: claim the session, declare the inputs, run the body."""
-    def body(self, session):
-        result = participate(self, session)
-        # A generator or coroutine body would run later, outside the claim.
-        if inspect.isgenerator(result) or inspect.iscoroutine(result) or inspect.isasyncgen(result):
-            getattr(result, 'close', lambda: None)()
-            raise TypeError(f'{type(self).__name__}.participate returned a {type(result).__name__}; '
-                            'participate runs the whole session before it returns: make it a plain '
-                            'method (no yield, no async def).')
-        return result
+def _take_part(subject, body, session):
+    """Run ``body(session)`` with the session duties: claim the subject, declare its inputs."""
+    running = _taking_part.__dict__.setdefault('pairs', set())
+    pair = (id(subject), id(session))
+    if pair in running:     # the same subject and session, already claimed and declared
+        return _run_now(subject, body, session)
+    from ._sessions.one_at_a_time import one_session_at_a_time
+    with one_session_at_a_time(subject):
+        session.declare_inputs(subject.in_channels)
+        running.add(pair)   # a nested call passes only once the inputs are declared
+        try:
+            return _run_now(subject, body, session)
+        finally:
+            running.discard(pair)
 
-    @functools.wraps(participate)
-    def wrapped(self, session):
-        running = _taking_part.__dict__.setdefault('pairs', set())
-        pair = (id(self), id(session))
-        if pair in running:     # super().participate(session), or a delegation of the same session
-            return body(self, session)
-        from ._sessions.one_at_a_time import one_session_at_a_time
-        with one_session_at_a_time(self):
-            session.declare_inputs(self.in_channels)
-            running.add(pair)   # a nested call passes only once the inputs are declared
-            try:
-                return body(self, session)
-            finally:
-                running.discard(pair)
-    wrapped._takes_part_once = wrapped      # by identity: a copied attribute is not a wrapper
-    return wrapped
+
+def _run_now(subject, body, session):
+    result = body(session)
+    # A generator or coroutine body would run later, outside the claim.
+    if inspect.isgenerator(result) or inspect.iscoroutine(result) or inspect.isasyncgen(result):
+        getattr(result, 'close', lambda: None)()
+        raise TypeError(f'{type(subject).__name__}.participate returned a {type(result).__name__}; '
+                        'participate runs the whole session before it returns: make it a plain '
+                        'method (no yield, no async def).')
+    return result
 
 
 class Subject(ABC):
@@ -185,11 +182,10 @@ class Subject(ABC):
             def out_channels(self):
                 return self._outputs
 
-    What runs around ``participate``: the base class wraps the ``participate`` that
-    a subclass uses, defined in its class body or inherited (from a parent or a
-    mixin). It must be a plain method, ``def participate(self, session)``; any
-    other object is refused when the class is created. Before the body runs, the
-    wrapper
+    What runs around ``participate``: reading ``subject.participate`` gives the
+    method that Python's normal lookup finds (the class body, a parent, a mixin,
+    or a method assigned to the class or the instance later), with the session
+    duties of the base around it. When it is called with a session, the base
 
     1. claims the subject for this session: a second session on the same subject
        object, from this thread or another one, is refused with ``RuntimeError``
@@ -199,16 +195,24 @@ class Subject(ABC):
     2. calls ``session.declare_inputs(self.in_channels)``: an input on a channel
        the subject does not declare never reaches the body, and ``control``
        events reach it only when it declares ``control``.
+    3. runs the body. The body must run the whole session before it returns: a
+       ``participate`` that yields or is ``async`` is refused. A ``participate``
+       that cannot be called (``participate = None``) is refused when it is read,
+       so the compatibility check refuses it before any session.
 
-    A nested call with the same session on the same thread, after the inputs are
-    declared, passes straight to the body: ``super().participate(session)``, or
-    a subject that gives its session to another subject (that subject claims
-    itself and narrows the inputs further to its own declaration; it never
-    reopens an input). A ``participate`` that yields or is ``async`` is refused. The body does neither duty itself.
+    The body does neither duty itself. ``super().participate(session)`` inside a
+    body reaches the parent's body directly: the outer call already holds the
+    claim and has declared the inputs. A call through ``self.participate`` with
+    the same session on the same thread, after the declaration, also runs the
+    body directly. A subject that gives its session to another subject: that
+    subject claims itself and narrows the inputs further to its own declaration;
+    it never reopens an input.
 
-    Limit: a ``participate`` assigned to a class or an instance after the class
-    statement is not wrapped and runs without both duties, unless it delegates to
-    the original method; define it in the class body or in a mixin.
+    Limit: only a read through the instance gets the duties. These bypass them
+    on purpose and are not supported for evaluation:
+    ``type(subject).participate(subject, session)``,
+    ``object.__getattribute__(subject, 'participate')``, and a subclass that
+    overrides ``__getattribute__`` without calling ``super().__getattribute__``.
 
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
     override it to clear memory, task setup and interventions between independent
@@ -217,18 +221,16 @@ class Subject(ABC):
     parts); interventions and task setup stay.
     """
 
-    def __init_subclass__(cls, **kwargs) -> None:
-        super().__init_subclass__(**kwargs)
-        # The effective participate, however it is inherited (class body, mixin, parent).
-        participate = next(klass.__dict__['participate'] for klass in cls.__mro__
-                           if 'participate' in klass.__dict__)
-        if (getattr(participate, '__isabstractmethod__', False)
-                or getattr(participate, '_takes_part_once', None) is participate):
-            return
-        if not inspect.isfunction(participate):
-            raise TypeError(f'{cls.__name__}.participate is a {type(participate).__name__}; '
-                            'define it as a plain method: def participate(self, session).')
-        cls.participate = _takes_part_once(participate)
+    def __getattribute__(self, name, _read=object.__getattribute__):
+        if name != 'participate':       # every other name: Python's normal lookup, unchanged
+            return _read(self, name)
+        value = _read(self, name)
+        # Python's own lookup chose the body (class body, parent, mixin or an
+        # assignment); the base adds the session duties around it.
+        if not callable(value):
+            raise TypeError(f'{type(self).__name__}.participate is {value!r}, which cannot be called; '
+                            'define it as a method: def participate(self, session).')
+        return functools.partial(_take_part, self, value)
 
     @property
     @abstractmethod
