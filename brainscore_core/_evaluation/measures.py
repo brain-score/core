@@ -219,14 +219,17 @@ def stage_session(session, participant, run: Callable[[], Any]) -> Any:
     if outer is None:
         return run()
     record = MeasureRecord(outer, participant)
-    token = _active.set(record)
+    token = None
     try:
         try:
+            token = _active.set(record)     # inside the try: an interrupt here still closes the record
             result = run()
         finally:
             record._closed = True   # a record an interrupt leaves in the context takes no notes
     finally:
-        _active.reset(token)
+        record._closed = True       # again: one interrupt at the close above skips it
+        if token is not None:
+            _active.reset(token)
     return _publish(record, outer, participant.identifier, session, result)
 
 

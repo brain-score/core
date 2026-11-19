@@ -226,7 +226,7 @@ def _sweep(scenario):
     import inspect
     import sys
     code_file = note_session.__code__.co_filename      # the code under test, from a public object
-    state = {'at': None, 'seen': 0, 'on': False, 'armed': False, 'previous': None}
+    state = {'at': None, 'seen': 0, 'on': False, 'armed': False, 'previous': None, 'frames': []}
 
     def step(frame, event, _):
         if state['on'] and event in ('line', 'return'):
@@ -246,6 +246,7 @@ def _sweep(scenario):
         frame = inspect.currentframe()
         while frame is not None:           # the record's frames that are already running too
             if frame.f_code.co_filename == code_file:
+                state['frames'].append((frame, frame.f_trace))
                 frame.f_trace = step
             frame = frame.f_back
 
@@ -254,6 +255,9 @@ def _sweep(scenario):
         if state['armed']:                 # also when the raised interrupt cleared the trace
             state['armed'] = False
             sys.settrace(state['previous'])
+        while state['frames']:             # the local trace of each frame that was changed
+            frame, local = state['frames'].pop()
+            frame.f_trace = local
 
     before = sys.gettrace()
     try:
@@ -486,3 +490,63 @@ def test_a_caller_can_still_name_a_session_that_no_subject_base_runs():
         _Text(identifier='taker').participate(named_by_both)
     subjects = {entry['subject'] for entry in _stamp(measures)['provenance']}
     assert {'custom', 'taker'} <= subjects and 'custom-too' not in subjects
+
+
+@pytest.mark.parametrize('interrupt', [KeyboardInterrupt, SystemExit])
+def test_a_good_session_after_an_interrupt_anywhere_in_the_record_still_reaches_the_score(interrupt):
+    """One interrupt at any step of the record code, the steps before the body included,
+    never leaves a record that takes the notes of a later session: a good retry in the
+    caller's context, and one in a context that the subject copied during its body, both
+    reach the score."""
+    import sys
+    from contextvars import copy_context
+    code_file = note_session.__code__.co_filename      # the code under test, from a public object
+
+    class _Copies(_Text):
+        copied = None
+
+        def participate(self, session):
+            type(self).copied = copy_context()
+            super().participate(session)
+
+    def run(at):
+        seen, fired = [0], []
+
+        def step(frame, event, _):
+            if not fired and event in ('line', 'return'):
+                seen[0] += 1
+                if seen[0] == at:
+                    fired.append(True)
+                    raise interrupt()
+            return step
+
+        def tracer(frame, event, _):
+            return step if frame.f_code.co_filename == code_file else None
+
+        _Copies.copied = None
+        with record_measures(subject='scored') as measures:
+            previous = sys.gettrace()
+            sys.settrace(tracer)
+            try:
+                _Copies('first').participate(_stream())
+            except interrupt:
+                pass
+            finally:
+                sys.settrace(previous)      # also when the raised interrupt cleared it
+            _Wrapper(_Text(), identifier='retry').participate(_session())
+            if _Copies.copied is not None:
+                _Copies.copied.run(lambda: _Wrapper(_Text(), identifier='in-the-copy').participate(_session()))
+        names = {entry['subject'] for entry in _stamp(measures)['provenance']}
+        return bool(fired), names, _Copies.copied is not None
+
+    before = sys.gettrace()
+    at = 0
+    while True:
+        at += 1
+        fired, names, copied = run(at)
+        if not fired:
+            break
+        assert 'retry' in names, f'the retry after an interrupt at step {at} did not reach the score'
+        if copied:
+            assert 'in-the-copy' in names, f'the session in the copied context was lost after step {at}'
+    assert at > 20 and sys.gettrace() is before
