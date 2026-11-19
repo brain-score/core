@@ -208,18 +208,22 @@ class TestStoredKinds(SchemaTest):
     def test_not_normalized_clears_an_existing_ceiled_value(self):
         entry = _create_score_entry()
         entry.score_ceiled = .5
+        entry.save()
+        assert Score.get_by_id(entry.id).score_ceiled == .5       # the row held a ceiled value
         score = ScoreObject(.7)
         score.attrs.update(raw=ScoreObject(.7), ceiling=ScoreObject(np.nan), normalized=False)
         update_score(score, entry)
-        assert Score.get_by_id(entry.id).score_ceiled is None
+        row = Score.get_by_id(entry.id)
+        assert (row.score_raw, row.score_ceiled) == (.7, None)
 
     def test_score_not_eligible_for_the_leaderboard_is_refused(self):
         score = ScoreObject(.7)
         score.attrs['leaderboard_eligible'] = False
         entry = _create_score_entry()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match='leaderboard_eligible'):
             update_score(score, entry)
-        assert Score.get_by_id(entry.id).score_raw is None
+        row = Score.get_by_id(entry.id)
+        assert (row.score_raw, row.score_ceiled) == (None, None)
 
 
 class TestPublic(SchemaTest):
