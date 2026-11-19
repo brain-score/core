@@ -2,7 +2,6 @@
 
 import functools
 import inspect
-import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
@@ -122,25 +121,17 @@ class TaskContext:
             self.present = tuple(self.present)
 
 
-# The (subject, session) pairs whose participate runs on this thread now, by id; an
-# entry lives only while its call runs, so both objects are alive.
-_taking_part = threading.local()
-
-
 def _take_part(subject, body, session):
     """Run ``body(session)`` with the session duties: claim the subject, declare its inputs."""
-    running = _taking_part.__dict__.setdefault('pairs', set())
-    pair = (id(subject), id(session))
-    if pair in running:     # the same subject and session, already claimed and declared
+    from ._sessions import one_at_a_time
+    # A nested call (super().participate, a wrapper that delegates the same session) passes
+    # while this thread's own claim for this session is live and its inputs are declared.
+    if one_at_a_time.declared(subject, session):
         return _run_now(subject, body, session)
-    from ._sessions.one_at_a_time import one_session_at_a_time
-    with one_session_at_a_time(subject):
+    with one_at_a_time.one_session_at_a_time(subject, session) as claim:
         session.declare_inputs(subject.in_channels)
-        running.add(pair)   # a nested call passes only once the inputs are declared
-        try:
-            return _run_now(subject, body, session)
-        finally:
-            running.discard(pair)
+        claim[3] = True
+        return _run_now(subject, body, session)
 
 
 def _run_now(subject, body, session):
@@ -221,10 +212,17 @@ class Subject(ABC):
     parts); interventions and task setup stay.
     """
 
-    def __getattribute__(self, name, _read=object.__getattribute__):
+    def __getattribute__(self, name):
+        # super(): the next lookup in the method resolution order, so a mixin's own lookup runs.
         if name != 'participate':       # every other name: Python's normal lookup, unchanged
-            return _read(self, name)
-        value = _read(self, name)
+            return super().__getattribute__(name)
+        try:
+            value = super().__getattribute__(name)
+        except AttributeError:          # Python would now ask __getattr__: ask it here, and guard its answer
+            fallback = getattr(type(self), '__getattr__', None)
+            if fallback is None:
+                raise
+            value = fallback(self, name)
         # Python's own lookup chose the body (class body, parent, mixin or an
         # assignment); the base adds the session duties around it.
         if not callable(value):

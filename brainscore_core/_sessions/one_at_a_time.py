@@ -17,8 +17,9 @@ from typing import TYPE_CHECKING, Optional, Type
 if TYPE_CHECKING:
     from brainscore_core.contract import Subject
 
-# id(subject) -> the token (subject, thread id) of the session that subject takes part in
-# now. The token holds its subject, so the id cannot go to another object while the entry exists.
+# id(subject) -> the token [subject, thread id, session, inputs declared] of the session
+# that subject takes part in now. The token holds its subject, so the id cannot go to
+# another object while the entry exists.
 _active_sessions = {}
 _naming = threading.local()
 
@@ -42,11 +43,11 @@ class one_session_at_a_time:
     that subject, so no other object is refused in its place: a separate subject runs.
     """
 
-    def __init__(self, subject: 'Subject') -> None:
-        self._session = _session(subject)
+    def __init__(self, subject: 'Subject', session=None) -> None:
+        self._session = _session(subject, session)
         self._used = False
 
-    def __enter__(self) -> None:
+    def __enter__(self) -> list:
         if self._used:      # a second entry would end the first session's claim
             raise RuntimeError('This guard is already in use. Make a new one_session_at_a_time '
                                'guard for each session.')
@@ -59,8 +60,8 @@ class one_session_at_a_time:
 
 
 @contextmanager
-def _session(subject):
-    key, token = id(subject), (subject, threading.get_ident())
+def _session(subject, session=None):
+    key, token = id(subject), [subject, threading.get_ident(), session, False]
     try:    # the claim and the session body are in one try, so every way out releases
         if (held := _active_sessions.setdefault(key, token)) is not token:
             raise RuntimeError(
@@ -69,7 +70,7 @@ def _session(subject):
                 'belong to that session. Wait for the running session to finish, or build a '
                 'separate subject for each session that runs at the same time.'
                 + (_SAME_THREAD if held[1] == token[1] else ''))
-        yield
+        yield token
     finally:
         try:
             _release(key, token)
@@ -81,6 +82,15 @@ def _session(subject):
 _SAME_THREAD = (' The running session is on this thread: if the participate of this subject '
                 'claims one_session_at_a_time itself, delete that line; the Subject base class '
                 'claims the session around participate.')
+
+
+def declared(subject, session) -> bool:
+    """True when this thread's live claim on ``subject`` is for ``session`` and its inputs
+    are declared: a nested call with the same session may then run. The answer comes from
+    the claim itself, so it ends when the claim ends."""
+    token = _active_sessions.get(id(subject))
+    return (token is not None and token[0] is subject and token[1] == threading.get_ident()
+            and token[2] is session and token[3])
 
 
 def _release(key, token):

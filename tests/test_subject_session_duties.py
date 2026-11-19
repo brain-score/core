@@ -329,3 +329,88 @@ def test_a_subject_with_slots_or_a_fallback_getattr_keeps_both_duties():
         subject.participate(_reward_then_text())
         assert subject.seen == ['text']
     assert Forwards().layer == 'from __getattr__'
+
+
+def test_a_participate_from_the_getattr_fallback_gets_both_duties():
+    class Fallback(_Reader):
+        __slots__ = ('participate',)        # never set: the lookup falls back to __getattr__
+
+        def __getattr__(self, name):
+            if name == 'participate':
+                return self._read
+            raise AttributeError(name)
+
+        def _read(self, session):
+            while (event := session.next_input()) is not None:
+                self.seen.append(event.channel)
+            session.respond(StreamEvent('behavior:text', 'done', None, {}))
+
+    subject = Fallback()
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text']
+
+
+def test_a_cooperative_mixin_keeps_its_own_attribute_lookup():
+    class GainMixin:
+        def __getattribute__(self, name):
+            if name == 'default_gain':
+                return 3
+            return super().__getattribute__(name)
+
+    class Model(_Reader, GainMixin):
+        pass
+
+    subject = Model()
+    assert subject.default_gain == 3
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text']
+
+
+def test_an_interrupt_on_the_way_out_does_not_admit_the_old_session_later():
+    import sys
+    contract_file = sys.modules[Subject.__module__].__file__
+
+    class Probe(_Reader):
+        old = None
+        refused_old = None
+
+        def participate(self, session):
+            if self.old is not None:        # a new session runs: try the old one from inside it
+                try:
+                    self.participate(self.old)
+                    self.refused_old = False
+                except RuntimeError:
+                    self.refused_old = True
+
+    judged = 0
+    for at in range(1, 80):
+        subject, first, seen, fired = Probe(), _session('text'), [0], []
+
+        def trace(frame, event, argument):
+            if frame.f_code.co_filename != contract_file:
+                return None
+            if event == 'line' and not fired:
+                seen[0] += 1
+                if seen[0] == at:
+                    fired.append(True)
+                    raise KeyboardInterrupt
+            return trace
+
+        previous = sys.gettrace()
+        sys.settrace(trace)
+        try:
+            subject.participate(first)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            sys.settrace(previous)
+        if not fired:
+            break
+        subject.old = first
+        try:
+            subject.participate(_session('text'))
+        except RuntimeError:
+            continue        # the stated limit: the interrupt left the subject reserved
+        judged += 1
+        assert subject.refused_old, f'the old session entered a new one after an interrupt at line event {at}'
+    assert judged >= 3
