@@ -23,6 +23,8 @@ class Score(DataAssembly):
 
     RAW_VALUES_KEY = 'raw'
 
+    __slots__ = ()
+
     def sel(self, *args, _apply_raw=True, **kwargs):
         return self._preserve_raw('sel', *args, **kwargs, _apply_raw=_apply_raw)
 
