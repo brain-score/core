@@ -2,15 +2,21 @@
 import gc
 import sys
 import threading
+import weakref
 
 import pytest
 
-from brainscore_core._sessions import one_at_a_time as helper
+from brainscore_core.contract import Subject
 from brainscore_core.streaming_helpers import one_session_at_a_time
 
 
-class _Subject:
+class _Subject(Subject):
     identifier = 'stand-in'
+    in_channels = {'text'}
+    out_channels = {'behavior:choice'}
+
+    def participate(self, session) -> None:
+        pass
 
 
 def _runs(subject) -> bool:
@@ -108,58 +114,91 @@ def test_three_callers_in_a_forced_order_never_share_the_subject():
     assert _runs(subject)
 
 
+def test_an_interrupt_in_the_session_body_comes_out_and_frees_the_subject_at_once():
+    subject = _Subject()
+    with pytest.raises(KeyboardInterrupt) as interrupt:
+        with one_session_at_a_time(subject):
+            raise KeyboardInterrupt
+    assert interrupt.value is not None and _runs(subject)      # the exception is still held
+
+
+def test_a_session_that_never_reaches_its_exit_frees_the_subject_when_its_guard_is_gone():
+    subject = _Subject()
+    guard = one_session_at_a_time(subject)
+    guard.__enter__()           # as after an interrupt between the enter and the body
+    with pytest.raises(RuntimeError):
+        _runs(subject)
+    del guard
+    gc.collect()
+    assert _runs(subject)
+
+
 def _interrupted_session(subject, at):
-    """Run one session and raise an interrupt at the ``at``-th line that the guard's own code
-    runs. Returns (fired, in the stated limit, the kept exception)."""
-    seen, state, kept = [0], {'body': False, 'release': False, 'limit': False, 'fired': False}, None
+    """Run one session and raise an interrupt at the ``at``-th event (call, line or return)
+    of the guard's own code. Returns (the event kind, True when the body had ended, the
+    exception that came out), or None when the session has fewer events."""
+    guard_file = sys.modules[one_session_at_a_time.__module__].__file__
+    seen, body_ended, fired, kept = [0], [False], [], None
 
     def trace(frame, event, argument):
-        if frame.f_code.co_filename != helper.__file__:
+        if frame.f_code.co_filename != guard_file:
             return None
-        if frame.f_code.co_name == '_release':
-            state['release'] = True
-        if event == 'line' and not state['fired']:
+        if not fired and event in ('call', 'line', 'return'):
             seen[0] += 1
             if seen[0] == at:
-                state['fired'] = True
-                # The stated limit: after the body ended and before the release started.
-                state['limit'] = state['body'] and not state['release']
+                fired.append((event, body_ended[0]))
                 raise KeyboardInterrupt
         return trace
 
+    previous = sys.gettrace()
     sys.settrace(trace)
     try:
         with one_session_at_a_time(subject):
-            state['body'] = True
+            body_ended[0] = True
     except KeyboardInterrupt as error:
         kept = error
     finally:
-        sys.settrace(None)
-    return state['fired'], state['limit'], kept
+        sys.settrace(previous)
+    return (*fired[0], kept) if fired else None
 
 
-def test_an_interrupt_in_the_guard_frees_the_subject_outside_the_stated_limit():
-    fired_count = 0
-    for at in range(1, 200):
+def test_an_interrupt_at_each_event_of_the_guard_has_one_of_the_three_stated_outcomes():
+    freed_at_once_after_the_body, freed_when_the_call_is_gone, reserved = [], [], []
+    for at in range(1, 400):
         subject = _Subject()
-        fired, in_limit, kept = _interrupted_session(subject, at)
-        if not fired:
+        interrupted = _interrupted_session(subject, at)
+        if interrupted is None:
             break
-        fired_count += 1
-        del kept
-        gc.collect()        # the interrupted call's exception and guard are gone
-        if in_limit:
-            assert _runs(_Subject()), 'a separate subject must run'
-        else:
-            assert _runs(subject), f'the subject stays reserved after an interrupt at guard line {at}'
-    assert fired_count >= 5, 'the interrupts did not reach the guard'
+        event, body_ended, kept = interrupted
+        assert isinstance(kept, KeyboardInterrupt), f'the interrupt at event {at} did not come out'
+        if _runs_or_refused(subject):               # the exception is still held
+            if body_ended and event == 'line':      # a line of the release was interrupted
+                freed_at_once_after_the_body.append(at)
+            continue
+        del kept, interrupted
+        gc.collect()                                # the interrupted call is gone
+        if _runs_or_refused(subject):
+            freed_when_the_call_is_gone.append(at)
+            continue
+        # The stated limit: the subject stays reserved, and the reservation holds it.
+        assert body_ended or event != 'line', f'a subject stays reserved after an interrupt at line event {at}'
+        still_there = weakref.ref(subject)
+        del subject
+        gc.collect()
+        assert still_there() is not None, 'a reserved subject was freed: another object could be refused in its place'
+        assert not _runs_or_refused(still_there())
+        assert all(_runs(_Subject()) for _ in range(20)), 'a separate subject must run'
+        reserved.append(at)
+    assert freed_at_once_after_the_body, 'no interrupt reached the protected release'
+    assert freed_when_the_call_is_gone, 'no interrupt left a session suspended'
+    assert reserved, 'no interrupt reached the stated limit'
 
 
-def test_a_subject_left_reserved_by_an_interrupt_does_not_block_a_new_object():
-    # The entry holds its subject, so a new object cannot get the reserved id.
-    stranded = [at for at in range(1, 200) if _interrupted_session(_Subject(), at)[1]]
-    gc.collect()
-    assert all(_runs(_Subject()) for _ in range(50)) or not stranded
+def _runs_or_refused(subject) -> bool:
+    try:
+        return _runs(subject)
+    except RuntimeError:
+        return False
 
 
 _FINALIZERS_DURING_ENTRY = """
@@ -223,7 +262,7 @@ def test_a_finalizer_that_starts_a_session_while_a_session_starts_does_not_wait(
 def test_an_identifier_that_starts_a_session_on_its_own_subject_is_read_once_for_a_refusal():
     reads = []
 
-    class Reentrant:
+    class Reentrant(_Subject):
         @property
         def identifier(self):
             reads.append(True)
@@ -246,7 +285,7 @@ def test_an_identifier_text_that_starts_a_session_is_formatted_once():
             _runs(subject)
             return 'unreachable'
 
-    class WithText:
+    class WithText(_Subject):
         identifier = Text('text')
 
     subject = WithText()
@@ -257,12 +296,12 @@ def test_an_identifier_text_that_starts_a_session_is_formatted_once():
 
 
 def test_a_type_whose_metaclass_hides_its_name_still_gets_the_refusal():
-    class Meta(type):
+    class Meta(type(_Subject)):
         @property
         def __name__(cls):
             raise LookupError('no name')
 
-    class Odd(metaclass=Meta):
+    class Odd(_Subject, metaclass=Meta):
         @property
         def identifier(self):
             raise ValueError('broken')

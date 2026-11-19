@@ -8,6 +8,11 @@ different subject objects run at the same time.
 
 import threading
 from contextlib import contextmanager
+from types import TracebackType
+from typing import TYPE_CHECKING, Optional, Type
+
+if TYPE_CHECKING:
+    from brainscore_core.contract import Subject
 
 # id(subject) -> the token of the session that subject takes part in now. The token holds
 # its subject, so the id cannot go to another object while the entry exists.
@@ -34,19 +39,20 @@ class one_session_at_a_time:
     that subject, so no other object is refused in its place: a separate subject runs.
     """
 
-    def __init__(self, subject):
+    def __init__(self, subject: 'Subject') -> None:
         self._session = _session(subject)
         self._used = False
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         if self._used:      # a second entry would end the first session's claim
             raise RuntimeError('This guard is already in use. Make a new one_session_at_a_time '
                                'guard for each session.')
         self._used = True
         return self._session.__enter__()
 
-    def __exit__(self, *error):
-        return self._session.__exit__(*error)
+    def __exit__(self, error_type: Optional[Type[BaseException]], error: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> bool:
+        return self._session.__exit__(error_type, error, traceback)
 
 
 @contextmanager
