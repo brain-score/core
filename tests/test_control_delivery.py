@@ -70,7 +70,6 @@ def test_several_channels_per_trial_and_a_late_batch_answer_are_fine():
         out_channels = {'behavior', 'neural:IT'}
 
         def participate(self, session):
-            session.declare_inputs(self.in_channels)
             events = list(iter(session.next_input, None))      # read every row, then answer
             for event in events:
                 session.respond(StreamEvent('behavior', 'yes', event.t_ms))
@@ -119,7 +118,6 @@ def test_a_closed_loop_subject_without_control_gets_a_clear_error():
         out_channels = {'motor'}
 
         def participate(self, session):
-            session.declare_inputs(self.in_channels)
             while (event := session.next_input()) is not None:
                 session.respond(StreamEvent('motor', 0, event.t_ms))
     session = Session(EnvironmentSource(Env()), ('motor',))
