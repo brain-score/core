@@ -178,6 +178,23 @@ def test_an_unsupported_output_combination_is_infeasible(driver):
     assert subject.passes == 0
 
 
+def _unreadable():
+    raise AssertionError('the driver read the source before it refused the outputs')
+    yield  # a generator: the body runs only when the source is read
+
+
+@pytest.mark.parametrize('driver', [drive_neural_session, drive_neural_session_streaming])
+@pytest.mark.parametrize('outputs, mixed', [(['neural:IT', 'behavior'], True),
+                                            (['behavior'], False)])
+def test_an_impossible_output_is_refused_before_the_source_is_read(driver, outputs, mixed):
+    subject = _Recorder(driver)
+    with pytest.raises(ExecutionNotFeasibleError) as refusal:
+        subject.participate(Session(_unreadable(), outputs=outputs))
+    # A mixed request can be split; a lone channel needs another driver.
+    assert ('separate sessions' in str(refusal.value)) == mixed
+    assert subject.passes == 0
+
+
 # Rule 4.2: the one answer for a whole table has no time.
 
 def test_a_whole_table_neural_answer_has_no_time():

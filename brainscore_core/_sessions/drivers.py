@@ -51,20 +51,11 @@ def drive_neural_session(
     would have alone. Without it, all regions are recorded in one call.
     """
     refuse_variance(subject, session)
+    channel_regions = _neural_channel_regions(session, "neural participate")
     input_events = drain_session_inputs(session)
     stimuli = session_stimuli(session, input_events)
     use_multi_modality = allow_multi_modality and _spans_several_inputs(input_events)
     time_bins = getattr(session, "time_bins", None)
-
-    channel_regions = []
-    for channel in session_outputs(session):
-        family, region = parse_channel(channel)
-        if family != "neural" or region is None:
-            raise ExecutionNotFeasibleError(
-                "neural participate answers only neural:<region> output channels; got "
-                f"{channel!r}. Request the neural and the other outputs in separate sessions.",
-                channels=[channel])
-        channel_regions.append((channel, region))
 
     if channel_runner is not None:
         payloads = channel_runner(stimuli, channel_regions, time_bins, use_multi_modality)
@@ -85,6 +76,29 @@ def drive_neural_session(
             t_ms=None,   # one answer for the whole table has no time (rule 4.2)
             meta={"driver": driver, "record": region},
         ))
+
+
+def _neural_channel_regions(session, driver: str) -> List[Tuple[str, str]]:
+    """Return ``(channel, region)`` for each requested output, or refuse the request.
+
+    Reads only the requested outputs, never the source: an impossible request is
+    refused before any input is read or computed (rule 5.14).
+    """
+    channels = session_outputs(session)
+    parsed = [(channel, *parse_channel(channel)) for channel in channels]
+    other = [channel for channel, family, region in parsed
+             if family != "neural" or region is None]
+    if other:
+        if len(other) < len(channels):
+            remedy = "Request the neural and the other outputs in separate sessions."
+        else:
+            remedy = ("Run this session with a driver that answers those outputs "
+                      "(drive_typed_session routes each combination), or request "
+                      "neural:<region>.")
+        raise ExecutionNotFeasibleError(
+            f"{driver} answers only neural:<region> output channels; got {other!r}. {remedy}",
+            channels=other)
+    return [(channel, region) for channel, _, region in parsed]
 
 
 def _combined_recording_target(
@@ -195,16 +209,7 @@ def drive_neural_session_streaming(
     was presented.
     """
     refuse_variance(subject, session)
-    channels = session_outputs(session)
-    channel_regions = []
-    for channel in channels:
-        family, region = parse_channel(channel)
-        if family != "neural" or region is None:
-            raise ExecutionNotFeasibleError(
-                "streaming neural participate answers only neural:<region> output channels; "
-                f"got {channel!r}. Request the neural and the other outputs in separate sessions.",
-                channels=[channel])
-        channel_regions.append((channel, region))
+    channel_regions = _neural_channel_regions(session, "streaming neural participate")
 
     if on_begin is not None:
         session._request_control('An episode reset')
