@@ -197,3 +197,23 @@ def test_a_deferred_participate_is_refused_with_a_remedy():
         subject.participate(_reward_then_text())
     with pytest.raises(TypeError, match='plain method'):    # the claim was released
         subject.participate(_session('text'))
+
+
+def test_an_inner_subject_with_a_broader_declaration_does_not_reopen_an_input():
+    class Wide(_Reader):
+        in_channels = {'text', 'reward'}
+
+    class NarrowOuter(Subject):
+        identifier = 'narrow'
+        in_channels = {'text'}
+        out_channels = {'behavior:text'}
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        def participate(self, session):
+            self.inner.participate(session)
+
+    inner = Wide()
+    NarrowOuter(inner).participate(_session('reward', 'text', 'reward'))
+    assert inner.seen == ['text']
