@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional
 
-from brainscore_core._evaluation.measures import note_response, note_session
+from brainscore_core._evaluation.measures import note_response
 
 
 _FAMILY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -271,7 +271,6 @@ class Session(Source):
                     raise ValueError(f'A session cannot request {problem}')
         self.task = task
         check_response_formats(self.outputs, task)
-        self._session_noted = False   # note_session runs once per session
         self.stimuli = stimuli
         # True only when the source presents exactly the rows of ``stimuli``, in order
         # (``stimulus_session`` states it). A source given here with a table does not:
@@ -532,10 +531,7 @@ class Session(Source):
     def _keep(self, stored: StreamEvent, observed: StreamEvent, request: Any = None) -> None:
         """Keep one response: tell the observers, note it, store it within the history limit."""
         self._notify(1, observed)
-        if not self._session_noted:
-            self._session_noted = True
-            note_session(self)
-        note_response(stored, request)
+        note_response(stored, request, session=self)   # the first one also notes the session
         self.emitted.append(stored)
         limit = self.source.history_limit
         if limit is not None and len(self.emitted) > limit:
