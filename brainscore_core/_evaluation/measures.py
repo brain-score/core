@@ -251,18 +251,20 @@ def _store_state() -> str:
 
 
 def note_session(session, regions_per_pass: Optional[str] = None,
-                 provenance: Optional[dict] = None) -> None:
-    """Note how ``session`` delivers its inputs and, when given, the plan the subject used
-    and the provenance of the session.
+                 provenance: Optional[dict] = None, subject: Optional[str] = None) -> None:
+    """Note how ``session`` delivers its inputs and, when given, the plan the subject used,
+    the provenance of the session and the subject that takes part in it.
 
     ``regions_per_pass`` comes from the subject that owns the setting and validated
     it (``BrainScoreModel``); a subject that does not read it passes none.
     ``provenance`` is one entry (a mapping of plain values with a ``subject``) from
     the subject that owns the parts; core adds ``activation_store`` (the store state
     of the session) and keeps a copy. An entry with ``parts`` says that its subject
-    stated its parts. The subject that takes part in ``session`` names it when its
-    participation succeeds (``stage_session``); a session that no subject names belongs
-    to the scored subject. Each subject that took part and
+    stated its parts. ``subject`` names the subject that takes part in ``session``, for a
+    caller that runs a session with a subject that is not a ``Subject``; a ``Subject``
+    names its own session when its participation succeeds (``stage_session``), and that
+    name wins. A session that no note names belongs to the scored subject. Each subject
+    that took part and
     stated no parts gets an entry with its facts ``'not stated'`` (``provenance_attrs``).
     """
     record = _active.get()
@@ -273,7 +275,7 @@ def note_session(session, regions_per_pass: Optional[str] = None,
     if regions_per_pass is not None:
         record._facts.region_plans.add(regions_per_pass)
     key = _session_key(session)
-    named = (provenance or {}).get('subject')
+    named = subject if subject is not None else (provenance or {}).get('subject')
     if named is not None or key not in record._facts.sessions:
         record._facts.sessions[key] = named if named is not None else record._facts.sessions.get(key)
     if provenance is not None:

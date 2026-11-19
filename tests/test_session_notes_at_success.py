@@ -390,3 +390,16 @@ def test_an_undo_on_the_same_subject_releases_its_change(route):
     assert subject.active == set()
     measures.check_released('bench', 'scored')
 
+
+def test_a_caller_can_still_name_a_session_that_no_subject_base_runs():
+    """``note_session(session, subject=...)`` names a session for a caller that runs it
+    itself; a ``Subject`` that takes part names its own session, and that name wins."""
+    note_session(_session(), subject='custom')           # outside a score: no effect, no error
+    with record_measures(subject='scored') as measures:
+        by_caller = _session()
+        note_session(by_caller, subject='custom')
+        named_by_both = _session()
+        note_session(named_by_both, subject='custom-too')
+        _Text(identifier='taker').participate(named_by_both)
+    subjects = {entry['subject'] for entry in _stamp(measures)['provenance']}
+    assert {'custom', 'taker'} <= subjects and 'custom-too' not in subjects
