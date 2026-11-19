@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+import pytest
 
 from brainscore_core import Score as ScoreObject
 from brainscore_core.benchmarks import BenchmarkBase
@@ -167,6 +168,58 @@ class TestScore(SchemaTest):
         entry = _create_score_entry()
         update_score(score, entry)
         assert entry.error == .1
+
+
+def _agg(center, error=np.nan):
+    return ScoreObject([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+
+
+class TestStoredKinds(SchemaTest):
+    """What the row holds for each kind of score: raw value, ceiled value (None when not estimated)."""
+
+    def _store(self, score):
+        entry = _create_score_entry()
+        update_score(score, entry)
+        return Score.get_by_id(entry.id)
+
+    def test_old_score_with_ceiling(self):
+        score = _agg(.42)
+        score.attrs['raw'] = _agg(.336)
+        score.attrs['ceiling'] = ScoreObject(.8)
+        row = self._store(score)
+        assert (row.score_raw, row.score_ceiled) == (.336, .42)
+
+    def test_old_score_without_ceiling(self):
+        row = self._store(_agg(.123))
+        assert (row.score_raw, row.score_ceiled) == (.123, None)
+
+    def test_unified_score_with_measured_ceiling(self):
+        score = ScoreObject(.42)
+        score.attrs.update(raw=ScoreObject(.336), ceiling=ScoreObject(.8), normalized=True)
+        row = self._store(score)
+        assert (row.score_raw, row.score_ceiled) == (.336, .42)
+
+    def test_unified_score_with_ceiling_not_estimated(self):
+        score = ScoreObject(.7)
+        score.attrs.update(raw=ScoreObject(.7), ceiling=ScoreObject(np.nan), normalized=False)
+        row = self._store(score)
+        assert (row.score_raw, row.score_ceiled) == (.7, None)
+
+    def test_not_normalized_clears_an_existing_ceiled_value(self):
+        entry = _create_score_entry()
+        entry.score_ceiled = .5
+        score = ScoreObject(.7)
+        score.attrs.update(raw=ScoreObject(.7), ceiling=ScoreObject(np.nan), normalized=False)
+        update_score(score, entry)
+        assert Score.get_by_id(entry.id).score_ceiled is None
+
+    def test_score_not_eligible_for_the_leaderboard_is_refused(self):
+        score = ScoreObject(.7)
+        score.attrs['leaderboard_eligible'] = False
+        entry = _create_score_entry()
+        with pytest.raises(Exception):
+            update_score(score, entry)
+        assert Score.get_by_id(entry.id).score_raw is None
 
 
 class TestPublic(SchemaTest):
