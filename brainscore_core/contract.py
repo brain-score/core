@@ -143,7 +143,7 @@ def _takes_part_once(participate):
                 return participate(self, session)
             finally:
                 running.discard(pair)
-    wrapped._takes_part_once = True
+    wrapped._takes_part_once = wrapped      # by identity: a copied attribute is not a wrapper
     return wrapped
 
 
@@ -176,7 +176,10 @@ class Subject(ABC):
                 return self._outputs
 
     What runs around ``participate``: the base class wraps the ``participate`` that
-    a subclass defines in its class body. Before the body runs, the wrapper
+    a subclass uses, defined in its class body or inherited (from a parent or a
+    mixin). It must be a plain method, ``def participate(self, session)``; any
+    other object is refused when the class is created. Before the body runs, the
+    wrapper
 
     1. claims the subject for this session: a second session on the same subject
        object, from this thread or another one, is refused with ``RuntimeError``
@@ -190,9 +193,11 @@ class Subject(ABC):
     A nested call with the same session on the same thread passes straight to
     the body: ``super().participate(session)``, or a subject that gives its
     session to another subject (that subject claims itself and narrows the
-    inputs to its own declaration). The body does neither duty itself. A
-    ``participate`` assigned to the class after the class statement is not
-    wrapped; define it in the class body.
+    inputs to its own declaration). The body does neither duty itself.
+
+    Limit: a ``participate`` assigned to a class or an instance after the class
+    statement is not wrapped and runs without both duties, unless it delegates to
+    the original method; define it in the class body or in a mixin.
 
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
     override it to clear memory, task setup and interventions between independent
@@ -203,10 +208,16 @@ class Subject(ABC):
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
-        participate = cls.__dict__.get('participate')
-        if (inspect.isfunction(participate) and not getattr(participate, '_takes_part_once', False)
-                and not getattr(participate, '__isabstractmethod__', False)):
-            cls.participate = _takes_part_once(participate)
+        # The effective participate, however it is inherited (class body, mixin, parent).
+        participate = next(klass.__dict__['participate'] for klass in cls.__mro__
+                           if 'participate' in klass.__dict__)
+        if (getattr(participate, '__isabstractmethod__', False)
+                or getattr(participate, '_takes_part_once', None) is participate):
+            return
+        if not inspect.isfunction(participate):
+            raise TypeError(f'{cls.__name__}.participate is a {type(participate).__name__}; '
+                            'define it as a plain method: def participate(self, session).')
+        cls.participate = _takes_part_once(participate)
 
     @property
     @abstractmethod

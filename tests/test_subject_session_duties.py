@@ -116,3 +116,58 @@ def test_a_subject_that_still_holds_the_guard_itself_is_told_to_delete_that_line
     with pytest.raises(RuntimeError, match='delete'):
         HoldsTheGuard().participate(_session('text'))
 
+
+
+class _Reads:
+    """A mixin that is not a Subject and supplies the subject's participate."""
+
+    def participate(self, session):
+        self.seen = [event.channel for event in iter(session.next_input, None)]
+        if self.during is not None:
+            self.during()
+
+
+def _reward_then_text():
+    return Session([StreamEvent('reward', 1.0, None, {}), StreamEvent('text', 'word', None, {})],
+                   outputs=('behavior:text',))
+
+
+@pytest.mark.parametrize('bases', [(_Reads, Subject), (_Reads, _Reader)],
+                         ids=['mixin', 'mixin before a subject parent'])
+def test_a_participate_from_a_mixin_gets_both_duties(bases):
+    Mixed = type('Mixed', bases, {'identifier': 'mixed', 'in_channels': {'text'},
+                                  'out_channels': {'behavior:text'}, 'during': None})
+    subject, refusals = Mixed(), []
+
+    def during():
+        subject.during = None
+        try:
+            subject.participate(_session('text'))
+        except RuntimeError:
+            refusals.append(True)
+
+    subject.during = during
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text'] and refusals == [True]
+
+
+def test_a_decorated_participate_that_copies_the_parent_attributes_gets_both_duties():
+    import functools
+
+    class Decorated(_Reader):
+        @functools.wraps(_Reader.participate)
+        def participate(self, session):
+            self.seen = [event.channel for event in iter(session.next_input, None)]
+
+    subject = Decorated()
+    subject.participate(_reward_then_text())
+    assert subject.seen == ['text']
+
+
+def test_a_participate_that_is_not_a_plain_method_is_refused_with_a_remedy():
+    class Callable:
+        def __call__(self, session):
+            pass
+
+    with pytest.raises(TypeError, match='def participate'):
+        type('Odd', (_Reader,), {'participate': Callable()})
