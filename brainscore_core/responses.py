@@ -130,6 +130,9 @@ class Choice:
         return f'Answer with exactly one of: {", ".join(self.labels)}.'
 
     def parse(self, reply: str) -> Tuple[Optional[str], Optional[str]]:
+        if isinstance(self.labels, str):
+            raise ValueError(f"labels is still the column name {self.labels!r}; parse with the "
+                             "row's options (trial_prompt resolves them per row).")
         first = (reply or '').strip().splitlines()[0].strip().lower() if (reply or '').strip() else ''
         for label in self.labels:
             if first == label.lower():
