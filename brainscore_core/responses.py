@@ -36,6 +36,35 @@ def _on_step(value: float, low: float, step: float) -> bool:
         return abs(index - n) <= Decimal('1e-9') or float(low_d + n * step_d) == float(value)
 
 
+_NUMBER = re.compile(r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?')
+
+
+def _numbers(reply: str):
+    """Return the exact values of the numbers in ``reply``, or a reason it is invalid.
+
+    A run of word characters and number punctuation that contains a digit is one
+    token. A token is one signed decimal number (a leading point and an exponent are
+    allowed; a Unicode minus is a minus); a token with letters is a word, not a number
+    (``m2``). Any other token (``1,000``, ``3,5``, ``3.5.2``) is a notation this parser
+    does not support: it is refused, never read as another number. A hyphen after a
+    digit separates two numbers (``3-4``).
+    """
+    from decimal import Decimal
+    numbers = set()
+    for token in re.findall(r'[\w.,+\-\u2212]+', reply):
+        token = token.rstrip('.,').replace('\u2212', '-')
+        if not any(c.isdigit() for c in token):
+            continue
+        # A hyphen after a digit joins two numbers, as in a range: ``3-4``.
+        parts = re.split(r'(?<=\d)-', token)
+        if all(_NUMBER.fullmatch(part) for part in parts):
+            numbers.update(Decimal(part) for part in parts)
+        elif not any(c.isalpha() or c == '_' for c in token):
+            return set(), (f'unsupported number notation {token!r}; reply with plain '
+                           'numbers such as 3, -2.5 or 1e3')
+    return numbers, None
+
+
 @dataclass(frozen=True)
 class Scale:
     """A number on a scale, such as a 1 to 7 rating. ``step=None`` allows any value."""
@@ -53,12 +82,15 @@ class Scale:
 
     def parse(self, reply: str) -> Tuple[Optional[float], Optional[str]]:
         # One number, also repeated, is the answer; several distinct numbers are invalid.
-        numbers = {float(number) for number in re.findall(r'-?\d+(?:\.\d+)?', reply or '')}
+        # Numbers are compared by their exact decimal value, before any float conversion.
+        numbers, reason = _numbers(reply or '')
+        if reason:
+            return None, reason
         if not numbers:
             return None, 'no number in the reply'
         if len(numbers) > 1:
-            return None, f'several numbers in the reply: {sorted(numbers)}'
-        value, = numbers
+            return None, f'several numbers in the reply: {sorted(map(str, numbers))}'
+        value = float(*numbers)
         if not self.low <= value <= self.high:
             return None, f'{value} is outside {self.low} to {self.high}'
         if self.step is not None and not _on_step(value, self.low, self.step):

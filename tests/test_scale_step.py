@@ -65,3 +65,29 @@ def test_a_reply_with_several_numbers_is_invalid(reply):
 @pytest.mark.parametrize('reply, value', [('4', 4.0), ('4, yes 4', 4.0), ('3 (3.0)', 3.0)])
 def test_a_reply_with_one_number_is_valid_also_when_repeated(reply, value):
     assert Scale(1, 5, 1).parse(reply) == (value, None)
+
+
+# Each row of the rating examples: a reply is read as complete numeric tokens with
+# their exact decimal values; a notation the parser does not support is invalid.
+WIDE = Scale(-10, 2000)
+
+
+@pytest.mark.parametrize('reply, value', [
+    ('1e3', 1000.0), ('1e1', 10.0), ('.5', 0.5), ('−3', -3.0), ('-3', -3.0),
+    ('4, yes 4', 4.0), ('3 (3.0)', 3.0), ('4 points', 4.0), ('4 m2', 4.0),
+    ('1000 or 1e3', 1000.0), ('The answer is 7.', 7.0),
+])
+def test_one_number_in_any_supported_spelling_is_that_number(reply, value):
+    assert WIDE.parse(reply) == (value, None)
+
+
+@pytest.mark.parametrize('reply', ['3-4', '3 or 4', '3 and 3.0000000000000001'])
+def test_distinct_exact_values_are_several_numbers(reply):
+    value, reason = WIDE.parse(reply)
+    assert value is None and 'several numbers' in reason
+
+
+@pytest.mark.parametrize('reply', ['1,000', '3,5'])
+def test_an_unsupported_notation_is_invalid_never_another_number(reply):
+    value, reason = WIDE.parse(reply)
+    assert value is None and reply in reason
