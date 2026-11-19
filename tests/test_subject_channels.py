@@ -1,4 +1,5 @@
 import pytest
+from brainscore_core.compatibility import ExecutionNotFeasibleError
 
 from tests.typed_subject import TypedSubject
 
@@ -62,7 +63,7 @@ def test_typed_participate_default_runs_sessions_and_rejects_unknown_outputs():
     from brainscore_core.streaming import Session
 
     subject = _ChannelSubject()
-    with pytest.raises(NotImplementedError, match="runs sessions requesting"):
+    with pytest.raises(ExecutionNotFeasibleError, match="runs sessions requesting"):
         subject.participate(Session((), outputs=["pupil"]))
 
 

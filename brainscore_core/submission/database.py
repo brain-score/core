@@ -398,12 +398,14 @@ _NA_COMMENT = f'{STATUS_NA}: '
 def update_score(score: ScoreObject, entry: Score):
     # Check before mutating an existing entry, including already published scores.
     require_leaderboard_eligible(score.attrs.get('leaderboard_eligible', True))
-    if 'ceiling' not in score.attrs:  # many engineering benchmarks do not have a primate ceiling
-        # only store raw (unceiled) value
+    # A unified score states `normalized`; an old score is normalized when it carries a ceiling.
+    normalized = score.attrs.get('normalized', 'ceiling' in score.attrs)
+    if not normalized:  # many engineering benchmarks have no primate ceiling
+        # only store raw (unceiled) value; the score value is the raw value here
         entry.score_raw = retrieve_score_center(score)
+        entry.score_ceiled = None
     else:  # score has a ceiling. Store ceiled as well as raw value
-        score_raw = retrieve_score_center(score.raw)
-        entry.score_raw = score_raw
+        entry.score_raw = retrieve_score_center(score.raw)
         entry.score_ceiled = retrieve_score_center(score)
     entry.error = retrieve_score_error(score)
     if 'comment' in score.attrs:

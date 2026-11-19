@@ -84,7 +84,8 @@ def task_input_channels(stimulus_set, task=None) -> frozenset:
 
 
 def _declared_task(task, stimulus_set, channels):
-    """``task`` without the ``present`` entries of input streams not in ``channels``.
+    """``task`` without the inputs not in ``channels``: its ``instruction`` when
+    ``instruction`` is not declared, and the ``present`` entries of the other streams.
 
     An entry's channel is the channel of its column when the column is in the
     catalog's column table (the one ``declared_only`` drops), else the channel
@@ -93,10 +94,14 @@ def _declared_task(task, stimulus_set, channels):
     a part the stimulus table has: a ``present`` entry no input provides is an
     error, never skipped.
     """
-    if task is None or task.present is None:
+    if task is None:
         return task
     from dataclasses import replace
     declared = frozenset(channels)
+    if task.instruction and not channel_declared('instruction', declared):
+        task = replace(task, instruction=None)
+    if task.present is None:
+        return task
     columns = set(getattr(stimulus_set, 'columns', ()))
     kept = []
     for entry in task.present:

@@ -54,3 +54,56 @@ def test_the_reply_parse_and_the_stored_check_agree(value, low, high, step, on):
 def test_the_bounds_stay_inclusive_and_exact():
     assert Scale(0.1, 0.3, 0.1).parse('0.30000000000000004')[1] == '0.30000000000000004 is outside 0.1 to 0.3'
     assert Scale(1, 7, 1).parse('7')[1] is None and Scale(1, 7, 1).parse('1')[1] is None
+
+
+@pytest.mark.parametrize('reply', ['not 3, 5', '3 or 4', '2.5 then 3'])
+def test_a_reply_with_several_numbers_is_invalid(reply):
+    value, reason = Scale(1, 5, 0.5).parse(reply)
+    assert value is None and reason
+
+
+@pytest.mark.parametrize('reply, value', [('4', 4.0), ('4, yes 4', 4.0), ('3 (3.0)', 3.0)])
+def test_a_reply_with_one_number_is_valid_also_when_repeated(reply, value):
+    assert Scale(1, 5, 1).parse(reply) == (value, None)
+
+
+# Each row of the rating examples: a reply is read as complete numeric tokens with
+# their exact decimal values; a notation the parser does not support is invalid.
+WIDE = Scale(-10, 2000)
+
+
+@pytest.mark.parametrize('reply, value', [
+    ('1e3', 1000.0), ('1e1', 10.0), ('.5', 0.5), ('−3', -3.0), ('-3', -3.0),
+    ('4, yes 4', 4.0), ('3 (3.0)', 3.0), ('4 points', 4.0), ('4 m2', 4.0),
+    ('1000 or 1e3', 1000.0), ('The answer is 7.', 7.0),
+])
+def test_one_number_in_any_supported_spelling_is_that_number(reply, value):
+    assert WIDE.parse(reply) == (value, None)
+
+
+@pytest.mark.parametrize('reply', ['3-4', '3 or 4', '3 and 3.0000000000000001'])
+def test_distinct_exact_values_are_several_numbers(reply):
+    value, reason = WIDE.parse(reply)
+    assert value is None and 'several numbers' in reason
+
+
+@pytest.mark.parametrize('reply', ['1,000', '3,5'])
+def test_an_unsupported_notation_is_invalid_never_another_number(reply):
+    value, reason = WIDE.parse(reply)
+    assert value is None and reply in reason
+
+
+@pytest.mark.parametrize('reply, scale', [
+    ('1,000e0 or 3', Scale(0, 10)),                     # a number-like token with letters hides no number
+    ('1e999999999999999999999', Scale(0, 10)),          # an exponent no decimal can hold
+    ('1e-400', Scale(-10, 0)),                          # above the upper bound, although its float is 0.0
+])
+def test_a_value_the_parser_cannot_hold_is_invalid_with_a_reason(reply, scale):
+    value, reason = scale.parse(reply)
+    assert value is None and reason
+
+
+@pytest.mark.parametrize('reply, value', [('4 m2', 4.0), ('the 3rd option: 4', 4.0)])
+def test_a_digit_inside_a_plain_word_is_part_of_the_word(reply, value):
+    assert Scale(0, 10).parse(reply) == (value, None)
+

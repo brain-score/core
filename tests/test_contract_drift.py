@@ -1,8 +1,8 @@
 """Drift guard for the UMI v2.0 public contract surface.
 
-This fixture is the in-repo source of truth for docs drift checks. Contract
-changes must update both this pinned list and the external v2 docs:
-API-CONTRACT.md and _DESIGN-CANON.md in the unified-model-interface-v2 vault.
+This fixture is a check of the public surface, not a specification. The binding
+rules are the Contract Rules; a change of the contract updates them first and
+this pinned list with it.
 """
 
 from dataclasses import MISSING, fields
