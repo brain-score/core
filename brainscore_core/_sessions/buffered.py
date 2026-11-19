@@ -108,9 +108,15 @@ def behavioral_response(subject, stimuli, task) -> BehavioralAssembly:
     """
     if stimuli is None:
         raise ValueError("behavioral_response needs the stimuli to answer.")
-    session = stimulus_session(stimuli, ['behavior'], task)
+    # A task with a response is answered on the first of its formats the subject
+    # declares, so the session checks each trial and stores a missing one. An old
+    # task without a response, or a subject with none of the formats, stays bare.
+    response = getattr(task, 'response', None)
+    declared = set(getattr(subject, 'out_channels', ()))
+    channel = next((c for c in getattr(response, 'channels', ()) if c in declared), 'behavior')
+    session = stimulus_session(stimuli, [channel], task)
     subject.participate(session)
-    return session.collect("behavior")
+    return session.collect(channel)
 
 
 def apply_state_change(subject, state_change: StateChange):
