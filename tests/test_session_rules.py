@@ -137,6 +137,20 @@ def test_an_end_signal_needs_a_known_reason(meta):
         Session([StreamEvent('control', 'end', None, meta)])
 
 
+@pytest.mark.parametrize('change', ['clear_reason', 'append_end'])
+def test_an_end_signal_of_a_listed_source_is_checked_at_delivery(change):
+    # A list can change after the session is built.
+    end = StreamEvent('control', 'end', None, {'reason': 'terminal'})
+    events = [end]
+    session = Session(events).declare_inputs({'control'})
+    if change == 'clear_reason':
+        end.meta.clear()
+    else:
+        events[:] = [StreamEvent('control', 'end', None, {})]
+    with pytest.raises(ValueError, match='reason'):
+        session.next_input()
+
+
 def test_an_end_signal_with_a_known_reason_passes():
     check_event(StreamEvent('control', 'end', None, {'reason': 'truncated'}), io_catalog.INPUT)
 

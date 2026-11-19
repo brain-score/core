@@ -366,10 +366,12 @@ class Session(Source):
 
     def next_input(self) -> Optional[StreamEvent]:
         while (event := self.source.next_input()) is not None:
-            if not self.source.checked:
+            _check_is_event(event)
+            # A listed source was checked when the session was built, but a list
+            # can change after that: a control signal is checked again here.
+            if not self.source.checked or event.channel == CONTROL_CHANNEL:
                 from . import io_catalog
                 check_event(event, io_catalog.INPUT)
-            _check_is_event(event)
             self._notify(0, event)
             if event.channel == CONTROL_CHANNEL:
                 # Read before the input filter: a subject that does not declare
