@@ -54,7 +54,6 @@ class Smeller(Subject):
         return frozenset({'odor_rating'})
 
     def participate(self, session):
-        session.declare_inputs(self.in_channels)
         self.table_columns = list(session.stimuli.columns)
         while (event := session.next_input()) is not None:
             if event.channel == 'odor':

@@ -7,9 +7,28 @@ import pytest
 
 from brainscore_core.compatibility import check_channel_compatibility
 from brainscore_core.compatibility import CompatibilityError
+from brainscore_core.contract import Subject
 from brainscore_core.streaming import Session, StreamEvent
 
 POOL = ['vision:image', 'vision:video', 'text', 'audio']
+
+
+class _Declared(Subject):
+    identifier = 's'
+
+    def __init__(self, in_channels, out_channels):
+        self._channels = in_channels, out_channels
+
+    @property
+    def in_channels(self):
+        return self._channels[0]
+
+    @property
+    def out_channels(self):
+        return self._channels[1]
+
+    def participate(self, session):
+        pass
 
 
 def _delivered(inputs, declared):
@@ -26,8 +45,7 @@ def test_consumed_inputs_equal_delivered_inputs():
     for _ in range(300):
         declared = set(rng.sample(POOL, rng.randint(1, len(POOL))))
         inputs = set(rng.sample(POOL, rng.randint(1, len(POOL))))
-        subject = SimpleNamespace(identifier='s', in_channels=declared, out_channels={'neural:IT'},
-                                  required_channels=set(), traits=set(), output_inputs={})
+        subject = _Declared(declared, {'neural:IT'})
         benchmark = SimpleNamespace(identifier='b', required_input_channels=inputs,
                                     requested_output_channels={'neural:IT'})
         delivered = _delivered(inputs, declared)

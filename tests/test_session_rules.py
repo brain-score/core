@@ -54,7 +54,6 @@ class _Reader(Subject):
     out_channels = {'behavior'}
 
     def participate(self, session):
-        session.declare_inputs(self.in_channels)
         self.task, self.outputs = session.task, session.outputs
         list(iter(session.next_input, None))
 
@@ -95,6 +94,18 @@ def test_an_undeclared_instruction_does_not_reach_the_subject():
     assert task.instruction == 'Pick one'          # the caller's task is not changed
 
 
+def test_a_repeated_declaration_does_not_restore_the_instruction():
+    class DeclaresAgain(_Reader):
+        def participate(self, session):
+            session.declare_inputs(self.in_channels | {'instruction'})
+            super().participate(session)
+
+    task = TaskContext(task_type='probabilities', label_set=['a', 'b'], instruction='Pick one')
+    subject = DeclaresAgain()
+    subject.participate(stimulus_session(_table(), ['behavior'], task))
+    assert not subject.task.instruction
+
+
 def test_a_declared_instruction_reaches_the_subject():
     task = TaskContext(task_type='probabilities', label_set=['a', 'b'], instruction='Pick one')
     subject = _Reader()
@@ -126,6 +137,14 @@ def test_a_driver_that_needs_control_refuses_a_session_without_a_declaration():
     session = stimulus_session(_table(), ['neural:IT'], streaming=True)
     with pytest.raises(ValueError, match="'control'"):
         subject.participate(session)
+    assert subject.passes == 0
+
+
+def test_a_driver_that_needs_control_refuses_a_raw_session_never_declared():
+    subject = _Recorder()
+    session = stimulus_session(_table(), ['neural:IT'], streaming=True)
+    with pytest.raises(ValueError, match="'control'"):
+        drive_neural_session_streaming(subject, session, on_begin=lambda: None)
     assert subject.passes == 0
 
 

@@ -138,7 +138,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     The subject must take in at least one benchmark input that is a stimulus:
     an instruction alone does not make a pair applicable (rule 5.2).
 
-    Decides from declarations only (rule 5.3). Raises
+    Decides from declarations only (rule 5.3). Raises ``TypeError`` for an object
+    that is not a :class:`Subject`. Raises
     :class:`CompatibilityError` before compute when valid declarations do not
     fit, and ``ValueError`` when a declaration is malformed (a field spelled the
     way benchmarks do not read, no inputs, a bad channel name, direction or form,
@@ -150,6 +151,13 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     Every declared channel must be registered in the catalog with the right
     direction.
     """
+    if Subject not in type(subject).__mro__:     # real inheritance, not Subject.register
+        raise TypeError(
+            f'{type(subject).__name__} is not a Subject. Every subject is an instance of '
+            'brainscore_core.contract.Subject, whose base class runs the session duties around '
+            'participate; subclass Subject (an old vision or language model: load it with '
+            'load_model, which wraps it in its adapter).')
+    subject.participate     # the read refuses a participate that cannot be called
     subject_in = set(subject.in_channels)
     subject_out = set(subject.out_channels)
     subject_required = set(subject.required_channels)

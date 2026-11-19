@@ -307,7 +307,7 @@ class Session(Source):
         return not self.source.listed
 
     def declare_inputs(self, channels: Iterable[str]) -> 'Session':
-        """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
+        """Keep only the inputs a subject declares; the ``Subject`` base calls this with its ``in_channels``.
 
         Events on other channels are skipped (exact match, see ``channel_declared``),
         and the stimulus table loses the columns that feed undeclared channels. The
@@ -330,8 +330,10 @@ class Session(Source):
         did not declare ``control`` (rule 4.6), including one never given a declaration."""
         if not self._control:
             raise ValueError(f"{driver} needs the 'control' input. Add 'control' to the "
-                             "subject's in_channels, call session.declare_inputs(in_channels) "
-                             "and answer on the respond signal.")
+                             "subject's in_channels (the Subject base declares them before "
+                             "participate runs) and answer on the respond signal; a driver "
+                             "called on a raw session needs session.declare_inputs(...) with "
+                             "'control' first.")
 
     @contextmanager
     def observe(self, on_input: Optional[Callable] = None, on_output: Optional[Callable] = None,

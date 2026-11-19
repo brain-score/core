@@ -24,14 +24,16 @@ def _table(n=4):
 class _Reader(Subject):
     """The simplest subject: answers every event it is given."""
     identifier = 'reader'
-    in_channels = {'text'}
     out_channels = {'behavior'}
 
     def __init__(self, control=False, answers=1):
         self.control, self.answers, self.seen = control, answers, []
 
+    @property
+    def in_channels(self):
+        return {'text'} | ({'control'} if self.control else set())
+
     def participate(self, session):
-        session.declare_inputs(self.in_channels | ({'control'} if self.control else set()))
         while (event := session.next_input()) is not None:
             self.seen.append(event.channel)
             for _ in range(self.answers if event.channel != 'control' else 0):
@@ -68,7 +70,6 @@ def test_several_channels_per_trial_and_a_late_batch_answer_are_fine():
         out_channels = {'behavior', 'neural:IT'}
 
         def participate(self, session):
-            session.declare_inputs(self.in_channels)
             events = list(iter(session.next_input, None))      # read every row, then answer
             for event in events:
                 session.respond(StreamEvent('behavior', 'yes', event.t_ms))
@@ -100,9 +101,7 @@ def test_a_memory_subject_without_control_is_a_malformed_declaration():
 def test_control_is_not_a_benchmark_input():
     bench = SimpleNamespace(identifier='b', required_input_channels={'text', 'control'},
                             requested_output_channels={'behavior'})
-    match = check_channel_compatibility(SimpleNamespace(
-        identifier='s', in_channels={'text'}, out_channels={'behavior'},
-        required_channels=set(), output_inputs={}), bench)
+    match = check_channel_compatibility(_Reader(), bench)
     assert match.consumed_inputs == {'text'} and not match.dropped_inputs
 
 
@@ -119,7 +118,6 @@ def test_a_closed_loop_subject_without_control_gets_a_clear_error():
         out_channels = {'motor'}
 
         def participate(self, session):
-            session.declare_inputs(self.in_channels)
             while (event := session.next_input()) is not None:
                 session.respond(StreamEvent('motor', 0, event.t_ms))
     session = Session(EnvironmentSource(Env()), ('motor',))

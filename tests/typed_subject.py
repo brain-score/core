@@ -24,7 +24,7 @@ class TypedSubject(Subject):
 
     def participate(self, session) -> None:
         from brainscore_core.streaming_helpers import drive_typed_session
-        drive_typed_session(self, session.declare_inputs(self.in_channels))
+        drive_typed_session(self, session)
 
     def start_task(self, task) -> None:
         self._task = task

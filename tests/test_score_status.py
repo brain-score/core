@@ -4,10 +4,11 @@ import pytest
 import brainscore_core
 from brainscore_core import STATUS_NA, na_score
 from brainscore_core.compatibility import CompatibilityError, check_compatibility
+from brainscore_core.contract import Subject
 from brainscore_core.metrics import Score
 
 
-class _Model:
+class _Model(Subject):
     # Compatibility reads declarations only (Contract v3 rule 2.1).
     identifier = "text-model"
     in_channels = {"text"}
@@ -15,6 +16,9 @@ class _Model:
     required_channels = set()
     output_inputs = {}
     traits = frozenset()
+
+    def participate(self, session):
+        pass
 
 
 class _Benchmark:

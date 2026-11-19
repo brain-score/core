@@ -93,7 +93,7 @@ class _SyntheticSubject(TypedSubject):
 
     @property
     def in_channels(self):
-        return {"vision:image", "text", "lesion"}
+        return {"vision:image", "lesion"}
 
     def start_recording(self, recording_target, **kwargs):
         self.recording_target = recording_target
@@ -118,7 +118,7 @@ class _NonNativeEnvironmentSubject(TypedSubject):
 
     @property
     def in_channels(self):
-        return {"control", "vision:image", "proprioception", "instruction"}
+        return {"vision:image", "proprioception", "instruction", "control"}
 
     def process(self, input_event):
         self.processed_rows.append(input_event)
@@ -247,7 +247,9 @@ def test_neural_response_matches_process_assembly_exactly():
     scored = neural_response(subject, stimuli, ['neural:IT'])
 
     assert subject.recording_target == "IT"
-    assert subject.process_input is stimuli
+    # The subject reads its declared input only: the text column is not shown.
+    assert list(subject.process_input['stimulus_id']) == list(stimuli['stimulus_id'])
+    assert 'sentence' not in subject.process_input.columns
     xr.testing.assert_identical(scored, expected)
 
 

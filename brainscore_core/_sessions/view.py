@@ -2,8 +2,8 @@
 
 Contract Rules v3, rule 5.5: the benchmark sends every stream its human
 participants received; a stream the subject cannot take in never enters it.
-Every shipped subject (``BrainScoreModel`` and the domain adapters) calls
-``Session.declare_inputs`` with its ``in_channels``, so ignoring an input is
+The ``Subject`` base class calls ``Session.declare_inputs`` with the subject's
+``in_channels`` before every ``participate`` body runs, so ignoring an input is
 implicit: no stub, no placeholder, and no change to the experiment. This
 module holds the table projection that method and ``start_task`` share.
 """

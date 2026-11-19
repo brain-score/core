@@ -1,5 +1,7 @@
 """Core Brain-Score subject contract."""
 
+import functools
+import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
@@ -119,6 +121,29 @@ class TaskContext:
             self.present = tuple(self.present)
 
 
+def _take_part(subject, body, session):
+    """Run ``body(session)`` with the session duties: claim the subject, declare its inputs."""
+    from ._sessions import one_at_a_time
+    # A nested call (super().participate, a wrapper that delegates the same session) passes
+    # while this thread's own claim for this session is live and its inputs are declared.
+    if one_at_a_time.declared(subject, session):
+        return _run_now(subject, body, session)
+    with one_at_a_time.one_session_at_a_time(subject, session) as claim:
+        session.declare_inputs(subject.in_channels)
+        claim[3] = True
+        return _run_now(subject, body, session)
+
+
+def _run_now(subject, body, session):
+    result = body(session)
+    # A generator or coroutine body would run later, outside the claim.
+    if inspect.isgenerator(result) or inspect.iscoroutine(result) or inspect.isasyncgen(result):
+        getattr(result, 'close', lambda: None)()
+        raise TypeError(f'{type(subject).__name__}.participate returned a {type(result).__name__}; '
+                        'participate runs the whole session before it returns: make it a plain '
+                        'method (no yield, no async def).')
+    return result
+
 
 class Subject(ABC):
     """Minimal contract for a subject evaluated through a session.
@@ -148,12 +173,65 @@ class Subject(ABC):
             def out_channels(self):
                 return self._outputs
 
+    What runs around ``participate``: reading ``subject.participate`` gives the
+    method that Python's normal lookup finds (the class body, a parent, a mixin,
+    or a method assigned to the class or the instance later), with the session
+    duties of the base around it. When it is called with a session, the base
+
+    1. claims the subject for this session: a second session on the same subject
+       object, from this thread or another one, is refused with ``RuntimeError``
+       while the first one runs (the recording and task state belong to one
+       session). Build a separate subject for each session that runs at the same
+       time.
+    2. calls ``session.declare_inputs(self.in_channels)``: an input on a channel
+       the subject does not declare never reaches the body, and ``control``
+       events reach it only when it declares ``control``.
+    3. runs the body. The body must run the whole session before it returns: a
+       ``participate`` that yields or is ``async`` is refused. A ``participate``
+       that cannot be called (``participate = None``) is refused when it is read,
+       so the compatibility check refuses it before any session.
+
+    The body does neither duty itself. ``super().participate(session)`` inside a
+    body reaches the parent's body directly: the outer call already holds the
+    claim and has declared the inputs. A call through ``self.participate`` with
+    the same session on the same thread, after the declaration, also runs the
+    body directly. A subject that gives its session to another subject: that
+    subject claims itself and narrows the inputs further to its own declaration;
+    it never reopens an input.
+
+    Limit: only a read through the instance gets the duties. These bypass them
+    on purpose and are not supported for evaluation:
+    ``type(subject).participate(subject, session)``,
+    ``object.__getattribute__(subject, 'participate')``, and a subclass that
+    overrides ``__getattribute__`` without calling ``super().__getattribute__``.
+
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
     override it to clear memory, task setup and interventions between independent
     runs. A ``begin`` control event is narrower: it clears only the history ``h``
     (earlier trials, steps and responses, and the episode state of the subject's
     parts); interventions and task setup stay.
     """
+
+    def __getattribute__(self, name):
+        # super(): the next lookup in the method resolution order, so a mixin's own lookup runs.
+        if name != 'participate':       # every other name: Python's normal lookup, unchanged
+            return super().__getattribute__(name)
+        try:
+            value = super().__getattribute__(name)
+        except AttributeError:
+            # Python would now ask a fallback __getattr__, outside this method, and its answer
+            # would get no duties. A TypeError stops that: participate must be found by the
+            # normal lookup.
+            raise TypeError(
+                f'{type(self).__name__} has no participate that the normal lookup finds (an unset slot, '
+                'or a property that raises AttributeError); a fallback __getattr__ is not used for '
+                'participate. Define it as a method: def participate(self, session).') from None
+        # Python's own lookup chose the body (class body, parent, mixin or an
+        # assignment); the base adds the session duties around it.
+        if not callable(value):
+            raise TypeError(f'{type(self).__name__}.participate is {value!r}, which cannot be called; '
+                            'define it as a method: def participate(self, session).')
+        return functools.partial(_take_part, self, value)
 
     @property
     @abstractmethod
