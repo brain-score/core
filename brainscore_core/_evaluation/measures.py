@@ -25,10 +25,12 @@ a separate entry). Core adds the activation store state of the session (the
 ``RESULTCACHING_DISABLE`` value at that moment) and keeps the distinct entries.
 No response, payload or event meta is read or changed for it.
 
-A session's notes are staged: the ``Subject`` base runs each participation inside its own
-nested record (``stage_session``), so the notes reach the score only when the outermost
-participation of the session returns without an error. A failed session passes on only
-its intervention counts, so the release check still sees a change it left active.
+A session's notes are staged: the ``Subject`` base runs each participation, the claim of
+the subject and its release included, inside its own nested record (``stage_session``), so
+the notes reach the score only when the outermost participation of the session returns
+without an error, all at once. An intervention response is counted at once in every
+open record, with the subject that gave it: a failed session cannot hide a change it left
+active, and an undo cancels only a change of the same subject.
 
 ponytail: the record is a ``ContextVar``. A response made in a worker thread or
 process is not noted. No behavioral path in core, vision, language or unified
@@ -39,39 +41,86 @@ compute metrics); copy the context into the worker if one ever does.
 import itertools
 import json
 import os
-import threading
 from copy import deepcopy
 from collections import Counter
 from contextlib import contextmanager
-from contextvars import ContextVar
-from typing import Dict, Iterator, Optional, Set, Tuple
+from contextvars import ContextVar, copy_context
+from typing import Any, Callable, Dict, Iterator, Optional, Set, Tuple
 
 _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', default=None)
-_merging = threading.Lock()     # several subjects' sessions (one thread each) end into one record
+
+
+class _Facts:
+    """The descriptive facts of a record (everything but the intervention counts)."""
+
+    def __init__(self) -> None:
+        self.records: Dict[str, dict] = {}       # one per distinct record, keyed by its JSON
+        self.deliveries: Set[str] = set()
+        self.region_plans: Set[str] = set()
+        self.provenance: Dict[str, dict] = {}    # one per distinct session entry, keyed by its JSON
+        self.store_states: Set[str] = set()
+        self.sessions: Dict[int, Optional[str]] = {}   # session key -> the subject that took part, if named
+        self.stated: Set[str] = set()            # subjects that stated their parts
+        self.answered: Set[int] = set()          # sessions whose first response is noted
+
+    def add(self, other: '_Facts') -> None:
+        self.records.update(other.records)
+        self.deliveries |= other.deliveries
+        self.region_plans |= other.region_plans
+        self.provenance.update(other.provenance)
+        self.store_states |= other.store_states
+        for key, named in other.sessions.items():
+            if named is not None or key not in self.sessions:
+                self.sessions[key] = named
+        self.stated |= other.stated
+        self.answered |= other.answered
 
 
 class MeasureRecord:
     """The response records seen during one scoring run, and how often its
     sessions applied and undid each perturbation handle (``perturbation``
     responses carry a ``handle_id``; ``meta['kind'] == 'reset'`` marks an undo).
-    Counts, not sets: a handle name used again after its undo is counted again."""
+    Counts, not sets: a handle name used again after its undo is counted again.
 
-    def __init__(self) -> None:
-        self._records: Dict[str, dict] = {}   # one per distinct record, keyed by its JSON
-        self.applied: Counter = Counter()
-        self.undone: Counter = Counter()
-        self._deliveries: Set[str] = set()
-        self._region_plans: Set[str] = set()
-        self._provenance: Dict[str, dict] = {}   # one per distinct session entry, keyed by its JSON
-        self._store_states: Set[str] = set()
-        self._sessions: Dict[int, Optional[str]] = {}   # session key -> the subject that took part, if named
-        self._stated: Set[str] = set()                  # subjects that stated their parts
-        self._answered: Set[int] = set()                # sessions whose first response is noted
+    A record changes only by single steps that an interrupt cannot split: a note adds
+    one entry; a nested record that succeeded publishes all its facts with one append
+    (``_published``); an intervention response is counted at once in this record and
+    in every record around it, with the subject that gave it, so no merge can lose it
+    and an undo cancels only a change of the same subject.
+    """
+
+    def __init__(self, outer: Optional['MeasureRecord'] = None, participant=None) -> None:
+        self._outer = outer
+        self._participant = participant      # the subject of a staged participation
+        self._facts = _Facts()               # what was noted while this record was the open one
+        self._published: list = []           # the facts of nested records that succeeded
+        self._changes: list = []             # (subject, handle, undo) of each intervention response
+
+    def _all_facts(self) -> _Facts:
+        facts = _Facts()
+        facts.add(self._facts)
+        for published in list(self._published):
+            facts.add(published)
+        return facts
+
+    def _counts(self, undo: bool, by_subject: bool = False) -> Counter:
+        return Counter((id(subject), handle) if by_subject else handle
+                       for subject, handle, is_undo in list(self._changes) if is_undo == undo)
+
+    @property
+    def applied(self) -> Counter:
+        """How often the run's sessions applied each handle."""
+        return self._counts(undo=False)
+
+    @property
+    def undone(self) -> Counter:
+        """How often the run's sessions undid each handle."""
+        return self._counts(undo=True)
 
     @property
     def unreleased(self) -> Set[str]:
         """Handles applied during the run more often than the run undid them."""
-        return set(self.applied - self.undone)
+        return set(self._counts(False) - self._counts(True))
 
     def check_released(self, benchmark_identifier: str, subject_identifier: str) -> None:
         """Raise when the run left an intervention it applied active.
@@ -89,13 +138,14 @@ class MeasureRecord:
     @property
     def responses(self) -> Tuple[dict, ...]:
         """The distinct response records of the run, sorted by format, then content."""
-        return tuple(self._records[key] for key in sorted(
-            self._records, key=lambda key: (self._records[key]['format'], key)))
+        records = self._all_facts().records
+        return tuple(records[key] for key in sorted(records, key=lambda key: (records[key]['format'], key)))
 
     @property
     def provenance(self) -> Tuple[dict, ...]:
         """The distinct provenance entries the run's sessions noted, sorted by content."""
-        return tuple(self._provenance[key] for key in sorted(self._provenance))
+        entries = self._all_facts().provenance
+        return tuple(entries[key] for key in sorted(entries))
 
 
 @contextmanager
@@ -114,49 +164,64 @@ def record_measures(subject: Optional[str] = None) -> Iterator[MeasureRecord]:
     to an outer one: a session belongs to the subject of the score that ran it.
     """
     outer = _active.get()
-    record = MeasureRecord()
+    record = MeasureRecord(outer)
     token = _active.set(record)
-    succeeded = False
     try:
         yield record
-        succeeded = True
     finally:
-        _active.reset(token)
-        if subject is not None:
-            record._sessions = {key: subject if named is None else named
-                                for key, named in record._sessions.items()}
-        if outer is not None:
-            with _merging:
-                outer.applied += record.applied
-                outer.undone += record.undone
-                if succeeded:
-                    outer._records.update(record._records)
-                    outer._deliveries |= record._deliveries
-                    outer._region_plans |= record._region_plans
-                    outer._provenance.update(record._provenance)
-                    outer._store_states |= record._store_states
-                    outer._sessions.update(record._sessions)
-                    outer._stated |= record._stated
-                    outer._answered |= record._answered
+        # ponytail: one step is not protected: an interrupt as this block starts leaves
+        # this record open in the caller's context. Later notes there then reach only this
+        # record (lost to the outer score, never published from a failed run); counts still
+        # reach every enclosing record. Python has no context manager in C that resets a
+        # ContextVar; a participation avoids the step (stage_session runs in a copied context).
+        try:
+            _active.reset(token)
+        finally:
+            _active.set(outer)
+    _publish(record, outer, subject)
 
 
-@contextmanager
-def stage_session(session, participant) -> Iterator[None]:
-    """Stage what ``session`` notes while ``participant`` takes part; name it on success.
+def stage_session(session, participant, run: Callable[[], Any]) -> Any:
+    """Return ``run()`` with what ``session`` notes meanwhile staged; name it on success.
 
-    The ``Subject`` base runs every participation that claims a subject inside this
-    block. The notes go to a nested record that passes them on only when the block ends
-    without an error (``record_measures``). On success the session is named after
-    ``participant`` (its ``identifier``), last, so the outermost subject that was given
-    the session names it: a wrapper names its sessions, not the subject inside it.
-    Without an open record (a session outside a score) nothing is kept.
+    The ``Subject`` base runs every participation that claims a subject through this
+    call, the claim and its release included. The notes go to a nested record that is
+    open only in a copy of the context, so the outer record is open again however
+    ``run`` ends. When ``run`` returns, the session is named after ``participant`` (its
+    ``identifier``), last, and the notes reach the outer record at once: the outermost
+    subject that was given the session names it, so a wrapper names its sessions, not
+    the subject inside it. When ``run`` raises, only the intervention counts (made at
+    once in every record) remain. Without an open record (a session outside a score)
+    nothing is kept.
     """
-    if _active.get() is None:
-        yield
-        return
-    with record_measures() as record:
-        yield
-        record._sessions[_session_key(session)] = participant.identifier
+    outer = _active.get()
+    if outer is None:
+        return run()
+    record = MeasureRecord(outer, participant)
+    result = copy_context().run(_open_and_run, record, run)
+    _publish(record, outer, participant.identifier, session)
+    return result
+
+
+def _open_and_run(record: MeasureRecord, run: Callable[[], Any]) -> Any:
+    _active.set(record)
+    return run()
+
+
+def _publish(record: MeasureRecord, outer: Optional[MeasureRecord], name: Optional[str],
+             session=None) -> None:
+    """Pass the facts of ``record``, which succeeded, to ``outer`` in one append, after
+    ``name`` named ``session`` (or, without a session, every session no note named). An
+    interrupt before that append leaves ``outer`` as it was."""
+    facts = record._all_facts()
+    if name is not None:
+        keys = [_session_key(session)] if session is not None else [
+            key for key, named in facts.sessions.items() if named is None]
+        facts.sessions.update(dict.fromkeys(keys, name))
+    if outer is None:
+        record._facts, record._published = facts, []
+    else:
+        outer._published.append(facts)
 
 
 def _note_record(payload) -> None:
@@ -170,7 +235,7 @@ def _note_record(payload) -> None:
         attrs = getattr(payload, 'attrs', None)
         response = attrs.get('response') if isinstance(attrs, dict) else None
     if isinstance(response, dict) and 'format' in response:
-        record._records[json.dumps(response, sort_keys=True, default=str)] = response
+        record._facts.records[json.dumps(response, sort_keys=True, default=str)] = response
 
 
 def _store_state() -> str:
@@ -203,19 +268,19 @@ def note_session(session, regions_per_pass: Optional[str] = None,
     record = _active.get()
     if record is None:
         return
-    record._deliveries.add('stream' if session.streaming else 'listed')
-    record._store_states.add(_store_state())
+    record._facts.deliveries.add('stream' if session.streaming else 'listed')
+    record._facts.store_states.add(_store_state())
     if regions_per_pass is not None:
-        record._region_plans.add(regions_per_pass)
+        record._facts.region_plans.add(regions_per_pass)
     key = _session_key(session)
     named = (provenance or {}).get('subject')
-    if named is not None or key not in record._sessions:
-        record._sessions[key] = named if named is not None else record._sessions.get(key)
+    if named is not None or key not in record._facts.sessions:
+        record._facts.sessions[key] = named if named is not None else record._facts.sessions.get(key)
     if provenance is not None:
         entry = {**deepcopy(dict(provenance)), 'activation_store': _store_state()}
-        record._provenance[json.dumps(entry, sort_keys=True, default=str)] = entry
+        record._facts.provenance[json.dumps(entry, sort_keys=True, default=str)] = entry
         if 'parts' in entry:
-            record._stated.add(entry.get('subject'))
+            record._facts.stated.add(entry.get('subject'))
 
 
 _SESSION_KEYS = itertools.count()
@@ -243,8 +308,9 @@ def execution_attrs(record: MeasureRecord) -> dict:
     def one(values, default):
         values = sorted(values)
         return default if not values else values[0] if len(values) == 1 else tuple(values)
-    return {'delivery': one(record._deliveries, None),
-            'regions_per_pass': one(record._region_plans, None)}
+    facts = record._all_facts()
+    return {'delivery': one(facts.deliveries, None),
+            'regions_per_pass': one(facts.region_plans, None)}
 
 
 NOT_STATED = 'not stated'
@@ -261,13 +327,14 @@ def provenance_attrs(record: Optional[MeasureRecord], subject_identifier) -> Tup
     is the one participant. The store state is the run's (``'not stated'`` when no
     session answered). Entries are sorted by content.
     """
-    sessions = record._sessions if record is not None else {}
+    facts = record._all_facts() if record is not None else _Facts()
+    sessions = facts.sessions
     participants = ({subject_identifier if named is None else named for named in sessions.values()}
                     if sessions else {subject_identifier})
-    stated = record._stated if record is not None else set()
-    states = sorted(record._store_states) if record is not None else []
+    stated = facts.stated
+    states = sorted(facts.store_states)
     store = NOT_STATED if not states else states[0] if len(states) == 1 else tuple(states)
-    entries = list(record._provenance.values()) if record is not None else []
+    entries = list(facts.provenance.values())
     entries += [{'subject': participant, 'parts': NOT_STATED, 'activation_store': store}
                 for participant in participants - stated]
     return tuple(sorted(entries, key=lambda entry: json.dumps(entry, sort_keys=True, default=str)))
@@ -286,8 +353,8 @@ def note_response(event, request=None, session=None) -> None:
     ``kind == 'reset'``.
     """
     record = _active.get()
-    if session is not None and record is not None and _session_key(session) not in record._answered:
-        record._answered.add(_session_key(session))
+    if session is not None and record is not None and _session_key(session) not in record._facts.answered:
+        record._facts.answered.add(_session_key(session))
         note_session(session)
     channel = getattr(event, 'channel', None)
     if is_behavior_channel(channel):
@@ -301,7 +368,20 @@ def note_response(event, request=None, session=None) -> None:
         handle = handle or meta.get('handle_id') or getattr(request, 'handle_id', None)
         if handle is not None:
             undo = meta.get('kind') == 'reset' or getattr(request, 'kind', None) == 'reset'
-            (record.undone if undo else record.applied)[handle] += 1
+            _count(record, handle, undo)
+
+
+def _count(record: MeasureRecord, handle, undo: bool) -> None:
+    """Count one intervention response in ``record`` and in every record around it, the
+    outermost first, with the subject that gave it: the subject of the innermost staged
+    participation (None for a session that no ``Subject`` runs)."""
+    chain = []
+    while record is not None:
+        chain.append(record)
+        record = record._outer
+    subject = next((each._participant for each in chain if each._participant is not None), None)
+    for each in reversed(chain):
+        each._changes.append((subject, handle, undo))
 
 
 def is_behavior_channel(channel) -> bool:

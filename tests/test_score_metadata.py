@@ -681,7 +681,7 @@ def test_the_record_keeps_no_session_alive():
         del session
         gc.collect()
         assert reference() is None
-    assert list(measures._sessions.values()) == ['custom']
+    assert {entry['subject'] for entry in _stamp(_Subject(), measures).attrs['provenance']} == {'custom'}
 
 
 def test_an_inner_record_binds_its_unnamed_sessions_to_its_own_subject(monkeypatch):
@@ -705,4 +705,4 @@ def test_a_named_session_keeps_its_name_when_the_record_binds_the_others(monkeyp
     with record_measures(subject='subject') as measures:
         _Taking('partner').participate(Session(_events(), ['neural:IT']))
         _answer_session(Session(_events(), ['neural:IT']))
-    assert sorted(measures._sessions.values()) == ['partner', 'subject']
+    assert {entry['subject'] for entry in _stamp(_Subject(), measures).attrs['provenance']} == {'partner', 'subject'}

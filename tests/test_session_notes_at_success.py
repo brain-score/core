@@ -167,3 +167,212 @@ def test_a_failed_session_still_passes_its_intervention_counts(nested_score):
     with pytest.raises(RuntimeError, match='left intervention'):
         measures.check_released('bench', 'scored')
     assert _stamp(measures)['response'] == ()
+
+
+# --- interrupts and handle owners (review of 2026-11-19) --------------------------------
+
+_FOUR = ('response', 'delivery', 'regions_per_pass', 'provenance')
+
+
+def _four(measures):
+    attrs = _stamp(measures)
+    return {name: attrs[name] for name in _FOUR}
+
+
+def _stream(n=2):
+    return Session(iter([StreamEvent('text', 'a', float(i)) for i in range(n)]), ['behavior:text'])
+
+
+def _good_only():
+    with record_measures(subject='scored') as measures:
+        _Wrapper(_Text(), identifier='good').participate(_session())
+    return _four(measures)
+
+
+@pytest.mark.parametrize('interrupt', [KeyboardInterrupt, SystemExit])
+def test_an_interrupt_in_the_release_of_the_subject_leaves_nothing_of_the_session(monkeypatch, interrupt):
+    """The session counts as failed when the release of its subject raises: the release is
+    part of the participation, so nothing of that session reaches the next good score."""
+    from brainscore_core._sessions import one_at_a_time
+    release, calls = one_at_a_time._release, []
+
+    def _interrupted_once(key, token):   # the test seam: the release itself is interrupted
+        calls.append(key)
+        if len(calls) == 1:
+            raise interrupt()
+        release(key, token)
+    monkeypatch.setattr(one_at_a_time, '_release', _interrupted_once)
+    failed = _Text(identifier='failed')
+    with record_measures(subject='scored') as measures:
+        session = _stream()
+        with pytest.raises(interrupt):
+            failed.participate(session)
+        assert len(session.emitted) == 2       # the answers were accepted
+        _Wrapper(_Text(), identifier='good').participate(_session())
+    monkeypatch.setattr(one_at_a_time, '_release', release)
+    assert _four(measures) == _good_only()
+    failed.participate(_session())             # the subject was released
+
+
+def _sweep(scenario):
+    """Run ``scenario(arm, disarm)`` once per line that the measure record runs between
+    ``arm()`` (the subject calls it as its body returns) and ``disarm()`` (the scenario calls
+    it when the participation is over), with one interrupt at that line. Yields the line and
+    the result of each interrupted run (the line is where the interrupt was raised)."""
+    import sys
+    from brainscore_core._evaluation import measures as module
+    state = {'at': None, 'seen': 0, 'on': False}
+
+    def line(frame, event, _):
+        if state['on'] and event == 'line':
+            state['seen'] += 1
+            if state['seen'] == state['at']:
+                state['on'] = False
+                state['where'] = frame.f_lineno
+                raise KeyboardInterrupt()
+        return line
+
+    def tracer(frame, event, _):
+        return line if frame.f_code.co_filename == module.__file__ else None
+
+    def arm():
+        state.update(seen=0, on=True)
+        sys.settrace(tracer)
+
+    def disarm():
+        state['on'] = False
+        sys.settrace(None)
+    try:
+        scenario(arm, disarm)
+    finally:
+        disarm()
+    total = state['seen']
+    assert total > 0
+    for at in range(1, total + 1):
+        state['at'] = at
+        state['where'] = None
+        try:
+            result = scenario(arm, disarm)
+        finally:
+            disarm()
+        yield f"measures.py line {state['where']}", result
+
+
+def _maybe_nested(nested_score):
+    from contextlib import nullcontext
+    return record_measures(subject='inner-score') if nested_score else nullcontext()
+
+
+@pytest.mark.parametrize('nested_score', [False, True], ids=['one score', 'inside a nested score'])
+def test_an_interrupt_anywhere_in_the_end_of_a_record_keeps_an_accepted_change_seen(nested_score):
+    class _Applies(Subject):
+        identifier = 'applies'
+        in_channels, out_channels = {'lesion'}, {'perturbation'}
+
+        def __init__(self, arm):
+            self.arm, self.active = arm, set()
+
+        def participate(self, session):
+            change = session.next_input().payload
+            session.respond(StreamEvent('perturbation', PerturbationApplied(
+                'h1', change.target, change.perturbation), 0.0))
+            self.active.add('h1')
+            self.arm()
+
+    def scenario(arm, disarm):
+        subject = _Applies(arm)
+        with record_measures(subject='scored') as measures:
+            try:
+                with _maybe_nested(nested_score):
+                    subject.participate(_lesion_session())
+            except KeyboardInterrupt:
+                pass
+            disarm()
+        return subject.active, measures.unreleased
+
+    for at, (active, unreleased) in _sweep(scenario):
+        assert active == {'h1'} and unreleased == {'h1'}, f'an interrupt at {at} hid the change'
+
+
+@pytest.mark.parametrize('nested_score', [False, True], ids=['one score', 'inside a nested score'])
+def test_an_interrupt_anywhere_in_the_end_of_a_record_publishes_all_or_nothing(nested_score):
+    def run(arm, disarm):
+        class _Armed(_Text):
+            def participate(self, session):
+                super().participate(session)
+                arm()
+        with record_measures(subject='scored') as measures:
+            try:
+                with _maybe_nested(nested_score):
+                    try:
+                        _Wrapper(_Armed(identifier='inner-of-late'), identifier='late').participate(_stream())
+                    finally:
+                        disarm()   # limit: the first step of a score record's own exit is not swept
+            except KeyboardInterrupt:
+                pass
+            _Wrapper(_Text(), identifier='good').participate(_session())
+        return _four(measures)
+
+    complete = run(lambda: None, lambda: None)
+    allowed = (_good_only(), complete)
+    for at, four in _sweep(run):
+        assert four in allowed, f'an interrupt at {at} published part of a failed session'
+
+
+class _Handles(Subject):
+    """Applies the handle ``h1`` on a lesion and undoes it on a reset; ``fail_after`` raises
+    after it answered."""
+    in_channels, out_channels = {'lesion'}, {'perturbation'}
+
+    def __init__(self, identifier, fail_after=False):
+        self._identifier, self.fail_after, self.active = identifier, fail_after, set()
+
+    @property
+    def identifier(self):
+        return self._identifier
+
+    def participate(self, session):
+        change = session.next_input().payload
+        (self.active.discard if change.kind == 'reset' else self.active.add)('h1')
+        session.respond(StreamEvent('perturbation', PerturbationApplied(
+            'h1', change.target, change.perturbation), 0.0, {'kind': change.kind}))
+        if self.fail_after:
+            raise RuntimeError('failed after it answered')
+
+
+def _change(kind):
+    if kind == 'reset':
+        return Session([StreamEvent('lesion', StateChange(kind='reset', handle_id='h1'), 0.0)],
+                       ['perturbation'])
+    return _lesion_session()
+
+
+@pytest.mark.parametrize('route', ['separate sessions', 'through a wrapper', 'a failed retry',
+                                   'nested scores'])
+def test_an_undo_on_the_same_subject_releases_its_change(route):
+    subject = _Handles('one')
+
+    class _Delegates(Subject):
+        identifier = 'wrapper'
+        in_channels, out_channels = {'lesion'}, {'perturbation'}
+
+        def participate(self, session):
+            subject.participate(session)
+
+    with record_measures(subject='scored') as measures:
+        if route == 'through a wrapper':
+            _Delegates().participate(_change('lesion'))
+        elif route == 'a failed retry':
+            subject.fail_after = True
+            with pytest.raises(RuntimeError):
+                subject.participate(_change('lesion'))
+            subject.fail_after = False
+        elif route == 'nested scores':
+            with record_measures(subject='one'):
+                subject.participate(_change('lesion'))
+        else:
+            subject.participate(_change('lesion'))
+        subject.participate(_change('reset'))
+    assert subject.active == set()
+    measures.check_released('bench', 'scored')
+
