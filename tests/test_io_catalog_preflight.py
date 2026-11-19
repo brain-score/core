@@ -8,6 +8,7 @@ import warnings
 import pytest
 
 from tests.typed_subject import TypedSubject
+from tests.unregistered import unregistered_family
 from brainscore_core.compatibility import (
     check_compatibility,
     CompatibilityError,
@@ -51,14 +52,14 @@ class TestIOCatalogPreflight:
             warnings.simplefilter("error", CompatibilityWarning)
             check_compatibility(m, b)  # vision is documented; must not warn
 
-    @pytest.mark.parametrize('subject_in, bench_in', [
-        ({"vision:image", "telepathy"}, {"vision"}),
-        ({"vision:image"}, {"vision", "telepathy"}),
-    ], ids=['subject', 'benchmark'])
-    def test_an_unknown_family_is_a_malformed_declaration(self, subject_in, bench_in):
+    @pytest.mark.parametrize('side', ['subject', 'benchmark'])
+    def test_an_unknown_family_is_a_malformed_declaration(self, side):
         # Rule 3.2: every channel family is registered. A name outside the catalog
         # is a defect of the declaration (ValueError), never an N/A pair.
-        with pytest.raises(ValueError, match="telepathy") as raised:
+        unknown = unregistered_family()
+        subject_in, bench_in = {"vision:image"}, {"vision"}
+        (subject_in if side == 'subject' else bench_in).add(unknown)
+        with pytest.raises(ValueError, match=unknown) as raised:
             check_compatibility(_Model(subject_in), _Bench(bench_in))
         assert not isinstance(raised.value, CompatibilityError)
         assert "'vision'" in str(raised.value)      # the known families are named
