@@ -203,10 +203,16 @@ def _runs_or_refused(subject) -> bool:
 
 _FINALIZERS_DURING_ENTRY = """
 import gc, sys
+from brainscore_core.contract import Subject as ContractSubject
 from brainscore_core.streaming_helpers import one_session_at_a_time
 
-class Subject:
+class Subject(ContractSubject):
     identifier = 'stand-in'
+    in_channels = {'text'}
+    out_channels = {'behavior:choice'}
+
+    def participate(self, session) -> None:
+        pass
 
 class Cycle:
     def __init__(self, subject):
