@@ -49,7 +49,7 @@ def _numbers(reply: str):
     does not support: it is refused, never read as another number. A hyphen after a
     digit separates two numbers (``3-4``).
     """
-    from decimal import Decimal
+    from decimal import Decimal, InvalidOperation
     numbers = set()
     for token in re.findall(r'[\w.,+\-\u2212]+', reply):
         token = token.rstrip('.,').replace('\u2212', '-')
@@ -57,11 +57,18 @@ def _numbers(reply: str):
             continue
         # A hyphen after a digit joins two numbers, as in a range: ``3-4``.
         parts = re.split(r'(?<=\d)-', token)
-        if all(_NUMBER.fullmatch(part) for part in parts):
-            numbers.update(Decimal(part) for part in parts)
-        elif not any(c.isalpha() or c == '_' for c in token):
+        try:
+            if all(_NUMBER.fullmatch(part) for part in parts):
+                numbers.update(Decimal(part) for part in parts)
+                continue
+        except InvalidOperation:    # an exponent that no decimal can hold
+            pass
+        # A plain word with a digit (``m2``, ``3rd``) is a word. Any other token is refused.
+        if not token.replace('_', 'a').isalnum():
             return set(), (f'unsupported number notation {token!r}; reply with plain '
                            'numbers such as 3, -2.5 or 1e3')
+        if _NUMBER.fullmatch(token):
+            return set(), f'the number {token!r} is too large or too small to read'
     return numbers, None
 
 
@@ -90,9 +97,12 @@ class Scale:
             return None, 'no number in the reply'
         if len(numbers) > 1:
             return None, f'several numbers in the reply: {sorted(map(str, numbers))}'
-        value = float(*numbers)
-        if not self.low <= value <= self.high:
-            return None, f'{value} is outside {self.low} to {self.high}'
+        from decimal import Decimal
+        exact, = numbers
+        # The bounds are checked on the exact value: a float can round a value onto a bound.
+        if not Decimal(str(self.low)) <= exact <= Decimal(str(self.high)):
+            return None, f'{exact} is outside {self.low} to {self.high}'
+        value = float(exact)
         if self.step is not None and not _on_step(value, self.low, self.step):
             return None, f'{value} is not on the scale step {self.step}'
         return value, None

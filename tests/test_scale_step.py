@@ -91,3 +91,19 @@ def test_distinct_exact_values_are_several_numbers(reply):
 def test_an_unsupported_notation_is_invalid_never_another_number(reply):
     value, reason = WIDE.parse(reply)
     assert value is None and reply in reason
+
+
+@pytest.mark.parametrize('reply, scale', [
+    ('1,000e0 or 3', Scale(0, 10)),                     # a number-like token with letters hides no number
+    ('1e999999999999999999999', Scale(0, 10)),          # an exponent no decimal can hold
+    ('1e-400', Scale(-10, 0)),                          # above the upper bound, although its float is 0.0
+])
+def test_a_value_the_parser_cannot_hold_is_invalid_with_a_reason(reply, scale):
+    value, reason = scale.parse(reply)
+    assert value is None and reason
+
+
+@pytest.mark.parametrize('reply, value', [('4 m2', 4.0), ('the 3rd option: 4', 4.0)])
+def test_a_digit_inside_a_plain_word_is_part_of_the_word(reply, value):
+    assert Scale(0, 10).parse(reply) == (value, None)
+
