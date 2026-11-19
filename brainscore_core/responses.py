@@ -52,10 +52,13 @@ class Scale:
         return f'Answer with a number from {bounds}. Reply with only that number.'
 
     def parse(self, reply: str) -> Tuple[Optional[float], Optional[str]]:
-        found = re.search(r'-?\d+(?:\.\d+)?', reply or '')
-        if found is None:
+        # One number, also repeated, is the answer; several distinct numbers are invalid.
+        numbers = {float(number) for number in re.findall(r'-?\d+(?:\.\d+)?', reply or '')}
+        if not numbers:
             return None, 'no number in the reply'
-        value = float(found.group())
+        if len(numbers) > 1:
+            return None, f'several numbers in the reply: {sorted(numbers)}'
+        value, = numbers
         if not self.low <= value <= self.high:
             return None, f'{value} is outside {self.low} to {self.high}'
         if self.step is not None and not _on_step(value, self.low, self.step):
