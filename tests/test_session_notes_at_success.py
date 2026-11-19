@@ -347,6 +347,20 @@ def _change(kind):
     return _lesion_session()
 
 
+def test_an_undo_on_another_subject_does_not_cancel_a_change_with_the_same_handle():
+    a, b = _Handles('a'), _Handles('b')
+    b.participate(_change('lesion'))            # b holds its own h1 from before the score
+    b.fail_after = True
+    with record_measures(subject='scored') as measures:
+        a.participate(_change('lesion'))
+        with pytest.raises(RuntimeError, match='failed after it answered'):
+            with record_measures(subject='b'):
+                b.participate(_change('reset'))
+    assert a.active == {'h1'} and b.active == set()
+    with pytest.raises(RuntimeError, match='left intervention'):
+        measures.check_released('bench', 'scored')
+
+
 @pytest.mark.parametrize('route', ['separate sessions', 'through a wrapper', 'a failed retry',
                                    'nested scores'])
 def test_an_undo_on_the_same_subject_releases_its_change(route):

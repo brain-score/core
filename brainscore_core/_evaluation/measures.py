@@ -119,8 +119,8 @@ class MeasureRecord:
 
     @property
     def unreleased(self) -> Set[str]:
-        """Handles applied during the run more often than the run undid them."""
-        return set(self._counts(False) - self._counts(True))
+        """Handles applied during the run more often than the same subject undid them."""
+        return {handle for _, handle in self._counts(False, True) - self._counts(True, True)}
 
     def check_released(self, benchmark_identifier: str, subject_identifier: str) -> None:
         """Raise when the run left an intervention it applied active.
