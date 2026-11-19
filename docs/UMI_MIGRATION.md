@@ -49,8 +49,9 @@ A native subject does not need `process()`, `start_recording()`, `start_task()`,
 a layer map, modality properties, or `check_session_support()`. Scoring preflight
 reads the channel declarations. There is one session class, `Session`. It takes
 a source of input events (a list, iterator or generator), the outputs you
-request, and the task. The subject calls `session.declare_inputs(in_channels)`
-to receive only the channels it declares. Channels match by exact name:
+request, and the task. The `Subject` base class calls
+`session.declare_inputs(in_channels)` before the `participate` body runs, so the
+subject receives only the channels it declares. Channels match by exact name:
 `vision:image` and `vision:video` are two channels. There is no bare `vision`
 channel: a subject declares the visual form it takes, or both.
 

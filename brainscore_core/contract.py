@@ -1,5 +1,8 @@
 """Core Brain-Score subject contract."""
 
+import functools
+import inspect
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
@@ -119,6 +122,30 @@ class TaskContext:
             self.present = tuple(self.present)
 
 
+# The (subject, session) pairs whose participate runs on this thread now, by id; an
+# entry lives only while its call runs, so both objects are alive.
+_taking_part = threading.local()
+
+
+def _takes_part_once(participate):
+    """Wrap a subclass's ``participate``: claim the session, declare the inputs, run the body."""
+    @functools.wraps(participate)
+    def wrapped(self, session):
+        running = _taking_part.__dict__.setdefault('pairs', set())
+        pair = (id(self), id(session))
+        if pair in running:     # super().participate(session), or a delegation of the same session
+            return participate(self, session)
+        from ._sessions.one_at_a_time import one_session_at_a_time
+        with one_session_at_a_time(self):
+            running.add(pair)
+            try:
+                session.declare_inputs(self.in_channels)
+                return participate(self, session)
+            finally:
+                running.discard(pair)
+    wrapped._takes_part_once = True
+    return wrapped
+
 
 class Subject(ABC):
     """Minimal contract for a subject evaluated through a session.
@@ -148,12 +175,38 @@ class Subject(ABC):
             def out_channels(self):
                 return self._outputs
 
+    What runs around ``participate``: the base class wraps the ``participate`` that
+    a subclass defines in its class body. Before the body runs, the wrapper
+
+    1. claims the subject for this session: a second session on the same subject
+       object, from this thread or another one, is refused with ``RuntimeError``
+       while the first one runs (the recording and task state belong to one
+       session). Build a separate subject for each session that runs at the same
+       time.
+    2. calls ``session.declare_inputs(self.in_channels)``: an input on a channel
+       the subject does not declare never reaches the body, and ``control``
+       events reach it only when it declares ``control``.
+
+    A nested call with the same session on the same thread passes straight to
+    the body: ``super().participate(session)``, or a subject that gives its
+    session to another subject (that subject claims itself and narrows the
+    inputs to its own declaration). The body does neither duty itself. A
+    ``participate`` assigned to the class after the class statement is not
+    wrapped; define it in the class body.
+
     ``reset`` is a lifecycle hook, not an evaluation method. Stateful subjects
     override it to clear memory, task setup and interventions between independent
     runs. A ``begin`` control event is narrower: it clears only the history ``h``
     (earlier trials, steps and responses, and the episode state of the subject's
     parts); interventions and task setup stay.
     """
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        participate = cls.__dict__.get('participate')
+        if (inspect.isfunction(participate) and not getattr(participate, '_takes_part_once', False)
+                and not getattr(participate, '__isabstractmethod__', False)):
+            cls.participate = _takes_part_once(participate)
 
     @property
     @abstractmethod

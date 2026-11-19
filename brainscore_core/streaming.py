@@ -302,7 +302,7 @@ class Session(Source):
         return not self.source.listed
 
     def declare_inputs(self, channels: Iterable[str]) -> 'Session':
-        """Keep only the inputs a subject declares; the subject calls this with its ``in_channels``.
+        """Keep only the inputs a subject declares; the ``Subject`` base calls this with its ``in_channels``.
 
         Events on other channels are skipped (exact match, see ``channel_declared``),
         and the stimulus table loses the columns that feed undeclared channels. The

@@ -93,7 +93,7 @@ def test_subject_participate_and_reset_contract_are_pinned():
     assert "reset" not in Subject.__abstractmethods__
 
     subject = _MinimalSubject()
-    assert subject.participate(session=None) is None
+    assert subject.participate(session=Session([])) is None
     assert not hasattr(subject, "process")
     assert not hasattr(subject, "region_layer_map")
     assert subject.reset() is None

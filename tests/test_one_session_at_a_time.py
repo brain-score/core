@@ -1,4 +1,4 @@
-"""One session at a time on one subject (``brainscore_core.streaming_helpers.one_session_at_a_time``)."""
+"""One session at a time on one subject (core-private ``_sessions.one_at_a_time``; the ``Subject`` base claims it)."""
 import gc
 import sys
 import threading
@@ -7,7 +7,7 @@ import weakref
 import pytest
 
 from brainscore_core.contract import Subject
-from brainscore_core.streaming_helpers import one_session_at_a_time
+from brainscore_core._sessions.one_at_a_time import one_session_at_a_time
 
 
 class _Subject(Subject):
@@ -204,7 +204,7 @@ def _runs_or_refused(subject) -> bool:
 _FINALIZERS_DURING_ENTRY = """
 import gc, sys
 from brainscore_core.contract import Subject as ContractSubject
-from brainscore_core.streaming_helpers import one_session_at_a_time
+from brainscore_core._sessions.one_at_a_time import one_session_at_a_time
 
 class Subject(ContractSubject):
     identifier = 'stand-in'

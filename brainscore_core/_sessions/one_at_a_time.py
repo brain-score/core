@@ -1,5 +1,8 @@
 """One session at a time on one subject.
 
+The ``Subject`` base class claims this guard around every ``participate``
+(``brainscore_core.contract``); a subject does not use it itself.
+
 A subject's recording, task and change state belong to the one session it takes
 part in, so a second session on the same subject object (a nested call, or a call
 from another thread) is refused instead of sharing that state. Sessions on
@@ -14,8 +17,8 @@ from typing import TYPE_CHECKING, Optional, Type
 if TYPE_CHECKING:
     from brainscore_core.contract import Subject
 
-# id(subject) -> the token of the session that subject takes part in now. The token holds
-# its subject, so the id cannot go to another object while the entry exists.
+# id(subject) -> the token (subject, thread id) of the session that subject takes part in
+# now. The token holds its subject, so the id cannot go to another object while the entry exists.
 _active_sessions = {}
 _naming = threading.local()
 
@@ -57,14 +60,15 @@ class one_session_at_a_time:
 
 @contextmanager
 def _session(subject):
-    key, token = id(subject), (subject,)
+    key, token = id(subject), (subject, threading.get_ident())
     try:    # the claim and the session body are in one try, so every way out releases
-        if _active_sessions.setdefault(key, token) is not token:
+        if (held := _active_sessions.setdefault(key, token)) is not token:
             raise RuntimeError(
                 f'Subject {_name(subject)} is already taking part in a session. A subject '
                 'takes part in one session at a time, because its recording and task state '
                 'belong to that session. Wait for the running session to finish, or build a '
-                'separate subject for each session that runs at the same time.')
+                'separate subject for each session that runs at the same time.'
+                + (_SAME_THREAD if held[1] == token[1] else ''))
         yield
     finally:
         try:
@@ -72,6 +76,11 @@ def _session(subject):
         except BaseException:   # an interrupt inside the release: finish it, then pass it on
             _release(key, token)
             raise
+
+
+_SAME_THREAD = (' The running session is on this thread: if the participate of this subject '
+                'claims one_session_at_a_time itself, delete that line; the Subject base class '
+                'claims the session around participate.')
 
 
 def _release(key, token):
