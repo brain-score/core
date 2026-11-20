@@ -391,3 +391,15 @@ class store_xarray(_store_xarray):
                 logger.info('Activation cache miss: %s; unversioned entries are retained but cannot be reused',
                             identifier)
         return identifier
+
+    def _merge_data_arrays(self, data_arrays):
+        """Append the new layers to the entry along the layer axis. The package's merge sorts the
+        axis by its index, so a layer added later would come back in another neuroid order than a
+        new pass gives. An entry written before keeps the order it was saved in."""
+        import xarray as xr
+        stored = data_arrays[0]
+        axes = {dim for field in self._combine_fields.values() if hasattr(stored, field)
+                for dim in stored[field].dims}
+        if len(axes) != 1:
+            return super()._merge_data_arrays(data_arrays)
+        return type(stored)(xr.concat(data_arrays, dim=axes.pop()))

@@ -308,3 +308,36 @@ def test_a_store_entry_with_long_names_fits_one_path_component(tmp_path, monkeyp
     Extractor().activations(**arguments)
     assert len(calls) == 1
     assert all(len((path.name + '.filepart').encode()) <= 255 for path in tmp_path.rglob('*'))
+
+
+def test_a_layer_added_to_a_store_entry_reads_back_as_a_new_pass(tmp_path, monkeypatch):
+    """Write layer A, then ask for A and B (the store merges B into the entry), then read B: its
+    neuroid order, coordinates and values equal a new pass for B alone, bit for bit. The neuroid
+    ids sort differently by name ('x.B.10' before 'x.B.2'), as the ids of a wide layer do."""
+    from brainscore_core.extraction_cache import store_xarray
+    from brainscore_core.supported_data_standards.brainio.assemblies import NeuroidAssembly
+    monkeypatch.setenv('RESULTCACHING_HOME', str(tmp_path))
+    monkeypatch.delenv('RESULTCACHING_DISABLE', raising=False)
+
+    def one_pass(layers):
+        units = 12
+        values = np.concatenate([np.random.default_rng(ord(layer)).standard_normal((3, units))
+                                 for layer in layers], axis=1)
+        return NeuroidAssembly(values, dims=['presentation', 'neuroid'], coords={
+            'stimulus_id': ('presentation', ['s2', 's0', 's1']),
+            'neuroid_id': ('neuroid', [f'x.{layer}.{unit}' for layer in layers for unit in range(units)]),
+            'neuroid_num': ('neuroid', [unit for _ in layers for unit in range(units)]),
+            'layer': ('neuroid', [layer for layer in layers for _ in range(units)])})
+
+    class Extractor:
+        @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
+        def activations(self, identifier, layers, stimuli_identifier):
+            return one_pass(layers)
+
+    arguments = dict(identifier='x', stimuli_identifier='t')
+    Extractor().activations(layers=['A'], **arguments)
+    Extractor().activations(layers=['A', 'B'], **arguments)
+    stored = Extractor().activations(layers=['B'], **arguments)
+    new = one_pass(['B'])
+    assert list(stored['neuroid_id'].values) == list(new['neuroid_id'].values)
+    assert stored.values.tobytes() == new.values.tobytes()
