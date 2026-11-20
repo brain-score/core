@@ -359,11 +359,27 @@ def implementation_config(cls):
     return implementations
 
 
+_NAME_LIMIT = 255   # bytes of one path component; a file system with a lower limit is not served
+
+
+def _name_that_fits(identifier):
+    """The store identifier, or, when the file name it gives is longer than one path component
+    may be, its folder with a hash of the whole name. The limit counts the '.pkl.filepart' that
+    the store adds while it saves. A name that fits is not changed, so its entry stays readable."""
+    folder, name = os.path.split(identifier)
+    if len((name + '.pkl.filepart').encode()) <= _NAME_LIMIT:
+        return identifier
+    short = os.path.join(folder, 'name_sha256=' + hashlib.sha256(name.encode()).hexdigest())
+    logger.info('The store file name is too long for the file system; the entry is %s for %s', short, identifier)
+    return short
+
+
 class store_xarray(_store_xarray):
-    """Existing xarray layer merging, with visible unversioned-cache misses."""
+    """Existing xarray layer merging, with visible unversioned-cache misses and entry names
+    that fit the file system."""
 
     def get_function_identifier(self, function, call_args):
-        identifier = super().get_function_identifier(function, call_args)
+        identifier = _name_that_fits(super().get_function_identifier(function, call_args))
         if (call_args.get('extraction_fingerprint') and is_enabled(identifier)
                 and not self.is_stored(identifier)):
             old_args = {k: v for k, v in call_args.items() if k != 'extraction_fingerprint'}

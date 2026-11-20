@@ -283,3 +283,28 @@ def test_a_part_of_a_disabled_or_opaque_configuration_is_none(monkeypatch):
     assert extraction_fingerprint({'configuration': 1}, cache_identifier='x', part='configuration') == (None, None)
     monkeypatch.delenv('RESULTCACHING_DISABLE')
     assert extraction_fingerprint({'configuration': object()}, part='configuration') == (None, None)
+
+
+def test_a_store_entry_with_long_names_fits_one_path_component(tmp_path, monkeypatch):
+    """A long model identifier and a long table name still give an entry that the file system
+    takes: the entry is written once, read back at the second call, and each name under the store
+    (with the '.filepart' that the store adds while it saves) fits one path component."""
+    import xarray as xr
+    from brainscore_core.extraction_cache import store_xarray
+    monkeypatch.setenv('RESULTCACHING_HOME', str(tmp_path))
+    monkeypatch.delenv('RESULTCACHING_DISABLE', raising=False)
+    calls = []
+
+    class Extractor:
+        @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
+        def activations(self, identifier, layers, stimuli_identifier, extraction_fingerprint):
+            calls.append(list(layers))
+            return xr.DataArray(np.zeros((1, len(layers))), dims=['presentation', 'neuroid'],
+                                coords={'layer': ('neuroid', list(layers))})
+
+    arguments = dict(identifier='m' * 120, layers=['a'], stimuli_identifier='t' * 150,
+                     extraction_fingerprint='v2-' + 'f' * 64)
+    Extractor().activations(**arguments)
+    Extractor().activations(**arguments)
+    assert len(calls) == 1
+    assert all(len((path.name + '.filepart').encode()) <= 255 for path in tmp_path.rglob('*'))
