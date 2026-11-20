@@ -260,14 +260,38 @@ def test_bad_observation_fails_before_inference_and_closes():
     assert env.actions == [] and env.closed == 1
 
 
-def test_missing_specs_or_unsupported_seed_fail_before_reset():
+def test_missing_specs_fail_before_reset():
     calls = []
     env = SimpleNamespace(reset=lambda: calls.append('reset'), step=lambda outputs: None)
     with pytest.raises(TypeError, match='observation_spec'):
         EnvironmentSource(env, require_specs=True)
-    with pytest.raises(TypeError, match='seed'):
-        EnvironmentSource(env, seed=1)
     assert calls == []
+
+
+class _UnreadableReset:
+    __signature__ = 'unreadable'     # inspect.signature raises on this object
+
+    def __call__(self, **kwargs):
+        self.kwargs = kwargs
+        return {'reward': 0.0}
+
+
+def test_reset_receives_exactly_the_given_seed_and_options():
+    """``reset`` gets ``seed`` and ``options`` as keywords only when they are given."""
+    calls = []
+    plain = SimpleNamespace(reset=lambda: calls.append('reset') or {'reward': 0.0},
+                            step=lambda outputs: None)
+    session, _ = make(plain)
+    assert [e.payload for e in advance(session) if e.channel == 'reward'] == [0.0]
+    assert calls == ['reset']
+    # A reset whose signature cannot be read (as for some compiled code) still gets the seed.
+    reset = _UnreadableReset()
+    advance(make(SimpleNamespace(reset=reset, step=lambda outputs: None), seed=7)[0])
+    assert reset.kwargs == {'seed': 7}
+    # A reset that takes no seed fails on the first reset, once.
+    with pytest.raises(TypeError, match='seed'):
+        advance(make(plain, seed=1)[0])
+    assert calls == ['reset']
 
 
 def test_unknown_time_stays_unknown_and_simulated_time_is_preserved():
@@ -378,8 +402,8 @@ def test_helper_closes_environment_if_preflight_fails():
         reset=lambda: None, step=lambda outputs: None,
         close=lambda: closed.append(True),
     )
-    with pytest.raises(TypeError, match='seed'):
-        run_environment(SimpleNamespace(), env, seed=2)
+    with pytest.raises(TypeError, match='observation_spec'):
+        run_environment(SimpleNamespace(), env, require_specs=True)
     assert closed == [True]
 
 

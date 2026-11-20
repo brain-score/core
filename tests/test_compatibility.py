@@ -251,8 +251,11 @@ class TestRegionMapping:
     def test_region_missing_raises(self):
         model = FakeModel(in_channels={'vision:image'}, region_layer_map={'V1': 'layer1'})
         bench = FakeBenchmark(required_modalities={'vision'}, region='IT')
-        with pytest.raises(CompatibilityError, match="no layer mapping for region 'IT'"):
+        with pytest.raises(CompatibilityError, match="no layer mapping for region 'IT'") as error:
             check_compatibility(model, bench)
+        # The remedy names the subject's own declaration, not a tool of one repository.
+        assert 'region_layer_map' in str(error.value)
+        assert 'brainscore_vision' not in str(error.value)
 
     def test_no_region_on_benchmark(self):
         model = FakeModel(in_channels={'vision:image'}, region_layer_map={})

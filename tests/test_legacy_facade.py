@@ -186,6 +186,20 @@ def test_domain_loaders_mark_legacy_benchmarks_and_scoring_wraps_them():
     assert subject_for_benchmark(subject, unmarked) is subject
 
 
+def test_a_domain_loaded_session_benchmark_keeps_its_stimuli_inputs():
+    """A benchmark that declares only its requested outputs is a session benchmark."""
+    from types import SimpleNamespace
+    from brainscore_core.compatibility import (
+        benchmark_required_input_channels, ensure_legacy_benchmark_modalities)
+    from brainscore_core.legacy_facade import mark_legacy_benchmark
+    stimuli = pd.DataFrame({'stimulus_id': ['s0'], 'sentence': ['a word']})
+    benchmark = SimpleNamespace(identifier='session', stimulus_set=stimuli, task=None,
+                                requested_output_channels={'behavior'})
+    mark_legacy_benchmark(ensure_legacy_benchmark_modalities(benchmark, {'vision'}))
+    assert benchmark.subject_api == 'session'
+    assert benchmark_required_input_channels(benchmark) == {'text'}
+
+
 # --- setup once, measure many times ---------------------------------------
 
 
@@ -680,3 +694,10 @@ def test_the_old_benchmark_receives_a_new_subjects_checked_answer_whatever_its_m
     facade.start_task('probabilities', fitting_stimuli=_labelled_images())
     answer = facade.look_at(_images())
     assert answer.values.tolist() == [[0.25, 0.75]] * 2
+
+
+def test_the_fitted_labels_come_from_image_label_else_label_and_a_table_needs_one():
+    from brainscore_core.legacy_facade import fitted_labels
+    assert fitted_labels('probabilities', pd.DataFrame({'label': ['b', 'a', 'b']})) == ['b', 'a']
+    with pytest.raises(ValueError, match="'image_label'"):
+        fitted_labels('probabilities', pd.DataFrame({'stimulus_id': ['s0']}))

@@ -18,7 +18,7 @@ of its own: every legacy call goes through this facade.
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from brainscore_core.compatibility import ExecutionNotFeasibleError
+from brainscore_core.compatibility import ExecutionNotFeasibleError, _declares_channels
 from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
@@ -126,7 +126,7 @@ class LegacyBenchmarkFacade:
             self._task = task
             return
         metadata = {'task_settings': dict(settings)} if settings else {}
-        labels = _fitted_labels(task, fitting_stimuli)
+        labels = fitted_labels(task, fitting_stimuli)
         if labels is not None:
             # The probabilities task is asked on behavior:probabilities: a Choice among the
             # labels of the fitting stimuli, in the old column order (first appearance), fitted
@@ -405,7 +405,7 @@ def _old_models_answer(event) -> bool:
             and isinstance((event.meta or {}).get('legacy_answer'), xr.DataArray))
 
 
-def _fitted_labels(task, fitting_stimuli):
+def fitted_labels(task, fitting_stimuli):
     """The labels of a legacy probabilities task in the old column order, else ``None``.
 
     ``start_task('probabilities', fitting_stimuli)`` fits on the labels of a table's
@@ -417,7 +417,8 @@ def _fitted_labels(task, fitting_stimuli):
     column = next((name for name in ('image_label', 'label') if name in fitting_stimuli.columns), None)
     if column is None:
         raise ValueError("A legacy probabilities task names its labels in the fitting stimuli's "
-                         "'image_label' (or 'label') column; these fitting stimuli have neither.")
+                         "'image_label' (or 'label') column; these fitting stimuli have neither. "
+                         "Add one of the two columns to the fitting stimuli.")
     return list(dict.fromkeys(fitting_stimuli[column].tolist()))
 
 
@@ -563,14 +564,13 @@ def _labels_from_choice(answer, stimuli=None, own_values: bool = False):
 def mark_legacy_benchmark(benchmark):
     """Record a benchmark's calling convention at a domain loader.
 
-    A benchmark that declares its own input channels drives sessions itself;
-    one that declares none calls the legacy methods. A value set before is
+    A benchmark that declares its input channels or its requested outputs drives
+    sessions itself; one that declares neither calls the legacy methods. A value set before is
     kept, so a second call changes nothing. Only a benchmark marked legacy
     receives the facade (``subject_for_benchmark``).
     """
     if getattr(benchmark, 'subject_api', None) is None:
-        declares_channels = getattr(benchmark, 'required_input_channels', None) is not None
-        benchmark.subject_api = SESSION_API if declares_channels else LEGACY_API
+        benchmark.subject_api = SESSION_API if _declares_channels(benchmark) else LEGACY_API
     return benchmark
 
 

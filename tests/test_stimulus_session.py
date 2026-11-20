@@ -281,10 +281,10 @@ def test_only_the_table_builder_states_that_its_source_presents_exactly_its_tabl
     from brainscore_core.streaming import Session
     table = StimulusSet({'stimulus_id': ['a', 'b'], 'sentence': ['x', 'y']})
     table.identifier = 'presents-table'
-    assert stimulus_session(table, ['behavior'], streaming=streaming)._presents_table is True
+    assert stimulus_session(table, ['behavior'], streaming=streaming).presents_table is True
     given = Session([StreamEvent('text', 'x', 0.0, {'stimulus_id': 'a'})], ['behavior'], stimuli=table)
-    assert given._presents_table is False
-    assert given.declare_inputs({'text'})._presents_table is False
+    assert given.presents_table is False
+    assert given.declare_inputs({'text'}).presents_table is False
 
 
 def test_a_rebuilt_row_names_a_picture_or_clip_event_by_the_catalog():

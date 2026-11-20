@@ -141,3 +141,9 @@ class TestPayloadTypes:
     def test_type_mismatch_is_a_validate_failure(self):
         assert io_catalog.validate("text", 42, direction=INPUT) == [
             "text: payload is int, not str (a Python str)"]
+
+
+def test_the_control_entry_says_a_subject_declares_it():
+    """Rule 4.6: control reaches only a subject that declares it; the catalog says so."""
+    from brainscore_core.io_catalog import get
+    assert 'in_channels' in get('control').handled_by

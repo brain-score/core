@@ -275,7 +275,7 @@ class Session(Source):
         # True only when the source presents exactly the rows of ``stimuli``, in order
         # (``stimulus_session`` states it). A source given here with a table does not:
         # a subject then reads each batch, not the table, to decide how it answers.
-        self._presents_table = False
+        self.presents_table = False
         self.time_bins = time_bins
         # Per-measurement settings a legacy facade attaches (trial count, variance
         # request, recording type, legacy text). None when the session has none.

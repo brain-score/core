@@ -248,3 +248,14 @@ def test_streaming_preserves_presentation_metadata():
     drive_neural_session_streaming(_MetaSubject(), session)
     assert 'object_name' in seen['columns'], (
         "streamed rows lost presentation metadata; metrics keyed on it would break")
+
+
+@pytest.mark.unit
+def test_the_region_splitter_is_public_and_gives_each_region_its_neuroids():
+    from brainscore_core.streaming_helpers import demultiplex_neural_output
+    subject = _MultiRegionSubject()
+    subject.start_recording(['early', 'late'])
+    output = subject.process(_stimulus_set(2))
+    split = demultiplex_neural_output(output, [('neural:late', 'late'), ('neural:early', 'early')])
+    assert [(channel, payload['region'].values.tolist()) for channel, _, payload in split] == [
+        ('neural:late', ['late']), ('neural:early', ['early'])]

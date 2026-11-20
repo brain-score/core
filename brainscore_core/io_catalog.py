@@ -399,11 +399,11 @@ _SEED = [
                  materializers=("TaskContext", "EnvironmentSource")),
     # Episode control, not a sensory stream: a source marks where an episode
     # begins, where the subject is asked to respond, and where it ends (the
-    # end event says why in meta['reason']). Every subject receives it.
+    # end event says why in meta['reason']). It reaches only a subject that declares it.
     CatalogEntry("control", INPUT, "StreamEvent",
                  "one of 'begin', 'respond', 'end'; 'end' carries meta['reason'] "
                  "in ('terminal', 'truncated', 'failure')",
-                 "the session; a subject never has to declare it",
+                 "the session; only a subject with 'control' in its in_channels receives it",
                  meta_keys=("reason",), payload_type=str,
                  shape_validator=lambda payload: (
                      [] if payload in ('begin', 'respond', 'end')
