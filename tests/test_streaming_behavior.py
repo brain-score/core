@@ -151,3 +151,18 @@ def test_the_answer_for_a_whole_table_has_no_time():
     drive_behavior_session(_Subject(), session)
     (answer,) = session.emitted
     assert answer.t_ms is None
+
+
+@pytest.mark.unit
+def test_each_begin_is_passed_on_after_the_trial_before_it():
+    """``stream_trials`` calls ``on_begin`` at each begin, once the trial before it was read."""
+    from brainscore_core.streaming import Session, begin_event
+    from brainscore_core.streaming_helpers import stream_trials
+    rows = [StreamEvent('text', str(i), 0.0, {'stimulus_index': i, 'stimulus_id': f's{i}'})
+            for i in range(3)]
+    log = []
+    session = Session(iter([begin_event(), rows[0], rows[1], begin_event(), rows[2]]),
+                      ['behavior'], _context(_stimuli(3))).declare_inputs({'text', 'control'})
+    for stimuli, _ in stream_trials(session, session.task, on_begin=lambda: log.append('begin')):
+        log.append(stimuli['stimulus_id'].iloc[0])
+    assert log == ['begin', 's0', 's1', 'begin', 's2']

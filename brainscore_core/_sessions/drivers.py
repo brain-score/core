@@ -300,16 +300,17 @@ def _stream_rows(session, on_begin: Optional[Callable[[], None]] = None,
         event = session.next_input()
 
 
-def stream_trials(session, task):
+def stream_trials(session, task, on_begin: Optional[Callable[[], None]] = None):
     """``(stimuli, t_ms)`` per trial: a single-row stimulus set and the time of its input.
 
-    The next trial is read only after the caller has answered this one. ``t_ms`` is
+    The next trial is read only after the caller has answered this one. Each ``begin``
+    control event calls ``on_begin()`` after the trial before it was answered. ``t_ms`` is
     the time of the trial's input events, or None when they have none. A session
     that sends no input events presents its table, or the task's own stimuli,
     with no time.
     """
     count = 0
-    for stimuli, t_ms in _stream_rows(session, skip_channels=("instruction",)):
+    for stimuli, t_ms in _stream_rows(session, on_begin, skip_channels=("instruction",)):
         count += 1
         yield stimuli, t_ms
     if not count:
@@ -477,7 +478,7 @@ def drive_behavior_session(
 
 def drive_behavior_session_streaming(
     subject, session: Session, task=None,
-    driver: str = "interact_streaming", on_begin: Optional[Callable[[], None]] = None,
+    driver: str = "interact_streaming",
 ) -> None:
     """Behavioral trials delivered one at a time.
 
@@ -488,9 +489,7 @@ def drive_behavior_session_streaming(
     outside the loop.
 
     Same responses as the batch driver; what changes is that the trial set need not
-    exist in full before the first response is produced. ``on_begin()`` runs
-    before each trial under ``none`` and once before the first under
-    ``history`` (``task.trial_memory``).
+    exist in full before the first response is produced.
     """
     if task is None:
         task = getattr(session, "task", None)
@@ -501,9 +500,6 @@ def drive_behavior_session_streaming(
     refuse_variance(subject, session)
     subject.start_task(task)              # once, before any trial
     for trial_index, (trial, t_ms) in enumerate(stream_trials(session, task)):
-        if on_begin is not None and (trial_index == 0
-                                     or task.trial_memory == 'none'):
-            on_begin()
         output = subject.process(trial)
         session.respond(StreamEvent(
             channel="behavior",
