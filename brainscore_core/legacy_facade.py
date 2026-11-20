@@ -18,7 +18,7 @@ of its own: every legacy call goes through this facade.
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from brainscore_core.compatibility import ExecutionNotFeasibleError
+from brainscore_core.compatibility import ExecutionNotFeasibleError, _declares_channels
 from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
@@ -563,14 +563,13 @@ def _labels_from_choice(answer, stimuli=None, own_values: bool = False):
 def mark_legacy_benchmark(benchmark):
     """Record a benchmark's calling convention at a domain loader.
 
-    A benchmark that declares its own input channels drives sessions itself;
-    one that declares none calls the legacy methods. A value set before is
+    A benchmark that declares its input channels or its requested outputs drives
+    sessions itself; one that declares neither calls the legacy methods. A value set before is
     kept, so a second call changes nothing. Only a benchmark marked legacy
     receives the facade (``subject_for_benchmark``).
     """
     if getattr(benchmark, 'subject_api', None) is None:
-        declares_channels = getattr(benchmark, 'required_input_channels', None) is not None
-        benchmark.subject_api = SESSION_API if declares_channels else LEGACY_API
+        benchmark.subject_api = SESSION_API if _declares_channels(benchmark) else LEGACY_API
     return benchmark
 
 

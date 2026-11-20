@@ -186,6 +186,20 @@ def test_domain_loaders_mark_legacy_benchmarks_and_scoring_wraps_them():
     assert subject_for_benchmark(subject, unmarked) is subject
 
 
+def test_a_domain_loaded_session_benchmark_keeps_its_stimuli_inputs():
+    """A benchmark that declares only its requested outputs is a session benchmark."""
+    from types import SimpleNamespace
+    from brainscore_core.compatibility import (
+        benchmark_required_input_channels, ensure_legacy_benchmark_modalities)
+    from brainscore_core.legacy_facade import mark_legacy_benchmark
+    stimuli = pd.DataFrame({'stimulus_id': ['s0'], 'sentence': ['a word']})
+    benchmark = SimpleNamespace(identifier='session', stimulus_set=stimuli, task=None,
+                                requested_output_channels={'behavior'})
+    mark_legacy_benchmark(ensure_legacy_benchmark_modalities(benchmark, {'vision'}))
+    assert benchmark.subject_api == 'session'
+    assert benchmark_required_input_channels(benchmark) == {'text'}
+
+
 # --- setup once, measure many times ---------------------------------------
 
 

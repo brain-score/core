@@ -85,9 +85,15 @@ class CompatibilityWarning(UserWarning):
     pass
 
 
+def _declares_channels(benchmark) -> bool:
+    """A benchmark that declares its inputs or its requested outputs drives sessions itself."""
+    return any(getattr(benchmark, name, None) is not None
+               for name in ('required_input_channels', 'requested_output_channels'))
+
+
 def ensure_legacy_benchmark_modalities(benchmark, modalities):
     """Supply a domain default only when a legacy benchmark has no input contract."""
-    if (getattr(benchmark, 'required_input_channels', None) is None
+    if (not _declares_channels(benchmark)
             and not getattr(benchmark, 'required_modalities', None)
             and not getattr(benchmark, 'accepted_modalities', None)):
         benchmark.required_modalities = set(modalities)
