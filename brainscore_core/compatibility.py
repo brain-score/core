@@ -226,9 +226,8 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
                          if family == 'neural' and address is not None)
         if regions:
             message += (
-                f" It has no layer mapping for region '{regions[0]}'. Use the "
-                f"layer-mapping explorer (brainscore_vision.tools.layer_mapping_explorer) "
-                f"to find and commit a region-to-layer mapping."
+                f" It has no layer mapping for region '{regions[0]}'. Name one of the "
+                f"subject's own layers for this region in its region_layer_map."
             )
         raise CompatibilityError(message, channels=missing_outputs)
 
