@@ -44,7 +44,7 @@ def stimulus_session(stimuli, outputs=None, task=None, *,
     session = Session(events, outputs, task,
                       stimuli=stimuli, time_bins=time_bins, settings=settings)
     session.one_answer_per_trial = memory == 'none'
-    session._presents_table = True      # the source is the table's own rows, every one, in order
+    session.presents_table = True      # the source is the table's own rows, every one, in order
     return session
 
 
