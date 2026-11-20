@@ -17,7 +17,6 @@ from collections import deque
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
-import inspect
 import time
 from typing import Any, Mapping, Optional
 import numpy as np
@@ -34,6 +33,8 @@ class EnvironmentSource(Source):
     ``respond``; after the subject answers on ``action_channel`` it advances the
     environment; at the end it emits ``end(reason)``. Specs are used when the
     environment provides them, and required with ``require_specs=True``.
+    ``environment.reset()`` gets ``seed`` and ``options`` as keywords only when they
+    are given; a reset that cannot take them fails on the first reset.
     Use as a context manager to close the environment; subject reset belongs to
     the trial owner. Terminal rows are delivered once, without a ``respond``.
 
@@ -69,9 +70,6 @@ class EnvironmentSource(Source):
         for method in ('reset', 'step'):
             if not callable(getattr(environment, method, None)):
                 raise TypeError(f"Environment requires {method}()")
-        if self.reset_kwargs:
-            # Fail before starting an episode if reset cannot accept its settings.
-            inspect.signature(environment.reset).bind(**self.reset_kwargs)
         self.observation_spec = self._specification('observation_spec', require_specs)
         self.action_spec = self._specification('action_spec', require_specs)
         self.input_events: list[StreamEvent] = []
