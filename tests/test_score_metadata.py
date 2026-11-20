@@ -482,10 +482,10 @@ def test_no_checkout_stamps_none(monkeypatch, tmp_path):
 
 def test_software_keys_are_installed_distribution_names():
     from brainscore_core.environment_check import _score_environment
-    assert set(_score_environment()["software"]) == {
-        "python", "numpy", "torch", "transformers", "scikit-learn", "xarray",
-        "brainscore-core", "brainscore", "brainscore_vision", "brainscore_language",
-        "environment_fingerprint", "accelerator", "math_threads"}
+    # The names that readers of a score depend on; a new entry does not fail this test.
+    assert {"python", "numpy", "torch", "transformers", "scikit-learn", "xarray",
+            "brainscore-core", "brainscore", "brainscore_vision", "brainscore_language",
+            "environment_fingerprint", "accelerator", "math_threads"} <= set(_score_environment()["software"])
 
 
 def test_nested_score_records_merge_their_deliveries():

@@ -308,6 +308,10 @@ def stream_trials(session, task, on_begin: Optional[Callable[[], None]] = None):
     the time of the trial's input events, or None when they have none. A session
     that sends no input events presents its table, or the task's own stimuli,
     with no time.
+
+    Limits: several ``begin`` events with no trial between them call ``on_begin()``
+    once for each, and a caller that resets at the next answer resets once; a row of
+    the session's table that no event presents is not given.
     """
     count = 0
     for stimuli, t_ms in _stream_rows(session, on_begin, skip_channels=("instruction",)):

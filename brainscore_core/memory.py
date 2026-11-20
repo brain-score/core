@@ -38,8 +38,12 @@ from brainscore_core.contract import Subject
 logger = logging.getLogger('brainscore_core.memory')
 
 class MemoryError(Exception):
-    """Raised when estimated memory exceeds available resources."""
-    pass
+    """Raised when estimated memory exceeds available resources.
+
+    Limit: the name is also the name of a built-in exception. Refer to this class through
+    its module (``brainscore_core.memory.MemoryError``); code that must catch the built-in
+    one in a module that imports this class writes ``builtins.MemoryError``.
+    """
 
 
 def get_available_memory() -> int:
