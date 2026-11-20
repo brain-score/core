@@ -694,3 +694,10 @@ def test_the_old_benchmark_receives_a_new_subjects_checked_answer_whatever_its_m
     facade.start_task('probabilities', fitting_stimuli=_labelled_images())
     answer = facade.look_at(_images())
     assert answer.values.tolist() == [[0.25, 0.75]] * 2
+
+
+def test_the_fitted_labels_come_from_image_label_else_label_and_a_table_needs_one():
+    from brainscore_core.legacy_facade import fitted_labels
+    assert fitted_labels('probabilities', pd.DataFrame({'label': ['b', 'a', 'b']})) == ['b', 'a']
+    with pytest.raises(ValueError, match="'image_label'"):
+        fitted_labels('probabilities', pd.DataFrame({'stimulus_id': ['s0']}))
