@@ -68,7 +68,7 @@ def drive_neural_session(
             output = subject.process(stimuli, multi_modality=True)
         else:
             output = subject.process(stimuli)
-        outputs = _demultiplex_neural_output(output, channel_regions)
+        outputs = demultiplex_neural_output(output, channel_regions)
     for channel, region, channel_output in outputs:
         session.respond(StreamEvent(
             channel=channel,
@@ -117,7 +117,7 @@ def _start_recording(
         subject.start_recording(recording_target, time_bins=time_bins)
 
 
-def _demultiplex_neural_output(output, channel_regions):
+def demultiplex_neural_output(output, channel_regions):
     """Return one region-specific payload per requested neural channel.
 
     A single requested channel keeps the historical payload object unchanged.
@@ -226,7 +226,7 @@ def drive_neural_session_streaming(
             outputs = [(channel, region, payloads[channel])
                        for channel, region in channel_regions]
         else:
-            outputs = _demultiplex_neural_output(subject.process(stimuli), channel_regions)
+            outputs = demultiplex_neural_output(subject.process(stimuli), channel_regions)
         for channel, region, channel_output in outputs:
             session.respond(StreamEvent(
                 channel=channel,
