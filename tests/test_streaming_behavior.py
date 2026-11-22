@@ -166,3 +166,24 @@ def test_each_begin_is_passed_on_after_the_trial_before_it():
     for stimuli, _ in stream_trials(session, session.task, on_begin=lambda: log.append('begin')):
         log.append(stimuli['stimulus_id'].iloc[0])
     assert log == ['begin', 's0', 's1', 'begin', 's2']
+
+
+@pytest.mark.unit
+def test_the_streamed_behavior_driver_passes_each_begin_on():
+    """The streamed behavior driver calls ``on_begin`` at each begin, after the trial before it
+    was answered, as the streamed neural driver does."""
+    from brainscore_core.streaming import Session, begin_event
+    from brainscore_core.streaming_helpers import drive_behavior_session_streaming
+    rows = [StreamEvent('text', str(i), 0.0, {'stimulus_index': i, 'stimulus_id': f's{i}'})
+            for i in range(2)]
+    log = []
+
+    class _Logged(_Subject):
+        def process(self, stimuli, multi_modality=False):
+            log.append(stimuli['stimulus_id'].iloc[0])
+            return super().process(stimuli)
+
+    session = Session(iter([begin_event(), rows[0], begin_event(), rows[1]]),
+                      ['behavior'], _context(_stimuli(2))).declare_inputs({'text', 'control'})
+    drive_behavior_session_streaming(_Logged(), session, on_begin=lambda: log.append('begin'))
+    assert log == ['begin', 's0', 'begin', 's1']
