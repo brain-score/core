@@ -10,7 +10,8 @@ def check_cache_directory():
     Configure RESULTCACHING_HOME before importing scoring packages, because the
     result-caching decorators capture that location when they are imported.
     """
-    if os.environ.get('RESULTCACHING_DISABLE') == '1':
+    from brainscore_core.extraction_cache import store_enabled
+    if not store_enabled(''):
         return None
     path = Path(os.environ.get('RESULTCACHING_HOME', '~/.result_caching')).expanduser()
     try:
