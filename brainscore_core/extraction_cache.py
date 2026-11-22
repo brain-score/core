@@ -51,6 +51,29 @@ def weight_fingerprint_scope():
         _weight_hashes.reset(token)
 
 
+def store_enabled(identifier: str) -> bool:
+    """Whether the activation store serves the entry ``identifier`` now.
+
+    The one reader of ``RESULTCACHING_DISABLE`` in core, vision and unified: every store
+    of the three packages asks it. The rule is that of the ``result_caching`` decorators,
+    which read the variable themselves: ``'1'`` turns every store off, an empty value
+    or ``'0'`` none, any other value the entries whose name starts with one of its
+    comma-separated prefixes. A list with an empty item, such as ``','``, turns every
+    store off, because every name starts with the empty prefix. Ask with the entry name the store builds, or with the longest part of it
+    that is known (``''`` asks whether any store can be on).
+    """
+    return is_enabled(identifier)
+
+
+def _store_state() -> str:
+    """The activation store state now, for the provenance of a session: ``'on'``, ``'off'``,
+    or ``'off for: <prefixes>'``."""
+    if not store_enabled(''):
+        return 'off'
+    value = os.environ.get('RESULTCACHING_DISABLE', '0')
+    return 'on' if value in ('', '0') else f'off for: {value}'
+
+
 # The process-wide activation cache switch while a subject's intervention is
 # active. Known gap (Contract Rule 4.4): the legacy vision store reads only the
 # RESULTCACHING_DISABLE variable, so the switch is that variable.
@@ -290,7 +313,7 @@ def extraction_fingerprint(configuration, *, cache_identifier=None, part=None):
     both from one traversal, so no tensor is read twice. The part's value equals
     ``fingerprint(configuration[part])``. ``(None, None)`` where the whole is None.
     """
-    if cache_identifier is not None and not is_enabled(cache_identifier):
+    if cache_identifier is not None and not store_enabled(cache_identifier):
         return None if part is None else (None, None)
     try:
         if part is None:
@@ -379,11 +402,11 @@ class store_xarray(_store_xarray):
     that fit the file system."""
 
     def get_function_identifier(self, function, call_args):
-        identifier = super().get_function_identifier(function, call_args)
-        if not is_enabled(identifier):
-            return identifier   # disabled on the whole name: never stored, so its length is no matter
-        identifier = _name_that_fits(identifier)
-        if (call_args.get('extraction_fingerprint') and is_enabled(identifier)
+        name = super().get_function_identifier(function, call_args)
+        if not store_enabled(name):     # the store then neither reads nor writes this name
+            return name
+        identifier = _name_that_fits(name)
+        if (call_args.get('extraction_fingerprint') and store_enabled(identifier)
                 and not self.is_stored(identifier)):
             old_args = {k: v for k, v in call_args.items() if k != 'extraction_fingerprint'}
             old_identifier = super().get_function_identifier(function, old_args)

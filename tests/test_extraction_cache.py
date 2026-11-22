@@ -310,6 +310,41 @@ def test_a_store_entry_with_long_names_fits_one_path_component(tmp_path, monkeyp
     assert all(len((path.name + '.filepart').encode()) <= 255 for path in tmp_path.rglob('*'))
 
 
+@pytest.mark.parametrize('value', ['', '0', '1', 'pkg', 'pkg.Extractor', 'other,pkg.Extractor', 'other', ','])
+def test_the_one_reader_of_the_store_switch_answers_as_the_store_package(monkeypatch, value):
+    """``store_enabled`` and the decorators of ``result_caching`` (which read the switch themselves)
+    give the same on and off answer for an empty value, '1', a prefix and a list of prefixes."""
+    import result_caching
+    from brainscore_core.extraction_cache import store_enabled
+    monkeypatch.setenv('RESULTCACHING_DISABLE', value)
+    for identifier in ('', 'pkg.Extractor.activations/identifier=m', 'other.f', 'third.g'):
+        assert store_enabled(identifier) == result_caching.is_enabled(identifier)
+
+
+def test_a_long_store_entry_that_the_switch_turns_off_is_not_written(tmp_path, monkeypatch):
+    """The switch is asked with the name the store builds, before that name is shortened to fit
+    the file system: '1' keeps the store off for a long name."""
+    import xarray as xr
+    from brainscore_core.extraction_cache import store_xarray
+    monkeypatch.setenv('RESULTCACHING_HOME', str(tmp_path))
+    calls = []
+
+    class Extractor:
+        @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
+        def activations(self, identifier, layers, stimuli_identifier, extraction_fingerprint):
+            calls.append(list(layers))
+            return xr.DataArray(np.zeros((1, len(layers))), dims=['presentation', 'neuroid'],
+                                coords={'layer': ('neuroid', list(layers))})
+
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
+    arguments = dict(identifier='m' * 120, layers=['a'], stimuli_identifier='t' * 150,
+                     extraction_fingerprint='v2-' + 'f' * 64)
+    Extractor().activations(**arguments)
+    Extractor().activations(**arguments)
+    assert len(calls) == 2
+    assert not [path for path in tmp_path.rglob('*') if path.is_file()]
+
+
 def test_a_disable_prefix_reaches_the_arguments_of_a_long_name(tmp_path, monkeypatch):
     """``RESULTCACHING_DISABLE=<prefix>`` is read on the whole name, also when the name is too long
     for one path component: a prefix into the arguments disables the entry (no file, no read)."""

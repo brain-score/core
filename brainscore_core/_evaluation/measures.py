@@ -53,12 +53,13 @@ compute metrics); copy the context into the worker if one ever does.
 
 import itertools
 import json
-import os
 from copy import deepcopy
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Callable, Dict, Iterator, Optional, Set, Tuple
+
+from brainscore_core.extraction_cache import _store_state
 
 _active: ContextVar[Optional['MeasureRecord']] = ContextVar('measure_record', default=None)
 
@@ -270,18 +271,6 @@ def _note_record(payload) -> None:
         response = attrs.get('response') if isinstance(attrs, dict) else None
     if isinstance(response, dict) and 'format' in response:
         record._facts.records[json.dumps(response, sort_keys=True, default=str)] = response
-
-
-def _store_state() -> str:
-    """The activation store state now: ``'on'``, ``'off'``, or ``'off for: <prefixes>'``.
-
-    The rule of ``result_caching.is_enabled``: ``'1'`` disables every function,
-    an empty value or ``'0'`` none, any other value the listed identifier prefixes.
-    """
-    value = os.environ.get('RESULTCACHING_DISABLE', '0')
-    if value == '1':
-        return 'off'
-    return 'on' if value in ('', '0') else f'off for: {value}'
 
 
 def note_session(session, regions_per_pass: Optional[str] = None,
