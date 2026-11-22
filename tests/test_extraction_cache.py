@@ -308,3 +308,28 @@ def test_a_store_entry_with_long_names_fits_one_path_component(tmp_path, monkeyp
     Extractor().activations(**arguments)
     assert len(calls) == 1
     assert all(len((path.name + '.filepart').encode()) <= 255 for path in tmp_path.rglob('*'))
+
+
+def test_a_disable_prefix_reaches_the_arguments_of_a_long_name(tmp_path, monkeypatch):
+    """``RESULTCACHING_DISABLE=<prefix>`` is read on the whole name, also when the name is too long
+    for one path component: a prefix into the arguments disables the entry (no file, no read)."""
+    import xarray as xr
+    from brainscore_core.extraction_cache import store_xarray
+    monkeypatch.setenv('RESULTCACHING_HOME', str(tmp_path))
+    calls = []
+
+    class Extractor:
+        @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
+        def activations(self, identifier, layers, stimuli_identifier, extraction_fingerprint):
+            calls.append(list(layers))
+            return xr.DataArray(np.zeros((1, len(layers))), dims=['presentation', 'neuroid'],
+                                coords={'layer': ('neuroid', list(layers))})
+
+    arguments = dict(identifier='m' * 120, layers=['a'], stimuli_identifier='t' * 150,
+                     extraction_fingerprint='v2-' + 'f' * 64)
+    name = f'{__name__}.Extractor.activations/identifier={"m" * 120}'
+    monkeypatch.setenv('RESULTCACHING_DISABLE', name)
+    Extractor().activations(**arguments)
+    Extractor().activations(**arguments)
+    assert len(calls) == 2
+    assert not any(path.is_file() for path in tmp_path.rglob('*'))

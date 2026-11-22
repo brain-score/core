@@ -483,6 +483,7 @@ def drive_behavior_session(
 def drive_behavior_session_streaming(
     subject, session: Session, task=None,
     driver: str = "interact_streaming",
+    on_begin: Optional[Callable[[], None]] = None,
 ) -> None:
     """Behavioral trials delivered one at a time.
 
@@ -493,7 +494,8 @@ def drive_behavior_session_streaming(
     outside the loop.
 
     Same responses as the batch driver; what changes is that the trial set need not
-    exist in full before the first response is produced.
+    exist in full before the first response is produced. ``on_begin()`` runs at each
+    ``begin`` control event, after the trial before it was answered.
     """
     if task is None:
         task = getattr(session, "task", None)
@@ -502,8 +504,10 @@ def drive_behavior_session_streaming(
             "behavior participate requires a session.task to drive."
         )
     refuse_variance(subject, session)
+    if on_begin is not None:
+        session._request_control('An episode reset')
     subject.start_task(task)              # once, before any trial
-    for trial_index, (trial, t_ms) in enumerate(stream_trials(session, task)):
+    for trial_index, (trial, t_ms) in enumerate(stream_trials(session, task, on_begin)):
         output = subject.process(trial)
         session.respond(StreamEvent(
             channel="behavior",
