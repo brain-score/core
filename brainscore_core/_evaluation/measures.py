@@ -207,7 +207,7 @@ def stage_session(session, participant, run: Callable[[], Any]) -> Any:
     so a wrapper names its sessions) and the notes reach the outer record in one append.
     Without an open record (a session outside a score) nothing is kept.
 
-    Limit (stated, not repaired): one asynchronous interrupt (a signal) that arrives in the
+    Limit: one asynchronous interrupt (a signal) that arrives in the
     few steps between the end of the body and the return of ``stage_session`` (the close,
     the reset, the naming, the publishing append and its return) can have one of two
     effects: the notes of a session that succeeded are not published, or they are
