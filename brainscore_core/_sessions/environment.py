@@ -286,6 +286,10 @@ def environment_session(environment, outputs=None, task=None, *,
     """A session driving ``environment``.
 
     ``outputs`` defaults to the action channel alone.
+
+    Limit: pre-flight compares channel names only, not the action space; a policy whose
+    action does not fit ``environment.action_spec()`` fails at the first action, after one
+    subject call. Write the policy for the action space the environment states.
     """
     source = EnvironmentSource(
         environment, action_channel=action_channel, action_validator=action_validator,
