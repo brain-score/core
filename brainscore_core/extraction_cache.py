@@ -379,7 +379,10 @@ class store_xarray(_store_xarray):
     that fit the file system."""
 
     def get_function_identifier(self, function, call_args):
-        identifier = _name_that_fits(super().get_function_identifier(function, call_args))
+        identifier = super().get_function_identifier(function, call_args)
+        if not is_enabled(identifier):
+            return identifier   # disabled on the whole name: never stored, so its length is no matter
+        identifier = _name_that_fits(identifier)
         if (call_args.get('extraction_fingerprint') and is_enabled(identifier)
                 and not self.is_stored(identifier)):
             old_args = {k: v for k, v in call_args.items() if k != 'extraction_fingerprint'}
