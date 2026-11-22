@@ -321,11 +321,9 @@ def test_the_one_reader_of_the_store_switch_answers_as_the_store_package(monkeyp
         assert store_enabled(identifier) == result_caching.is_enabled(identifier)
 
 
-@pytest.mark.parametrize('prefix_of_the_arguments', [False, True])
-def test_a_long_store_entry_that_the_switch_turns_off_is_not_written(tmp_path, monkeypatch,
-                                                                     prefix_of_the_arguments):
+def test_a_long_store_entry_that_the_switch_turns_off_is_not_written(tmp_path, monkeypatch):
     """The switch is asked with the name the store builds, before that name is shortened to fit
-    the file system: '1' and a prefix that reaches into the arguments both keep the store off."""
+    the file system: '1' keeps the store off for a long name."""
     import xarray as xr
     from brainscore_core.extraction_cache import store_xarray
     monkeypatch.setenv('RESULTCACHING_HOME', str(tmp_path))
@@ -338,11 +336,35 @@ def test_a_long_store_entry_that_the_switch_turns_off_is_not_written(tmp_path, m
             return xr.DataArray(np.zeros((1, len(layers))), dims=['presentation', 'neuroid'],
                                 coords={'layer': ('neuroid', list(layers))})
 
-    prefix = f'{__name__}.Extractor.activations/identifier=mmm'
-    monkeypatch.setenv('RESULTCACHING_DISABLE', prefix if prefix_of_the_arguments else '1')
+    monkeypatch.setenv('RESULTCACHING_DISABLE', '1')
     arguments = dict(identifier='m' * 120, layers=['a'], stimuli_identifier='t' * 150,
                      extraction_fingerprint='v2-' + 'f' * 64)
     Extractor().activations(**arguments)
     Extractor().activations(**arguments)
     assert len(calls) == 2
     assert not [path for path in tmp_path.rglob('*') if path.is_file()]
+
+
+def test_a_disable_prefix_reaches_the_arguments_of_a_long_name(tmp_path, monkeypatch):
+    """``RESULTCACHING_DISABLE=<prefix>`` is read on the whole name, also when the name is too long
+    for one path component: a prefix into the arguments disables the entry (no file, no read)."""
+    import xarray as xr
+    from brainscore_core.extraction_cache import store_xarray
+    monkeypatch.setenv('RESULTCACHING_HOME', str(tmp_path))
+    calls = []
+
+    class Extractor:
+        @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
+        def activations(self, identifier, layers, stimuli_identifier, extraction_fingerprint):
+            calls.append(list(layers))
+            return xr.DataArray(np.zeros((1, len(layers))), dims=['presentation', 'neuroid'],
+                                coords={'layer': ('neuroid', list(layers))})
+
+    arguments = dict(identifier='m' * 120, layers=['a'], stimuli_identifier='t' * 150,
+                     extraction_fingerprint='v2-' + 'f' * 64)
+    name = f'{__name__}.Extractor.activations/identifier={"m" * 120}'
+    monkeypatch.setenv('RESULTCACHING_DISABLE', name)
+    Extractor().activations(**arguments)
+    Extractor().activations(**arguments)
+    assert len(calls) == 2
+    assert not any(path.is_file() for path in tmp_path.rglob('*'))

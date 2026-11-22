@@ -406,7 +406,7 @@ class store_xarray(_store_xarray):
         if not store_enabled(name):     # the store then neither reads nor writes this name
             return name
         identifier = _name_that_fits(name)
-        if (call_args.get('extraction_fingerprint')
+        if (call_args.get('extraction_fingerprint') and store_enabled(identifier)
                 and not self.is_stored(identifier)):
             old_args = {k: v for k, v in call_args.items() if k != 'extraction_fingerprint'}
             old_identifier = super().get_function_identifier(function, old_args)
