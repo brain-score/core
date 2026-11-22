@@ -57,8 +57,9 @@ def store_enabled(identifier: str) -> bool:
     The one reader of ``RESULTCACHING_DISABLE`` in core, vision and unified: every store
     of the three packages asks it. The rule is that of the ``result_caching`` decorators,
     which read the variable themselves: ``'1'`` turns every store off, an empty value
-    none, any other value the entries whose name starts with one of its comma-separated
-    prefixes. Ask with the entry name the store builds, or with the longest part of it
+    or ``'0'`` none, any other value the entries whose name starts with one of its
+    comma-separated prefixes. A list with an empty item, such as ``','``, turns every
+    store off, because every name starts with the empty prefix. Ask with the entry name the store builds, or with the longest part of it
     that is known (``''`` asks whether any store can be on).
     """
     return is_enabled(identifier)
