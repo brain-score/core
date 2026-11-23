@@ -10,8 +10,7 @@ subjects with compatible inputs, outputs and methods.
 
 > **UMI integration:** `Subject` defines session interaction through
 > `participate(session)`. `BrainScoreModel`, in the unified `brainscore`
-> package, implements it with extraction and task helpers, including
-> `process()`. Existing vision `BrainModel` and language `ArtificialSubject`
+> package, implements it with extraction and task helpers. Existing vision `BrainModel` and language `ArtificialSubject`
 > plugins remain supported through adapters. See
 > [the interface guide](docs/UMI_MIGRATION.md).
 
