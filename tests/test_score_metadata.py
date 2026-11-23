@@ -133,6 +133,16 @@ def test_requested_output_channels_infer_behavioral_parent():
     ) == {"behavior"}
 
 
+def test_a_benchmark_that_declares_channels_gets_no_parent_guess():
+    """Rule 5.6: a declaration is read, never guessed. Only a benchmark that declares
+    no channels (a legacy benchmark) gets the stamp from its parent."""
+    declares_none = _Benchmark(parent="behavioral", requested_output_channels=set())
+    declares_inputs = _Benchmark(parent="behavioral")
+    declares_inputs.required_input_channels = {"vision:image"}
+    assert requested_output_channels_for_score(declares_none) == set()
+    assert requested_output_channels_for_score(declares_inputs) == set()
+
+
 def test_parent_lookup_is_best_effort_for_legacy_benchmarks():
     benchmark = _AbstractParentBenchmark()
 
