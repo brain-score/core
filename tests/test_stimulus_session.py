@@ -289,13 +289,15 @@ def test_only_the_table_builder_states_that_its_source_presents_exactly_its_tabl
 
 def test_a_rebuilt_row_names_a_picture_or_clip_event_by_the_catalog():
     """An event that names no column: its channel's first catalog column, unless the channel is a column."""
-    from brainscore_core.streaming_helpers import reconstruct_stimulus_set_from_events
-    columns = {channel: list(reconstruct_stimulus_set_from_events(
-        [StreamEvent(channel, 'x', 0.0, {'stimulus_id': 's0'})]).columns)
+    from types import SimpleNamespace
+    from brainscore_core.streaming_helpers import session_stimuli
+    no_table = SimpleNamespace(stimuli=None)
+    columns = {channel: list(session_stimuli(
+        no_table, [StreamEvent(channel, 'x', 0.0, {'stimulus_id': 's0'})]).columns)
         for channel in ('vision:image', 'vision:video', 'audio', 'text')}
     assert columns == {'vision:image': ['image_file_name', 'stimulus_id'],
                        'vision:video': ['video_path', 'stimulus_id'],
                        'audio': ['audio', 'stimulus_id'], 'text': ['text', 'stimulus_id']}
-    named = reconstruct_stimulus_set_from_events(
-        [StreamEvent('vision:image', 'x', 0.0, {'stimulus_id': 's0', 'column': 'image_path'})])
+    named = session_stimuli(
+        no_table, [StreamEvent('vision:image', 'x', 0.0, {'stimulus_id': 's0', 'column': 'image_path'})])
     assert list(named.columns) == ['image_path', 'stimulus_id']

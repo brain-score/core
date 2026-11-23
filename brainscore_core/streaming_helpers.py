@@ -33,8 +33,6 @@ from brainscore_core._sessions.drivers import (
 
 from brainscore_core._sessions.payloads import (
     behavior_stimuli_from_session,
-    preserve_stimulus_set_type,
-    reconstruct_stimulus_set_from_events,
     session_outputs,
     drain_session_inputs,
     session_stimuli,
