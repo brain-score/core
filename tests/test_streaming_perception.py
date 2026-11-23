@@ -259,3 +259,17 @@ def test_the_region_splitter_is_public_and_gives_each_region_its_neuroids():
     split = demultiplex_neural_output(output, [('neural:late', 'late'), ('neural:early', 'early')])
     assert [(channel, payload['region'].values.tolist()) for channel, _, payload in split] == [
         ('neural:late', ['late']), ('neural:early', ['early'])]
+
+
+@pytest.mark.unit
+def test_streaming_with_a_channel_runner_needs_no_recording_method():
+    """A subject that records each batch with its own runner has no typed methods."""
+    from brainscore_core.streaming_helpers import drive_neural_session_streaming
+
+    def runner(stimuli, channel_regions, time_bins, multi_modality):
+        return {channel: _CountingSubject().process(stimuli) for channel, _ in channel_regions}
+
+    session = stimulus_session(_stimulus_set(2), ['neural:IT'], streaming=True)
+    drive_neural_session_streaming(object(), session, channel_runner=runner)
+
+    assert len([event for event in session.emitted if event.channel == 'neural:IT']) == 2

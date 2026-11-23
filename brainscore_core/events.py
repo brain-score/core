@@ -82,9 +82,8 @@ class StateChange:
 
     Used to simulate conditions like dyslexia, prosopagnosia, or pharmacological
     effects. A session (or the typed ``apply_state_change`` helper) delivers it
-    to the subject; ``BrainScoreModel.process()`` also accepts it as a typed
-    convenience, the same way it accepts stimuli. Benchmarks studying neural
-    dysfunction or drug effects do not need a separate model method.
+    to the subject. Benchmarks studying neural dysfunction or drug effects do
+    not need a separate model method.
 
     Two roles, distinguished by ``kind``:
 

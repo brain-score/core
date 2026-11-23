@@ -33,9 +33,8 @@ def drive_neural_session(
 ) -> None:
     """Answer a session's ``neural:<region>`` requests with one ``process`` call.
 
-    For typed subjects such as legacy adapters and ``BrainScoreModel``, which
-    already implement ``start_recording(target, time_bins=...)`` and
-    ``process(stimuli)``. The contract does not require ``process``: an
+    For typed subjects such as legacy adapters, which already implement
+    ``start_recording(target, time_bins=...)`` and ``process(stimuli)``. The contract does not require ``process``: an
     arbitrary ``Subject`` only implements ``participate`` and never needs this.
 
     Reads every input from ``session``, records all requested regions in one
@@ -214,8 +213,8 @@ def drive_neural_session_streaming(
     if on_begin is not None:
         session._request_control('An episode reset')
     time_bins = getattr(session, "time_bins", None)
-    recording_target = _combined_recording_target(channel_regions)
-    _start_recording(subject, recording_target, time_bins=time_bins)
+    if channel_runner is None:     # a runner sets its own recording for each batch
+        _start_recording(subject, _combined_recording_target(channel_regions), time_bins=time_bins)
 
     stream_index = 0
 
@@ -442,8 +441,8 @@ def drive_behavior_session(
 ) -> None:
     """Answer a session's ``behavior`` request with ``start_task`` then one ``process`` call.
 
-    For typed subjects such as legacy adapters and ``BrainScoreModel``, which
-    already implement ``start_task(task)`` and ``process(stimuli)``.
+    For typed subjects such as legacy adapters, which already implement
+    ``start_task(task)`` and ``process(stimuli)``.
     The contract does not require ``process``: an arbitrary ``Subject`` only
     implements ``participate`` and never needs this.
 
