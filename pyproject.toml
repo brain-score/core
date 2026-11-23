@@ -55,7 +55,6 @@ ignore_missing_imports = true
 follow_imports = "silent"
 warn_unused_ignores = true
 files = [
-    "brainscore_core/model_interface.py",
     "brainscore_core/_evaluation/compatibility.py",
     "brainscore_core/_evaluation/memory.py",
     "brainscore_core/events.py",
