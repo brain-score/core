@@ -110,7 +110,7 @@ def test_validate_reports_unaddressable_channel_family():
 def test_registration_keeps_builtin_column_ownership(monkeypatch):
     """A column core already maps cannot be claimed by a new family without replace=True."""
     import pytest
-    from brainscore_core.extensions import register_channel
+    from brainscore_core.io_catalog import register_channel
 
     monkeypatch.setattr(io_catalog, '_CATALOG', dict(io_catalog._CATALOG))
     monkeypatch.setattr(io_catalog, '_STIMULUS_COLUMNS', dict(io_catalog._STIMULUS_COLUMNS))

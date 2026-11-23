@@ -29,7 +29,7 @@ please [send in a pull request](https://github.com/brain-score/core/pulls).
 | `compatibility.py`, `memory.py`, `preflight.py`, `score_metadata.py`, `score_status.py`, `legacy_facade.py`, `execution_plan.py` | Pre-flight, memory checks, score stamps, the legacy-benchmark facade |
 | `streaming_helpers.py` | Session helpers: build a session, run a subject on it, read its outputs |
 | `assembly_builder.py`, `text.py`, `time_axis.py` | Assembly builders, text and time helpers |
-| `extraction_cache.py`, `environment_check.py`, `hf_compat.py`, `extensions.py` | Extraction cache, environment checks, extensions |
+| `extraction_cache.py`, `environment_check.py`, `hf_compat.py` | Extraction cache, environment checks |
 | `_sessions/`, `_evaluation/` | Internal: the session implementation and the measure record |
 
 `BrainScoreModel` and the temporal analysis functions are in the unified

@@ -9,7 +9,7 @@ import pytest
 from brainscore_core import io_catalog
 from brainscore_core.compatibility import validate_channels
 from brainscore_core.contract import TaskContext
-from brainscore_core.extensions import register_channel
+from brainscore_core.io_catalog import register_channel
 from brainscore_core.responses import Choice, Scale, Text
 from brainscore_core.streaming import Session, StreamEvent
 

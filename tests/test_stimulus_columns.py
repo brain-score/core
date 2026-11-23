@@ -12,7 +12,7 @@ import pytest
 from brainscore_core import io_catalog
 from brainscore_core.compatibility import check_channel_compatibility
 from brainscore_core.contract import Subject
-from brainscore_core.extensions import CatalogEntry, register_channel
+from brainscore_core.io_catalog import CatalogEntry, register_channel
 from brainscore_core.responses import PART_CHANNELS, part_columns
 from brainscore_core.streaming_helpers import declared_only
 from brainscore_core.streaming import StreamEvent
