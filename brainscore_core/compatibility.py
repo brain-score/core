@@ -25,7 +25,10 @@ An incompatible pair raises :class:`CompatibilityError`; ``score()`` returns
 the N/A result for it (``brainscore_core.score_status.na_score``). A malformed
 declaration raises ``ValueError``: it is a defect, not an incompatible pair. A
 compatible pair whose run is refused when it starts (a task, outputs or settings
-the subject cannot run) raises :class:`ExecutionNotFeasibleError`, an error.
+the subject cannot run) raises :class:`ExecutionNotFeasibleError`, an error. On an
+old benchmark, which states no requested output, a refusal before any input of the
+benchmark reached the subject is raised as :class:`CompatibilityError` (N/A) by the
+legacy facade.
 
 Benchmark inputs are ``required_input_channels`` when declared, otherwise the
 channels of ``required_modalities`` plus ``accepted_modalities``. A benchmark with no
@@ -51,8 +54,10 @@ from brainscore_core.streaming import CONTROL_CHANNEL, channel_declared, parse_c
 class CompatibilityError(Exception):
     """Raised when the declarations of a subject and a benchmark do not fit.
 
-    Only the declaration check raises it, before any compute, and ``score()``
-    turns it into the N/A result. ``channels`` are the channels that cause the
+    The declaration check raises it, before any compute, and ``score()`` turns it
+    into the N/A result. The legacy facade raises it too, for a refusal of an old
+    benchmark's task or recording before any input of the benchmark reached the
+    subject. ``channels`` are the channels that cause the
     mismatch (for example the requested outputs the subject does not produce);
     empty when the reason is not a channel.
     """
@@ -67,7 +72,9 @@ class ExecutionNotFeasibleError(Exception):
 
     The pair passed the declaration check, and the refusal comes when a session
     or a benchmark run starts, before model computation. It is an error of the
-    run, never N/A; ``channels`` and ``task_type`` name what was refused.
+    run; ``channels`` and ``task_type`` name what was refused. On an old benchmark, a
+    refusal before any input reached the subject is N/A (the legacy facade raises it
+    as :class:`CompatibilityError`).
 
     A refusal is raised before model computation where the fact is knowable at
     session start. A reply part that can detect an unsupported setting or

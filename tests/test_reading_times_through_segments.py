@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from brainscore_core.compatibility import ExecutionNotFeasibleError
+from brainscore_core.compatibility import CompatibilityError
 from brainscore_core.contract import Subject, TaskContext
 from brainscore_core.legacy_facade import LegacyBenchmarkFacade, READING_TIME_POLICY
 from brainscore_core.response_formats import response_record
@@ -214,7 +214,7 @@ def test_a_subject_with_neither_output_is_refused_before_any_session():
     subject = _Segmenter()
     subject.out_channels = {'neural:language_system'}
     facade = LegacyBenchmarkFacade(subject)
-    with pytest.raises(ExecutionNotFeasibleError, match="no 'behavior:log_probabilities' output"):
+    with pytest.raises(CompatibilityError, match="no 'behavior:log_probabilities' output"):
         facade.start_behavioral_task('reading_times')
     assert subject.sessions == []
 
@@ -224,6 +224,6 @@ def test_a_joint_call_is_refused_before_any_session():
     facade = LegacyBenchmarkFacade(subject)
     facade.start_neural_recording('language_system')
     facade.start_behavioral_task('reading_times')
-    with pytest.raises(ExecutionNotFeasibleError, match='neural recording'):
+    with pytest.raises(CompatibilityError, match='neural recording'):
         facade.digest_text(['a', 'b'])
     assert subject.sessions == []

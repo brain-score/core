@@ -115,13 +115,12 @@ def test_behavioral_task_needs_a_declared_behavior_output():
     class Neural(_Recorder):
         out_channels = {'neural:IT'}
 
-    from brainscore_core.compatibility import CompatibilityError, ExecutionNotFeasibleError
+    # Refused before any input reached the subject: N/A with the reason (CompatibilityError).
+    from brainscore_core.compatibility import CompatibilityError
     subject = Neural()
-    with pytest.raises(ExecutionNotFeasibleError, match="declares no 'behavior' output") as caught:
+    with pytest.raises(CompatibilityError, match="declares no 'behavior' output") as caught:
         LegacyBenchmarkFacade(subject).start_behavioral_task('reading_times')
     assert caught.value.channels == {'behavior'}
-    assert caught.value.task_type == 'reading_times'
-    assert not isinstance(caught.value, CompatibilityError)
     assert subject.sessions == []
 
 
@@ -254,9 +253,26 @@ def test_an_old_probabilities_task_is_refused_before_compute_without_the_format(
     subject = _Recorder()
     facade = LegacyBenchmarkFacade(subject)
     facade.start_task('probabilities', fitting_stimuli=_labelled_images())
-    with pytest.raises(ExecutionNotFeasibleError, match='behavior:probabilities'):
+    from brainscore_core.compatibility import CompatibilityError
+    with pytest.raises(CompatibilityError, match='behavior:probabilities'):
         facade.look_at(_images())
     assert subject.sessions == []
+
+
+def test_a_refusal_after_an_input_reached_the_subject_stays_an_error():
+    class RefusesTheSecondTask(_Recorder):
+        def participate(self, session):
+            if self.sessions:
+                raise ExecutionNotFeasibleError('no answer for this task', channels={'behavior'})
+            super().participate(session)
+
+    subject = RefusesTheSecondTask()
+    facade = LegacyBenchmarkFacade(subject)
+    facade.start_recording('IT')
+    facade.look_at(_images())
+    facade.start_task('odd_one_out')
+    with pytest.raises(ExecutionNotFeasibleError, match='no answer for this task'):
+        facade.look_at(_images())
 
 
 def test_fitting_settings_stay_apart_from_measurement_settings():
@@ -363,11 +379,11 @@ def test_other_legacy_tasks_stay_on_bare_behavior(task, setting):
 
 
 def test_a_label_task_refuses_a_subject_without_a_choice_output():
-    from brainscore_core.compatibility import ExecutionNotFeasibleError
+    from brainscore_core.compatibility import CompatibilityError
     subject = _Recorder()
     facade = LegacyBenchmarkFacade(subject, visual_degrees=8)
     facade.start_task('label', ['cat', 'dog'])
-    with pytest.raises(ExecutionNotFeasibleError, match="declares no 'behavior:choice' output"):
+    with pytest.raises(CompatibilityError, match="declares no 'behavior:choice' output"):
         facade.look_at(_label_stimuli())
     assert subject.sessions == []
 

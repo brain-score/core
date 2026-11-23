@@ -18,7 +18,9 @@ of its own: every legacy call goes through this facade.
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from brainscore_core.compatibility import ExecutionNotFeasibleError, _declares_channels
+from brainscore_core.compatibility import (
+    CompatibilityError, ExecutionNotFeasibleError, _declares_channels)
+from brainscore_core.streaming import CONTROL_CHANNEL
 from brainscore_core.contract import TaskContext
 from brainscore_core._sessions.buffered import stimulus_session
 
@@ -57,6 +59,8 @@ class LegacyBenchmarkFacade:
         # The labels of an old probabilities task in the old column order, as the fitting
         # stimuli give them; None for any other task.
         self._probability_labels: Optional[list] = None
+        # Whether an input event of the benchmark reached the subject (``_refused``).
+        self._reached = False
 
     def _resolve(self, answer):
         import numpy as np
@@ -165,17 +169,17 @@ class LegacyBenchmarkFacade:
         if self._probability_labels is not None:
             channel = 'behavior:probabilities'
             if channel not in set(self._subject.out_channels):
-                raise ExecutionNotFeasibleError(
+                raise self._refused(ExecutionNotFeasibleError(
                     f"Subject {self.identifier!r} refused the legacy probabilities task: it is asked "
                     f"on 'behavior:probabilities', and the subject declares no such output.",
-                    channels={channel}, task_type='probabilities')
+                    channels={channel}, task_type='probabilities'))
         elif self._choice_requested():
             channel = 'behavior:choice'
             if channel not in set(self._subject.out_channels):
-                raise ExecutionNotFeasibleError(
+                raise self._refused(ExecutionNotFeasibleError(
                     f"Subject {self.identifier!r} refused the legacy label task: it is asked "
                     f"as a choice among the labels, and the subject declares no "
-                    f"'behavior:choice' output.", channels={channel}, task_type='label')
+                    f"'behavior:choice' output.", channels={channel}, task_type='label'))
         else:
             channel = 'behavior' if self._behavior_requested() else self._neural_channel('look_at')
         settings = {'number_of_trials': number_of_trials, 'require_variance': require_variance}
@@ -253,14 +257,13 @@ class LegacyBenchmarkFacade:
             self.start_task(TaskContext(response=Segments(_SEGMENTS_COLUMN)))
             return
         if 'behavior' not in declared:
-            # A refusal when the run starts: an error of score().
             also = (f" and no '{_LOG_PROBABILITIES}' output (a model with a likelihood part "
                     f"answers reading times there)" if name == _READING_TIMES else '')
-            raise ExecutionNotFeasibleError(
+            raise self._refused(ExecutionNotFeasibleError(
                 f"Subject {self.identifier!r} refused the legacy language behavioral task "
                 f"{name!r}: it declares no 'behavior' output{also}. The pair passed the declared "
                 f"compatibility check because this legacy benchmark declares no requested "
-                f"output, so there is no result.", channels={'behavior'}, task_type=name)
+                f"output, so there is no result.", channels={'behavior'}, task_type=name))
         self.start_task(task)
 
     def digest_text(self, text) -> Dict[str, Any]:
@@ -284,10 +287,10 @@ class LegacyBenchmarkFacade:
         if segments:
             if channels:
                 # A recording comes from the trial that is answered (rule 4.5); refused before any pass.
-                raise ExecutionNotFeasibleError(
+                raise self._refused(ExecutionNotFeasibleError(
                     f"Subject {self.identifier!r}: reading times are asked as one Segments trial, "
                     f"and a neural recording in the same digest_text call is not supported on this "
-                    f"route.", channels=set(channels.values()), task_type=_READING_TIMES)
+                    f"route.", channels=set(channels.values()), task_type=_READING_TIMES))
             return {'behavior': self._reading_times(stimuli)}
         settings = {} if stimuli is text else {'legacy_text': text}
         measured, _ = self._measure(stimuli, list(channels.values()), settings)
@@ -351,6 +354,25 @@ class LegacyBenchmarkFacade:
 
     _passive: Optional[TaskContext] = None
 
+    def _refused(self, error: ExecutionNotFeasibleError) -> Exception:
+        """The error a refusal of the subject is raised as.
+
+        Before any input of the benchmark reached the subject (no session delivered a
+        stimulus event), the subject cannot take part in this benchmark's task or
+        recording: the refusal is raised as ``CompatibilityError``, which ``score()``
+        returns as the N/A result with its reason. After an input reached it, the
+        refusal stays an ``ExecutionNotFeasibleError``, an error of the run.
+        Old benchmarks give their fitting stimuli with the task (``start_task``), so the
+        first session is the first contact. Limit: a subject that computes from the
+        task's fitting stimuli or the stimulus table inside ``participate`` before it
+        reads an input, and then refuses, gets N/A although it computed.
+        """
+        if self._reached:
+            return error
+        refusal = CompatibilityError(str(error), channels=error.channels)
+        refusal.__cause__ = error
+        return refusal
+
     def _behavior_requested(self) -> bool:
         return self._task is not None and self._task.task_type != PASSIVE
 
@@ -388,7 +410,15 @@ class LegacyBenchmarkFacade:
             settings['recording_type'] = self._recording_type
         session = stimulus_session(stimuli, channels, self._session_task(),
                                    time_bins=self._time_bins, settings=dict(settings))
-        self._subject.participate(session)
+
+        def note_input(event) -> None:
+            if event.channel != CONTROL_CHANNEL:
+                self._reached = True
+        try:
+            with session.observe(on_input=note_input):
+                self._subject.participate(session)
+        except ExecutionNotFeasibleError as error:
+            raise self._refused(error)
         return {channel: session.collect(channel) for channel in channels}, list(session.emitted)
 
 
