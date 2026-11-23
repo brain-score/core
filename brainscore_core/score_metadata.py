@@ -7,7 +7,7 @@ execution plan (unified ``BrainScoreModel``) calls it so the run record names th
 
 from typing import Iterable, Optional, Set
 
-from brainscore_core.compatibility import benchmark_requested_output_channels
+from brainscore_core.compatibility import _declares_channels, benchmark_requested_output_channels
 from brainscore_core._evaluation.measures import (  # noqa: F401  (re-exported)
     MeasureRecord,
     note_session,
@@ -89,9 +89,13 @@ def stamp_score_metadata(
 
 
 def requested_output_channels_for_score(benchmark) -> Set[str]:
-    """Return output channels requested by a benchmark for score metadata."""
+    """Return output channels requested by a benchmark for score metadata.
+
+    Only a benchmark that declares no channels (a legacy benchmark) gets a guess from
+    its ``parent``; a declaration is read as it is (rule 5.6).
+    """
     requested = benchmark_requested_output_channels(benchmark)
-    if requested:
+    if requested or _declares_channels(benchmark):
         return requested
 
     parent = _normalise_parent(_optional_attr(benchmark, "parent"))
