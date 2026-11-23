@@ -58,9 +58,10 @@ class TestUserManager:
         uid = user_manager.get_uid('admin@brainscore.com')
         assert uid == 2
 
-    def test_send_user_email(self, mocker):
-        smtp_mock = mocker.MagicMock(name='smtp_mock')
-        mocker.patch('brainscore_core.submission.endpoints.smtplib.SMTP_SSL', new=smtp_mock)
+    def test_send_user_email(self, monkeypatch):
+        from unittest.mock import MagicMock
+        smtp_mock = MagicMock(name='smtp_mock')
+        monkeypatch.setattr('brainscore_core.submission.endpoints.smtplib.SMTP_SSL', smtp_mock)
         user_manager = UserManager(self.test_database)
         user_manager.send_user_email(2, 'Subject', 'Test email body', 'sender@gmail.com', 'testpassword')
         smtp_mock.assert_called_once_with('smtp.gmail.com', 465)

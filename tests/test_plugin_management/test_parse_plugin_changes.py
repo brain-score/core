@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+from unittest.mock import MagicMock
 from collections import namedtuple
 from pathlib import Path
 
@@ -105,11 +106,12 @@ class TestParsePluginChanges:
 
 
 class TestGetScoringInfo:
-    def test_scoring_needed(self, mocker):
+    def test_scoring_needed(self, monkeypatch):
         changed_files = " ".join(DUMMY_FILES_CHANGED)
 
         mocked_plugin_ids = ["dummy_plugin1", "dummy_plugin2"]
-        get_plugin_ids_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.get_plugin_ids")
+        get_plugin_ids_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.parse_plugin_changes.get_plugin_ids", get_plugin_ids_mock)
         get_plugin_ids_mock.return_value = mocked_plugin_ids
 
         f = io.StringIO()
@@ -160,15 +162,16 @@ class TestGetScoringInfo:
 class TestRunChangedPlugins:
     domain_root = str(Path(__file__).parent / 'test_parse_plugin_changes__brainscore_dummy')
 
-    def test_run_changed_plugin_tests_one_benchmark(self, mocker):
-        plugin_info_dict_mock = mocker.patch(
-            "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
+    def test_run_changed_plugin_tests_one_benchmark(self, monkeypatch):
+        plugin_info_dict_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes", plugin_info_dict_mock)
         plugin_info_dict_mock.return_value = {
             'modifies_plugins': True, 'test_all_plugins': [],
             'changed_plugins': {'models': [], 'benchmarks': ['dummy_benchmark_2'], 'data': [], 'metrics': []},
             'is_automergeable': False, 'run_score': 'True'}
 
-        run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
+        run_args_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.parse_plugin_changes.run_args", run_args_mock)
         run_args_mock.return_value = "Mock test run"
 
         f = io.StringIO()
@@ -180,21 +183,21 @@ class TestRunChangedPlugins:
         assert "Running tests for new or modified plugins: [" \
                f"'{self.domain_root}/benchmarks/dummy_benchmark_2/test.py']" in output
 
-    def test_run_changed_plugin_tests_one_model(self, mocker, monkeypatch, tmp_path):
+    def test_run_changed_plugin_tests_one_model(self, monkeypatch, tmp_path):
         # This checks the command we construct, without running or finding Conda.
         monkeypatch.setenv('PATH', str(tmp_path))
-        conda_base = mocker.patch(
-            'brainscore_core.plugin_management.environment_manager.EnvironmentManager.get_conda_base',
-            return_value=str(tmp_path / 'conda'),
-        )
-        plugin_info_dict_mock = mocker.patch(
-            "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
+        conda_base = MagicMock(return_value=str(tmp_path / 'conda'))
+        monkeypatch.setattr(
+            'brainscore_core.plugin_management.environment_manager.EnvironmentManager.get_conda_base', conda_base)
+        plugin_info_dict_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes", plugin_info_dict_mock)
         plugin_info_dict_mock.return_value = {
             'modifies_plugins': True, 'test_all_plugins': [],
             'changed_plugins': {'models': ['dummy_model'], 'benchmarks': [], 'data': [], 'metrics': []},
             'is_automergeable': False, 'run_score': 'True'}
 
-        run_mock = mocker.patch("brainscore_core.plugin_management.environment_manager.EnvironmentManager.run_in_env")
+        run_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.environment_manager.EnvironmentManager.run_in_env", run_mock)
         MockReturn = namedtuple("MockRunInEnv", field_names=['returncode'])
         run_mock.return_value = MockReturn(returncode=0)
 
@@ -227,15 +230,16 @@ class TestRunChangedPlugins:
                                  generic_plugin_test, selected_test]
         conda_base.assert_called_once_with()
 
-    def test_run_changed_plugin_tests_all_models_benchmarks_data(self, mocker):
-        plugin_info_dict_mock = mocker.patch(
-            "brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes")
+    def test_run_changed_plugin_tests_all_models_benchmarks_data(self, monkeypatch):
+        plugin_info_dict_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.parse_plugin_changes.parse_plugin_changes", plugin_info_dict_mock)
         plugin_info_dict_mock.return_value = {
             'modifies_plugins': True, 'test_all_plugins': ['data', 'benchmarks', 'models'],
             'changed_plugins': {'models': [], 'benchmarks': [], 'data': [], 'metrics': []},
             'is_automergeable': False, 'run_score': 'True'}
     
-        run_args_mock = mocker.patch("brainscore_core.plugin_management.parse_plugin_changes.run_args")
+        run_args_mock = MagicMock()
+        monkeypatch.setattr("brainscore_core.plugin_management.parse_plugin_changes.run_args", run_args_mock)
         run_args_mock.return_value = "Mock test run"
     
         f = io.StringIO()
