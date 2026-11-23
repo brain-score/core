@@ -1,5 +1,7 @@
 import subprocess
 
+import pytest
+
 from brainscore_core.plugin_management.environment_manager import EnvironmentManager
 
 
@@ -9,6 +11,7 @@ def test_get_conda_base():
     assert 'conda' in conda_base
 
 
+@pytest.mark.slow  # conda create downloads Python 3.8: it needs the network and a conda build
 def test_teardown():
     environment_manager = EnvironmentManager()
     subprocess.run(f"conda create -n {environment_manager.env_name} python=3.8 -y", shell=True)
