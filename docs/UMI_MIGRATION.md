@@ -129,5 +129,7 @@ them.
 
 Existing vision `BrainModel` and language `ArtificialSubject` plugins keep
 working through their permanent adapters. No plugin removal or re-registration
-is required. Ordinary compositional registrations can continue to instantiate
-`BrainScoreModel` and use its supported task, recording, and process methods.
+is required. A compositional registration instantiates `BrainScoreModel` and
+runs it through `participate(session)` and the session helpers
+(`neural_response`, `behavioral_response`, `stimulus_session`).
+`BrainScoreModel.process(row)` answers one step of a closed loop only.
