@@ -194,7 +194,7 @@ def drive_neural_session_streaming(
     an event contains one stimulus, or a bounded window.
 
     ``stimulus_session(..., streaming=True)`` collapses batch size to one and may be slower;
-    ``windowed_stream`` restores bounded batches.
+    a source whose events each carry a bounded window keeps bounded batches.
 
     A session opts into this driver with ``streaming=True``.
 

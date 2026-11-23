@@ -12,7 +12,7 @@ from brainscore_core.streaming import (
 )
 from brainscore_core.streaming_helpers import (
     drive_neural_session, drive_neural_session_streaming, drive_state_change_session,
-    stimulus_session, windowed_stream,
+    stimulus_session,
 )
 from brainscore_core.supported_data_standards.brainio.assemblies import (
     BehavioralAssembly, NeuroidAssembly,
@@ -168,24 +168,6 @@ def test_a_lazy_iterator_source_is_consumed_lazily():
     assert pulled == [0]
     session.next_input()
     assert pulled == [0, 1]
-
-
-def test_windowing_composes_with_the_one_session():
-    stats = {}
-    frames = (f'f{i}.png' for i in range(90))
-    windows = windowed_stream(frames, fps=30, window_ms=1000, stats=stats)
-    session = Session(windows, ['neural:IT'])
-
-    class Recorder:
-        def start_recording(self, region, time_bins=None, recording_type=None):
-            pass
-
-        def process(self, stimuli, multi_modality=False):
-            return _neural(list(stimuli['stimulus_id']))
-
-    drive_neural_session_streaming(Recorder(), session)
-    assert stats['windows_emitted'] == 3
-    assert session.collect().sizes['presentation'] == 90
 
 
 def test_a_new_source_and_a_new_result_channel_need_no_new_class():

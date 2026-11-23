@@ -215,16 +215,12 @@ def test_collect_packages_raw_neural_events_as_neuroid_assembly():
 
 
 @pytest.mark.parametrize('regions', ['IT', ['V4', 'IT']])
-@pytest.mark.parametrize('kind', ['batch', 'streaming', 'windowed'])
+@pytest.mark.parametrize('kind', ['batch', 'streaming'])
 def test_collect_defaults_to_all_requested_neural_channels(regions, kind):
-    from brainscore_core.streaming import Session
-    from brainscore_core.streaming_helpers import stimulus_session, windowed_stream
+    from brainscore_core.streaming_helpers import stimulus_session
     channels = ([f'neural:{regions}'] if isinstance(regions, str)
                 else [f'neural:{region}' for region in regions])
-    if kind == 'windowed':
-        session = Session(windowed_stream(iter([]), fps=30, window_ms=1000), channels)
-    else:
-        session = stimulus_session(_stimulus_set(), channels, streaming=kind == 'streaming')
+    session = stimulus_session(_stimulus_set(), channels, streaming=kind == 'streaming')
     expected = {}
     for channel in session.outputs:
         expected[channel] = _assembly()

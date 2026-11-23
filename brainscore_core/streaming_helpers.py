@@ -18,8 +18,6 @@ from brainscore_core._sessions.environment import (
     send_outputs,
 )
 
-from brainscore_core._sessions.perception import windowed_stream
-
 from brainscore_core._sessions.drivers import (
     demultiplex_neural_output,
     drive_behavior_session_streaming,
