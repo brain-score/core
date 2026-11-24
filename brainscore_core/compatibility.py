@@ -8,7 +8,9 @@ A subject is compatible with a benchmark when all four hold:
 1. every requested output is in ``subject.out_channels``;
 2. at least one benchmark input is in ``subject.in_channels``;
 3. every channel in ``subject.required_channels`` is among the benchmark's
-   inputs;
+   inputs, and every channel in the benchmark's ``essential_input_channels``
+   (the inputs without which a subject never sees the stimulus) is in
+   ``subject.in_channels``;
 4. every requested output that ``subject.output_inputs`` lists can be answered:
    the subject takes in at least one of its listed inputs from the benchmark.
    A ``perturbation`` record answers an intervention, so it is answered only
@@ -177,6 +179,7 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
     # The control signals belong to the session, not to what a benchmark presents.
     bench_inputs = benchmark_input_channels(benchmark) - {CONTROL_CHANNEL}
     bench_requested = benchmark_requested_output_channels(benchmark)
+    bench_essential = _declared_channels(benchmark, 'essential_input_channels') or set()
     subject_id = subject.identifier
     benchmark_id = _benchmark_identifier(benchmark)
 
@@ -211,8 +214,17 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             (subject_required, io_catalog.INPUT, f"subject '{subject_id}' required_channels"),
             (bench_inputs, io_catalog.INPUT, f"benchmark '{benchmark_id}' input channels"),
             (bench_requested, io_catalog.OUTPUT,
-             f"benchmark '{benchmark_id}' requested_output_channels")):
+             f"benchmark '{benchmark_id}' requested_output_channels"),
+            (bench_essential, io_catalog.INPUT,
+             f"benchmark '{benchmark_id}' essential_input_channels")):
         validate_channels(channels, direction, owner)
+    unsent_essential = bench_essential - bench_inputs
+    if unsent_essential:
+        raise ValueError(
+            f"Benchmark '{benchmark_id}' names {_format_channels(unsent_essential)} as "
+            f"essential inputs, but it does not send them (its inputs: "
+            f"{_format_channels(bench_inputs)}). Add them to required_input_channels, or "
+            f"remove them from essential_input_channels.")
     undeclared_required = subject_required - subject_in
     if undeclared_required:
         raise ValueError(
@@ -261,6 +273,15 @@ def check_channel_compatibility(subject: Subject, benchmark) -> CompatibilityMat
             f"an instruction alone does not make a pair applicable. "
             f"Subject in_channels: {_format_channels(subject_in)}.",
             channels=stimuli)
+
+    missing_essential = {channel for channel in bench_essential
+                         if not channel_declared(channel, subject_in)}
+    if missing_essential:
+        raise CompatibilityError(
+            f"Subject '{subject_id}' does not take in {_format_channels(missing_essential)}, "
+            f"which benchmark '{benchmark_id}' names as essential: without it the subject "
+            f"never sees the stimulus. Subject in_channels: {_format_channels(subject_in)}.",
+            channels=missing_essential)
 
     unmet_requirements = subject_required - bench_inputs
     if unmet_requirements:
@@ -353,6 +374,12 @@ def _validate_output_inputs(output_inputs, in_channels, out_channels, subject_id
                     "list only intervention inputs (lesion, stimulation, pharmacological).")
 
 
+def _declared_channels(benchmark, name: str) -> Optional[Set[str]]:
+    """The channels a benchmark declares in ``name``, or None when it does not declare them."""
+    declared = getattr(benchmark, name, None)
+    return None if declared is None else set(declared)
+
+
 def benchmark_input_channels(benchmark) -> Set[str]:
     """Every input channel the benchmark sends."""
     return benchmark_required_input_channels(benchmark) | benchmark_accepted_input_channels(benchmark)
@@ -365,9 +392,9 @@ def benchmark_required_input_channels(benchmark) -> Set[str]:
     ``required_modalities``; else what its ``stimulus_set`` presents under its
     ``task`` (``task_input_channels``, with ``instruction`` when the task gives one).
     """
-    declared = getattr(benchmark, "required_input_channels", None)
+    declared = _declared_channels(benchmark, "required_input_channels")
     if declared is not None:
-        return set(declared)
+        return declared
     modalities = set(getattr(benchmark, "required_modalities", set()))
     if modalities:
         return modalities_to_input_channels(modalities)
@@ -380,7 +407,7 @@ def benchmark_required_input_channels(benchmark) -> Set[str]:
 
 def benchmark_accepted_input_channels(benchmark) -> Set[str]:
     """Return v1.5 any-of input channels from accepted_modalities."""
-    if getattr(benchmark, "required_input_channels", None) is not None:
+    if _declared_channels(benchmark, "required_input_channels") is not None:
         return set()
     modalities = set(getattr(benchmark, "accepted_modalities", set()))
     return modalities_to_input_channels(modalities)
@@ -388,9 +415,9 @@ def benchmark_accepted_input_channels(benchmark) -> Set[str]:
 
 def benchmark_requested_output_channels(benchmark) -> Set[str]:
     """Return v2 requested output channels, with a v1.5 region fallback."""
-    declared = getattr(benchmark, "requested_output_channels", None)
+    declared = _declared_channels(benchmark, "requested_output_channels")
     if declared is not None:
-        return set(declared)
+        return declared
     region = getattr(benchmark, "region", None)
     if region is None:
         return set()

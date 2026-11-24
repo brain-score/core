@@ -151,6 +151,36 @@ def test_incompatible_pair_raises_before_compute_not_zero_score():
     assert subject.process_called is False
 
 
+def test_a_subject_without_an_essential_input_is_na_before_compute():
+    # Rule 5.1: a benchmark can name the inputs a subject must take.
+    subject = _Subject(in_channels={"text", "vision:image"}, out_channels={"behavior:text"})
+    benchmark = _Benchmark(
+        required_input_channels={"text", "vision:image", "vision:video"},
+        requested_output_channels={"behavior:text"},
+    )
+    benchmark.essential_input_channels = {"vision:video"}
+
+    with pytest.raises(CompatibilityError, match="vision:video") as error:
+        check_channel_compatibility(subject, benchmark)
+    assert error.value.channels == {"vision:video"}
+    assert subject.process_called is False
+
+    video_subject = _Subject(in_channels={"text", "vision:video"}, out_channels={"behavior:text"})
+    assert check_channel_compatibility(video_subject, benchmark).dropped_inputs == {"vision:image"}
+
+
+def test_an_essential_input_the_benchmark_does_not_send_is_malformed():
+    subject = _Subject(in_channels={"text", "vision:video"}, out_channels={"behavior:text"})
+    benchmark = _Benchmark(
+        required_input_channels={"text"},
+        requested_output_channels={"behavior:text"},
+    )
+    benchmark.essential_input_channels = {"vision:video"}
+
+    with pytest.raises(ValueError, match="vision:video"):
+        check_channel_compatibility(subject, benchmark)
+
+
 def test_required_input_channels_derive_from_required_modalities():
     subject = _Subject(
         in_channels={"vision:image"},
