@@ -147,13 +147,16 @@ def _catalog_column(channel: str) -> str:
     """The column a rebuilt row gives an event of ``channel`` that names none.
 
     The channel's name when it is a catalog column itself (``text``, ``audio``),
-    else the first catalog column that feeds it: ``image_file_name`` for
-    ``vision:image``, ``video_path`` for ``vision:video``. So a picture or a clip
-    from a raw event stream is a part of the trial's prompt, an answer part's row
-    and an extractor's input, as it is in a table.
+    ``image_path`` for ``vision:image`` (the picture column that every extractor
+    reads, the old vision one too), else the first catalog column that feeds it:
+    ``video_path`` for ``vision:video``. So a picture or a clip from a raw event
+    stream is a part of the trial's prompt, an answer part's row and an
+    extractor's input, as it is in a table.
     """
     if column_channel(channel) == channel:
         return channel
+    if channel == 'vision:image':
+        return 'image_path'
     return next((column for column, fed in stimulus_columns().items() if fed == channel), channel)
 
 
