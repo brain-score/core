@@ -10,8 +10,7 @@ subjects with compatible inputs, outputs and methods.
 
 > **UMI integration:** `Subject` defines session interaction through
 > `participate(session)`. `BrainScoreModel`, in the unified `brainscore`
-> package, implements it with extraction and task helpers, including
-> `process()`. Existing vision `BrainModel` and language `ArtificialSubject`
+> package, implements it with extraction and task helpers. Existing vision `BrainModel` and language `ArtificialSubject`
 > plugins remain supported through adapters. See
 > [the interface guide](docs/UMI_MIGRATION.md).
 
@@ -26,11 +25,10 @@ please [send in a pull request](https://github.com/brain-score/core/pulls).
 | --- | --- |
 | `contract.py`, `events.py`, `streaming.py` | `Subject`, `TaskContext`, event types, `StreamEvent`, `Session` |
 | `io_catalog.py`, `responses.py`, `environment.py` | Channel catalog, answer forms, environment specifications |
-| `model_interface.py` | The subject contract and its events, under one older name |
 | `compatibility.py`, `memory.py`, `preflight.py`, `score_metadata.py`, `score_status.py`, `legacy_facade.py`, `execution_plan.py` | Pre-flight, memory checks, score stamps, the legacy-benchmark facade |
 | `streaming_helpers.py` | Session helpers: build a session, run a subject on it, read its outputs |
 | `assembly_builder.py`, `text.py`, `time_axis.py` | Assembly builders, text and time helpers |
-| `extraction_cache.py`, `environment_check.py`, `hf_compat.py`, `extensions.py` | Extraction cache, environment checks, extensions |
+| `extraction_cache.py`, `environment_check.py`, `hf_compat.py` | Extraction cache, environment checks |
 | `_sessions/`, `_evaluation/` | Internal: the session implementation and the measure record |
 
 `BrainScoreModel` and the temporal analysis functions are in the unified

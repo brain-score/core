@@ -6,14 +6,16 @@ A score has four states:
 - compatible but failed: an error; never silently converted to 0;
 - not applicable (N/A): the declarations show that the subject cannot take
   part (:func:`~brainscore_core.compatibility.check_compatibility` raises
-  :class:`~brainscore_core.compatibility.CompatibilityError`). This is known
-  before any compute;
+  :class:`~brainscore_core.compatibility.CompatibilityError`), or, on an old
+  benchmark that states no requested output, the subject refuses its task or
+  recording before any input of the benchmark reached it (the legacy facade
+  raises ``CompatibilityError``). This is known before any compute;
 - poor but compatible: the actual score, including a genuine 0.0.
 
 Every ``score()`` entry point (``brainscore``, ``brainscore_vision``,
-``brainscore_language``) wraps only the declaration check in
-``except CompatibilityError: return na_score(error)``. A refusal when the run
-starts (a subject that refuses a session, a benchmark's own check) raises
+``brainscore_language``) wraps the declaration check, and the benchmark run when
+it received the legacy facade, in ``except CompatibilityError: return na_score(error)``. Any other refusal when the
+run starts (a subject that refuses a session after an input, a benchmark's own check) raises
 :class:`~brainscore_core.compatibility.ExecutionNotFeasibleError`; it, a
 malformed declaration (``ValueError``) and a memory-check failure are errors.
 """

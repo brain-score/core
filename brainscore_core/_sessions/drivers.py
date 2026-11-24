@@ -33,9 +33,8 @@ def drive_neural_session(
 ) -> None:
     """Answer a session's ``neural:<region>`` requests with one ``process`` call.
 
-    For typed subjects such as legacy adapters and ``BrainScoreModel``, which
-    already implement ``start_recording(target, time_bins=...)`` and
-    ``process(stimuli)``. The contract does not require ``process``: an
+    For typed subjects such as legacy adapters, which already implement
+    ``start_recording(target, time_bins=...)`` and ``process(stimuli)``. The contract does not require ``process``: an
     arbitrary ``Subject`` only implements ``participate`` and never needs this.
 
     Reads every input from ``session``, records all requested regions in one
@@ -194,7 +193,7 @@ def drive_neural_session_streaming(
     an event contains one stimulus, or a bounded window.
 
     ``stimulus_session(..., streaming=True)`` collapses batch size to one and may be slower;
-    ``windowed_stream`` restores bounded batches.
+    a source whose events each carry a bounded window keeps bounded batches.
 
     A session opts into this driver with ``streaming=True``.
 
@@ -214,8 +213,8 @@ def drive_neural_session_streaming(
     if on_begin is not None:
         session._request_control('An episode reset')
     time_bins = getattr(session, "time_bins", None)
-    recording_target = _combined_recording_target(channel_regions)
-    _start_recording(subject, recording_target, time_bins=time_bins)
+    if channel_runner is None:     # a runner sets its own recording for each batch
+        _start_recording(subject, _combined_recording_target(channel_regions), time_bins=time_bins)
 
     stream_index = 0
 
@@ -309,9 +308,10 @@ def stream_trials(session, task, on_begin: Optional[Callable[[], None]] = None):
     that sends no input events presents its table, or the task's own stimuli,
     with no time.
 
-    Limits: several ``begin`` events with no trial between them call ``on_begin()``
-    once for each, and a caller that resets at the next answer resets once; a row of
-    the session's table that no event presents is not given.
+    Limit: several ``begin`` events with no trial between them call ``on_begin()``
+    once for each, and a caller that resets at the next answer resets once.
+    Limit: a row of the session's table that no event presents is not given (a custom
+    partial table); present every row that must be answered.
     """
     count = 0
     for stimuli, t_ms in _stream_rows(session, on_begin, skip_channels=("instruction",)):
@@ -441,8 +441,8 @@ def drive_behavior_session(
 ) -> None:
     """Answer a session's ``behavior`` request with ``start_task`` then one ``process`` call.
 
-    For typed subjects such as legacy adapters and ``BrainScoreModel``, which
-    already implement ``start_task(task)`` and ``process(stimuli)``.
+    For typed subjects such as legacy adapters, which already implement
+    ``start_task(task)`` and ``process(stimuli)``.
     The contract does not require ``process``: an arbitrary ``Subject`` only
     implements ``participate`` and never needs this.
 

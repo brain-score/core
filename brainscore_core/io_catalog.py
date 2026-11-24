@@ -21,9 +21,8 @@ no heavy dependency. ``validate`` runs every check for one event. The validator 
 a family only core defines (``behavior``) also receives the event and the
 session, so it can check a response against the task and the trials.
 
-``register_channel`` adds a family and, for an input family, the columns that
-feed it. Code outside core imports it from ``brainscore_core.extensions``. The
-``behavior`` family is closed: only core defines it and its addresses.
+``register_channel`` is the one way to add a family and, for an input family,
+the columns that feed it. The ``behavior`` family is closed: only core defines it and its addresses.
 """
 from dataclasses import dataclass
 from collections.abc import Iterable

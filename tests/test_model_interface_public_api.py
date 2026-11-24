@@ -29,7 +29,7 @@ import json
 _PUBLIC_MODULES = [
     'streaming_helpers', 'compatibility', 'execution_plan', 'memory', 'preflight',
     'score_metadata', 'score_status', 'legacy_facade', 'assembly_builder', 'text',
-    'time_axis', 'environment_check', 'extraction_cache', 'hf_compat', 'extensions',
+    'time_axis', 'environment_check', 'extraction_cache', 'hf_compat', 'io_catalog',
 ]
 
 

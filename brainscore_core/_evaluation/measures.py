@@ -58,6 +58,7 @@ from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Callable, Dict, Iterator, Optional, Set, Tuple
+import weakref
 
 from brainscore_core.extraction_cache import _store_state
 
@@ -208,7 +209,7 @@ def stage_session(session, participant, run: Callable[[], Any]) -> Any:
     so a wrapper names its sessions) and the notes reach the outer record in one append.
     Without an open record (a session outside a score) nothing is kept.
 
-    Limit (stated, not repaired): one asynchronous interrupt (a signal) that arrives in the
+    Limit: one asynchronous interrupt (a signal) that arrives in the
     few steps between the end of the body and the return of ``stage_session`` (the close,
     the reset, the naming, the publishing append and its return) can have one of two
     effects: the notes of a session that succeeded are not published, or they are
@@ -309,18 +310,17 @@ def note_session(session, regions_per_pass: Optional[str] = None,
 
 
 _SESSION_KEYS = itertools.count()
+_KEYS_BY_SESSION = weakref.WeakKeyDictionary()   # session -> its number; no session kept alive
 
 
 def _session_key(session) -> int:
     """A number for ``session`` that lasts as long as the session: the record keeps no session alive."""
-    key = getattr(session, '_measure_key', None)
-    if key is None:
-        key = next(_SESSION_KEYS)
-        try:
-            session._measure_key = key
-        except AttributeError:
-            key = id(session)
-    return key
+    try:
+        if session not in _KEYS_BY_SESSION:
+            _KEYS_BY_SESSION[session] = next(_SESSION_KEYS)
+        return _KEYS_BY_SESSION[session]
+    except TypeError:                              # no weak reference or no hash
+        return id(session)
 
 
 def execution_attrs(record: MeasureRecord) -> dict:

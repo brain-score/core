@@ -1,6 +1,6 @@
 import pytest
 from brainscore_core import io_catalog
-from brainscore_core.extensions import StreamEvent
+from brainscore_core.streaming import StreamEvent
 
 
 @pytest.fixture(autouse=True)
