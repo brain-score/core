@@ -456,7 +456,8 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
     (the guard is OFF, not "safe"), and gives the reason to its caller.
     """
     if probe_stimuli is not None:
-        one = probe_stimuli
+        # A copy gets the new name, so the plan's own table keeps its name.
+        one = _isolate_probe_identifier(probe_stimuli.copy(), probe_stimuli)
     else:
         try:
             one = stimulus_set.iloc[:1] if hasattr(stimulus_set, 'iloc') else stimulus_set[:1]

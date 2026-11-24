@@ -557,7 +557,7 @@ class TestCheckMemory:
             def start_recording(self, target, time_bins=None, recording_type=None):
                 recorded['target'] = target
             def process(self, stimuli):
-                if getattr(stimuli, 'identifier', None) != 'one-frame':
+                if not str(getattr(stimuli, 'identifier', None)).startswith('one-frame'):
                     raise RuntimeError("image-only model can't process a video row")
                 return FakeResult(n_features=4321)
 
@@ -839,7 +839,7 @@ class TestProbeCacheIsolation:
         return s
 
     @staticmethod
-    def _probe_identifiers(stimulus_set, runs=1):
+    def _probe_identifiers(stimulus_set, runs=1, plan=None):
         """Identifiers of the stimuli each probe session shows the subject."""
         import numpy as np
         from types import SimpleNamespace
@@ -862,6 +862,8 @@ class TestProbeCacheIsolation:
 
         subject = Watching()
         bench = SimpleNamespace(identifier='bench', stimulus_set=stimulus_set, region='IT')
+        if plan is not None:
+            bench.execution_plan = plan
         with patch('brainscore_core.memory.get_host_available_memory', return_value=16_000_000_000), \
              _mock_memory(100):
             for _ in range(runs):
@@ -877,6 +879,17 @@ class TestProbeCacheIsolation:
     def test_probe_identifier_is_derived_and_stable(self):
         assert self._probe_identifiers(self._stimulus_set(), runs=2) == [
             'hvm-public-memory-probe', 'hvm-public-memory-probe']
+
+    def test_a_plan_probe_gets_its_own_identifier(self):
+        """A plan's probe sliced from the run's stimuli keeps their identifier; the probe
+        renames it, and leaves the benchmark's table as it was."""
+        from brainscore_core.execution_plan import ExecutionPlan
+        parent = self._stimulus_set()
+        sliced = parent.iloc[:1]
+        seen, = self._probe_identifiers(
+            parent, plan=ExecutionPlan(n_extraction_presentations=4, probe_stimuli=sliced))
+        assert seen != parent.identifier
+        assert parent.identifier == sliced.identifier == 'hvm-public'
 
     def test_identifierless_stimulus_set_passes_through(self):
         import pandas as pd
