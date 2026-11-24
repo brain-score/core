@@ -451,10 +451,9 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
     so an image-only model isn't handed a raw video row. Without them, records a
     SINGLE region at a time (see _probe_regions) over the raw stimulus set.
 
-    Returns (None, None) if no region yields a readable width; the caller then skips
-    with a loud warning (the guard is OFF, not "safe").
-
-    Returns (n_features, region_used) or (None, None).
+    Returns (n_features, region_used), or (None, reason) when no region yields a
+    readable width: the check then makes no estimate, says so in one warning line
+    (the guard is OFF, not "safe"), and gives the reason to its caller.
     """
     if probe_stimuli is not None:
         one = probe_stimuli
@@ -480,7 +479,7 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
             "or expected_feature_dim on the benchmark or feature_dim on the model.",
             getattr(benchmark, 'identifier', type(benchmark).__name__),
             ' (the subject declares no probe_safe_regions)' if undeclared else '')
-        return None, None
+        return None, 'no neural region to probe for the feature width'
     last_error = None
     for region in regions:
         # One session through participate, the same way every subject is
@@ -501,9 +500,8 @@ def _probe_feature_dim(model, benchmark, stimulus_set,
         "for this run. To estimate anyway, call check_memory(model, benchmark, "
         "feature_dim=...); to silence this, pass check_mem=False to score().",
         last_error,
-        exc_info=last_error if isinstance(last_error, BaseException) else None,
     )
-    return None, None
+    return None, f'the feature-width probe failed: {last_error}'
 
 
 def _resolve_feature_dim(model, benchmark, feature_dim, stimulus_set):
@@ -516,8 +514,8 @@ def _resolve_feature_dim(model, benchmark, feature_dim, stimulus_set):
         if declared is not None:  # is-not-None, so a declared 0 errors (not skipped)
             name = f'{type(obj).__name__}.{attr}'
             return _validate_positive_int(declared, name), name
-    dim, _region = _probe_feature_dim(model, benchmark, stimulus_set)
-    return dim, 'single-stimulus probe'
+    dim, detail = _probe_feature_dim(model, benchmark, stimulus_set)
+    return (dim, 'single-stimulus probe') if dim is not None else (None, detail)
 
 
 def _get_n_presentations(benchmark, stimulus_set):
@@ -542,7 +540,7 @@ def check_memory(
     benchmark,
     safety_factor: Optional[float] = None,
     feature_dim: Optional[int] = None,
-) -> None:
+) -> str:
     """
     Memory pre-flight. Raise when the estimated host-RAM peak exceeds available
     RAM. The estimate is compared against HOST RAM only (the plan models host-side
@@ -575,6 +573,11 @@ def check_memory(
     Skips (loudly) when no feature width can be resolved — e.g. a subject that
     only configures recording inside the benchmark's ``__call__`` and the plan
     supplies no ``probe_stimuli`` (the guard is OFF for that run, not "safe").
+    The plan's ``probe_stimuli`` can be a function of the subject when the input a
+    benchmark shows depends on the subject (clips or frames, sound).
+
+    Returns ``'estimated'`` when an estimate was made, else ``'not run: <reason>'``;
+    the three ``score()`` functions record it as ``attrs['memory_check']``.
 
     :param model: the model to check
     :param benchmark: the benchmark to check against
@@ -608,14 +611,16 @@ def check_memory(
             # probe for the raw width; touch the benchmark's stimulus set only if
             # the plan gave no probe input of its own
             probe_input = plan.probe_stimuli
+            if callable(probe_input):           # the input this subject is shown
+                probe_input = probe_input(model)
             stim_fallback = (None if probe_input is not None
                              else _get_benchmark_stimulus_set(benchmark))
-            feature_width, _region = _probe_feature_dim(
+            feature_width, detail = _probe_feature_dim(
                 model, benchmark, stim_fallback,
                 recording_target=plan.recording_target,
                 probe_stimuli=probe_input)
             if feature_width is None:
-                return  # probe failed; _probe_feature_dim already warned loudly
+                return f'not run: {detail}'  # probe failed; _probe_feature_dim already warned
         metric_obs = plan.resolved_metric_observations
         metric_fw = plan.resolved_metric_feature_width(feature_width)
         dtype_bytes = plan.activation_dtype_bytes
@@ -627,11 +632,11 @@ def check_memory(
         if stimulus_set is None or len(stimulus_set) == 0:
             logger.info("Memory check not applicable: benchmark has no "
                         "stimulus_set (nothing to extract).")
-            return
+            return 'not run: not applicable, the benchmark has no stimulus set'
         n_features, source = _resolve_feature_dim(
             model, benchmark, feature_dim, stimulus_set)
         if n_features is None:
-            return  # unresolved feature dim; _probe_feature_dim already warned loudly
+            return f'not run: {source}'  # unresolved feature dim; _probe_feature_dim already warned
         approximate = True
         n_presentations, cardinality_declared = _get_n_presentations(
             benchmark, stimulus_set)
@@ -716,3 +721,4 @@ def check_memory(
             f"{available / 1e9:.1f} GB). OOM risk is elevated.",
             ResourceWarning,
         )
+    return 'estimated'

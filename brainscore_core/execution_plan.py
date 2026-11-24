@@ -73,8 +73,9 @@ class ExecutionPlan:
     - ``probe_stimuli``: the input to run the probe through — a small stimulus set
       of the SAME shape the benchmark actually processes (e.g. one image frame for
       a benchmark that expands videos to frames), so an image-only model doesn't
-      choke on a raw video row. Only used when ``feature_width`` is probed;
-      defaults to the benchmark's stimulus set.
+      choke on a raw video row. A function of the subject that returns that table
+      when the input shown depends on the subject. Only used when
+      ``feature_width`` is probed; defaults to the benchmark's stimulus set.
     - ``activation_dtype_bytes``: bytes per activation element (float32 = 4).
     """
     n_extraction_presentations: int
