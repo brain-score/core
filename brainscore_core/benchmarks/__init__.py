@@ -21,6 +21,9 @@ class Benchmark(ABC):
 
     #: Every input channel the human participants received, e.g. ``{'vision:image'}``.
     required_input_channels = None
+    #: The inputs among them a subject must take, e.g. ``{'vision:video'}``: a subject that
+    #: does not take one in never sees the stimulus, so the pair is N/A.
+    essential_input_channels = None
     #: Every output channel the benchmark's sessions request, e.g. ``{'neural:IT'}``.
     requested_output_channels = None
     #: ``'none'`` (independent trials) or ``'history'`` (needs ``memory:trial_history``).
