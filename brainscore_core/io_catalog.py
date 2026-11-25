@@ -9,7 +9,8 @@ validator (Contract Rules 3.2 and 5).
 The catalog is part of the contract. Pre-flight refuses a channel that is not
 registered. A session checks every event against the entry of its family and
 raises an error for a payload that does not match. A family with a ``CHANNEL_FORMS``
-entry (``vision``) has no bare channel: each channel names a form.
+entry has a closed list of channels: ``vision`` has no bare channel (each channel
+names a form); ``behavior`` and ``motor`` have a bare channel and their forms.
 
 The catalog also holds the one table that says which channel a stimulus-table
 column feeds (``stimulus_columns``, ``column_channel``). A table session sends
@@ -134,7 +135,7 @@ def register_channel(entry: CatalogEntry, *, columns: Iterable[str] = (),
     """
     if _family(entry.name) in _CLOSED_FAMILIES:
         raise ValueError(f"The {entry.name!r} family is defined by core and cannot be "
-                         "registered or replaced (Response Format Standard)")
+                         "registered or replaced (its forms are CHANNEL_FORMS)")
     return _register(entry, columns=columns, replace=replace)
 
 
@@ -184,13 +185,18 @@ def _matches_direction(entry: CatalogEntry, direction: str) -> bool:
 # The closed address list of a family: each channel of the family is one of
 # these addresses. ``None`` admits the bare family name. ``vision`` has no bare
 # channel: each channel names its form. ``behavior`` lists the response formats
-# that exist; the bare ``behavior`` channel stays for legacy tasks.
+# that exist; the bare ``behavior`` channel stays for legacy tasks. ``motor``:
+# the bare channel is an action in the form the environment defines; ``key``
+# and ``pointer`` are the act forms of a person at a screen (Contract Rules 3.7, 5.15).
 CHANNEL_FORMS: Mapping[str, tuple] = MappingProxyType({
     "vision": ("image", "video"),
     "behavior": (None, "choice", "probabilities", "log_probabilities", "rating", "rt", "text"),
+    "motor": (None, "key", "pointer"),
 })
-# Families only core defines: ``register_channel`` refuses them outside the seed.
-_CLOSED_FAMILIES = ("behavior",)
+# Families only core defines, with the forms and payload checks above:
+# ``register_channel`` refuses them outside the seed, and their validator also
+# receives the event and the session.
+_CLOSED_FAMILIES = ("behavior", "motor")
 
 
 def form_problem(channel: str) -> Optional[str]:
@@ -371,6 +377,62 @@ def _check_behavior(payload, event=None, session=None) -> List[str]:
     return _validate(payload, event, session)
 
 
+# The acts of each motor form: name -> (required fields, optional fields). A
+# position is a pixel of the last picture the subject received (origin at the
+# top left); ``wait`` passes time (Contract Rules 5.15).
+MOTOR_ACTS: Mapping[str, Mapping[str, tuple]] = MappingProxyType({
+    "key": {"press": ({"key"}, set()), "release": ({"key"}, set()), "type": ({"text"}, set()),
+            "wait": ({"ms"}, set())},
+    "pointer": {"move": ({"x", "y"}, set()), "down": (set(), set()), "up": (set(), set()),
+                "stroke": ({"points"}, {"force"}), "wait": ({"ms"}, set())},
+})
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float, np.number)) and not isinstance(value, bool) and bool(np.isfinite(value))
+
+
+def _act_problem(act, acts: Mapping[str, tuple]) -> Optional[str]:
+    name = act.get("act") if isinstance(act, dict) else None
+    if name not in acts:
+        return f"{act!r} is not an act {{'act': name, fields}} with a name of {sorted(acts)}"
+    required, optional = acts[name]
+    fields = set(act) - {"act"}
+    if not required <= fields <= required | optional:
+        return f"{name} takes {sorted(required)}" + (f" and optionally {sorted(optional)}" if optional else "") \
+            + f", not {sorted(fields)}"
+    for field in fields & {"key", "text"}:
+        if not isinstance(act[field], str) or not act[field]:
+            return f"{name}: {field} is a nonempty str, not {act[field]!r}"
+    for field in fields & {"x", "y", "ms", "force"}:
+        if not _number(act[field]):
+            return f"{name}: {field} is a finite number, not {act[field]!r}"
+    if name == "wait" and act["ms"] < 0:
+        return f"wait: ms is 0 or more, not {act['ms']!r}"
+    if name == "stroke":
+        points = act["points"]
+        if not isinstance(points, (list, tuple)) or not points or not all(
+                isinstance(point, (list, tuple)) and len(point) == 2 and all(map(_number, point))
+                for point in points):
+            return f"stroke: points is a nonempty list of [x, y] pairs, not {points!r}"
+        if "force" in act and not 0 < act["force"] <= 1:
+            return f"stroke: force is above 0 and at most 1, not {act['force']!r}"
+    return None
+
+
+def _check_motor(payload, event=None, session=None) -> List[str]:
+    """A ``motor:key`` or ``motor:pointer`` payload: a list of acts of its form,
+    done in order (an empty list is no act); None is an answer that has no act.
+    The bare channel is the environment's to check."""
+    form = parse_channel(event.channel)[1] if event is not None else None
+    if form not in MOTOR_ACTS or payload is None:
+        return []
+    if not isinstance(payload, (list, tuple)):
+        return [f"payload is a list of acts, not {type(payload).__name__}"]
+    problems = [_act_problem(act, MOTOR_ACTS[form]) for act in payload]
+    return [f"act {number}: {problem}" for number, problem in enumerate(problems, 1) if problem]
+
+
 _SEED = [
     # --- inputs: sensory (carried by StimulusSet columns) ---
     # `vision` is a channel family with no bare channel: `vision:image` takes
@@ -466,10 +528,17 @@ _SEED = [
                  materializers=("BehavioralAssembly",)),
     # --- outputs: motor (answered by a policy, harness-defined) ---
     CatalogEntry("motor", OUTPUT, "a policy's returned mapping entry",
-                 "one action per step, in the form the environment defines (its action_spec(), "
-                 "when it has one): a control vector, a discrete choice or a mapping of named fields",
+                 "bare motor: one action per step, in the form the environment defines (its "
+                 "action_spec(), when it has one): a control vector, a discrete choice or a mapping "
+                 "of named fields; motor:key and motor:pointer: a list of acts (MOTOR_ACTS), each "
+                 "{'act': name, fields}, done in order; positions are pixels of the last picture, "
+                 "origin at the top left; None is an answer with no act",
                  "the model's policy, decoded by the environment harness",
                  meta_keys=RESPONSE_META_KEYS,
+                 shape_validator=_check_motor,
+                 addressing=("address is the act form, from the closed list CHANNEL_FORMS['motor']: "
+                             "'key' (key acts) or 'pointer' (pointer acts); a subject declares "
+                             "each form it can give"),
                  owner="environment harness",
                  materializers=("policy",)),
     # --- outputs: perturbation record (carried by PerturbationApplied) ---
