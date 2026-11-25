@@ -16,6 +16,7 @@ def problems(channel, payload):
                    {'act': 'release', 'key': 'Space'}, {'act': 'type', 'text': 'yes'}]),
     ('motor:pointer', [{'act': 'move', 'x': 10, 'y': 20.5}, {'act': 'down'},
                        {'act': 'stroke', 'points': [[30, 40], [50, 60]], 'force': 0.5}, {'act': 'up'}]),
+    ('motor:key', [{'act': 'look', 'id': 'after-start'}]),
     ('motor:key', []),          # no act this step
     ('motor:pointer', None),    # an answer with no act
     ('motor', 3),               # the bare channel is the environment's to check
@@ -32,6 +33,7 @@ def test_a_list_of_acts_of_the_form_passes(channel, payload):
     ('motor:pointer', [{'act': 'move', 'x': float('nan'), 'y': 2}], 'finite'),
     ('motor:key', [{'act': 'wait', 'ms': -5}], '0 or more'),
     ('motor:key', [{'act': 'press', 'key': ''}], 'nonempty'),
+    ('motor:pointer', [{'act': 'look', 'id': 'a\nb'}], 'one line'),
     ('motor:pointer', [{'act': 'stroke', 'points': [[1, 2, 3]]}], 'pairs'),
     ('motor:pointer', [{'act': 'stroke', 'points': [[1, 2]], 'force': 2}], 'force'),
 ])

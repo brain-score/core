@@ -379,12 +379,13 @@ def _check_behavior(payload, event=None, session=None) -> List[str]:
 
 # The acts of each motor form: name -> (required fields, optional fields). A
 # position is a pixel of the last picture the subject received (origin at the
-# top left); ``wait`` passes time (Contract Rules 5.15).
+# top left); ``wait`` passes time; ``look`` asks for a picture during the acts, under its ``id``, in a
+# benchmark that offers the agent view (Contract Rules 5.15).
 MOTOR_ACTS: Mapping[str, Mapping[str, tuple]] = MappingProxyType({
     "key": {"press": ({"key"}, set()), "release": ({"key"}, set()), "type": ({"text"}, set()),
-            "wait": ({"ms"}, set())},
+            "wait": ({"ms"}, set()), "look": ({"id"}, set())},
     "pointer": {"move": ({"x", "y"}, set()), "down": (set(), set()), "up": (set(), set()),
-                "stroke": ({"points"}, {"force"}), "wait": ({"ms"}, set())},
+                "stroke": ({"points"}, {"force"}), "wait": ({"ms"}, set()), "look": ({"id"}, set())},
 })
 
 
@@ -404,6 +405,8 @@ def _act_problem(act, acts: Mapping[str, tuple]) -> Optional[str]:
     for field in fields & {"key", "text"}:
         if not isinstance(act[field], str) or not act[field]:
             return f"{name}: {field} is a nonempty str, not {act[field]!r}"
+    if "id" in fields and not (isinstance(act["id"], str) and 0 < len(act["id"]) <= 64 and "\n" not in act["id"]):
+        return f"{name}: id is a name of 1 to 64 characters on one line, not {act['id']!r}"
     for field in fields & {"x", "y", "ms", "force"}:
         if not _number(act[field]):
             return f"{name}: {field} is a finite number, not {act[field]!r}"
